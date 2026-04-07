@@ -54,7 +54,6 @@ export default function CommissionRequestsView() {
 
   // Calculate vendor-provider balances
   const balances = useMemo(() => {
-    // Group orders by provider and sum commission_gs
     const skuProvider: Record<string, string> = {};
     products.forEach(p => {
       if (p.sku && p.provider_email) {
@@ -62,12 +61,13 @@ export default function CommissionRequestsView() {
       }
     });
 
-    const map: Record<string, { provider: string; gross: number; orderIds: string[] }> = {};
+    const map: Record<string, { provider: string; gross: number; grossRendido: number; orderIds: string[] }> = {};
     orders.forEach(o => {
       const commission = Number(o.commission_gs || 0);
       if (commission <= 0) return;
 
-      // Find providers from order items
+      const isRendido = o.status2 === 'RENDIDO';
+
       const provSet = new Set<string>();
       try {
         const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
@@ -78,7 +78,6 @@ export default function CommissionRequestsView() {
         });
       } catch {}
 
-      // If order has provider_emails_list, use that as fallback
       if (provSet.size === 0 && o.provider_emails_list) {
         o.provider_emails_list.split(',').forEach((e: string) => {
           const t = e.trim().toLowerCase();
@@ -86,19 +85,18 @@ export default function CommissionRequestsView() {
         });
       }
 
-      // Distribute commission equally among providers (usually 1)
       const provArr = Array.from(provSet);
       if (provArr.length === 0) return;
       const perProv = commission / provArr.length;
 
       provArr.forEach(prov => {
-        if (!map[prov]) map[prov] = { provider: prov, gross: 0, orderIds: [] };
+        if (!map[prov]) map[prov] = { provider: prov, gross: 0, grossRendido: 0, orderIds: [] };
         map[prov].gross += perProv;
+        if (isRendido) map[prov].grossRendido += perProv;
         if (!map[prov].orderIds.includes(o.id)) map[prov].orderIds.push(o.id);
       });
     });
 
-    // Subtract already requested/approved amounts
     const requested: Record<string, number> = {};
     requests.forEach(r => {
       if (r.vendor_email?.toLowerCase() === myEmail.toLowerCase() && r.status !== 'RECHAZADO') {
@@ -110,7 +108,7 @@ export default function CommissionRequestsView() {
     return Object.values(map).map(b => ({
       ...b,
       requested: requested[b.provider] || 0,
-      available: Math.max(0, b.gross - (requested[b.provider] || 0)),
+      available: Math.max(0, b.grossRendido - (requested[b.provider] || 0)),
     }));
   }, [orders, products, requests, myEmail]);
 
