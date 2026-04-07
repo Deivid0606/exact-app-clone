@@ -12,9 +12,10 @@ export default function ClosuresView() {
   const [orders, setOrders] = useState<any[]>([]);
   const [deliveries, setDeliveries] = useState<any[]>([]);
   const [fees, setFees] = useState<any[]>([]);
+  const [clientPrices, setClientPrices] = useState<any[]>([]);
   const [filterDelivery, setFilterDelivery] = useState(role === 'DELIVERY' ? (profile?.email || '') : '');
   const [filterType, setFilterType] = useState('ENTREGADO');
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [rendicionNote, setRendicionNote] = useState('');
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date(); d.setDate(1);
     return d.toISOString().slice(0, 10);
@@ -24,6 +25,7 @@ export default function ClosuresView() {
   useEffect(() => {
     supabase.from('profiles').select('email, name').then(({ data }) => setDeliveries(data || []));
     supabase.from('delivery_fees').select('*').then(({ data }) => setFees(data || []));
+    supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
   }, []);
 
   const loadClosures = async () => {
@@ -37,7 +39,6 @@ export default function ClosuresView() {
 
     const { data } = await query;
     setOrders(data || []);
-    setSelectedIds(new Set());
   };
 
   useEffect(() => { loadClosures(); }, []);
@@ -72,70 +73,78 @@ export default function ClosuresView() {
 
   const netRendir = kpis.entregadosRev + kpis.encomiendaRev - kpis.deliveryFee;
 
+  const totalAPagar = useMemo(() => {
+    return delivered.reduce((s, o) => {
+      const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
+      return s + (Number(o.total_gs || 0) - fee);
+    }, 0);
+  }, [delivered]);
+
   const updateStatus2 = async (orderId: string, status2: string) => {
     const { error } = await supabase.from('orders').update({ status2 }).eq('id', orderId);
     if (error) toast.error(error.message);
-    else { toast.success('Estado 2 actualizado'); loadClosures(); }
+    else { toast.success('Estado 2 actualizado'); setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status2 } : o)); }
   };
 
   const updateRetiro = async (orderId: string, estado: string) => {
     const { error } = await supabase.from('orders').update({ estado_retiro: estado }).eq('id', orderId);
     if (error) toast.error(error.message);
-    else toast.success('Estado de retiro actualizado');
+    else { toast.success('Estado de retiro actualizado'); setOrders(prev => prev.map(o => o.id === orderId ? { ...o, estado_retiro: estado } : o)); }
   };
 
-  // Mark selected orders as RENDIDO
-  const markRendido = async () => {
-    const ids = [...selectedIds];
-    if (ids.length === 0) { toast.error('Seleccioná pedidos primero'); return; }
-    let ok = 0;
-    for (const id of ids) {
-      const { error } = await supabase.from('orders').update({
-        delivery_settled: true,
-        status2: 'RENDIDO',
-        updated_at: new Date().toISOString(),
-      }).eq('id', id);
-      if (!error) ok++;
-    }
-    if (ok > 0) {
-      await supabase.from('news').insert({
-        message: `${ok} pedidos marcados como RENDIDO por ${myEmail} (${filterDelivery || 'todos'})`,
-        actor_email: myEmail,
-        role_scope: role,
-      });
-      toast.success(`${ok} pedidos marcados como RENDIDO`);
-    }
-    setSelectedIds(new Set());
-    loadClosures();
+  const updateAssignedAt = async (orderId: string, dateVal: string) => {
+    if (!dateVal) return;
+    const { error } = await supabase.from('orders').update({ assigned_at: dateVal + 'T00:00:00', updated_at: new Date().toISOString() }).eq('id', orderId);
+    if (error) toast.error(error.message);
+    else { toast.success('Fecha actualizada'); setOrders(prev => prev.map(o => o.id === orderId ? { ...o, assigned_at: dateVal + 'T00:00:00' } : o)); }
   };
 
-  // Mark rendición del día as PAGADO
+  const updateCity = async (orderId: string, city: string) => {
+    const { error } = await supabase.from('orders').update({ city, updated_at: new Date().toISOString() }).eq('id', orderId);
+    if (error) toast.error(error.message);
+    else { toast.success('Ciudad actualizada'); setOrders(prev => prev.map(o => o.id === orderId ? { ...o, city } : o)); }
+  };
+
+  // Mark single order as RENDIDO
+  const markSingleRendido = async (orderId: string) => {
+    const { error } = await supabase.from('orders').update({
+      delivery_settled: true,
+      status2: 'RENDIDO',
+      updated_at: new Date().toISOString(),
+    }).eq('id', orderId);
+    if (error) { toast.error(error.message); return; }
+    toast.success('Marcado como RENDIDO');
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, delivery_settled: true, status2: 'RENDIDO' } : o));
+    const order = orders.find(o => o.id === orderId);
+    await supabase.from('news').insert({
+      message: `Pedido ${order?.order_number || orderId.slice(0, 8)} marcado como RENDIDO por ${myEmail}`,
+      actor_email: myEmail,
+      role_scope: role,
+    });
+  };
+
+  // Mark rendición as PAGADO
   const markRendicionPagada = async () => {
     const deliveryEmail = filterDelivery;
     if (!deliveryEmail) { toast.error('Seleccioná un delivery primero'); return; }
 
-    const montoRendir = rendidos.reduce((s, o) => {
-      const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
-      return s + (Number(o.total_gs || 0) - fee);
-    }, 0);
+    if (totalAPagar <= 0) { toast.error('No hay monto para rendir'); return; }
+    if (!confirm(`¿Marcar rendición de ${deliveryEmail} por Gs ${nf(totalAPagar)} como PAGADA?`)) return;
 
-    if (montoRendir <= 0) { toast.error('No hay monto para rendir'); return; }
-    if (!confirm(`¿Marcar rendición de ${deliveryEmail} por Gs ${nf(montoRendir)} como PAGADA?`)) return;
-
-    // Mark all settled orders as paid
-    for (const o of rendidos) {
+    for (const o of delivered) {
       await supabase.from('orders').update({
+        delivery_settled: true,
         delivery_paid_at: new Date().toISOString(),
+        status2: 'RENDIDO',
         updated_at: new Date().toISOString(),
       }).eq('id', o.id);
     }
 
-    // Create rendicion pagada record
     const { error } = await supabase.from('rendiciones_pagadas').insert({
       delivery_email: deliveryEmail,
       fecha_rendicion: new Date().toISOString().slice(0, 10),
-      monto_total: montoRendir,
-      nota: `Rendición ${dateFrom} a ${dateTo} — ${rendidos.length} pedidos`,
+      monto_total: totalAPagar,
+      nota: rendicionNote || `Rendición ${dateFrom} a ${dateTo} — ${delivered.length} pedidos`,
       marcado_por: myEmail,
       marcado_en: new Date().toISOString(),
       pagado_en: new Date().toISOString(),
@@ -144,33 +153,20 @@ export default function ClosuresView() {
     if (error) { toast.error(error.message); return; }
 
     await supabase.from('news').insert({
-      message: `Rendición de ${deliveryEmail} marcada como PAGADA — Gs ${nf(montoRendir)}`,
+      message: `Rendición de ${deliveryEmail} marcada como PAGADA — Gs ${nf(totalAPagar)}`,
       actor_email: myEmail,
       role_scope: role,
     });
 
-    toast.success(`Rendición de Gs ${nf(montoRendir)} marcada como PAGADA`);
+    toast.success(`Rendición de Gs ${nf(totalAPagar)} marcada como PAGADA`);
+    setRendicionNote('');
     loadClosures();
-  };
-
-  const toggleSelect = (id: string) => {
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  };
-
-  const selectAllNoRendidos = () => {
-    if (selectedIds.size === noRendidos.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(noRendidos.map(o => o.id)));
-    }
   };
 
   const state2Opts = ['--', 'GUIA GENERADA', 'FUERA DE COBERTURA', 'CANCELADO', 'REPETIDO', 'RENDIDO'];
   const retiroOpts = ['', 'PENDIENTE', 'REALIZADO', 'CANCELADO'];
+  const deliveryName = deliveries.find(d => d.email === filterDelivery)?.name || filterDelivery || 'Todos los repartidores';
+  const allRendered = noRendidos.length === 0 && delivered.length > 0;
 
   return (
     <div className="app-card">
@@ -205,58 +201,66 @@ export default function ClosuresView() {
         <button className="nav-btn active" onClick={loadClosures}>Aplicar</button>
       </div>
 
+      {/* Control de Rendición card */}
+      {role !== 'DELIVERY' && delivered.length > 0 && (
+        <div className="app-card !p-4 mb-4 border-l-4 border-l-[hsl(var(--primary))]">
+          <h4 className="font-extrabold mb-3 flex items-center gap-2">📋 Control de Rendición</h4>
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mb-3">
+            <div className="flex items-center gap-2">
+              <span className="chip text-[11px]">Delivery:</span>
+              <span className="text-sm font-bold">{deliveryName}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="chip text-[11px]">Fecha:</span>
+              <span className="text-sm">{dateFrom}</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="chip text-[11px]">Total a pagar:</span>
+              <span className="text-lg font-extrabold">{nf(totalAPagar)} Gs</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="chip text-[11px]">Estado:</span>
+              <span className={`badge-status ${allRendered ? 'badge-entregado' : 'badge-pendiente'}`}>
+                {allRendered ? '✅ RENDIDO' : '⏳ PENDIENTE'}
+              </span>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <input className="app-input flex-1 min-w-[250px]" placeholder="Agregar nota (opcional)"
+              value={rendicionNote} onChange={e => setRendicionNote(e.target.value)} />
+            <button
+              onClick={markRendicionPagada}
+              disabled={!filterDelivery || totalAPagar <= 0}
+              className="relative group inline-flex items-center gap-2 px-6 py-3 rounded-xl font-extrabold text-sm text-white shadow-lg transition-all duration-200 hover:scale-[1.03] active:scale-[0.97] disabled:opacity-40 disabled:hover:scale-100"
+              style={{ background: 'linear-gradient(135deg, #16a34a, #059669)' }}
+            >
+              <span className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200" style={{ background: 'linear-gradient(135deg, #059669, #16a34a)' }} />
+              <span className="relative flex items-center gap-2">✅ MARCAR COMO PAGADO</span>
+            </button>
+          </div>
+        </div>
+      )}
+
+      <p className="chip mb-3 text-[10px]">Los KPIs se calculan <strong>solo</strong> con Estado 1 = ENTREGADO.</p>
+
       <div className="grid-kpi mb-4">
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">ENTREGADOS</div><div className="text-[22px] font-extrabold">{kpis.entregados}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.entregadosRev)}</div></div>
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">ENCOMIENDAS</div><div className="text-[22px] font-extrabold">{kpis.encomiendas}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.encomiendaRev)}</div></div>
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Ganancia Delivery</div><div className="text-[22px] font-extrabold">{nf(kpis.deliveryFee)}</div></div>
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Neto a Rendir</div><div className="text-[22px] font-extrabold">{nf(netRendir)}</div></div>
-        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Pendientes rendir</div><div className="text-[22px] font-extrabold text-yellow-400">{kpis.noRendidos}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.montoPendiente)}</div></div>
-        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Ya rendidos</div><div className="text-[22px] font-extrabold text-green-400">{kpis.rendidos}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.montoRendido)}</div></div>
+        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Pendientes rendir</div><div className="text-[22px] font-extrabold" style={{ color: '#eab308' }}>{kpis.noRendidos}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.montoPendiente)}</div></div>
+        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Ya rendidos</div><div className="text-[22px] font-extrabold" style={{ color: '#4ade80' }}>{kpis.rendidos}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.montoRendido)}</div></div>
       </div>
 
-      {/* Bulk actions for ADMIN/DESPACHANTE */}
-      {role !== 'DELIVERY' && (
-        <div className="flex flex-wrap gap-3 mb-4">
-          {selectedIds.size > 0 && (
-            <button
-              onClick={markRendido}
-              className="relative group inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm text-white shadow-lg transition-all duration-200 hover:scale-[1.03] active:scale-[0.97]"
-              style={{ background: 'linear-gradient(135deg, hsl(var(--primary)), hsl(270 60% 50%))' }}
-            >
-              <span className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200" style={{ background: 'linear-gradient(135deg, hsl(270 60% 50%), hsl(var(--primary)))' }} />
-              <span className="relative flex items-center gap-2">✅ Marcar {selectedIds.size} como RENDIDO</span>
-            </button>
-          )}
-          {filterDelivery && rendidos.length > 0 && (
-            <button
-              onClick={markRendicionPagada}
-              className="relative group inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm text-white shadow-lg transition-all duration-200 hover:scale-[1.03] active:scale-[0.97]"
-              style={{ background: 'linear-gradient(135deg, #16a34a, #059669)' }}
-            >
-              <span className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200" style={{ background: 'linear-gradient(135deg, #059669, #16a34a)' }} />
-              <span className="relative flex items-center gap-2">💰 Marcar rendición PAGADA — {rendidos.length} pedidos — Gs {nf(rendidos.reduce((s, o) => {
-                const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
-                return s + (Number(o.total_gs || 0) - fee);
-              }, 0))}</span>
-            </button>
-          )}
-        </div>
-      )}
-
       <div className="overflow-auto">
-        <table className="app-table min-w-[1200px]">
+        <table className="app-table min-w-[1400px]">
           <thead>
             <tr>
-              {role !== 'DELIVERY' && (
-                <th className="!w-[40px] text-center">
-                  <input type="checkbox"
-                    checked={selectedIds.size === noRendidos.length && noRendidos.length > 0}
-                    onChange={selectAllNoRendidos} title="Seleccionar no rendidos" />
-                </th>
-              )}
               <th>Asignado</th><th>ID</th><th>Ciudad</th><th>Cliente</th>
               <th className="text-right">Total (Gs)</th><th className="text-right">Tarifa (Gs)</th>
-              <th className="text-right">Neto (Gs)</th><th>Estado 1</th><th>Rendido</th><th>Retiro</th><th>Estado 2</th>
+              <th className="text-right">Neto (Gs)</th><th>Estado 1</th>
+              <th>Estado de retiro</th><th>Estado 2 (cierre)</th>
+              {role !== 'DELIVERY' && <th></th>}
             </tr>
           </thead>
           <tbody>
@@ -264,29 +268,37 @@ export default function ClosuresView() {
               const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
               const net = Number(o.total_gs || 0) - fee;
               const isSettled = o.delivery_settled;
+              const assignedDate = o.assigned_at ? new Date(o.assigned_at).toISOString().slice(0, 10) : '';
               return (
                 <tr key={o.id} className={isSettled ? 'opacity-60' : ''}>
-                  {role !== 'DELIVERY' && (
-                    <td className="text-center">
-                      {!isSettled && (o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA') ? (
-                        <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
-                      ) : <span className="text-[10px]">{isSettled ? '✅' : ''}</span>}
-                    </td>
-                  )}
-                  <td className="text-xs whitespace-nowrap">{o.assigned_at ? new Date(o.assigned_at).toLocaleDateString('es-PY') : ''}</td>
+                  <td>
+                    {role !== 'DELIVERY' ? (
+                      <input type="date" className="app-input !py-1 !px-2 !text-xs !w-[130px]"
+                        value={assignedDate}
+                        onChange={e => updateAssignedAt(o.id, e.target.value)} />
+                    ) : (
+                      <span className="text-xs whitespace-nowrap">{assignedDate ? new Date(o.assigned_at).toLocaleDateString('es-PY') : ''}</span>
+                    )}
+                  </td>
                   <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
-                  <td className="text-xs">{o.city}</td>
+                  <td>
+                    {role !== 'DELIVERY' ? (
+                      <select className="app-input !py-1 !px-2 !text-xs !w-auto !min-w-[120px]"
+                        value={o.city || ''}
+                        onChange={e => updateCity(o.id, e.target.value)}>
+                        <option value="">—</option>
+                        {clientPrices.map(c => <option key={c.id} value={c.city}>{c.city}</option>)}
+                        {o.city && !clientPrices.find(c => c.city === o.city) && <option value={o.city}>{o.city}</option>}
+                      </select>
+                    ) : (
+                      <span className="text-xs">{o.city}</span>
+                    )}
+                  </td>
                   <td className="text-xs">{o.customer_name}</td>
                   <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
                   <td className="text-right text-xs">{nf(fee)}</td>
                   <td className="text-right text-xs">{nf(net)}</td>
                   <td><span className={`badge-status ${o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA' ? 'badge-entregado' : o.status === 'CANCELADO' ? 'badge-cancelado' : 'badge-pendiente'}`}>{o.status}</span></td>
-                  <td>
-                    <span className={`badge-status ${isSettled ? 'badge-entregado' : 'badge-pendiente'}`}>
-                      {isSettled ? 'RENDIDO' : 'PENDIENTE'}
-                    </span>
-                    {o.delivery_paid_at && <div className="text-[9px] text-green-400 mt-0.5">PAGADO</div>}
-                  </td>
                   <td>
                     {role !== 'DELIVERY' ? (
                       <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.estado_retiro || ''}
@@ -303,10 +315,28 @@ export default function ClosuresView() {
                       </select>
                     ) : <span className="text-xs">{o.status2 || '—'}</span>}
                   </td>
+                  {role !== 'DELIVERY' && (
+                    <td>
+                      <div className="flex items-center gap-1">
+                        {!isSettled && (o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA') && (
+                          <button
+                            onClick={() => markSingleRendido(o.id)}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold text-white transition-all hover:scale-105 active:scale-95"
+                            style={{ background: 'linear-gradient(135deg, #16a34a, #059669)' }}
+                          >
+                            RENDIDO
+                          </button>
+                        )}
+                        {isSettled && (
+                          <span className="text-xs font-bold" style={{ color: '#4ade80' }}>RENDIDO</span>
+                        )}
+                      </div>
+                    </td>
+                  )}
                 </tr>
               );
             })}
-            {orders.length === 0 && <tr><td colSpan={role !== 'DELIVERY' ? 12 : 11} className="text-center text-muted-foreground py-8">Sin resultados</td></tr>}
+            {orders.length === 0 && <tr><td colSpan={role !== 'DELIVERY' ? 11 : 10} className="text-center text-muted-foreground py-8">Sin resultados</td></tr>}
           </tbody>
         </table>
       </div>
