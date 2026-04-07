@@ -23,6 +23,7 @@ interface EditOrder {
   district: string;
   email: string;
   obs: string;
+  assigned_at: string;
 }
 
 export default function OrdersView() {
