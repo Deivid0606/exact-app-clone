@@ -16,6 +16,7 @@ export default function ClosuresView() {
   const [filterDelivery, setFilterDelivery] = useState(role === 'DELIVERY' ? (profile?.email || '') : '');
   const [filterType, setFilterType] = useState('ENTREGADO');
   const [rendicionNote, setRendicionNote] = useState('');
+  const [rendicionPagada, setRendicionPagada] = useState<{ pagado_en: string; nota: string; marcado_por: string } | null>(null);
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date(); d.setDate(1);
     return d.toISOString().slice(0, 10);
@@ -39,6 +40,19 @@ export default function ClosuresView() {
 
     const { data } = await query;
     setOrders(data || []);
+
+    // Check if rendición already paid
+    if (filterDelivery) {
+      const { data: rp } = await supabase.from('rendiciones_pagadas').select('*')
+        .eq('delivery_email', filterDelivery)
+        .gte('pagado_en', dateFrom + 'T00:00:00')
+        .lte('pagado_en', dateTo + 'T23:59:59')
+        .order('pagado_en', { ascending: false })
+        .limit(1);
+      setRendicionPagada(rp && rp.length > 0 ? { pagado_en: rp[0].pagado_en, nota: rp[0].nota || '', marcado_por: rp[0].marcado_por || '' } : null);
+    } else {
+      setRendicionPagada(null);
+    }
   };
 
   useEffect(() => { loadClosures(); }, []);
