@@ -16,6 +16,7 @@ export default function ClosuresView() {
   const [filterDelivery, setFilterDelivery] = useState(role === 'DELIVERY' ? (profile?.email || '') : '');
   const [filterType, setFilterType] = useState('ENTREGADO');
   const [rendicionNote, setRendicionNote] = useState('');
+  const [rendicionPagada, setRendicionPagada] = useState<{ pagado_en: string; nota: string; marcado_por: string } | null>(null);
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date(); d.setDate(1);
     return d.toISOString().slice(0, 10);
@@ -39,6 +40,19 @@ export default function ClosuresView() {
 
     const { data } = await query;
     setOrders(data || []);
+
+    // Check if rendición already paid
+    if (filterDelivery) {
+      const { data: rp } = await supabase.from('rendiciones_pagadas').select('*')
+        .eq('delivery_email', filterDelivery)
+        .gte('pagado_en', dateFrom + 'T00:00:00')
+        .lte('pagado_en', dateTo + 'T23:59:59')
+        .order('pagado_en', { ascending: false })
+        .limit(1);
+      setRendicionPagada(rp && rp.length > 0 ? { pagado_en: rp[0].pagado_en, nota: rp[0].nota || '', marcado_por: rp[0].marcado_por || '' } : null);
+    } else {
+      setRendicionPagada(null);
+    }
   };
 
   useEffect(() => { loadClosures(); }, []);
@@ -220,24 +234,45 @@ export default function ClosuresView() {
             </div>
             <div className="flex items-center gap-2">
               <span className="chip text-[11px]">Estado:</span>
-              <span className={`badge-status ${allRendered ? 'badge-entregado' : 'badge-pendiente'}`}>
-                {allRendered ? '✅ RENDIDO' : '⏳ PENDIENTE'}
+              <span className={`badge-status ${rendicionPagada ? 'badge-entregado' : allRendered ? 'badge-entregado' : 'badge-pendiente'}`}>
+                {rendicionPagada ? '💰 PAGADO' : allRendered ? '✅ RENDIDO' : '⏳ PENDIENTE'}
               </span>
             </div>
           </div>
-          <div className="flex flex-wrap items-center gap-3">
-            <input className="app-input flex-1 min-w-[250px]" placeholder="Agregar nota (opcional)"
-              value={rendicionNote} onChange={e => setRendicionNote(e.target.value)} />
-            <button
-              onClick={markRendicionPagada}
-              disabled={!filterDelivery || totalAPagar <= 0}
-              className="relative group inline-flex items-center gap-2 px-6 py-3 rounded-xl font-extrabold text-sm text-white shadow-lg transition-all duration-200 hover:scale-[1.03] active:scale-[0.97] disabled:opacity-40 disabled:hover:scale-100"
-              style={{ background: 'linear-gradient(135deg, #16a34a, #059669)' }}
-            >
-              <span className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200" style={{ background: 'linear-gradient(135deg, #059669, #16a34a)' }} />
-              <span className="relative flex items-center gap-2">✅ MARCAR COMO PAGADO</span>
-            </button>
-          </div>
+          {rendicionPagada ? (
+            <div className="p-3 rounded-xl border border-[#4ade80]/30 bg-[#4ade80]/10">
+              <div className="flex flex-wrap items-center gap-4">
+                <span className="inline-flex items-center gap-2 px-4 py-2 rounded-xl font-extrabold text-sm text-[#4ade80] border border-[#4ade80]/30">
+                  💰 PAGADO
+                </span>
+                <div className="text-xs text-muted-foreground">
+                  <span className="font-bold text-foreground">Pagado el:</span> {new Date(rendicionPagada.pagado_en).toLocaleString('es-PY')}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  <span className="font-bold text-foreground">Por:</span> {rendicionPagada.marcado_por}
+                </div>
+                {rendicionPagada.nota && (
+                  <div className="text-xs text-muted-foreground">
+                    <span className="font-bold text-foreground">Nota:</span> {rendicionPagada.nota}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+            <div className="flex flex-wrap items-center gap-3">
+              <input className="app-input flex-1 min-w-[250px]" placeholder="Agregar nota (opcional)"
+                value={rendicionNote} onChange={e => setRendicionNote(e.target.value)} />
+              <button
+                onClick={markRendicionPagada}
+                disabled={!filterDelivery || totalAPagar <= 0}
+                className="relative group inline-flex items-center gap-2 px-6 py-3 rounded-xl font-extrabold text-sm text-white shadow-lg transition-all duration-200 hover:scale-[1.03] active:scale-[0.97] disabled:opacity-40 disabled:hover:scale-100"
+                style={{ background: 'linear-gradient(135deg, #16a34a, #059669)' }}
+              >
+                <span className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200" style={{ background: 'linear-gradient(135deg, #059669, #16a34a)' }} />
+                <span className="relative flex items-center gap-2">✅ MARCAR COMO PAGADO</span>
+              </button>
+            </div>
+          )}
         </div>
       )}
 
