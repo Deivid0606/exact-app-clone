@@ -1,4 +1,6 @@
+# =========================
 # Logs
+# =========================
 logs
 *.log
 npm-debug.log*
@@ -7,18 +9,64 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
+# =========================
+# Dependencias
+# =========================
+node_modules/
 
-# Editor directories and files
+# =========================
+# Build / producción
+# =========================
+dist/
+dist-ssr/
+build/
+.vercel/
+
+# =========================
+# Variables de entorno (MUY IMPORTANTE)
+# =========================
+.env
+.env.local
+.env.*.local
+
+# =========================
+# Supabase (CLI opcional)
+# =========================
+.supabase/
+.supabase/*
+
+# =========================
+# Cache
+# =========================
+.cache/
+.vite/
+
+# =========================
+# Testing
+# =========================
+coverage/
+
+# =========================
+# Editor / IDE
+# =========================
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 .DS_Store
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+
+# =========================
+# Sistema operativo
+# =========================
+Thumbs.db
+
+# =========================
+# Otros
+# =========================
+*.tmp
+*.bak
+*.zip
