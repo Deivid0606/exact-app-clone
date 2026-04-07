@@ -96,7 +96,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
 
   // Group by provider
   const grouped = useMemo(() => {
-    const map = new Map<string, { email: string; name: string; logo: string; items: Product[] }>();
+    const map = new Map<string, { email: string; name: string; logo: string; phone: string; items: Product[] }>();
     filtered.forEach(p => {
       const key = (p.provider_email || '__sin_proveedor__').toLowerCase().trim();
       const info = profileMap[key] || { name: p.provider_email || 'Sin proveedor', logo: '', phone: '' };
