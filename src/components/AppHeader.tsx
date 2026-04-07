@@ -19,7 +19,7 @@ export default function AppHeader({ onRefresh, lastUpdate }: AppHeaderProps) {
         <span className="text-[22px] font-extrabold tracking-wide">
           EL-ECOMMERCE DCANP GROUP
         </span>
-        <span className="chip">Cloud DB</span>
+        
       </div>
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2">
