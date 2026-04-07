@@ -64,7 +64,16 @@ export default function WithGuidesView() {
     const val = status2 === '--' ? null : status2;
     const { error } = await supabase.from('orders').update({ status2: val, updated_at: new Date().toISOString() }).eq('id', orderId);
     if (error) toast.error(error.message);
-    else { toast.success('Estado 2 actualizado'); setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status2: val } : o)); }
+    else {
+      toast.success('Estado 2 actualizado');
+      // Remove from list instantly if changed to a final state
+      const finalStates = ['FUERA DE COBERTURA', 'CANCELADO', 'REPETIDO', 'RENDIDO'];
+      if (val && finalStates.includes(val)) {
+        setOrders(prev => prev.filter(o => o.id !== orderId));
+      } else {
+        setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status2: val } : o));
+      }
+    }
   };
 
   const buildGuideText = (o: any) => {
