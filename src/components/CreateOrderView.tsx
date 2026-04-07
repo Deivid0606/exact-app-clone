@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
-export default function CreateOrderView() {
+export default function CreateOrderView({ initialSku, onSkuConsumed }: { initialSku?: string | null; onSkuConsumed?: () => void }) {
   const { profile } = useAuth();
   const [products, setProducts] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
@@ -20,7 +20,16 @@ export default function CreateOrderView() {
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    supabase.from('products').select('*').order('title').then(({ data }) => setProducts(data || []));
+    supabase.from('products').select('*').order('title').then(({ data }) => {
+      setProducts(data || []);
+      if (initialSku && data) {
+        const found = data.find((p: any) => p.sku === initialSku);
+        if (found) {
+          setItems([{ sku: initialSku, sale_gs: 0, qty: 1 }]);
+          onSkuConsumed?.();
+        }
+      }
+    });
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
   }, []);
 

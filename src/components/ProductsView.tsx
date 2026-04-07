@@ -31,7 +31,7 @@ const emptyProduct: Omit<Product, 'id'> = {
   image_url: '', image_url_2: '', image_url_3: '', description: '', provider_email: '', private_to_emails: '', is_private: false,
 };
 
-export default function ProductsView() {
+export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: string) => void }) {
   const { profile } = useAuth();
   const role = profile?.role || '';
   const myEmail = profile?.email || '';
@@ -47,6 +47,7 @@ export default function ProductsView() {
   const [editProduct, setEditProduct] = useState<(Product & { isNew?: boolean }) | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [imgIndex, setImgIndex] = useState<Record<string, number>>({});
+  const [viewingImage, setViewingImage] = useState<{ url: string; title: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -257,11 +258,14 @@ export default function ProductsView() {
                       )}
                     </div>
                     <div className="flex gap-1">
+                      {mainImg && (
+                        <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={e => { e.stopPropagation(); setViewingImage({ url: mainImg, title: p.title }); }}>👁 Ver</button>
+                      )}
                       {canEdit && (
                         <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={e => { e.stopPropagation(); openEdit(p); }}>Editar</button>
                       )}
-                      {role === 'VENDEDOR' && (
-                        <button className="nav-btn active !px-2 !py-1 !text-[10px]" onClick={e => e.stopPropagation()}>➕ Cargar</button>
+                      {role === 'VENDEDOR' && p.sku && (
+                        <button className="nav-btn active !px-2 !py-1 !text-[10px]" onClick={e => { e.stopPropagation(); onLoadProduct?.(p.sku!); }}>➕ Cargar</button>
                       )}
                     </div>
                   </div>
@@ -343,6 +347,23 @@ export default function ProductsView() {
                 <button className="nav-btn" onClick={() => setEditProduct(null)}>Cancelar</button>
                 <button className="nav-btn active" onClick={saveProduct}>Guardar</button>
               </div>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+      {/* Image Viewer Modal */}
+      {viewingImage && createPortal(
+        <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4" onClick={() => setViewingImage(null)}>
+          <div className="relative max-w-4xl max-h-[90vh] flex flex-col items-center gap-4" onClick={e => e.stopPropagation()}>
+            <img src={viewingImage.url} alt={viewingImage.title} className="max-w-full max-h-[75vh] object-contain rounded-xl shadow-2xl" />
+            <div className="flex gap-3 items-center">
+              <span className="text-white font-bold text-sm">{viewingImage.title}</span>
+              <a href={viewingImage.url} download target="_blank" rel="noopener noreferrer"
+                className="nav-btn active !px-4 !py-2 !text-xs">
+                ⬇ Descargar
+              </a>
+              <button className="nav-btn !px-4 !py-2 !text-xs" onClick={() => setViewingImage(null)}>Cerrar</button>
             </div>
           </div>
         </div>,

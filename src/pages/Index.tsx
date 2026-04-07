@@ -28,6 +28,12 @@ export default function Index() {
   const { user, profile, loading } = useAuth();
   const [currentView, setCurrentView] = useState<ViewName>('auth');
   const [lastUpdate, setLastUpdate] = useState(() => new Date().toLocaleString('es-PY'));
+  const [preSelectedSku, setPreSelectedSku] = useState<string | null>(null);
+
+  const handleLoadProduct = (sku: string) => {
+    setPreSelectedSku(sku);
+    setCurrentView('order');
+  };
 
   const handleAuthSuccess = () => setCurrentView('dashboard');
   const handleRefresh = () => setLastUpdate(new Date().toLocaleString('es-PY'));
@@ -62,10 +68,10 @@ export default function Index() {
       case 'dashboard': return <DashboardView />;
       case 'orders': return <OrdersView />;
       case 'news': return <NewsView />;
-      case 'products': return <ProductsView />;
+      case 'products': return <ProductsView onLoadProduct={handleLoadProduct} />;
       case 'profile': return <ProfileView />;
       case 'users': return <UsersView />;
-      case 'order': return <CreateOrderView />;
+      case 'order': return <CreateOrderView initialSku={preSelectedSku} onSkuConsumed={() => setPreSelectedSku(null)} />;
       case 'rates': return <RatesView />;
       case 'commissions': return <CommissionsView />;
       case 'commissionRequests': return <CommissionRequestsView />;
