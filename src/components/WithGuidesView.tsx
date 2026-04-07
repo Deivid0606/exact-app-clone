@@ -168,7 +168,6 @@ export default function WithGuidesView() {
             <tr><td style="padding:3px 0;color:#999;">Ciudad:</td><td>${o.city || ''}</td></tr>
             <tr><td style="padding:3px 0;color:#999;">Dirección:</td><td>${o.street || ''} ${o.district ? '- ' + o.district : ''}</td></tr>
             <tr><td style="padding:3px 0;color:#999;">Vendedor:</td><td>${o.created_by || ''}</td></tr>
-            <tr><td style="padding:3px 0;color:#999;">Delivery:</td><td>${o.assigned_delivery || 'Sin asignar'}</td></tr>
             <tr><td style="padding:3px 0;color:#999;">Proveedor:</td><td>${o.provider_emails_list || '—'}</td></tr>
           </tbody></table>
           <table style="width:100%;border-collapse:collapse;font-size:12px;">
