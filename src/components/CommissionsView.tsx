@@ -62,7 +62,7 @@ export default function CommissionsView() {
   const kpis = {
     count: filtered.length,
     sum: filtered.reduce((s, o) => s + Number(o.commission_gs || 0), 0),
-    available: filtered.filter(o => !o.commission_paid).reduce((s, o) => s + Number(o.commission_gs || 0), 0),
+    available: filtered.filter(o => !o.commission_paid && o.status2 === 'RENDIDO').reduce((s, o) => s + Number(o.commission_gs || 0), 0),
   };
 
   const togglePaid = async (orderId: string, paid: boolean) => {
