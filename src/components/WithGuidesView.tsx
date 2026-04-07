@@ -294,7 +294,7 @@ export default function WithGuidesView() {
 
       {/* Guide Modal */}
       {guideText && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setGuideText('')}>
+        <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-4" onClick={() => setGuideText('')}>
           <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-lg" onClick={e => e.stopPropagation()}>
             <h4 className="text-lg font-extrabold mb-3">📦 Guía — {guideId}</h4>
             <pre className="text-xs whitespace-pre-wrap bg-background p-4 rounded-xl border border-border max-h-[400px] overflow-auto">{guideText}</pre>
