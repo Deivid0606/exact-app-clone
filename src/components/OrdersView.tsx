@@ -189,23 +189,23 @@ export default function OrdersView() {
       ).join('\n');
 
       const text = [
-        `📦 GUÍA DE ENVÍO — ${o.order_number || o.id.slice(0, 8)}`,
+        `GUÍA DE ENVÍO — ${o.order_number || o.id.slice(0, 8)}`,
         `━━━━━━━━━━━━━━━━━━`,
-        `👤 Cliente: ${o.customer_name || ''}`,
-        `📱 Teléfono: ${o.phone || ''}`,
-        `📧 Email: ${o.email || ''}`,
-        `🏙️ Ciudad: ${o.city || ''}`,
-        `📍 Dirección: ${o.street || ''} ${o.district ? '- ' + o.district : ''}`,
+        `Cliente: ${o.customer_name || ''}`,
+        `Teléfono: ${o.phone || ''}`,
+        `Email: ${o.email || ''}`,
+        `Ciudad: ${o.city || ''}`,
+        `Dirección: ${o.street || ''} ${o.district ? '- ' + o.district : ''}`,
         `━━━━━━━━━━━━━━━━━━`,
-        `📝 Productos:`,
+        `Productos:`,
         itemsText,
         `━━━━━━━━━━━━━━━━━━`,
-        `💰 Total: Gs ${nf(Number(o.total_gs || 0))}`,
-        `🚚 Delivery: Gs ${nf(Number(o.delivery_gs || 0))}`,
-        o.obs ? `📌 Obs: ${o.obs}` : '',
+        `Total: Gs ${nf(Number(o.total_gs || 0))}`,
+        `Delivery: Gs ${nf(Number(o.delivery_gs || 0))}`,
+        o.obs ? `Observación: ${o.obs}` : '',
         `━━━━━━━━━━━━━━━━━━`,
-        `👷 Vendedor: ${o.created_by || ''}`,
-        `🛵 Delivery: ${o.assigned_delivery || 'Sin asignar'}`,
+        `Vendedor: ${o.created_by || ''}`,
+        `Delivery: ${o.assigned_delivery || 'Sin asignar'}`,
       ].filter(Boolean).join('\n');
 
       setGuideText(text);
@@ -242,7 +242,7 @@ export default function OrdersView() {
     const allText = selected.map(o => {
       const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json || '[]') : (o.items_json || []);
       const itemsText = items.map((it: any, i: number) => `  ${i + 1}. ${it.title || it.sku} x${it.qty}`).join('\n');
-      return `📦 ${o.order_number || o.id.slice(0, 8)} — ${o.customer_name} — ${o.city}\n📱 ${o.phone}\n📍 ${o.street || ''} ${o.district || ''}\n${itemsText}\n💰 Gs ${nf(Number(o.total_gs || 0))}\n${o.obs ? '📌 ' + o.obs : ''}`;
+      return `${o.order_number || o.id.slice(0, 8)} — ${o.customer_name} — ${o.city}\nTeléfono: ${o.phone}\nDirección: ${o.street || ''} ${o.district || ''}\n${itemsText}\nTotal: Gs ${nf(Number(o.total_gs || 0))}\n${o.obs ? 'Obs: ' + o.obs : ''}`;
     }).join('\n\n════════════════════\n\n');
     navigator.clipboard.writeText(allText);
     toast.success(`${selected.length} guías copiadas`);
@@ -454,12 +454,12 @@ export default function OrdersView() {
       {/* Guide Modal */}
       {guideText && (
         <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setGuideText('')}>
-          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-lg" onClick={e => e.stopPropagation()}>
-            <h4 className="text-lg font-extrabold mb-3">📦 Guía — {guideOrderId}</h4>
-            <pre className="text-xs whitespace-pre-wrap bg-background p-4 rounded-xl border border-border max-h-[400px] overflow-auto">{guideText}</pre>
+          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-xl" onClick={e => e.stopPropagation()}>
+            <h4 className="text-lg font-extrabold mb-3">Guía — {guideOrderId}</h4>
+            <pre className="text-sm whitespace-pre-wrap bg-background p-5 rounded-xl border border-border max-h-[60vh] overflow-auto leading-relaxed">{guideText}</pre>
             <div className="flex gap-2 justify-end mt-4">
               <button className="nav-btn" onClick={() => setGuideText('')}>Cerrar</button>
-              <button className="nav-btn active" onClick={copyGuide}>📋 Copiar</button>
+              <button className="nav-btn active" onClick={copyGuide}>Copiar</button>
             </div>
           </div>
         </div>
