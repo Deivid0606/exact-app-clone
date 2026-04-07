@@ -113,9 +113,8 @@ export default function CommissionRequestsView() {
     if (!newProvider) { toast.error('Elegí un proveedor'); return; }
     const balance = balances.find(b => b.provider === newProvider);
     const available = balance?.available || 0;
-    const amount = newAmount > 0 ? newAmount : available;
+    const amount = available;
     if (amount <= 0) { toast.error('No tenés saldo disponible'); return; }
-    if (amount > available) { toast.error(`El monto supera tu saldo disponible (${nf(available)} Gs)`); return; }
 
     const { error } = await supabase.from('commission_requests').insert({
       vendor_email: myEmail,
