@@ -399,7 +399,7 @@ export default function OrdersView() {
 
       {/* Edit Order Modal */}
       {editOrder && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setEditOrder(null)}>
+        <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-4" onClick={() => setEditOrder(null)}>
           <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-lg space-y-3" onClick={e => e.stopPropagation()}>
             <h4 className="text-lg font-extrabold">Editar Pedido</h4>
             <div className="grid grid-cols-2 gap-3">
@@ -413,7 +413,18 @@ export default function OrdersView() {
               </div>
               <div>
                 <label className="app-label">Ciudad *</label>
-                <input className="app-input" value={editOrder.city} onChange={e => setEditOrder({ ...editOrder, city: e.target.value })} />
+                <select className="app-input" value={editOrder.city} onChange={e => setEditOrder({ ...editOrder, city: e.target.value })}>
+                  <option value="">Seleccionar ciudad…</option>
+                  {clientPrices.map(c => <option key={c.id} value={c.city}>{c.city}</option>)}
+                  {editOrder.city && !clientPrices.find(c => c.city === editOrder.city) && (
+                    <option value={editOrder.city}>{editOrder.city}</option>
+                  )}
+                </select>
+              </div>
+              <div>
+                <label className="app-label">Fecha asignación</label>
+                <input type="datetime-local" className="app-input" value={editOrder.assigned_at}
+                  onChange={e => setEditOrder({ ...editOrder, assigned_at: e.target.value })} />
               </div>
               <div>
                 <label className="app-label">Calle</label>
@@ -423,7 +434,7 @@ export default function OrdersView() {
                 <label className="app-label">Barrio</label>
                 <input className="app-input" value={editOrder.district} onChange={e => setEditOrder({ ...editOrder, district: e.target.value })} />
               </div>
-              <div>
+              <div className="col-span-2">
                 <label className="app-label">Email</label>
                 <input className="app-input" value={editOrder.email} onChange={e => setEditOrder({ ...editOrder, email: e.target.value })} />
               </div>
