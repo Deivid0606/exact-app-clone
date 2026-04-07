@@ -102,11 +102,23 @@ export default function UsersView() {
                   </span>
                 </td>
                 <td>
-                  {!u.approved && (
-                    <button className="nav-btn active text-xs !py-1 !px-2" onClick={() => approveUser(u.user_id)}>
-                      Aprobar
-                    </button>
-                  )}
+                  <div className="flex gap-1">
+                    {!u.approved && (
+                      <button className="nav-btn active text-xs !py-1 !px-2" onClick={() => approveUser(u.user_id)}>
+                        ✅ Aprobar
+                      </button>
+                    )}
+                    {!u.approved && (
+                      <button className="nav-btn text-xs !py-1 !px-2 !bg-destructive/20 hover:!bg-destructive/40 text-destructive" onClick={() => rejectUser(u.user_id)}>
+                        ❌ Rechazar
+                      </button>
+                    )}
+                    {u.approved && (
+                      <button className="nav-btn text-xs !py-1 !px-2" onClick={() => revokeUser(u.user_id)}>
+                        Revocar acceso
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}

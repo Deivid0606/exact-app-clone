@@ -80,7 +80,6 @@ export default function AuthView({ onSuccess }: AuthViewProps) {
             <option value="DELIVERY">DELIVERY</option>
             <option value="DESPACHANTE">DESPACHANTE</option>
             <option value="PROVEEDOR">PROVEEDOR</option>
-            <option value="ADMIN">ADMIN</option>
           </select>
           <small className="text-xs text-muted-foreground mt-1 block">
             ⚡ El primer usuario creado será ADMIN automáticamente.
