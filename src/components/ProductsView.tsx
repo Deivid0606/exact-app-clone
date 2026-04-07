@@ -277,10 +277,10 @@ export default function ProductsView() {
 
       {/* Edit/Add Product Modal */}
       {editProduct && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setEditProduct(null)}>
-          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-auto space-y-3" onClick={e => e.stopPropagation()}>
-            <h4 className="text-lg font-extrabold">{(editProduct as any).isNew ? 'Agregar Producto' : 'Editar Producto'}</h4>
-            <div className="grid grid-cols-2 gap-3">
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-start justify-center p-2 sm:p-4 overflow-auto" onClick={() => setEditProduct(null)}>
+          <div className="bg-card border border-border rounded-2xl p-4 sm:p-6 w-full max-w-3xl my-4 space-y-4" onClick={e => e.stopPropagation()}>
+            <h4 className="text-lg font-extrabold">{(editProduct as any).isNew ? '➕ Agregar Producto' : '✏️ Editar Producto'}</h4>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="app-label">Título *</label>
                 <input className="app-input" value={editProduct.title} onChange={e => setEditProduct({ ...editProduct, title: e.target.value })} />
