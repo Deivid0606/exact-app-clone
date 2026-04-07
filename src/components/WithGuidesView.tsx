@@ -86,11 +86,9 @@ export default function WithGuidesView() {
       itemsText,
       `━━━━━━━━━━━━━━━━━━`,
       `💰 Total: Gs ${nf(Number(o.total_gs || 0))}`,
-      `🚚 Delivery: Gs ${nf(Number(o.delivery_gs || 0))}`,
       o.obs ? `📌 Obs: ${o.obs}` : '',
       `━━━━━━━━━━━━━━━━━━`,
       `👷 Vendedor: ${o.created_by || ''}`,
-      `🛵 Delivery: ${o.assigned_delivery || 'Sin asignar'}`,
       `📋 Proveedor: ${o.provider_emails_list || '—'}`,
     ].filter(Boolean).join('\n');
   };
