@@ -72,8 +72,8 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
   };
 
   const profileMap = useMemo(() => {
-    const m: Record<string, { name: string; logo: string }> = {};
-    profiles.forEach(p => { m[p.email.toLowerCase()] = { name: p.name || p.email, logo: p.logo_url || '' }; });
+    const m: Record<string, { name: string; logo: string; phone: string }> = {};
+    profiles.forEach(p => { m[p.email.toLowerCase()] = { name: p.name || p.email, logo: p.logo_url || '', phone: p.phone || '' }; });
     return m;
   }, [profiles]);
 
