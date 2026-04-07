@@ -25,6 +25,7 @@ interface OrderRow {
   items_json: any;
   delivery_settled: boolean | null;
   provider_emails_list: string | null;
+  delivered_at: string | null;
 }
 
 export default function DashboardView() {
