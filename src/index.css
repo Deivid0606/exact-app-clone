@@ -94,7 +94,7 @@
   }
 
   .app-card {
-    @apply bg-card border border-border rounded-2xl p-5 relative overflow-hidden transition-all duration-200;
+    @apply bg-card border border-transparent rounded-2xl p-5 relative overflow-hidden transition-all duration-200;
     box-shadow: var(--shadow-card);
   }
 
