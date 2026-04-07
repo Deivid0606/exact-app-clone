@@ -31,7 +31,7 @@ const emptyProduct: Omit<Product, 'id'> = {
   image_url: '', image_url_2: '', image_url_3: '', description: '', provider_email: '', private_to_emails: '', is_private: false,
 };
 
-export default function ProductsView() {
+export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: string) => void }) {
   const { profile } = useAuth();
   const role = profile?.role || '';
   const myEmail = profile?.email || '';
@@ -47,6 +47,7 @@ export default function ProductsView() {
   const [editProduct, setEditProduct] = useState<(Product & { isNew?: boolean }) | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [imgIndex, setImgIndex] = useState<Record<string, number>>({});
+  const [viewingImage, setViewingImage] = useState<{ url: string; title: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -257,11 +258,14 @@ export default function ProductsView() {
                       )}
                     </div>
                     <div className="flex gap-1">
+                      {mainImg && (
+                        <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={e => { e.stopPropagation(); setViewingImage({ url: mainImg, title: p.title }); }}>👁 Ver</button>
+                      )}
                       {canEdit && (
                         <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={e => { e.stopPropagation(); openEdit(p); }}>Editar</button>
                       )}
-                      {role === 'VENDEDOR' && (
-                        <button className="nav-btn active !px-2 !py-1 !text-[10px]" onClick={e => e.stopPropagation()}>➕ Cargar</button>
+                      {role === 'VENDEDOR' && p.sku && (
+                        <button className="nav-btn active !px-2 !py-1 !text-[10px]" onClick={e => { e.stopPropagation(); onLoadProduct?.(p.sku!); }}>➕ Cargar</button>
                       )}
                     </div>
                   </div>
