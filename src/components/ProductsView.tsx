@@ -37,7 +37,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
   const myEmail = profile?.email || '';
 
   const [products, setProducts] = useState<Product[]>([]);
-  const [profiles, setProfiles] = useState<{ email: string; name: string | null; logo_url: string | null }[]>([]);
+  const [profiles, setProfiles] = useState<{ email: string; name: string | null; logo_url: string | null; phone: string | null }[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>('general');
