@@ -66,6 +66,8 @@ export default function OrdersView() {
     setOrders(ordersRes.data || []);
     setDeliveries(deliveriesRes);
     setLoading(false);
+    // Load cities for dropdown
+    supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
   };
 
   useEffect(() => { loadOrders(); }, []);
