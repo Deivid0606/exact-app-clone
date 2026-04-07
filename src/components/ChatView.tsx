@@ -14,11 +14,10 @@ export default function ChatView() {
   const [contacts, setContacts] = useState<{ email: string; name: string | null; role: string | null }[]>([]);
   const [text, setText] = useState('');
   const msgRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
 
-  // General chat state
   const [generalMessages, setGeneralMessages] = useState<any[]>([]);
-
-  // DM state
   const [selectedPeer, setSelectedPeer] = useState('');
   const [dmMessages, setDmMessages] = useState<any[]>([]);
   const [threads, setThreads] = useState<{ key: string; peer: string; peerName: string; lastMsg: string; lastTime: string }[]>([]);
@@ -28,7 +27,6 @@ export default function ChatView() {
     return x < y ? `${x}|${y}` : `${y}|${x}`;
   };
 
-  // Load contacts with roles
   useEffect(() => {
     const loadContacts = async () => {
       const [profRes, rolesRes] = await Promise.all([
@@ -37,12 +35,9 @@ export default function ChatView() {
       ]);
       const roleMap = new Map<string, string>();
       (rolesRes.data || []).forEach(r => roleMap.set(r.user_id, r.role));
-      const list = (profRes.data || []).map(p => ({
-        email: p.email,
-        name: p.name,
-        role: roleMap.get(p.user_id) || null,
-      }));
-      setContacts(list);
+      setContacts((profRes.data || []).map(p => ({
+        email: p.email, name: p.name, role: roleMap.get(p.user_id) || null,
+      })));
     };
     loadContacts();
   }, []);
@@ -53,7 +48,6 @@ export default function ChatView() {
     return m;
   }, [contacts]);
 
-  // Load general chat
   const loadGeneral = async () => {
     const { data } = await supabase.from('chat_messages').select('*')
       .order('created_at', { ascending: true }).limit(200);
@@ -61,7 +55,6 @@ export default function ChatView() {
     scrollBottom();
   };
 
-  // Load DM threads
   const loadThreads = async () => {
     if (!myEmail) return;
     const { data } = await supabase.from('chat_dm_messages').select('*')
@@ -80,7 +73,6 @@ export default function ChatView() {
     })));
   };
 
-  // Load DM messages
   const loadDmMessages = async (peer: string) => {
     if (!myEmail || !peer) return;
     const key = threadKey(myEmail, peer);
@@ -96,7 +88,6 @@ export default function ChatView() {
 
   useEffect(() => { loadGeneral(); loadThreads(); }, [myEmail]);
 
-  // Poll
   useEffect(() => {
     const iv = setInterval(() => {
       if (tab === 'general') loadGeneral();
@@ -105,31 +96,44 @@ export default function ChatView() {
     return () => clearInterval(iv);
   }, [tab, selectedPeer]);
 
-  const selectPeer = (peer: string) => {
-    setSelectedPeer(peer);
-    loadDmMessages(peer);
+  const selectPeer = (peer: string) => { setSelectedPeer(peer); loadDmMessages(peer); };
+
+  // File upload handler
+  const handleFileUpload = async (file: File): Promise<{ url: string; name: string } | null> => {
+    setUploading(true);
+    try {
+      const ext = file.name.split('.').pop();
+      const path = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+      const { error } = await supabase.storage.from('chat-attachments').upload(path, file);
+      if (error) { toast.error('Error subiendo archivo'); return null; }
+      const { data: urlData } = supabase.storage.from('chat-attachments').getPublicUrl(path);
+      return { url: urlData.publicUrl, name: file.name };
+    } catch { toast.error('Error subiendo archivo'); return null; }
+    finally { setUploading(false); }
   };
 
-  const sendGeneral = async () => {
-    if (!text.trim() || !myEmail) return;
+  const sendGeneral = async (attachment?: { url: string; name: string }) => {
+    if (!text.trim() && !attachment) return;
+    if (!myEmail) return;
     await supabase.from('chat_messages').insert({
-      sender_email: myEmail,
-      sender_role: myRole,
-      message_text: text.trim(),
+      sender_email: myEmail, sender_role: myRole,
+      message_text: text.trim() || (attachment ? `📎 ${attachment.name}` : ''),
+      attachment_url: attachment?.url || null,
+      attachment_name: attachment?.name || null,
     });
     setText('');
     loadGeneral();
   };
 
-  const sendDm = async () => {
-    if (!text.trim() || !selectedPeer || !myEmail) return;
+  const sendDm = async (attachment?: { url: string; name: string }) => {
+    if (!text.trim() && !attachment) return;
+    if (!selectedPeer || !myEmail) return;
     const key = threadKey(myEmail, selectedPeer);
     await supabase.from('chat_dm_messages').insert({
-      thread_key: key,
-      from_email: myEmail,
-      to_email: selectedPeer,
-      from_role: myRole,
-      message_text: text.trim(),
+      thread_key: key, from_email: myEmail, to_email: selectedPeer, from_role: myRole,
+      message_text: text.trim() || (attachment ? `📎 ${attachment.name}` : ''),
+      attachment_url: attachment?.url || null,
+      attachment_name: attachment?.name || null,
     });
     setText('');
     loadDmMessages(selectedPeer);
@@ -137,20 +141,28 @@ export default function ChatView() {
   };
 
   const send = () => tab === 'general' ? sendGeneral() : sendDm();
+
+  const handleFileInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const attachment = await handleFileUpload(file);
+    if (!attachment) return;
+    if (tab === 'general') await sendGeneral(attachment);
+    else await sendDm(attachment);
+    if (fileInputRef.current) fileInputRef.current.value = '';
+  };
+
   const messages = tab === 'general' ? generalMessages : dmMessages;
 
   return (
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Chat</h3>
-
-      {/* Tab buttons */}
       <div className="flex gap-2 mb-3">
         <button className={`nav-btn ${tab === 'general' ? 'active' : ''}`} onClick={() => setTab('general')}>💬 Chat General</button>
         <button className={`nav-btn ${tab === 'dm' ? 'active' : ''}`} onClick={() => setTab('dm')}>📩 Mensajes Directos</button>
       </div>
 
       <div className="flex gap-3" style={{ alignItems: 'stretch' }}>
-        {/* Sidebar */}
         {tab === 'dm' && (
           <div className="app-card !p-3 w-[300px] overflow-auto shrink-0" style={{ maxHeight: 520 }}>
             <div className="flex justify-between items-center mb-2">
@@ -184,7 +196,6 @@ export default function ChatView() {
           </div>
         )}
 
-        {/* Messages */}
         <div className="flex-1 min-w-[320px] flex flex-col gap-2">
           <div className="app-card !p-3">
             {tab === 'general' ? (
@@ -220,7 +231,7 @@ export default function ChatView() {
                     </div>
                     <div className="mt-1 text-sm">{m.message_text}</div>
                     {m.attachment_url && (
-                      <a href={m.attachment_url} target="_blank" rel="noopener" className="text-[11px] text-primary mt-1 block">
+                      <a href={m.attachment_url} target="_blank" rel="noopener" className="text-[11px] text-primary mt-1 block hover:underline">
                         📎 {m.attachment_name || 'Adjunto'}
                       </a>
                     )}
@@ -234,6 +245,12 @@ export default function ChatView() {
           </div>
 
           <div className="flex gap-2">
+            <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileInput} />
+            <button className="nav-btn !px-3" onClick={() => fileInputRef.current?.click()}
+              disabled={(tab === 'dm' && !selectedPeer) || uploading}
+              title="Adjuntar archivo">
+              {uploading ? '⏳' : '📎'}
+            </button>
             <input className="app-input flex-1" placeholder="Escribí tu mensaje..."
               value={text} onChange={e => setText(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && send()}
