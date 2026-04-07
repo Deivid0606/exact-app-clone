@@ -54,28 +54,48 @@ export default function CommissionRequestsView() {
 
   // Calculate vendor-provider balances
   const balances = useMemo(() => {
+    // Group orders by provider and sum commission_gs
     const skuProvider: Record<string, string> = {};
-    const skuPrice: Record<string, number> = {};
     products.forEach(p => {
       if (p.sku && p.provider_email) {
         skuProvider[p.sku.trim()] = p.provider_email.toLowerCase().trim();
-        skuPrice[p.sku.trim()] = Number(p.provider_price_gs || 0);
       }
     });
 
     const map: Record<string, { provider: string; gross: number; orderIds: string[] }> = {};
     orders.forEach(o => {
+      const commission = Number(o.commission_gs || 0);
+      if (commission <= 0) return;
+
+      // Find providers from order items
+      const provSet = new Set<string>();
       try {
         const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
         items.forEach((it: any) => {
           const sku = String(it.sku || '').trim();
           const prov = skuProvider[sku];
-          if (!prov) return;
-          if (!map[prov]) map[prov] = { provider: prov, gross: 0, orderIds: [] };
-          map[prov].gross += Number(it.sale_gs || skuPrice[sku] || 0) * Number(it.qty || 1);
-          if (!map[prov].orderIds.includes(o.id)) map[prov].orderIds.push(o.id);
+          if (prov) provSet.add(prov);
         });
       } catch {}
+
+      // If order has provider_emails_list, use that as fallback
+      if (provSet.size === 0 && o.provider_emails_list) {
+        o.provider_emails_list.split(',').forEach((e: string) => {
+          const t = e.trim().toLowerCase();
+          if (t) provSet.add(t);
+        });
+      }
+
+      // Distribute commission equally among providers (usually 1)
+      const provArr = Array.from(provSet);
+      if (provArr.length === 0) return;
+      const perProv = commission / provArr.length;
+
+      provArr.forEach(prov => {
+        if (!map[prov]) map[prov] = { provider: prov, gross: 0, orderIds: [] };
+        map[prov].gross += perProv;
+        if (!map[prov].orderIds.includes(o.id)) map[prov].orderIds.push(o.id);
+      });
     });
 
     // Subtract already requested/approved amounts
