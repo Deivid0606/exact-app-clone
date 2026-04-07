@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
@@ -8,11 +8,13 @@ const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 export default function ClosuresView() {
   const { profile } = useAuth();
   const role = profile?.role;
+  const myEmail = profile?.email || '';
   const [orders, setOrders] = useState<any[]>([]);
   const [deliveries, setDeliveries] = useState<any[]>([]);
   const [fees, setFees] = useState<any[]>([]);
   const [filterDelivery, setFilterDelivery] = useState(role === 'DELIVERY' ? (profile?.email || '') : '');
   const [filterType, setFilterType] = useState('ENTREGADO');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date(); d.setDate(1);
     return d.toISOString().slice(0, 10);
@@ -35,6 +37,7 @@ export default function ClosuresView() {
 
     const { data } = await query;
     setOrders(data || []);
+    setSelectedIds(new Set());
   };
 
   useEffect(() => { loadClosures(); }, []);
@@ -44,16 +47,29 @@ export default function ClosuresView() {
     return Number(f?.fee_gs || 0);
   };
 
-  const kpis = {
-    entregados: orders.filter(o => o.status === 'ENTREGADO').length,
-    entregadosRev: orders.filter(o => o.status === 'ENTREGADO').reduce((s, o) => s + Number(o.total_gs || 0), 0),
-    encomiendas: orders.filter(o => o.status === 'ENCOMIENDA ENTREGADA').length,
-    encomiendaRev: orders.filter(o => o.status === 'ENCOMIENDA ENTREGADA').reduce((s, o) => s + Number(o.total_gs || 0), 0),
-    deliveryFee: orders.reduce((s, o) => {
-      const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
-      return s + fee;
-    }, 0),
-  };
+  const delivered = useMemo(() => orders.filter(o => o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA'), [orders]);
+  const rendidos = useMemo(() => delivered.filter(o => o.delivery_settled), [delivered]);
+  const noRendidos = useMemo(() => delivered.filter(o => !o.delivery_settled), [delivered]);
+
+  const kpis = useMemo(() => {
+    const entregados = orders.filter(o => o.status === 'ENTREGADO');
+    const encomiendas = orders.filter(o => o.status === 'ENCOMIENDA ENTREGADA');
+    return {
+      entregados: entregados.length,
+      entregadosRev: entregados.reduce((s, o) => s + Number(o.total_gs || 0), 0),
+      encomiendas: encomiendas.length,
+      encomiendaRev: encomiendas.reduce((s, o) => s + Number(o.total_gs || 0), 0),
+      deliveryFee: orders.reduce((s, o) => {
+        const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
+        return s + fee;
+      }, 0),
+      rendidos: rendidos.length,
+      noRendidos: noRendidos.length,
+      montoRendido: rendidos.reduce((s, o) => s + Number(o.total_gs || 0), 0),
+      montoPendiente: noRendidos.reduce((s, o) => s + Number(o.total_gs || 0), 0),
+    };
+  }, [orders, rendidos, noRendidos]);
+
   const netRendir = kpis.entregadosRev + kpis.encomiendaRev - kpis.deliveryFee;
 
   const updateStatus2 = async (orderId: string, status2: string) => {
@@ -66,6 +82,91 @@ export default function ClosuresView() {
     const { error } = await supabase.from('orders').update({ estado_retiro: estado }).eq('id', orderId);
     if (error) toast.error(error.message);
     else toast.success('Estado de retiro actualizado');
+  };
+
+  // Mark selected orders as RENDIDO
+  const markRendido = async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) { toast.error('Seleccioná pedidos primero'); return; }
+    let ok = 0;
+    for (const id of ids) {
+      const { error } = await supabase.from('orders').update({
+        delivery_settled: true,
+        status2: 'RENDIDO',
+        updated_at: new Date().toISOString(),
+      }).eq('id', id);
+      if (!error) ok++;
+    }
+    if (ok > 0) {
+      await supabase.from('news').insert({
+        message: `${ok} pedidos marcados como RENDIDO por ${myEmail} (${filterDelivery || 'todos'})`,
+        actor_email: myEmail,
+        role_scope: role,
+      });
+      toast.success(`${ok} pedidos marcados como RENDIDO`);
+    }
+    setSelectedIds(new Set());
+    loadClosures();
+  };
+
+  // Mark rendición del día as PAGADO
+  const markRendicionPagada = async () => {
+    const deliveryEmail = filterDelivery;
+    if (!deliveryEmail) { toast.error('Seleccioná un delivery primero'); return; }
+
+    const montoRendir = rendidos.reduce((s, o) => {
+      const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
+      return s + (Number(o.total_gs || 0) - fee);
+    }, 0);
+
+    if (montoRendir <= 0) { toast.error('No hay monto para rendir'); return; }
+    if (!confirm(`¿Marcar rendición de ${deliveryEmail} por Gs ${nf(montoRendir)} como PAGADA?`)) return;
+
+    // Mark all settled orders as paid
+    for (const o of rendidos) {
+      await supabase.from('orders').update({
+        delivery_paid_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }).eq('id', o.id);
+    }
+
+    // Create rendicion pagada record
+    const { error } = await supabase.from('rendiciones_pagadas').insert({
+      delivery_email: deliveryEmail,
+      fecha_rendicion: new Date().toISOString().slice(0, 10),
+      monto_total: montoRendir,
+      nota: `Rendición ${dateFrom} a ${dateTo} — ${rendidos.length} pedidos`,
+      marcado_por: myEmail,
+      marcado_en: new Date().toISOString(),
+      pagado_en: new Date().toISOString(),
+    });
+
+    if (error) { toast.error(error.message); return; }
+
+    await supabase.from('news').insert({
+      message: `Rendición de ${deliveryEmail} marcada como PAGADA — Gs ${nf(montoRendir)}`,
+      actor_email: myEmail,
+      role_scope: role,
+    });
+
+    toast.success(`Rendición de Gs ${nf(montoRendir)} marcada como PAGADA`);
+    loadClosures();
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const selectAllNoRendidos = () => {
+    if (selectedIds.size === noRendidos.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(noRendidos.map(o => o.id)));
+    }
   };
 
   const state2Opts = ['--', 'GUIA GENERADA', 'FUERA DE COBERTURA', 'CANCELADO', 'REPETIDO', 'RENDIDO'];
@@ -104,31 +205,64 @@ export default function ClosuresView() {
         <button className="nav-btn active" onClick={loadClosures}>Aplicar</button>
       </div>
 
-      <p className="chip mb-3 text-[10px]">Los KPIs se calculan solo con Estado 1 = ENTREGADO</p>
-
       <div className="grid-kpi mb-4">
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">ENTREGADOS</div><div className="text-[22px] font-extrabold">{kpis.entregados}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.entregadosRev)}</div></div>
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">ENCOMIENDAS</div><div className="text-[22px] font-extrabold">{kpis.encomiendas}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.encomiendaRev)}</div></div>
-        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Ganancia Delivery (Gs)</div><div className="text-[22px] font-extrabold">{nf(kpis.deliveryFee)}</div></div>
-        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Neto a Rendir (Gs)</div><div className="text-[22px] font-extrabold">{nf(netRendir)}</div></div>
-        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Pedidos</div><div className="text-[22px] font-extrabold">{orders.length}</div></div>
+        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Ganancia Delivery</div><div className="text-[22px] font-extrabold">{nf(kpis.deliveryFee)}</div></div>
+        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Neto a Rendir</div><div className="text-[22px] font-extrabold">{nf(netRendir)}</div></div>
+        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Pendientes rendir</div><div className="text-[22px] font-extrabold text-yellow-400">{kpis.noRendidos}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.montoPendiente)}</div></div>
+        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Ya rendidos</div><div className="text-[22px] font-extrabold text-green-400">{kpis.rendidos}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.montoRendido)}</div></div>
       </div>
 
+      {/* Bulk actions for ADMIN/DESPACHANTE */}
+      {role !== 'DELIVERY' && (
+        <div className="flex flex-wrap gap-2 mb-3">
+          {selectedIds.size > 0 && (
+            <button className="nav-btn active" onClick={markRendido}>
+              ✅ Marcar {selectedIds.size} como RENDIDO
+            </button>
+          )}
+          {filterDelivery && rendidos.length > 0 && (
+            <button className="nav-btn active !bg-green-600 hover:!bg-green-700" onClick={markRendicionPagada}>
+              💰 Marcar rendición como PAGADA ({rendidos.length} pedidos — Gs {nf(rendidos.reduce((s, o) => {
+                const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
+                return s + (Number(o.total_gs || 0) - fee);
+              }, 0))})
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="overflow-auto">
-        <table className="app-table min-w-[1100px]">
+        <table className="app-table min-w-[1200px]">
           <thead>
             <tr>
+              {role !== 'DELIVERY' && (
+                <th className="!w-[40px] text-center">
+                  <input type="checkbox"
+                    checked={selectedIds.size === noRendidos.length && noRendidos.length > 0}
+                    onChange={selectAllNoRendidos} title="Seleccionar no rendidos" />
+                </th>
+              )}
               <th>Asignado</th><th>ID</th><th>Ciudad</th><th>Cliente</th>
               <th className="text-right">Total (Gs)</th><th className="text-right">Tarifa (Gs)</th>
-              <th className="text-right">Neto (Gs)</th><th>Estado 1</th><th>Retiro</th><th>Estado 2</th>
+              <th className="text-right">Neto (Gs)</th><th>Estado 1</th><th>Rendido</th><th>Retiro</th><th>Estado 2</th>
             </tr>
           </thead>
           <tbody>
             {orders.map(o => {
               const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
               const net = Number(o.total_gs || 0) - fee;
+              const isSettled = o.delivery_settled;
               return (
-                <tr key={o.id}>
+                <tr key={o.id} className={isSettled ? 'opacity-60' : ''}>
+                  {role !== 'DELIVERY' && (
+                    <td className="text-center">
+                      {!isSettled && (o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA') ? (
+                        <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
+                      ) : <span className="text-[10px]">{isSettled ? '✅' : ''}</span>}
+                    </td>
+                  )}
                   <td className="text-xs whitespace-nowrap">{o.assigned_at ? new Date(o.assigned_at).toLocaleDateString('es-PY') : ''}</td>
                   <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
                   <td className="text-xs">{o.city}</td>
@@ -137,6 +271,12 @@ export default function ClosuresView() {
                   <td className="text-right text-xs">{nf(fee)}</td>
                   <td className="text-right text-xs">{nf(net)}</td>
                   <td><span className={`badge-status ${o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA' ? 'badge-entregado' : o.status === 'CANCELADO' ? 'badge-cancelado' : 'badge-pendiente'}`}>{o.status}</span></td>
+                  <td>
+                    <span className={`badge-status ${isSettled ? 'badge-entregado' : 'badge-pendiente'}`}>
+                      {isSettled ? 'RENDIDO' : 'PENDIENTE'}
+                    </span>
+                    {o.delivery_paid_at && <div className="text-[9px] text-green-400 mt-0.5">PAGADO</div>}
+                  </td>
                   <td>
                     {role !== 'DELIVERY' ? (
                       <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.estado_retiro || ''}
@@ -156,7 +296,7 @@ export default function ClosuresView() {
                 </tr>
               );
             })}
-            {orders.length === 0 && <tr><td colSpan={10} className="text-center text-muted-foreground py-8">Sin resultados</td></tr>}
+            {orders.length === 0 && <tr><td colSpan={role !== 'DELIVERY' ? 12 : 11} className="text-center text-muted-foreground py-8">Sin resultados</td></tr>}
           </tbody>
         </table>
       </div>
