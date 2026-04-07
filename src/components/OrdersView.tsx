@@ -88,11 +88,19 @@ export default function OrdersView() {
     });
   }, [orders, search, statusFilter, role, myEmail]);
 
+  const postNews = async (message: string, orderNum: string) => {
+    await supabase.from('news').insert({
+      message, order_id: orderNum, actor_email: myEmail, role_scope: role,
+    });
+  };
+
   const handleStatus1Change = async (orderId: string, newStatus: string) => {
     if (role === 'DELIVERY' && newStatus === 'DEVUELTO A DEPÓSITO') {
       toast.error('No podés usar DEVUELTO A DEPÓSITO');
       return;
     }
+    const order = orders.find(o => o.id === orderId);
+    const orderNum = order?.order_number || orderId.slice(0, 8);
     const updates: any = { status: newStatus, updated_at: new Date().toISOString() };
     if (newStatus === 'ENTREGADO' || newStatus === 'ENCOMIENDA ENTREGADA') {
       updates.delivered_at = new Date().toISOString();
@@ -101,17 +109,23 @@ export default function OrdersView() {
     if (error) { toast.error(error.message); return; }
     toast.success(`Estado → ${newStatus}`);
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updates } : o));
+    postNews(`Pedido ${orderNum} cambió a ${newStatus} por ${myEmail}`, orderNum);
   };
 
   const handleStatus2Change = async (orderId: string, newStatus2: string) => {
     const val = newStatus2 === '--' ? null : newStatus2;
+    const order = orders.find(o => o.id === orderId);
+    const orderNum = order?.order_number || orderId.slice(0, 8);
     const { error } = await supabase.from('orders').update({ status2: val, updated_at: new Date().toISOString() }).eq('id', orderId);
     if (error) { toast.error(error.message); return; }
     toast.success(`Estado 2 → ${newStatus2}`);
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status2: val } : o));
+    if (val) postNews(`Pedido ${orderNum} estado 2 → ${val}`, orderNum);
   };
 
   const handleAssignDelivery = async (orderId: string, deliveryEmail: string) => {
+    const order = orders.find(o => o.id === orderId);
+    const orderNum = order?.order_number || orderId.slice(0, 8);
     const updates: any = {
       assigned_delivery: deliveryEmail || null,
       assigned_at: deliveryEmail ? new Date().toISOString() : null,
@@ -122,6 +136,7 @@ export default function OrdersView() {
     if (error) { toast.error(error.message); return; }
     toast.success(deliveryEmail ? `Asignado a ${deliveryEmail}` : 'Delivery removido');
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updates } : o));
+    if (deliveryEmail) postNews(`${myEmail} asignó pedido ${orderNum} a ${deliveryEmail}`, orderNum);
   };
 
   const openEdit = (o: any) => {
