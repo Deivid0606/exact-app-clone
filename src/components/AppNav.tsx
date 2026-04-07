@@ -23,7 +23,7 @@ const navItems: NavItem[] = [
   { id: 'earnings', label: 'Ganancias', roles: ['ADMIN', 'PROVEEDOR'] },
   { id: 'order', label: 'Cargar pedido', roles: ['VENDEDOR'] },
   { id: 'orders', label: 'Pedidos' },
-  { id: 'shopifyInbox', label: 'Pedidos Shopify + WhatsApp', roles: ['VENDEDOR'] },
+  { id: 'shopifyInbox', label: 'Pedidos Shopify + WhatsApp', roles: ['ADMIN'] },
   { id: 'assignOrders', label: 'Asignar Pedidos', roles: ['ADMIN', 'PROVEEDOR', 'DELIVERY'] },
   { id: 'mapa', label: 'Mapa', roles: ['ADMIN', 'DELIVERY'] },
   { id: 'rates', label: 'Costos delivery', excludeRoles: ['DESPACHANTE', 'DELIVERY'] },
