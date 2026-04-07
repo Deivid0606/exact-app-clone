@@ -85,22 +85,22 @@ export default function WithGuidesView() {
     ).join('\n');
 
     return [
-      `📦 GUÍA DE ENVÍO — ${o.order_number || o.id.slice(0, 8)}`,
+      `GUÍA DE ENVÍO — ${o.order_number || o.id.slice(0, 8)}`,
       `━━━━━━━━━━━━━━━━━━`,
-      `👤 Cliente: ${o.customer_name || ''}`,
-      `📱 Teléfono: ${o.phone || ''}`,
-      `📧 Email: ${o.email || ''}`,
-      `🏙️ Ciudad: ${o.city || ''}`,
-      `📍 Dirección: ${o.street || ''} ${o.district ? '- ' + o.district : ''}`,
+      `Cliente: ${o.customer_name || ''}`,
+      `Teléfono: ${o.phone || ''}`,
+      `Email: ${o.email || ''}`,
+      `Ciudad: ${o.city || ''}`,
+      `Dirección: ${o.street || ''} ${o.district ? '- ' + o.district : ''}`,
       `━━━━━━━━━━━━━━━━━━`,
-      `📝 Productos:`,
+      `Productos:`,
       itemsText,
       `━━━━━━━━━━━━━━━━━━`,
-      `💰 Total: Gs ${nf(Number(o.total_gs || 0))}`,
-      o.obs ? `📌 Obs: ${o.obs}` : '',
+      `Total: Gs ${nf(Number(o.total_gs || 0))}`,
+      o.obs ? `Observación: ${o.obs}` : '',
       `━━━━━━━━━━━━━━━━━━`,
-      `👷 Vendedor: ${o.created_by || ''}`,
-      `📋 Proveedor: ${o.provider_emails_list || '—'}`,
+      `Vendedor: ${o.created_by || ''}`,
+      `Proveedor: ${o.provider_emails_list || '—'}`,
     ].filter(Boolean).join('\n');
   };
 
