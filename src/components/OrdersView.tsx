@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
@@ -452,17 +453,18 @@ export default function OrdersView() {
       )}
 
       {/* Guide Modal */}
-      {guideText && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setGuideText('')}>
-          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-xl" onClick={e => e.stopPropagation()}>
+      {guideText && createPortal(
+        <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-4" onClick={() => setGuideText('')}>
+          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-xl shadow-2xl" onClick={e => e.stopPropagation()}>
             <h4 className="text-lg font-extrabold mb-3">Guía — {guideOrderId}</h4>
-            <pre className="text-sm whitespace-pre-wrap bg-background p-5 rounded-xl border border-border max-h-[60vh] overflow-auto leading-relaxed">{guideText}</pre>
+            <pre className="text-sm whitespace-pre-wrap bg-background p-5 rounded-xl border border-border max-h-[70vh] overflow-auto leading-relaxed">{guideText}</pre>
             <div className="flex gap-2 justify-end mt-4">
               <button className="nav-btn" onClick={() => setGuideText('')}>Cerrar</button>
               <button className="nav-btn active" onClick={copyGuide}>Copiar</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
