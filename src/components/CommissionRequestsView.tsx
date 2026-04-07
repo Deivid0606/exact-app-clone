@@ -224,15 +224,27 @@ export default function CommissionRequestsView() {
               </select>
             </div>
           </div>
-          {newProvider && (
-            <div className="mb-3 p-3 rounded-xl border border-border bg-secondary/50">
-              <div className="text-xs text-muted-foreground">
-                Bruto: Gs {nf(balances.find(b => b.provider === newProvider)?.gross || 0)} | 
-                Ya solicitado: Gs {nf(balances.find(b => b.provider === newProvider)?.requested || 0)} | 
-                <span className="font-bold text-foreground"> Disponible: Gs {nf(balances.find(b => b.provider === newProvider)?.available || 0)}</span>
+          {newProvider && (() => {
+            const bal = balances.find(b => b.provider === newProvider);
+            const pendiente = (bal?.gross || 0) - (bal?.grossRendido || 0);
+            return (
+              <div className="mb-3 p-3 rounded-xl border border-border bg-secondary/50 space-y-1">
+                <div className="text-xs text-muted-foreground">
+                  Comisión total: Gs {nf(bal?.gross || 0)} |
+                  Rendido: Gs {nf(bal?.grossRendido || 0)} |
+                  Ya solicitado: Gs {nf(bal?.requested || 0)}
+                </div>
+                {pendiente > 0 && (
+                  <div className="text-[10px] text-yellow-400">
+                    ⏳ Gs {nf(pendiente)} pendientes de rendir (no se pueden solicitar aún)
+                  </div>
+                )}
+                <div className="text-xs">
+                  <span className="font-bold text-foreground">Disponible para solicitar: Gs {nf(bal?.available || 0)}</span>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
           <div className="mb-3">
             <label className="app-label">Nota (opcional)</label>
             <input className="app-input" value={newNote} onChange={e => setNewNote(e.target.value)} placeholder="Nota para el proveedor" />
