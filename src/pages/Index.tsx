@@ -9,7 +9,20 @@ import NewsView from '@/components/NewsView';
 import ProductsView from '@/components/ProductsView';
 import ProfileView from '@/components/ProfileView';
 import UsersView from '@/components/UsersView';
-import PlaceholderView from '@/components/PlaceholderView';
+import CreateOrderView from '@/components/CreateOrderView';
+import RatesView from '@/components/RatesView';
+import CommissionsView from '@/components/CommissionsView';
+import CommissionRequestsView from '@/components/CommissionRequestsView';
+import ClosuresView from '@/components/ClosuresView';
+import EarningsView from '@/components/EarningsView';
+import ChatView from '@/components/ChatView';
+import AssignOrdersView from '@/components/AssignOrdersView';
+import RankingDeliveryView from '@/components/RankingDeliveryView';
+import RendicionesPagadasView from '@/components/RendicionesPagadasView';
+import WithGuidesView from '@/components/WithGuidesView';
+import CounterView from '@/components/CounterView';
+import MapView from '@/components/MapView';
+import ShopifyInboxView from '@/components/ShopifyInboxView';
 
 export default function Index() {
   const { user, profile, loading } = useAuth();
@@ -17,10 +30,7 @@ export default function Index() {
   const [lastUpdate, setLastUpdate] = useState(() => new Date().toLocaleString('es-PY'));
 
   const handleAuthSuccess = () => setCurrentView('dashboard');
-
-  const handleRefresh = () => {
-    setLastUpdate(new Date().toLocaleString('es-PY'));
-  };
+  const handleRefresh = () => setLastUpdate(new Date().toLocaleString('es-PY'));
 
   if (loading) {
     return (
@@ -33,7 +43,6 @@ export default function Index() {
     );
   }
 
-  // If not logged in, show auth
   if (!user || !profile) {
     return (
       <div className="max-w-full mx-auto px-6 py-5">
@@ -43,7 +52,6 @@ export default function Index() {
     );
   }
 
-  // Auto-navigate on first load
   if (currentView === 'auth') {
     const defaultView = (profile.role === 'DESPACHANTE' || profile.role === 'DELIVERY') ? 'orders' : 'dashboard';
     setCurrentView(defaultView as ViewName);
@@ -57,20 +65,20 @@ export default function Index() {
       case 'products': return <ProductsView />;
       case 'profile': return <ProfileView />;
       case 'users': return <UsersView />;
-      case 'chat': return <PlaceholderView title="Chat" icon="💬" />;
-      case 'earnings': return <PlaceholderView title="Ganancias" icon="💹" />;
-      case 'order': return <PlaceholderView title="Cargar pedido" icon="🛒" />;
-      case 'rates': return <PlaceholderView title="Costos delivery" icon="🚚" />;
-      case 'commissions': return <PlaceholderView title="Pago de comisiones" icon="💸" />;
-      case 'commissionRequests': return <PlaceholderView title="Solicitud de comisiones" icon="📋" />;
-      case 'counter': return <PlaceholderView title="Actualizar contador" icon="🔢" />;
-      case 'closures': return <PlaceholderView title="Cierres" icon="✅" />;
-      case 'rendicionesPagadas': return <PlaceholderView title="Rendiciones pagadas" icon="🏷️" />;
-      case 'withGuides': return <PlaceholderView title="Pedidos con guías" icon="📦" />;
-      case 'shopifyInbox': return <PlaceholderView title="Pedidos Shopify + WhatsApp" icon="🛍️" />;
-      case 'assignOrders': return <PlaceholderView title="Asignar Pedidos" icon="📌" />;
-      case 'rankingDelivery': return <PlaceholderView title="🏆 Ranking Delivery" icon="🏆" />;
-      case 'mapa': return <PlaceholderView title="Mapa" icon="🗺️" />;
+      case 'order': return <CreateOrderView />;
+      case 'rates': return <RatesView />;
+      case 'commissions': return <CommissionsView />;
+      case 'commissionRequests': return <CommissionRequestsView />;
+      case 'closures': return <ClosuresView />;
+      case 'earnings': return <EarningsView />;
+      case 'chat': return <ChatView />;
+      case 'assignOrders': return <AssignOrdersView />;
+      case 'rankingDelivery': return <RankingDeliveryView />;
+      case 'rendicionesPagadas': return <RendicionesPagadasView />;
+      case 'withGuides': return <WithGuidesView />;
+      case 'counter': return <CounterView />;
+      case 'mapa': return <MapView />;
+      case 'shopifyInbox': return <ShopifyInboxView />;
       default: return <DashboardView />;
     }
   };
