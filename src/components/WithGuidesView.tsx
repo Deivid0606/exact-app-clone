@@ -180,7 +180,7 @@ export default function WithGuidesView() {
             <tbody>${itemsHtml}</tbody>
           </table>
           <div style="margin-top:12px;padding:8px;background:#1e1e2f;border-radius:8px;font-size:14px;">
-            <strong>💰 Total: Gs ${nf(Number(o.total_gs || 0))}</strong> &nbsp;|&nbsp; 🚚 Delivery: Gs ${nf(Number(o.delivery_gs || 0))}
+            <strong>💰 Total: Gs ${nf(Number(o.total_gs || 0))}</strong>
           </div>
           ${o.obs ? `<div style="margin-top:8px;font-size:12px;color:#bbb;">📌 ${o.obs}</div>` : ''}
         </div>`;
