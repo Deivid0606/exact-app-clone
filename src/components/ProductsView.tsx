@@ -99,10 +99,8 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
     const map = new Map<string, { email: string; name: string; logo: string; items: Product[] }>();
     filtered.forEach(p => {
       const key = (p.provider_email || '__sin_proveedor__').toLowerCase().trim();
-      if (!map.has(key)) {
-        const info = profileMap[key] || { name: p.provider_email || 'Sin proveedor', logo: '' };
-        map.set(key, { email: p.provider_email || '', name: info.name, logo: info.logo, items: [] });
-      }
+      const info = profileMap[key] || { name: p.provider_email || 'Sin proveedor', logo: '', phone: '' };
+        map.set(key, { email: p.provider_email || '', name: info.name, logo: info.logo, phone: info.phone, items: [] });
       map.get(key)!.items.push(p);
     });
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'es'));
