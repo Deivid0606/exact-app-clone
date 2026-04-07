@@ -153,6 +153,7 @@ export default function OrdersView() {
       district: o.district || '',
       email: o.email || '',
       obs: o.obs || '',
+      assigned_at: o.assigned_at ? new Date(o.assigned_at).toISOString().slice(0, 16) : '',
     });
   };
 
