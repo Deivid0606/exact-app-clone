@@ -187,9 +187,6 @@ export default function AuthView({ onSuccess }: AuthViewProps) {
                 </div>
               </div>
 
-              <small className="text-xs text-muted-foreground mt-2 block">
-                ⚡ El primer usuario creado será ADMIN automáticamente.
-              </small>
 
               <button
                 className="w-full mt-5 bg-primary hover:bg-primary/90 text-primary-foreground font-bold rounded-lg py-3 transition-colors disabled:opacity-50"
