@@ -68,8 +68,14 @@
     @apply border-border;
   }
 
+  html, body, #root {
+    background-color: hsl(var(--background));
+    min-height: 100%;
+  }
+
   body {
     @apply bg-background text-foreground font-sans;
+    min-height: 100vh;
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
   }
 }
