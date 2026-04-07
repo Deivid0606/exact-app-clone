@@ -235,7 +235,6 @@ export default function CommissionRequestsView() {
             <tr>
               <th>Fecha</th><th>Vendedor</th><th>Proveedor</th>
               <th className="text-right">Monto (Gs)</th><th>Rango</th><th>Nota</th><th>Estado</th>
-              {r.status === 'APROBADO' && <th>Aprobado por</th>}
               <th>Acción</th>
             </tr>
           </thead>
