@@ -43,7 +43,7 @@ export default function CommissionRequestsView() {
   // Load orders for balance calc when vendor opens form
   const loadBalanceOrders = async () => {
     const { data } = await supabase.from('orders').select('*')
-      .eq('status2', 'RENDIDO')
+      .in('status', ['ENTREGADO', 'ENCOMIENDA ENTREGADA'])
       .gte('created_at', newFrom + 'T00:00:00')
       .lte('created_at', newTo + 'T23:59:59')
       .eq('created_by', myEmail);
@@ -54,7 +54,6 @@ export default function CommissionRequestsView() {
 
   // Calculate vendor-provider balances
   const balances = useMemo(() => {
-    // Group orders by provider and sum commission_gs
     const skuProvider: Record<string, string> = {};
     products.forEach(p => {
       if (p.sku && p.provider_email) {
@@ -62,12 +61,13 @@ export default function CommissionRequestsView() {
       }
     });
 
-    const map: Record<string, { provider: string; gross: number; orderIds: string[] }> = {};
+    const map: Record<string, { provider: string; gross: number; grossRendido: number; orderIds: string[] }> = {};
     orders.forEach(o => {
       const commission = Number(o.commission_gs || 0);
       if (commission <= 0) return;
 
-      // Find providers from order items
+      const isRendido = o.status2 === 'RENDIDO';
+
       const provSet = new Set<string>();
       try {
         const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
@@ -78,7 +78,6 @@ export default function CommissionRequestsView() {
         });
       } catch {}
 
-      // If order has provider_emails_list, use that as fallback
       if (provSet.size === 0 && o.provider_emails_list) {
         o.provider_emails_list.split(',').forEach((e: string) => {
           const t = e.trim().toLowerCase();
@@ -86,19 +85,18 @@ export default function CommissionRequestsView() {
         });
       }
 
-      // Distribute commission equally among providers (usually 1)
       const provArr = Array.from(provSet);
       if (provArr.length === 0) return;
       const perProv = commission / provArr.length;
 
       provArr.forEach(prov => {
-        if (!map[prov]) map[prov] = { provider: prov, gross: 0, orderIds: [] };
+        if (!map[prov]) map[prov] = { provider: prov, gross: 0, grossRendido: 0, orderIds: [] };
         map[prov].gross += perProv;
+        if (isRendido) map[prov].grossRendido += perProv;
         if (!map[prov].orderIds.includes(o.id)) map[prov].orderIds.push(o.id);
       });
     });
 
-    // Subtract already requested/approved amounts
     const requested: Record<string, number> = {};
     requests.forEach(r => {
       if (r.vendor_email?.toLowerCase() === myEmail.toLowerCase() && r.status !== 'RECHAZADO') {
@@ -110,7 +108,7 @@ export default function CommissionRequestsView() {
     return Object.values(map).map(b => ({
       ...b,
       requested: requested[b.provider] || 0,
-      available: Math.max(0, b.gross - (requested[b.provider] || 0)),
+      available: Math.max(0, b.grossRendido - (requested[b.provider] || 0)),
     }));
   }, [orders, products, requests, myEmail]);
 
@@ -226,15 +224,27 @@ export default function CommissionRequestsView() {
               </select>
             </div>
           </div>
-          {newProvider && (
-            <div className="mb-3 p-3 rounded-xl border border-border bg-secondary/50">
-              <div className="text-xs text-muted-foreground">
-                Bruto: Gs {nf(balances.find(b => b.provider === newProvider)?.gross || 0)} | 
-                Ya solicitado: Gs {nf(balances.find(b => b.provider === newProvider)?.requested || 0)} | 
-                <span className="font-bold text-foreground"> Disponible: Gs {nf(balances.find(b => b.provider === newProvider)?.available || 0)}</span>
+          {newProvider && (() => {
+            const bal = balances.find(b => b.provider === newProvider);
+            const pendiente = (bal?.gross || 0) - (bal?.grossRendido || 0);
+            return (
+              <div className="mb-3 p-3 rounded-xl border border-border bg-secondary/50 space-y-1">
+                <div className="text-xs text-muted-foreground">
+                  Comisión total: Gs {nf(bal?.gross || 0)} |
+                  Rendido: Gs {nf(bal?.grossRendido || 0)} |
+                  Ya solicitado: Gs {nf(bal?.requested || 0)}
+                </div>
+                {pendiente > 0 && (
+                  <div className="text-[10px] text-yellow-400">
+                    ⏳ Gs {nf(pendiente)} pendientes de rendir (no se pueden solicitar aún)
+                  </div>
+                )}
+                <div className="text-xs">
+                  <span className="font-bold text-foreground">Disponible para solicitar: Gs {nf(bal?.available || 0)}</span>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
           <div className="mb-3">
             <label className="app-label">Nota (opcional)</label>
             <input className="app-input" value={newNote} onChange={e => setNewNote(e.target.value)} placeholder="Nota para el proveedor" />
