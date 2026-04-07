@@ -86,11 +86,9 @@ export default function WithGuidesView() {
       itemsText,
       `━━━━━━━━━━━━━━━━━━`,
       `💰 Total: Gs ${nf(Number(o.total_gs || 0))}`,
-      `🚚 Delivery: Gs ${nf(Number(o.delivery_gs || 0))}`,
       o.obs ? `📌 Obs: ${o.obs}` : '',
       `━━━━━━━━━━━━━━━━━━`,
       `👷 Vendedor: ${o.created_by || ''}`,
-      `🛵 Delivery: ${o.assigned_delivery || 'Sin asignar'}`,
       `📋 Proveedor: ${o.provider_emails_list || '—'}`,
     ].filter(Boolean).join('\n');
   };
@@ -170,7 +168,6 @@ export default function WithGuidesView() {
             <tr><td style="padding:3px 0;color:#999;">Ciudad:</td><td>${o.city || ''}</td></tr>
             <tr><td style="padding:3px 0;color:#999;">Dirección:</td><td>${o.street || ''} ${o.district ? '- ' + o.district : ''}</td></tr>
             <tr><td style="padding:3px 0;color:#999;">Vendedor:</td><td>${o.created_by || ''}</td></tr>
-            <tr><td style="padding:3px 0;color:#999;">Delivery:</td><td>${o.assigned_delivery || 'Sin asignar'}</td></tr>
             <tr><td style="padding:3px 0;color:#999;">Proveedor:</td><td>${o.provider_emails_list || '—'}</td></tr>
           </tbody></table>
           <table style="width:100%;border-collapse:collapse;font-size:12px;">
@@ -183,7 +180,7 @@ export default function WithGuidesView() {
             <tbody>${itemsHtml}</tbody>
           </table>
           <div style="margin-top:12px;padding:8px;background:#1e1e2f;border-radius:8px;font-size:14px;">
-            <strong>💰 Total: Gs ${nf(Number(o.total_gs || 0))}</strong> &nbsp;|&nbsp; 🚚 Delivery: Gs ${nf(Number(o.delivery_gs || 0))}
+            <strong>💰 Total: Gs ${nf(Number(o.total_gs || 0))}</strong>
           </div>
           ${o.obs ? `<div style="margin-top:8px;font-size:12px;color:#bbb;">📌 ${o.obs}</div>` : ''}
         </div>`;
@@ -297,7 +294,7 @@ export default function WithGuidesView() {
 
       {/* Guide Modal */}
       {guideText && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={() => setGuideText('')}>
+        <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-4" onClick={() => setGuideText('')}>
           <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-lg" onClick={e => e.stopPropagation()}>
             <h4 className="text-lg font-extrabold mb-3">📦 Guía — {guideId}</h4>
             <pre className="text-xs whitespace-pre-wrap bg-background p-4 rounded-xl border border-border max-h-[400px] overflow-auto">{guideText}</pre>
