@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
+import ImageUploadField from './ImageUploadField';
 import { createPortal } from 'react-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
@@ -323,18 +324,9 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                 <label className="app-label">Stock real</label>
                 <input type="number" className="app-input" value={editProduct.real_stock || 0} onChange={e => setEditProduct({ ...editProduct, real_stock: Number(e.target.value) })} />
               </div>
-              <div>
-                <label className="app-label">Imagen URL 1</label>
-                <input className="app-input" value={editProduct.image_url || ''} onChange={e => setEditProduct({ ...editProduct, image_url: e.target.value })} />
-              </div>
-              <div>
-                <label className="app-label">Imagen URL 2</label>
-                <input className="app-input" value={editProduct.image_url_2 || ''} onChange={e => setEditProduct({ ...editProduct, image_url_2: e.target.value })} />
-              </div>
-              <div>
-                <label className="app-label">Imagen URL 3</label>
-                <input className="app-input" value={editProduct.image_url_3 || ''} onChange={e => setEditProduct({ ...editProduct, image_url_3: e.target.value })} />
-              </div>
+              <ImageUploadField label="Imagen 1" value={editProduct.image_url || ''} onChange={v => setEditProduct({ ...editProduct, image_url: v })} />
+              <ImageUploadField label="Imagen 2" value={editProduct.image_url_2 || ''} onChange={v => setEditProduct({ ...editProduct, image_url_2: v })} />
+              <ImageUploadField label="Imagen 3" value={editProduct.image_url_3 || ''} onChange={v => setEditProduct({ ...editProduct, image_url_3: v })} />
               {role !== 'PROVEEDOR' && (
                 <div>
                   <label className="app-label">Email proveedor</label>
