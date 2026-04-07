@@ -85,22 +85,22 @@ export default function WithGuidesView() {
     ).join('\n');
 
     return [
-      `📦 GUÍA DE ENVÍO — ${o.order_number || o.id.slice(0, 8)}`,
+      `GUÍA DE ENVÍO — ${o.order_number || o.id.slice(0, 8)}`,
       `━━━━━━━━━━━━━━━━━━`,
-      `👤 Cliente: ${o.customer_name || ''}`,
-      `📱 Teléfono: ${o.phone || ''}`,
-      `📧 Email: ${o.email || ''}`,
-      `🏙️ Ciudad: ${o.city || ''}`,
-      `📍 Dirección: ${o.street || ''} ${o.district ? '- ' + o.district : ''}`,
+      `Cliente: ${o.customer_name || ''}`,
+      `Teléfono: ${o.phone || ''}`,
+      `Email: ${o.email || ''}`,
+      `Ciudad: ${o.city || ''}`,
+      `Dirección: ${o.street || ''} ${o.district ? '- ' + o.district : ''}`,
       `━━━━━━━━━━━━━━━━━━`,
-      `📝 Productos:`,
+      `Productos:`,
       itemsText,
       `━━━━━━━━━━━━━━━━━━`,
-      `💰 Total: Gs ${nf(Number(o.total_gs || 0))}`,
-      o.obs ? `📌 Obs: ${o.obs}` : '',
+      `Total: Gs ${nf(Number(o.total_gs || 0))}`,
+      o.obs ? `Observación: ${o.obs}` : '',
       `━━━━━━━━━━━━━━━━━━`,
-      `👷 Vendedor: ${o.created_by || ''}`,
-      `📋 Proveedor: ${o.provider_emails_list || '—'}`,
+      `Vendedor: ${o.created_by || ''}`,
+      `Proveedor: ${o.provider_emails_list || '—'}`,
     ].filter(Boolean).join('\n');
   };
 
@@ -171,7 +171,7 @@ export default function WithGuidesView() {
 
       return `
         <div style="page-break-after:always;padding:20px;font-family:Arial,sans-serif;color:#eee;background:#141420;">
-          <h2 style="color:#7c5cff;margin:0 0 10px;">📦 Guía — ${o.order_number || o.id.slice(0, 8)}</h2>
+          <h2 style="color:#7c5cff;margin:0 0 10px;">Guía — ${o.order_number || o.id.slice(0, 8)}</h2>
           <table style="width:100%;margin-bottom:12px;font-size:13px;"><tbody>
             <tr><td style="padding:3px 0;width:120px;color:#999;">Cliente:</td><td style="font-weight:bold;">${o.customer_name || ''}</td></tr>
             <tr><td style="padding:3px 0;color:#999;">Teléfono:</td><td>${o.phone || ''}</td></tr>
@@ -191,9 +191,9 @@ export default function WithGuidesView() {
             <tbody>${itemsHtml}</tbody>
           </table>
           <div style="margin-top:12px;padding:8px;background:#1e1e2f;border-radius:8px;font-size:14px;">
-            <strong>💰 Total: Gs ${nf(Number(o.total_gs || 0))}</strong>
+            <strong>Total: Gs ${nf(Number(o.total_gs || 0))}</strong>
           </div>
-          ${o.obs ? `<div style="margin-top:8px;font-size:12px;color:#bbb;">📌 ${o.obs}</div>` : ''}
+          ${o.obs ? `<div style="margin-top:8px;font-size:12px;color:#bbb;">Observación: ${o.obs}</div>` : ''}
         </div>`;
     }).join('');
 
