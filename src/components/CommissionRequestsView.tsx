@@ -186,7 +186,7 @@ export default function CommissionRequestsView() {
       {showForm && role === 'VENDEDOR' && (
         <div className="app-card !p-4 mb-4">
           <h4 className="font-bold mb-3">Nueva solicitud de comisión</h4>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-3">
             <div>
               <label className="app-label">Desde</label>
               <input type="date" className="app-input" value={newFrom} onChange={e => setNewFrom(e.target.value)} />
@@ -197,7 +197,7 @@ export default function CommissionRequestsView() {
             </div>
             <div>
               <label className="app-label">Proveedor</label>
-              <select className="app-input" value={newProvider} onChange={e => { setNewProvider(e.target.value); setNewAmount(0); }}>
+              <select className="app-input" value={newProvider} onChange={e => { setNewProvider(e.target.value); }}>
                 <option value="">-- Elegir --</option>
                 {balances.map(b => (
                   <option key={b.provider} value={b.provider}>
@@ -205,11 +205,6 @@ export default function CommissionRequestsView() {
                   </option>
                 ))}
               </select>
-            </div>
-            <div>
-              <label className="app-label">Monto (Gs) — 0 = todo disponible</label>
-              <input type="number" className="app-input" value={newAmount} onChange={e => setNewAmount(Number(e.target.value))}
-                placeholder={`Máx: ${nf(balances.find(b => b.provider === newProvider)?.available || 0)}`} />
             </div>
           </div>
           {newProvider && (
