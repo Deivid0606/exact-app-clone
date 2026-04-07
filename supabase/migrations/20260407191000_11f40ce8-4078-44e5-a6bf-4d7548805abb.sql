@@ -1,0 +1,1 @@
+UPDATE public.order_sequence SET counter = 1 WHERE id = 1;
