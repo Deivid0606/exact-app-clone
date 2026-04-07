@@ -20,7 +20,16 @@ export default function CreateOrderView({ initialSku, onSkuConsumed }: { initial
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    supabase.from('products').select('*').order('title').then(({ data }) => setProducts(data || []));
+    supabase.from('products').select('*').order('title').then(({ data }) => {
+      setProducts(data || []);
+      if (initialSku && data) {
+        const found = data.find((p: any) => p.sku === initialSku);
+        if (found) {
+          setItems([{ sku: initialSku, sale_gs: 0, qty: 1 }]);
+          onSkuConsumed?.();
+        }
+      }
+    });
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
   }, []);
 
