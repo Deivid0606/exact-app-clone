@@ -53,7 +53,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
     setLoading(true);
     const [prodRes, profRes] = await Promise.all([
       supabase.from('products').select('*').order('created_at', { ascending: false }),
-      supabase.from('profiles').select('email, name, logo_url'),
+      supabase.from('profiles').select('email, name, logo_url, phone'),
     ]);
     setProducts((prodRes.data || []) as Product[]);
     setProfiles(profRes.data || []);
