@@ -1,0 +1,1 @@
+CREATE POLICY "Providers can manage own fees" ON public.delivery_fees FOR ALL TO public USING (has_role(auth.uid(), 'PROVEEDOR'::app_role) AND delivery_email IN (SELECT email FROM profiles WHERE user_id = auth.uid())) WITH CHECK (has_role(auth.uid(), 'PROVEEDOR'::app_role));
