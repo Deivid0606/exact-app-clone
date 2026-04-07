@@ -283,6 +283,14 @@ export default function ClosuresView() {
                     <span className="font-bold text-foreground">Nota:</span> {rendicionPagada.nota}
                   </div>
                 )}
+                {(role === 'ADMIN' || role === 'PROVEEDOR') && (
+                  <button
+                    onClick={desmarcarPagado}
+                    className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold border border-destructive/30 text-destructive hover:bg-destructive/10 transition-all"
+                  >
+                    ↩ Desmarcar
+                  </button>
+                )}
               </div>
             </div>
           ) : (
