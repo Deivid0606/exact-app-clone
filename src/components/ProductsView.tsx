@@ -207,10 +207,10 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                   <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-primary to-primary/60 opacity-85 z-10" />
 
                   {/* Image */}
-                  <div className="relative w-full h-[220px] overflow-hidden bg-background border-b border-border"
+                  <div className="relative w-full h-[180px] overflow-hidden bg-background border-b border-border flex items-center justify-center"
                     onClick={() => setExpandedId(isExpanded ? null : p.id)}>
                     {mainImg ? (
-                      <img src={mainImg} alt={p.title} className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-[1.04]" />
+                      <img src={mainImg} alt={p.title} className="max-w-full max-h-full object-contain p-2" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-muted-foreground text-sm">Sin imagen</div>
                     )}
