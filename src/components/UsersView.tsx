@@ -36,6 +36,20 @@ export default function UsersView() {
     else { toast.success('Usuario aprobado'); loadUsers(); }
   };
 
+  const rejectUser = async (userId: string) => {
+    if (!confirm('¿Estás seguro de rechazar este usuario? Se eliminará su rol.')) return;
+    const { error } = await supabase.from('user_roles').delete().eq('user_id', userId);
+    if (error) toast.error(error.message);
+    else { toast.success('Usuario rechazado'); loadUsers(); }
+  };
+
+  const revokeUser = async (userId: string) => {
+    if (!confirm('¿Revocar acceso a este usuario?')) return;
+    const { error } = await supabase.from('user_roles').update({ approved: false }).eq('user_id', userId);
+    if (error) toast.error(error.message);
+    else { toast.success('Acceso revocado'); loadUsers(); }
+  };
+
   const changeRole = async (userId: string, newRole: string) => {
     const { error } = await supabase.from('user_roles').update({ role: newRole as any }).eq('user_id', userId);
     if (error) toast.error(error.message);
