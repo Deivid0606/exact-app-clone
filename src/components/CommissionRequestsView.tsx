@@ -43,7 +43,7 @@ export default function CommissionRequestsView() {
   // Load orders for balance calc when vendor opens form
   const loadBalanceOrders = async () => {
     const { data } = await supabase.from('orders').select('*')
-      .in('status', ['ENTREGADO', 'ENCOMIENDA ENTREGADA'])
+      .eq('status', 'RENDIDO')
       .gte('created_at', newFrom + 'T00:00:00')
       .lte('created_at', newTo + 'T23:59:59')
       .eq('created_by', myEmail);
