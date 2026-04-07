@@ -352,6 +352,23 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
         </div>,
         document.body
       )}
+      {/* Image Viewer Modal */}
+      {viewingImage && createPortal(
+        <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4" onClick={() => setViewingImage(null)}>
+          <div className="relative max-w-4xl max-h-[90vh] flex flex-col items-center gap-4" onClick={e => e.stopPropagation()}>
+            <img src={viewingImage.url} alt={viewingImage.title} className="max-w-full max-h-[75vh] object-contain rounded-xl shadow-2xl" />
+            <div className="flex gap-3 items-center">
+              <span className="text-white font-bold text-sm">{viewingImage.title}</span>
+              <a href={viewingImage.url} download target="_blank" rel="noopener noreferrer"
+                className="nav-btn active !px-4 !py-2 !text-xs">
+                ⬇ Descargar
+              </a>
+              <button className="nav-btn !px-4 !py-2 !text-xs" onClick={() => setViewingImage(null)}>Cerrar</button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }

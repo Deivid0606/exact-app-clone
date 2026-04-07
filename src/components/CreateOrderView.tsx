@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
-export default function CreateOrderView() {
+export default function CreateOrderView({ initialSku, onSkuConsumed }: { initialSku?: string | null; onSkuConsumed?: () => void }) {
   const { profile } = useAuth();
   const [products, setProducts] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
