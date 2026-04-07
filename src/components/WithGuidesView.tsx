@@ -57,6 +57,7 @@ export default function WithGuidesView() {
 
   const pendingGuides = filtered.filter(o => !o.status2 || o.status2 === '--');
   const withGuides = filtered.filter(o => o.status2 === 'GUIA GENERADA');
+  const visibleOrders = pendingGuides;
 
   const state2Opts = ['--', 'GUIA GENERADA', 'FUERA DE COBERTURA', 'CANCELADO', 'REPETIDO', 'RENDIDO'];
 
@@ -66,8 +67,14 @@ export default function WithGuidesView() {
     if (error) toast.error(error.message);
     else {
       toast.success('Estado 2 actualizado');
-      // Update locally; the filtered lists (pendingGuides / withGuides) will hide it automatically
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status2: val } : o));
+      if (val) {
+        setSelectedIds(prev => {
+          const next = new Set(prev);
+          next.delete(orderId);
+          return next;
+        });
+      }
     }
   };
 
@@ -119,7 +126,7 @@ export default function WithGuidesView() {
     });
   };
 
-  const getSelectedOrders = () => filtered.filter(o => selectedIds.has(o.id));
+  const getSelectedOrders = () => visibleOrders.filter(o => selectedIds.has(o.id));
 
   const bulkCopyGuides = () => {
     const selected = getSelectedOrders();
@@ -253,15 +260,15 @@ export default function WithGuidesView() {
           <thead>
             <tr>
               <th className="!w-[40px] text-center">
-                <input type="checkbox" checked={selectedIds.size === filtered.length && filtered.length > 0}
-                  onChange={() => selectedIds.size === filtered.length ? setSelectedIds(new Set()) : setSelectedIds(new Set(filtered.map(o => o.id)))} />
+                <input type="checkbox" checked={selectedIds.size === visibleOrders.length && visibleOrders.length > 0}
+                  onChange={() => selectedIds.size === visibleOrders.length ? setSelectedIds(new Set()) : setSelectedIds(new Set(visibleOrders.map(o => o.id)))} />
               </th>
               <th>Fecha</th><th>ID</th><th>Ciudad</th><th>Cliente</th><th>Teléfono</th>
               <th>Vendedor</th><th>Proveedor</th><th>Estado 2</th><th>Guía</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map(o => (
+            {visibleOrders.map(o => (
               <tr key={o.id}>
                 <td className="text-center">
                   <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
@@ -291,7 +298,7 @@ export default function WithGuidesView() {
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && <tr><td colSpan={10} className="text-center text-muted-foreground py-8">Sin pedidos</td></tr>}
+            {visibleOrders.length === 0 && <tr><td colSpan={10} className="text-center text-muted-foreground py-8">Sin pedidos</td></tr>}
           </tbody>
         </table>
       </div>
