@@ -33,6 +33,7 @@ export default function OrdersView() {
 
   const [orders, setOrders] = useState<any[]>([]);
   const [deliveries, setDeliveries] = useState<any[]>([]);
+  const [clientPrices, setClientPrices] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [dateFrom, setDateFrom] = useState(() => {
