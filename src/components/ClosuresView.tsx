@@ -16,7 +16,7 @@ export default function ClosuresView() {
   const [filterDelivery, setFilterDelivery] = useState(role === 'DELIVERY' ? (profile?.email || '') : '');
   const [filterType, setFilterType] = useState('ENTREGADO');
   const [rendicionNote, setRendicionNote] = useState('');
-  const [rendicionPagada, setRendicionPagada] = useState<{ pagado_en: string; nota: string; marcado_por: string } | null>(null);
+  const [rendicionPagada, setRendicionPagada] = useState<{ id: string; pagado_en: string; nota: string; marcado_por: string } | null>(null);
   const [dateFrom, setDateFrom] = useState(() => {
     const d = new Date(); d.setDate(1);
     return d.toISOString().slice(0, 10);
@@ -49,7 +49,7 @@ export default function ClosuresView() {
         .lte('pagado_en', dateTo + 'T23:59:59')
         .order('pagado_en', { ascending: false })
         .limit(1);
-      setRendicionPagada(rp && rp.length > 0 ? { pagado_en: rp[0].pagado_en, nota: rp[0].nota || '', marcado_por: rp[0].marcado_por || '' } : null);
+      setRendicionPagada(rp && rp.length > 0 ? { id: rp[0].id, pagado_en: rp[0].pagado_en, nota: rp[0].nota || '', marcado_por: rp[0].marcado_por || '' } : null);
     } else {
       setRendicionPagada(null);
     }
@@ -174,6 +174,33 @@ export default function ClosuresView() {
 
     toast.success(`Rendición de Gs ${nf(totalAPagar)} marcada como PAGADA`);
     setRendicionNote('');
+    loadClosures();
+  };
+
+  const desmarcarPagado = async () => {
+    if (!rendicionPagada) return;
+    if (!confirm('¿Desmarcar esta rendición como pagada?')) return;
+
+    // Revert orders
+    for (const o of delivered) {
+      await supabase.from('orders').update({
+        delivery_settled: false,
+        delivery_paid_at: null,
+        status2: '--',
+        updated_at: new Date().toISOString(),
+      }).eq('id', o.id);
+    }
+
+    // Delete rendicion record
+    await supabase.from('rendiciones_pagadas').delete().eq('id', rendicionPagada.id);
+
+    await supabase.from('news').insert({
+      message: `Rendición de ${filterDelivery} DESMARCADA como pagada por ${myEmail}`,
+      actor_email: myEmail,
+      role_scope: role,
+    });
+
+    toast.success('Rendición desmarcada');
     loadClosures();
   };
 
