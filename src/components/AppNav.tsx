@@ -26,7 +26,7 @@ const navItems: NavItem[] = [
   { id: 'shopifyInbox', label: 'Pedidos Shopify + WhatsApp', roles: ['ADMIN'] },
   { id: 'assignOrders', label: 'Asignar Pedidos', roles: ['ADMIN', 'PROVEEDOR', 'DELIVERY'] },
   { id: 'mapa', label: 'Mapa', roles: ['ADMIN', 'DELIVERY'] },
-  { id: 'rates', label: 'Costos delivery', excludeRoles: ['DESPACHANTE', 'DELIVERY'] },
+  { id: 'rates', label: 'Costos delivery', excludeRoles: ['DESPACHANTE', 'DELIVERY', 'VENDEDOR'] },
   { id: 'commissions', label: 'Pago de comisiones', roles: ['ADMIN', 'PROVEEDOR', 'VENDEDOR'] },
   { id: 'commissionRequests', label: 'Solicitud de comisiones', roles: ['ADMIN', 'PROVEEDOR', 'VENDEDOR'] },
   { id: 'counter', label: 'Actualizar contador', roles: ['ADMIN'] },
