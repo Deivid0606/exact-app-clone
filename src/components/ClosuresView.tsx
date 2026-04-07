@@ -216,18 +216,28 @@ export default function ClosuresView() {
 
       {/* Bulk actions for ADMIN/DESPACHANTE */}
       {role !== 'DELIVERY' && (
-        <div className="flex flex-wrap gap-2 mb-3">
+        <div className="flex flex-wrap gap-3 mb-4">
           {selectedIds.size > 0 && (
-            <button className="nav-btn active" onClick={markRendido}>
-              ✅ Marcar {selectedIds.size} como RENDIDO
+            <button
+              onClick={markRendido}
+              className="relative group inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm text-white shadow-lg transition-all duration-200 hover:scale-[1.03] active:scale-[0.97]"
+              style={{ background: 'linear-gradient(135deg, hsl(var(--primary)), hsl(270 60% 50%))' }}
+            >
+              <span className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200" style={{ background: 'linear-gradient(135deg, hsl(270 60% 50%), hsl(var(--primary)))' }} />
+              <span className="relative flex items-center gap-2">✅ Marcar {selectedIds.size} como RENDIDO</span>
             </button>
           )}
           {filterDelivery && rendidos.length > 0 && (
-            <button className="nav-btn active !bg-green-600 hover:!bg-green-700" onClick={markRendicionPagada}>
-              💰 Marcar rendición como PAGADA ({rendidos.length} pedidos — Gs {nf(rendidos.reduce((s, o) => {
+            <button
+              onClick={markRendicionPagada}
+              className="relative group inline-flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm text-white shadow-lg transition-all duration-200 hover:scale-[1.03] active:scale-[0.97]"
+              style={{ background: 'linear-gradient(135deg, #16a34a, #059669)' }}
+            >
+              <span className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200" style={{ background: 'linear-gradient(135deg, #059669, #16a34a)' }} />
+              <span className="relative flex items-center gap-2">💰 Marcar rendición PAGADA — {rendidos.length} pedidos — Gs {nf(rendidos.reduce((s, o) => {
                 const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
                 return s + (Number(o.total_gs || 0) - fee);
-              }, 0))})
+              }, 0))}</span>
             </button>
           )}
         </div>
