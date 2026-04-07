@@ -66,13 +66,8 @@ export default function WithGuidesView() {
     if (error) toast.error(error.message);
     else {
       toast.success('Estado 2 actualizado');
-      // Remove from list instantly if changed to a final state
-      const finalStates = ['FUERA DE COBERTURA', 'CANCELADO', 'REPETIDO', 'RENDIDO'];
-      if (val && finalStates.includes(val)) {
-        setOrders(prev => prev.filter(o => o.id !== orderId));
-      } else {
-        setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status2: val } : o));
-      }
+      // Update locally; the filtered lists (pendingGuides / withGuides) will hide it automatically
+      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status2: val } : o));
     }
   };
 
