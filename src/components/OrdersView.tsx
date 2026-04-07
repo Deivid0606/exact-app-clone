@@ -163,11 +163,13 @@ export default function OrdersView() {
       toast.error('Cliente, teléfono y ciudad son obligatorios');
       return;
     }
-    const { id, ...data } = editOrder;
-    const { error } = await supabase.from('orders').update({ ...data, updated_at: new Date().toISOString() }).eq('id', id);
+    const { id, assigned_at, ...data } = editOrder;
+    const updates: any = { ...data, updated_at: new Date().toISOString() };
+    if (assigned_at) updates.assigned_at = new Date(assigned_at).toISOString();
+    const { error } = await supabase.from('orders').update(updates).eq('id', id);
     if (error) { toast.error(error.message); return; }
     toast.success('Pedido actualizado');
-    setOrders(prev => prev.map(o => o.id === id ? { ...o, ...data } : o));
+    setOrders(prev => prev.map(o => o.id === id ? { ...o, ...updates } : o));
     setEditOrder(null);
   };
 
