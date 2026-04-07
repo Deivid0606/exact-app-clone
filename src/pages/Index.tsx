@@ -50,12 +50,7 @@ export default function Index() {
   }
 
   if (!user || !profile) {
-    return (
-      <div className="max-w-full mx-auto px-6 py-5">
-        <AppHeader onRefresh={handleRefresh} lastUpdate={lastUpdate} />
-        <AuthView onSuccess={handleAuthSuccess} />
-      </div>
-    );
+    return <AuthView onSuccess={handleAuthSuccess} />;
   }
 
   // Block unapproved users
