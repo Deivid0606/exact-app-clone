@@ -277,8 +277,8 @@ export default function ProductsView() {
       )}
 
       {/* Edit/Add Product Modal */}
-      {editProduct && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-start justify-center p-2 sm:p-4 overflow-auto" onClick={() => setEditProduct(null)}>
+      {editProduct && createPortal(
+        <div className="fixed inset-0 bg-black/60 z-[9999] flex items-start justify-center p-2 sm:p-4 overflow-auto" onClick={() => setEditProduct(null)}>
           <div className="bg-card border border-border rounded-2xl p-4 sm:p-6 w-full max-w-3xl my-4 space-y-4" onClick={e => e.stopPropagation()}>
             <h4 className="text-lg font-extrabold">{(editProduct as any).isNew ? '➕ Agregar Producto' : '✏️ Editar Producto'}</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -324,11 +324,11 @@ export default function ProductsView() {
                   <input className="app-input" value={editProduct.provider_email || ''} onChange={e => setEditProduct({ ...editProduct, provider_email: e.target.value })} />
                 </div>
               )}
-              <div className="col-span-2">
+              <div className="col-span-1 sm:col-span-2">
                 <label className="app-label">Privado para (emails separados por coma)</label>
                 <input className="app-input" value={editProduct.private_to_emails || ''} onChange={e => setEditProduct({ ...editProduct, private_to_emails: e.target.value })} placeholder="email1@x.com, email2@x.com" />
               </div>
-              <div className="col-span-2">
+              <div className="col-span-1 sm:col-span-2">
                 <label className="app-label">Descripción</label>
                 <textarea className="app-input min-h-[80px]" value={editProduct.description || ''} onChange={e => setEditProduct({ ...editProduct, description: e.target.value })} />
               </div>
@@ -345,7 +345,8 @@ export default function ProductsView() {
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
