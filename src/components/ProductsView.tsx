@@ -327,7 +327,6 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
               <ImageUploadField label="Imagen 1" value={editProduct.image_url || ''} onChange={v => setEditProduct({ ...editProduct, image_url: v })} />
               <ImageUploadField label="Imagen 2" value={editProduct.image_url_2 || ''} onChange={v => setEditProduct({ ...editProduct, image_url_2: v })} />
               <ImageUploadField label="Imagen 3" value={editProduct.image_url_3 || ''} onChange={v => setEditProduct({ ...editProduct, image_url_3: v })} />
-              </div>
               {role !== 'PROVEEDOR' && (
                 <div>
                   <label className="app-label">Email proveedor</label>
