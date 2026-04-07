@@ -25,7 +25,7 @@ import MapView from '@/components/MapView';
 import ShopifyInboxView from '@/components/ShopifyInboxView';
 
 export default function Index() {
-  const { user, profile, loading } = useAuth();
+  const { user, profile, loading, signOut, refreshProfile } = useAuth();
   const [currentView, setCurrentView] = useState<ViewName>('auth');
   const [lastUpdate, setLastUpdate] = useState(() => new Date().toLocaleString('es-PY'));
   const [preSelectedSku, setPreSelectedSku] = useState<string | null>(null);
@@ -54,6 +54,32 @@ export default function Index() {
       <div className="max-w-full mx-auto px-6 py-5">
         <AppHeader onRefresh={handleRefresh} lastUpdate={lastUpdate} />
         <AuthView onSuccess={handleAuthSuccess} />
+      </div>
+    );
+  }
+
+  // Block unapproved users
+  if (!profile.approved) {
+    return (
+      <div className="max-w-full mx-auto px-6 py-5">
+        <AppHeader onRefresh={handleRefresh} lastUpdate={lastUpdate} />
+        <div className="app-card text-center py-12">
+          <h3 className="text-xl font-extrabold mb-3">Cuenta pendiente de aprobación</h3>
+          <p className="text-muted-foreground mb-2">
+            Tu cuenta fue creada exitosamente pero necesita ser aprobada por un administrador.
+          </p>
+          <p className="text-muted-foreground text-sm mb-6">
+            Una vez aprobada, podrás acceder al sistema con tu rol asignado.
+          </p>
+          <div className="flex gap-2 justify-center">
+            <button className="nav-btn" onClick={() => { refreshProfile(); handleRefresh(); }}>
+              Verificar estado
+            </button>
+            <button className="nav-btn" onClick={signOut}>
+              Cerrar sesión
+            </button>
+          </div>
+        </div>
       </div>
     );
   }

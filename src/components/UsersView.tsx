@@ -36,6 +36,20 @@ export default function UsersView() {
     else { toast.success('Usuario aprobado'); loadUsers(); }
   };
 
+  const rejectUser = async (userId: string) => {
+    if (!confirm('¿Estás seguro de rechazar este usuario? Se eliminará su rol.')) return;
+    const { error } = await supabase.from('user_roles').delete().eq('user_id', userId);
+    if (error) toast.error(error.message);
+    else { toast.success('Usuario rechazado'); loadUsers(); }
+  };
+
+  const revokeUser = async (userId: string) => {
+    if (!confirm('¿Revocar acceso a este usuario?')) return;
+    const { error } = await supabase.from('user_roles').update({ approved: false }).eq('user_id', userId);
+    if (error) toast.error(error.message);
+    else { toast.success('Acceso revocado'); loadUsers(); }
+  };
+
   const changeRole = async (userId: string, newRole: string) => {
     const { error } = await supabase.from('user_roles').update({ role: newRole as any }).eq('user_id', userId);
     if (error) toast.error(error.message);
@@ -102,11 +116,23 @@ export default function UsersView() {
                   </span>
                 </td>
                 <td>
-                  {!u.approved && (
-                    <button className="nav-btn active text-xs !py-1 !px-2" onClick={() => approveUser(u.user_id)}>
-                      Aprobar
-                    </button>
-                  )}
+                  <div className="flex gap-1">
+                    {!u.approved && (
+                      <button className="nav-btn active text-xs !py-1 !px-2" onClick={() => approveUser(u.user_id)}>
+                        ✅ Aprobar
+                      </button>
+                    )}
+                    {!u.approved && (
+                      <button className="nav-btn text-xs !py-1 !px-2 !bg-destructive/20 hover:!bg-destructive/40 text-destructive" onClick={() => rejectUser(u.user_id)}>
+                        ❌ Rechazar
+                      </button>
+                    )}
+                    {u.approved && (
+                      <button className="nav-btn text-xs !py-1 !px-2" onClick={() => revokeUser(u.user_id)}>
+                        Revocar acceso
+                      </button>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}
