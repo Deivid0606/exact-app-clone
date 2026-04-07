@@ -185,6 +185,30 @@ export type Database = {
         }
         Relationships: []
       }
+      delivery_locations: {
+        Row: {
+          delivery_email: string
+          id: string
+          lat: number
+          lng: number
+          updated_at: string
+        }
+        Insert: {
+          delivery_email: string
+          id?: string
+          lat: number
+          lng: number
+          updated_at?: string
+        }
+        Update: {
+          delivery_email?: string
+          id?: string
+          lat?: number
+          lng?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       news: {
         Row: {
           actor_email: string | null
