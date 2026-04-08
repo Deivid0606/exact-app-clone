@@ -1,328 +1,235 @@
-import { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 
-const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
+type OrderRow = {
+  id: number | string;
+  order_number: string | null;
+  created_at: string | null;
+  city: string | null;
+  customer_name: string | null;
+  created_by: string | null;
+  status: string | null;
+};
 
-export default function CreateOrderView({
-  initialSku,
-  onSkuConsumed,
-}: {
-  initialSku?: string | null;
-  onSkuConsumed?: () => void;
-}) {
-  const { profile } = useAuth();
-  const [products, setProducts] = useState<any[]>([]);
-  const [clientPrices, setClientPrices] = useState<any[]>([]);
-  const [customer, setCustomer] = useState('');
-  const [phone, setPhone] = useState('');
-  const [city, setCity] = useState('');
-  const [street, setStreet] = useState('');
-  const [district, setDistrict] = useState('');
-  const [email, setEmail] = useState('');
-  const [obs, setObs] = useState('');
-  const [items, setItems] = useState<{ sku: string; sale_gs: number; qty: number }[]>([
-    { sku: '', sale_gs: 0, qty: 1 },
-  ]);
-  const [saving, setSaving] = useState(false);
+const formatDateInput = (date: Date) => {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
 
-  useEffect(() => {
-    const loadData = async () => {
-      const { data: productsData } = await supabase.from('products').select('*').order('title');
-      const loadedProducts = productsData || [];
-      setProducts(loadedProducts);
+const formatDateTime = (value?: string | null) => {
+  if (!value) return '-';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleString('es-PY');
+};
 
-      if (initialSku) {
-        const found = loadedProducts.find((p: any) => p.sku === initialSku);
-        if (found) {
-          setItems([{ sku: initialSku, sale_gs: 0, qty: 1 }]);
-          onSkuConsumed?.();
-        }
-      }
+const statusOptions = [
+  'Todos los estados',
+  'PENDIENTE',
+  'EN RUTA',
+  'ENTREGADO',
+  'CANCELADO',
+  'RECHAZADO',
+];
 
-      const { data: pricesData } = await supabase.from('client_prices').select('*').order('city');
-      setClientPrices(pricesData || []);
-    };
+export default function OrdersView() {
+  const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [loading, setLoading] = useState(false);
 
-    loadData();
-  }, [initialSku, onSkuConsumed]);
-
-  const catalogMap: Record<string, any> = {};
-  products.forEach((p) => {
-    if (p.sku) catalogMap[p.sku] = p;
+  const [fromDate, setFromDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 21);
+    return formatDateInput(d);
   });
 
-  const deliveryPrice =
-    clientPrices.find((c) => c.city?.toLowerCase() === city.toLowerCase())?.price_gs || 0;
+  const [toDate, setToDate] = useState(() => formatDateInput(new Date()));
+  const [statusFilter, setStatusFilter] = useState('Todos los estados');
+  const [selectedIds, setSelectedIds] = useState<(number | string)[]>([]);
 
-  const totalVenta = items.reduce((s, i) => s + (Number(i.sale_gs) || 0), 0);
-
-  const totalProv = items.reduce((s, i) => {
-    const p = catalogMap[i.sku];
-    return s + (p ? Number(p.provider_price_gs || 0) * Number(i.qty || 0) : 0);
-  }, 0);
-
-  const commission = totalVenta - (totalProv + Number(deliveryPrice || 0));
-
-  const addItem = () => setItems([...items, { sku: '', sale_gs: 0, qty: 1 }]);
-
-  const removeItem = (idx: number) => {
-    setItems(items.filter((_, i) => i !== idx));
-  };
-
-  const updateItem = (idx: number, field: string, value: any) => {
-    const copy = [...items];
-    (copy[idx] as any)[field] = value;
-    setItems(copy);
-  };
-
-  const resetForm = () => {
-    setCustomer('');
-    setPhone('');
-    setCity('');
-    setStreet('');
-    setDistrict('');
-    setEmail('');
-    setObs('');
-    setItems([{ sku: '', sale_gs: 0, qty: 1 }]);
-  };
-
-  const saveOrder = async () => {
-    if (saving) return;
-
-    if (!customer || !phone || !city) {
-      toast.error('Completá cliente / teléfono / ciudad');
-      return;
-    }
-
-    const validItems = items.filter(
-      (i) => i.sku && Number(i.sale_gs) > 0 && Number(i.qty) > 0
-    );
-
-    if (validItems.length === 0) {
-      toast.error('Agregá al menos 1 ítem');
-      return;
-    }
-
-    setSaving(true);
-
+  const loadOrders = async () => {
+    setLoading(true);
     try {
-      const providerEmails = [
-        ...new Set(validItems.map((i) => catalogMap[i.sku]?.provider_email).filter(Boolean)),
-      ];
+      const fromIso = new Date(`${fromDate}T00:00:00`).toISOString();
+      const toIso = new Date(`${toDate}T23:59:59.999`).toISOString();
 
-      const payload = {
-        created_by: profile?.email || null,
-        customer_name: customer,
-        phone,
-        city,
-        street,
-        district,
-        email,
-        obs,
-        items_json: validItems.map((i) => ({
-          sku: i.sku,
-          title: catalogMap[i.sku]?.title || i.sku,
-          sale_gs: Number(i.sale_gs),
-          qty: Number(i.qty),
-          provider_price_gs: Number(catalogMap[i.sku]?.provider_price_gs || 0),
-          provider_email: catalogMap[i.sku]?.provider_email || '',
-        })),
-        total_gs: totalVenta,
-        delivery_gs: Number(deliveryPrice),
-        commission_gs: commission,
-        provider_emails_list: providerEmails.join(','),
-      };
-
-      const { data: insertedOrder, error: insertError } = await supabase
+      let query = supabase
         .from('orders')
-        .insert(payload)
-        .select('id, order_number')
-        .single();
+        .select('id, order_number, created_at, city, customer_name, created_by, status')
+        .gte('created_at', fromIso)
+        .lte('created_at', toIso)
+        .order('created_at', { ascending: false });
 
-      if (insertError) {
-        throw insertError;
+      if (statusFilter !== 'Todos los estados') {
+        query = query.eq('status', statusFilter);
       }
 
-      const generatedOrderNumber = insertedOrder?.order_number || insertedOrder?.id || 'SIN-NUMERO';
+      const { data, error } = await query;
 
-      const { error: newsError } = await supabase.from('news').insert({
-        order_id: String(generatedOrderNumber),
-        actor_email: profile?.email,
-        role_scope: profile?.role,
-        message: `Nuevo pedido ${generatedOrderNumber} - ${customer} - ${city} - Gs ${nf(totalVenta)}`,
-      });
+      if (error) throw error;
 
-      if (newsError) {
-        console.error('Error al crear noticia:', newsError);
-      }
-
-      toast.success(`✅ Pedido ${generatedOrderNumber} guardado`);
-      resetForm();
+      setOrders((data || []) as OrderRow[]);
+      setSelectedIds([]);
     } catch (error: any) {
-      console.error('Error guardando pedido:', error);
-      toast.error(error?.message || 'No se pudo guardar el pedido');
+      console.error('Error cargando pedidos:', error);
+      toast.error(error?.message || 'No se pudieron cargar los pedidos');
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
+  };
+
+  useEffect(() => {
+    loadOrders();
+  }, []);
+
+  const visibleOrders = useMemo(() => orders, [orders]);
+
+  const toggleAll = () => {
+    if (selectedIds.length === visibleOrders.length) {
+      setSelectedIds([]);
+      return;
+    }
+    setSelectedIds(visibleOrders.map((o) => o.id));
+  };
+
+  const toggleOne = (id: number | string) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const getStatusClass = (status?: string | null) => {
+    const s = (status || '').toUpperCase();
+    if (s === 'ENTREGADO') return 'bg-green-500/15 text-green-400 border border-green-500/30';
+    if (s === 'EN RUTA') return 'bg-blue-500/15 text-blue-400 border border-blue-500/30';
+    if (s === 'CANCELADO' || s === 'RECHAZADO') {
+      return 'bg-red-500/15 text-red-400 border border-red-500/30';
+    }
+    return 'bg-white/5 text-white/80 border border-white/10';
   };
 
   return (
     <div className="app-card">
-      <h3 className="text-lg font-extrabold mb-3">Cargar pedido</h3>
+      <h3 className="text-2xl font-extrabold mb-4">Pedidos</h3>
 
-      <div className="flex flex-wrap gap-4">
-        <div className="flex-1 min-w-[320px]">
-          <label className="app-label">Cliente</label>
+      <div className="flex flex-wrap gap-3 items-end mb-4">
+        <div>
+          <label className="app-label">Desde</label>
           <input
+            type="date"
             className="app-input"
-            value={customer}
-            onChange={(e) => setCustomer(e.target.value)}
+            value={fromDate}
+            onChange={(e) => setFromDate(e.target.value)}
           />
+        </div>
 
-          <label className="app-label">Teléfono</label>
+        <div>
+          <label className="app-label">Hasta</label>
           <input
+            type="date"
             className="app-input"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
+            value={toDate}
+            onChange={(e) => setToDate(e.target.value)}
           />
+        </div>
 
-          <label className="app-label">Ciudad</label>
+        <div className="min-w-[220px]">
+          <label className="app-label">Estado</label>
           <select
             className="app-input"
-            value={city}
-            onChange={(e) => setCity(e.target.value)}
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
           >
-            <option value="">Selecciona ciudad…</option>
-            {clientPrices.map((c) => (
-              <option key={c.id} value={c.city}>
-                {c.city}
+            {statusOptions.map((s) => (
+              <option key={s} value={s}>
+                {s}
               </option>
             ))}
           </select>
-
-          {deliveryPrice > 0 && (
-            <div className="chip mt-1">Delivery cobrado: {nf(Number(deliveryPrice))} Gs</div>
-          )}
-
-          <label className="app-label">Calle</label>
-          <input
-            className="app-input"
-            value={street}
-            onChange={(e) => setStreet(e.target.value)}
-          />
-
-          <label className="app-label">Barrio</label>
-          <input
-            className="app-input"
-            value={district}
-            onChange={(e) => setDistrict(e.target.value)}
-          />
-
-          <label className="app-label">Email</label>
-          <input
-            className="app-input"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="Opcional"
-          />
-
-          <label className="app-label">Observación</label>
-          <textarea
-            className="app-input"
-            rows={2}
-            value={obs}
-            onChange={(e) => setObs(e.target.value)}
-          />
         </div>
 
-        <div className="flex-[2] min-w-[420px]">
-          <label className="app-label !mt-0">Items</label>
+        <button className="nav-btn active" onClick={loadOrders} disabled={loading}>
+          {loading ? 'Cargando...' : 'Filtrar'}
+        </button>
+      </div>
 
-          {items.map((item, idx) => (
-            <div key={idx} className="flex flex-wrap items-center gap-2 mb-2">
-              <select
-                className="app-input !w-auto flex-[2]"
-                value={item.sku}
-                onChange={(e) => updateItem(idx, 'sku', e.target.value)}
-              >
-                <option value="">Seleccionar producto…</option>
-                {products.map((p) => (
-                  <option key={p.id} value={p.sku} disabled={(p.stock || 0) <= 0}>
-                    {p.title} — {p.sku} (Prov {nf(Number(p.provider_price_gs || 0))}){' '}
-                    {p.provider_email ? `[${p.provider_email}]` : ''}
-                  </option>
-                ))}
-              </select>
+      <div className="text-sm text-muted-foreground mb-3">
+        {visibleOrders.length} pedido{visibleOrders.length === 1 ? '' : 's'}
+      </div>
 
-              <span className="chip text-[10px]">
-                Prov: {nf(Number(catalogMap[item.sku]?.provider_price_gs || 0))}
-              </span>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-white/10 text-left">
+              <th className="py-3 pr-3 w-[40px]">
+                <input
+                  type="checkbox"
+                  checked={visibleOrders.length > 0 && selectedIds.length === visibleOrders.length}
+                  onChange={toggleAll}
+                />
+              </th>
+              <th className="py-3 pr-4">Fecha</th>
+              <th className="py-3 pr-4">ID</th>
+              <th className="py-3 pr-4">Ciudad</th>
+              <th className="py-3 pr-4">Cliente</th>
+              <th className="py-3 pr-4">Vendedor</th>
+              <th className="py-3 pr-4">Estado</th>
+            </tr>
+          </thead>
 
-              <input
-                className="app-input !w-auto flex-1"
-                type="number"
-                placeholder="Venta TOTAL (Gs)"
-                value={item.sale_gs || ''}
-                onChange={(e) => updateItem(idx, 'sale_gs', Number(e.target.value))}
-              />
-
-              <input
-                className="app-input !w-[80px]"
-                type="number"
-                placeholder="Cant."
-                value={item.qty}
-                onChange={(e) => updateItem(idx, 'qty', Number(e.target.value))}
-              />
-
-              <span className="chip text-[10px]">
-                Prov×Cant: {nf(Number(catalogMap[item.sku]?.provider_price_gs || 0) * item.qty)}
-              </span>
-
-              <button className="nav-btn text-xs" onClick={() => removeItem(idx)}>
-                Quitar
-              </button>
-            </div>
-          ))}
-
-          <button className="nav-btn active text-xs mt-2" onClick={addItem}>
-            + Agregar ítem
-          </button>
-
-          <span className="chip ml-2 text-[10px]">Catálogo: {products.length} productos</span>
-
-          <div className="flex gap-3 mt-4">
-            <div className="flex-1">
-              <label className="app-label">Total (Gs)</label>
-              <input className="app-input bg-secondary" readOnly value={nf(totalVenta)} />
-            </div>
-
-            <div className="flex-1">
-              <label className="app-label">Delivery cobrado (Gs)</label>
-              <input
-                className="app-input bg-secondary"
-                readOnly
-                value={nf(Number(deliveryPrice))}
-              />
-            </div>
-
-            <div className="flex-1">
-              <label className="app-label">Comisión estimada (Gs)</label>
-              <input className="app-input bg-secondary" readOnly value={nf(commission)} />
-            </div>
-          </div>
-
-          <button className="nav-btn active mt-4" onClick={saveOrder} disabled={saving}>
-            {saving ? (
-              <span className="flex items-center gap-2">
-                <span className="btn-spinner" /> Guardando...
-              </span>
+          <tbody>
+            {visibleOrders.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="py-8 text-center text-muted-foreground">
+                  {loading ? 'Cargando pedidos...' : 'No hay pedidos en ese rango'}
+                </td>
+              </tr>
             ) : (
-              'Guardar pedido'
+              visibleOrders.map((order) => (
+                <tr
+                  key={order.id}
+                  className="border-b border-white/5 hover:bg-white/[0.03] transition-colors"
+                >
+                  <td className="py-4 pr-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.includes(order.id)}
+                      onChange={() => toggleOne(order.id)}
+                    />
+                  </td>
+
+                  <td className="py-4 pr-4 whitespace-nowrap">
+                    {formatDateTime(order.created_at)}
+                  </td>
+
+                  <td className="py-4 pr-4 font-bold whitespace-nowrap">
+                    {order.order_number || order.id}
+                  </td>
+
+                  <td className="py-4 pr-4 whitespace-nowrap">
+                    {order.city || '-'}
+                  </td>
+
+                  <td className="py-4 pr-4 whitespace-nowrap">
+                    {order.customer_name || '-'}
+                  </td>
+
+                  <td className="py-4 pr-4 whitespace-nowrap">
+                    {order.created_by || '-'}
+                  </td>
+
+                  <td className="py-4 pr-4 whitespace-nowrap">
+                    <span className={`px-2 py-1 rounded-full text-xs font-semibold ${getStatusClass(order.status)}`}>
+                      {order.status || 'PENDIENTE'}
+                    </span>
+                  </td>
+                </tr>
+              ))
             )}
-          </button>
-        </div>
+          </tbody>
+        </table>
       </div>
     </div>
   );
