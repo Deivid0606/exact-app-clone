@@ -1,9 +1,54 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
+
+const normalizeEmail = (value: any) => String(value || '').trim().toLowerCase();
+const normalizeRole = (value: any) => String(value || '').trim().toLowerCase();
+
+const extractPrivateEmails = (value: any): string[] => {
+  if (!value) return [];
+
+  if (Array.isArray(value)) {
+    return value.map((v) => normalizeEmail(v)).filter(Boolean);
+  }
+
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map((v) => normalizeEmail(v))
+      .filter(Boolean);
+  }
+
+  return [];
+};
+
+const canAccessProduct = (product: any, profile: any) => {
+  const role = normalizeRole(profile?.role);
+  const userEmail = normalizeEmail(profile?.email);
+  const providerEmail = normalizeEmail(product?.provider_email);
+  const isPrivate = Boolean(product?.is_private_stock);
+  const privateEmails = extractPrivateEmails(product?.private_to_emails);
+
+  if (!role || !userEmail) return false;
+
+  if (role === 'admin') {
+    return true;
+  }
+
+  if (role === 'provider') {
+    return providerEmail === userEmail;
+  }
+
+  if (['seller', 'despachante', 'delivery'].includes(role)) {
+    if (!isPrivate) return true;
+    return privateEmails.includes(userEmail);
+  }
+
+  return !isPrivate;
+};
 
 export default function CreateOrderView({
   initialSku,
@@ -13,6 +58,7 @@ export default function CreateOrderView({
   onSkuConsumed?: () => void;
 }) {
   const { profile } = useAuth();
+
   const [products, setProducts] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
   const [customer, setCustomer] = useState('');
@@ -26,37 +72,71 @@ export default function CreateOrderView({
     { sku: '', sale_gs: 0, qty: 1 },
   ]);
   const [saving, setSaving] = useState(false);
+  const [loadingProducts, setLoadingProducts] = useState(false);
 
   useEffect(() => {
     const loadData = async () => {
-      const { data: productsData } = await supabase.from('products').select('*').order('title');
-      const loadedProducts = productsData || [];
-      setProducts(loadedProducts);
+      if (!profile?.email || !profile?.role) return;
 
-      if (initialSku) {
-        const found = loadedProducts.find((p: any) => p.sku === initialSku);
-        if (found) {
-          setItems([{ sku: initialSku, sale_gs: 0, qty: 1 }]);
-          onSkuConsumed?.();
+      setLoadingProducts(true);
+
+      try {
+        const { data: productsData, error: productsError } = await supabase
+          .from('products')
+          .select('*')
+          .order('title');
+
+        if (productsError) throw productsError;
+
+        const allProducts = productsData || [];
+        const visibleProducts = allProducts.filter((p: any) => canAccessProduct(p, profile));
+
+        setProducts(visibleProducts);
+
+        if (initialSku) {
+          const found = visibleProducts.find((p: any) => p.sku === initialSku);
+          if (found) {
+            setItems([{ sku: initialSku, sale_gs: 0, qty: 1 }]);
+            onSkuConsumed?.();
+          } else {
+            onSkuConsumed?.();
+          }
         }
-      }
 
-      const { data: pricesData } = await supabase.from('client_prices').select('*').order('city');
-      setClientPrices(pricesData || []);
+        const { data: pricesData, error: pricesError } = await supabase
+          .from('client_prices')
+          .select('*')
+          .order('city');
+
+        if (pricesError) throw pricesError;
+
+        setClientPrices(pricesData || []);
+      } catch (error: any) {
+        console.error('Error cargando datos de CreateOrderView:', error);
+        toast.error(error?.message || 'No se pudieron cargar los productos');
+      } finally {
+        setLoadingProducts(false);
+      }
     };
 
     loadData();
-  }, [initialSku, onSkuConsumed]);
+  }, [initialSku, onSkuConsumed, profile?.email, profile?.role]);
 
-  const catalogMap: Record<string, any> = {};
-  products.forEach((p) => {
-    if (p.sku) catalogMap[p.sku] = p;
-  });
+  const catalogMap: Record<string, any> = useMemo(() => {
+    const map: Record<string, any> = {};
+    products.forEach((p) => {
+      if (p.sku) map[p.sku] = p;
+    });
+    return map;
+  }, [products]);
 
   const deliveryPrice =
     clientPrices.find((c) => c.city?.toLowerCase() === city.toLowerCase())?.price_gs || 0;
 
-  const totalVenta = items.reduce((s, i) => s + (Number(i.sale_gs) || 0), 0);
+  const totalVenta = items.reduce(
+    (s, i) => s + Number(i.sale_gs || 0) * Number(i.qty || 0),
+    0
+  );
 
   const totalProv = items.reduce((s, i) => {
     const p = catalogMap[i.sku];
@@ -74,6 +154,14 @@ export default function CreateOrderView({
   const updateItem = (idx: number, field: string, value: any) => {
     const copy = [...items];
     (copy[idx] as any)[field] = value;
+
+    if (field === 'sku') {
+      const selected = catalogMap[value];
+      if (selected && !copy[idx].sale_gs) {
+        copy[idx].sale_gs = Number(selected.sale_price_gs || 0);
+      }
+    }
+
     setItems(copy);
   };
 
@@ -97,11 +185,11 @@ export default function CreateOrderView({
     }
 
     const validItems = items.filter(
-      (i) => i.sku && Number(i.sale_gs) > 0 && Number(i.qty) > 0
+      (i) => i.sku && Number(i.sale_gs) > 0 && Number(i.qty) > 0 && catalogMap[i.sku]
     );
 
     if (validItems.length === 0) {
-      toast.error('Agregá al menos 1 ítem');
+      toast.error('Agregá al menos 1 ítem válido');
       return;
     }
 
@@ -141,9 +229,7 @@ export default function CreateOrderView({
         .select('id, order_number')
         .single();
 
-      if (insertError) {
-        throw insertError;
-      }
+      if (insertError) throw insertError;
 
       const generatedOrderNumber = insertedOrder?.order_number || insertedOrder?.id || 'SIN-NUMERO';
 
@@ -247,7 +333,9 @@ export default function CreateOrderView({
                 value={item.sku}
                 onChange={(e) => updateItem(idx, 'sku', e.target.value)}
               >
-                <option value="">Seleccionar producto…</option>
+                <option value="">
+                  {loadingProducts ? 'Cargando productos…' : 'Seleccionar producto…'}
+                </option>
                 {products.map((p) => (
                   <option key={p.id} value={p.sku} disabled={(p.stock || 0) <= 0}>
                     {p.title} — {p.sku} (Prov {nf(Number(p.provider_price_gs || 0))}){' '}
@@ -313,7 +401,7 @@ export default function CreateOrderView({
             </div>
           </div>
 
-          <button className="nav-btn active mt-4" onClick={saveOrder} disabled={saving}>
+          <button className="nav-btn active mt-4" onClick={saveOrder} disabled={saving || loadingProducts}>
             {saving ? (
               <span className="flex items-center gap-2">
                 <span className="btn-spinner" /> Guardando...
