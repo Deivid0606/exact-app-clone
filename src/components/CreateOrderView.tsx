@@ -35,7 +35,12 @@ const statusOptions = [
   'RECHAZADO',
 ];
 
-export default function OrdersView() {
+interface CreateOrderViewProps {
+  initialSku?: string | null;
+  onSkuConsumed?: () => void;
+}
+
+export default function OrdersView({ initialSku, onSkuConsumed }: CreateOrderViewProps) {
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(false);
 
