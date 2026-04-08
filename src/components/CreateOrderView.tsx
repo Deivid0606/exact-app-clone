@@ -19,6 +19,12 @@ const normalizeRole = (value: any) => {
   return r;
 };
 
+const parsePrivateEmails = (value: any): string[] =>
+  String(value || '')
+    .split(',')
+    .map((e) => String(e || '').trim().toLowerCase())
+    .filter(Boolean);
+
 const isPrivateProduct = (product: any) =>
   Boolean(product?.is_private_stock ?? product?.is_private);
 
@@ -26,6 +32,7 @@ const canAccessProduct = (product: any, profile: any) => {
   const role = normalizeRole(profile?.role);
   const userEmail = normalizeEmail(profile?.email);
   const providerEmail = normalizeEmail(product?.provider_email);
+  const privateEmails = parsePrivateEmails(product?.private_to_emails);
   const isPrivate = isPrivateProduct(product);
 
   if (!role || !userEmail) return false;
@@ -38,9 +45,9 @@ const canAccessProduct = (product: any, profile: any) => {
     return providerEmail === userEmail;
   }
 
-  // vendedor / despachante / delivery: SOLO libres
   if (['seller', 'despachante', 'delivery'].includes(role)) {
-    return !isPrivate;
+    if (!isPrivate) return true;
+    return privateEmails.includes(userEmail);
   }
 
   return false;
