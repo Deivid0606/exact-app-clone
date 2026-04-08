@@ -5,349 +5,159 @@ import { toast } from 'sonner';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
-export default function CreateOrderView({
-  initialSku,
-  onSkuConsumed,
-}: {
-  initialSku?: string | null;
-  onSkuConsumed?: () => void;
-}) {
+export default function AssignOrdersView() {
   const { profile } = useAuth();
-  const [products, setProducts] = useState<any[]>([]);
-  const [clientPrices, setClientPrices] = useState<any[]>([]);
-  const [customer, setCustomer] = useState('');
-  const [phone, setPhone] = useState('');
-  const [city, setCity] = useState('');
-  const [street, setStreet] = useState('');
-  const [district, setDistrict] = useState('');
-  const [email, setEmail] = useState('');
-  const [obs, setObs] = useState('');
-  const [items, setItems] = useState<{ sku: string; sale_gs: number; qty: number }[]>([
-    { sku: '', sale_gs: 0, qty: 1 },
-  ]);
-  const [saving, setSaving] = useState(false);
+  const role = profile?.role;
+  const [orders, setOrders] = useState<any[]>([]);
+  const [deliveries, setDeliveries] = useState<any[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [assignDelivery, setAssignDelivery] = useState('');
+  const [search, setSearch] = useState('');
+  const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); });
+  const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [idsInput, setIdsInput] = useState('');
 
   useEffect(() => {
-    const loadData = async () => {
-      const { data: productsData } = await supabase.from('products').select('*').order('title');
-      const loadedProducts = productsData || [];
-      setProducts(loadedProducts);
+    supabase.from('profiles').select('email, name').then(({ data }) => setDeliveries(data || []));
+  }, []);
 
-      if (initialSku) {
-        const found = loadedProducts.find((p: any) => p.sku === initialSku);
-        if (found) {
-          setItems([{ sku: initialSku, sale_gs: 0, qty: 1 }]);
-          onSkuConsumed?.();
-        }
-      }
+  const load = async () => {
+    const { data } = await supabase.from('orders').select('*')
+      .gte('created_at', dateFrom + 'T00:00:00')
+      .lte('created_at', dateTo + 'T23:59:59')
+      .order('created_at', { ascending: false }).limit(300);
+    setOrders(data || []);
+  };
 
-      const { data: pricesData } = await supabase.from('client_prices').select('*').order('city');
-      setClientPrices(pricesData || []);
-    };
+  useEffect(() => { load(); }, []);
 
-    loadData();
-  }, [initialSku, onSkuConsumed]);
-
-  const catalogMap: Record<string, any> = {};
-  products.forEach((p) => {
-    if (p.sku) catalogMap[p.sku] = p;
+  const filtered = orders.filter(o => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (o.customer_name || '').toLowerCase().includes(q) ||
+      (o.order_number || '').toLowerCase().includes(q) ||
+      (o.city || '').toLowerCase().includes(q);
   });
 
-  const deliveryPrice =
-    clientPrices.find((c) => c.city?.toLowerCase() === city.toLowerCase())?.price_gs || 0;
-
-  const totalVenta = items.reduce((s, i) => s + (Number(i.sale_gs) || 0), 0);
-
-  const totalProv = items.reduce((s, i) => {
-    const p = catalogMap[i.sku];
-    return s + (p ? Number(p.provider_price_gs || 0) * Number(i.qty || 0) : 0);
-  }, 0);
-
-  const commission = totalVenta - (totalProv + Number(deliveryPrice || 0));
-
-  const addItem = () => setItems([...items, { sku: '', sale_gs: 0, qty: 1 }]);
-
-  const removeItem = (idx: number) => {
-    setItems(items.filter((_, i) => i !== idx));
+  const toggleSelect = (id: string) => {
+    const s = new Set(selected);
+    s.has(id) ? s.delete(id) : s.add(id);
+    setSelected(s);
   };
 
-  const updateItem = (idx: number, field: string, value: any) => {
-    const copy = [...items];
-    (copy[idx] as any)[field] = value;
-    setItems(copy);
+  const assignSelected = async () => {
+    if (!assignDelivery) { toast.error('Selecciona un delivery'); return; }
+    for (const id of selected) {
+      await supabase.from('orders').update({ assigned_delivery: assignDelivery, assigned_at: new Date().toISOString() }).eq('id', id);
+    }
+    toast.success(`${selected.size} pedidos asignados`);
+    setSelected(new Set());
+    load();
   };
 
-  const resetForm = () => {
-    setCustomer('');
-    setPhone('');
-    setCity('');
-    setStreet('');
-    setDistrict('');
-    setEmail('');
-    setObs('');
-    setItems([{ sku: '', sale_gs: 0, qty: 1 }]);
+  const assignByIds = async () => {
+    if (!assignDelivery && role !== 'DELIVERY') { toast.error('Selecciona un delivery'); return; }
+    const deliveryEmail = role === 'DELIVERY' ? profile?.email : assignDelivery;
+    const ids = idsInput.split(/[,\s\n]+/).map(s => s.trim().toUpperCase()).filter(Boolean);
+    if (ids.length === 0) { toast.error('Ingresá al menos un ID'); return; }
+
+    let count = 0;
+    for (const id of ids) {
+      const { data } = await supabase.from('orders').select('id').eq('order_number', id).limit(1);
+      if (data && data[0]) {
+        await supabase.from('orders').update({ assigned_delivery: deliveryEmail, assigned_at: new Date().toISOString() }).eq('id', data[0].id);
+        count++;
+      }
+    }
+    toast.success(`${count} pedidos asignados de ${ids.length}`);
+    setIdsInput('');
+    load();
   };
 
-  const saveOrder = async () => {
-    if (saving) return;
-
-    if (!customer || !phone || !city) {
-      toast.error('Completá cliente / teléfono / ciudad');
-      return;
-    }
-
-    const validItems = items.filter(
-      (i) => i.sku && Number(i.sale_gs) > 0 && Number(i.qty) > 0
-    );
-
-    if (validItems.length === 0) {
-      toast.error('Agregá al menos 1 ítem');
-      return;
-    }
-
-    setSaving(true);
-
-    try {
-      const providerEmails = [
-        ...new Set(validItems.map((i) => catalogMap[i.sku]?.provider_email).filter(Boolean)),
-      ];
-
-      // 1) Leer order_sequence
-      const { data: seq, error: seqError } = await supabase
-        .from('order_sequence')
-        .select('*')
-        .eq('id', 1)
-        .single();
-
-      if (seqError) {
-        throw new Error(`No se pudo leer order_sequence: ${seqError.message}`);
-      }
-
-      // 2) Incrementar contador
-      const counter = Number(seq?.counter || 0) + 1;
-      const prefix = seq?.prefix || 'A';
-      const pad = Number(seq?.pad || 3);
-
-      // 3) Generar order_number tipo A003
-      const generatedOrderNumber = `${prefix}${String(counter).padStart(pad, '0')}`;
-
-      const payload = {
-        order_number: generatedOrderNumber,
-        created_by: profile?.email || null,
-        customer_name: customer,
-        phone,
-        city,
-        street,
-        district,
-        email,
-        obs,
-        items_json: validItems.map((i) => ({
-          sku: i.sku,
-          title: catalogMap[i.sku]?.title || i.sku,
-          sale_gs: Number(i.sale_gs),
-          qty: Number(i.qty),
-          provider_price_gs: Number(catalogMap[i.sku]?.provider_price_gs || 0),
-          provider_email: catalogMap[i.sku]?.provider_email || '',
-        })),
-        total_gs: totalVenta,
-        delivery_gs: Number(deliveryPrice),
-        commission_gs: commission,
-        provider_emails_list: providerEmails.join(','),
-      };
-
-      // 4) Guardar pedido
-      const { error: insertError } = await supabase.from('orders').insert(payload);
-
-      if (insertError) {
-        throw insertError;
-      }
-
-      // 5) Actualizar order_sequence
-      const { error: updateSeqError } = await supabase
-        .from('order_sequence')
-        .update({ counter })
-        .eq('id', 1);
-
-      if (updateSeqError) {
-        throw new Error(`Pedido guardado pero no se actualizó order_sequence: ${updateSeqError.message}`);
-      }
-
-      const { error: newsError } = await supabase.from('news').insert({
-        order_id: generatedOrderNumber,
-        actor_email: profile?.email,
-        role_scope: profile?.role,
-        message: `Nuevo pedido ${generatedOrderNumber} - ${customer} - ${city} - Gs ${nf(totalVenta)}`,
-      });
-
-      if (newsError) {
-        console.error('Error al crear noticia:', newsError);
-      }
-
-      toast.success(`✅ Pedido ${generatedOrderNumber} guardado`);
-      resetForm();
-    } catch (error: any) {
-      console.error('Error guardando pedido:', error);
-      toast.error(error?.message || 'No se pudo guardar el pedido');
-    } finally {
-      setSaving(false);
-    }
+  const assignSingle = async (orderId: string, deliveryEmail: string) => {
+    await supabase.from('orders').update({ assigned_delivery: deliveryEmail, assigned_at: new Date().toISOString() }).eq('id', orderId);
+    toast.success('Delivery asignado');
+    load();
   };
 
   return (
     <div className="app-card">
-      <h3 className="text-lg font-extrabold mb-3">Cargar pedido</h3>
+      <h3 className="text-lg font-extrabold mb-3">Asignar Pedidos</h3>
 
-      <div className="flex flex-wrap gap-4">
-        <div className="flex-1 min-w-[320px]">
-          <label className="app-label">Cliente</label>
-          <input
-            className="app-input"
-            value={customer}
-            onChange={(e) => setCustomer(e.target.value)}
-          />
+      <div className="flex flex-wrap gap-2 mb-3">
+        <label className="app-label !mt-0">Desde</label>
+        <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+        <label className="app-label !mt-0">Hasta</label>
+        <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+        <input className="app-input flex-1 min-w-[200px]" placeholder="🔎 Buscar cliente, ID, ciudad..."
+          value={search} onChange={e => setSearch(e.target.value)} />
+        <button className="nav-btn active" onClick={load}>Filtrar</button>
+      </div>
 
-          <label className="app-label">Teléfono</label>
-          <input
-            className="app-input"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-          />
-
-          <label className="app-label">Ciudad</label>
-          <select
-            className="app-input"
-            value={city}
-            onChange={(e) => setCity(e.target.value)}
-          >
-            <option value="">Selecciona ciudad…</option>
-            {clientPrices.map((c) => (
-              <option key={c.id} value={c.city}>
-                {c.city}
-              </option>
-            ))}
+      {(role === 'ADMIN' || role === 'PROVEEDOR') && (
+        <div className="flex flex-wrap gap-2 mb-3">
+          <select className="app-input !w-auto min-w-[200px]" value={assignDelivery} onChange={e => setAssignDelivery(e.target.value)}>
+            <option value="">Seleccionar delivery...</option>
+            {deliveries.map(d => <option key={d.email} value={d.email}>{d.name || d.email}</option>)}
           </select>
-
-          {deliveryPrice > 0 && (
-            <div className="chip mt-1">Delivery cobrado: {nf(Number(deliveryPrice))} Gs</div>
-          )}
-
-          <label className="app-label">Calle</label>
-          <input
-            className="app-input"
-            value={street}
-            onChange={(e) => setStreet(e.target.value)}
-          />
-
-          <label className="app-label">Barrio</label>
-          <input
-            className="app-input"
-            value={district}
-            onChange={(e) => setDistrict(e.target.value)}
-          />
-
-          <label className="app-label">Email</label>
-          <input
-            className="app-input"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="Opcional"
-          />
-
-          <label className="app-label">Observación</label>
-          <textarea
-            className="app-input"
-            rows={2}
-            value={obs}
-            onChange={(e) => setObs(e.target.value)}
-          />
-        </div>
-
-        <div className="flex-[2] min-w-[420px]">
-          <label className="app-label !mt-0">Items</label>
-
-          {items.map((item, idx) => (
-            <div key={idx} className="flex flex-wrap items-center gap-2 mb-2">
-              <select
-                className="app-input !w-auto flex-[2]"
-                value={item.sku}
-                onChange={(e) => updateItem(idx, 'sku', e.target.value)}
-              >
-                <option value="">Seleccionar producto…</option>
-                {products.map((p) => (
-                  <option key={p.id} value={p.sku} disabled={(p.stock || 0) <= 0}>
-                    {p.title} — {p.sku} (Prov {nf(Number(p.provider_price_gs || 0))}){' '}
-                    {p.provider_email ? `[${p.provider_email}]` : ''}
-                  </option>
-                ))}
-              </select>
-
-              <span className="chip text-[10px]">
-                Prov: {nf(Number(catalogMap[item.sku]?.provider_price_gs || 0))}
-              </span>
-
-              <input
-                className="app-input !w-auto flex-1"
-                type="number"
-                placeholder="Venta TOTAL (Gs)"
-                value={item.sale_gs || ''}
-                onChange={(e) => updateItem(idx, 'sale_gs', Number(e.target.value))}
-              />
-
-              <input
-                className="app-input !w-[80px]"
-                type="number"
-                placeholder="Cant."
-                value={item.qty}
-                onChange={(e) => updateItem(idx, 'qty', Number(e.target.value))}
-              />
-
-              <span className="chip text-[10px]">
-                Prov×Cant: {nf(Number(catalogMap[item.sku]?.provider_price_gs || 0) * item.qty)}
-              </span>
-
-              <button className="nav-btn text-xs" onClick={() => removeItem(idx)}>
-                Quitar
-              </button>
-            </div>
-          ))}
-
-          <button className="nav-btn active text-xs mt-2" onClick={addItem}>
-            + Agregar ítem
-          </button>
-
-          <span className="chip ml-2 text-[10px]">Catálogo: {products.length} productos</span>
-
-          <div className="flex gap-3 mt-4">
-            <div className="flex-1">
-              <label className="app-label">Total (Gs)</label>
-              <input className="app-input bg-secondary" readOnly value={nf(totalVenta)} />
-            </div>
-
-            <div className="flex-1">
-              <label className="app-label">Delivery cobrado (Gs)</label>
-              <input
-                className="app-input bg-secondary"
-                readOnly
-                value={nf(Number(deliveryPrice))}
-              />
-            </div>
-
-            <div className="flex-1">
-              <label className="app-label">Comisión estimada (Gs)</label>
-              <input className="app-input bg-secondary" readOnly value={nf(commission)} />
-            </div>
-          </div>
-
-          <button className="nav-btn active mt-4" onClick={saveOrder} disabled={saving}>
-            {saving ? (
-              <span className="flex items-center gap-2">
-                <span className="btn-spinner" /> Guardando...
-              </span>
-            ) : (
-              'Guardar pedido'
-            )}
+          <button className="nav-btn active" onClick={assignSelected} disabled={selected.size === 0}>
+            Asignar seleccionados ({selected.size})
           </button>
         </div>
+      )}
+
+      {/* Assign by IDs */}
+      <div className="app-card !p-3 mb-3">
+        <div className="flex justify-between items-center mb-2">
+          <b className="text-sm">Asignar por IDs manualmente</b>
+          <span className="chip text-[10px]">Máximo 35 IDs por carga</span>
+        </div>
+        {role !== 'DELIVERY' && (
+          <select className="app-input !w-auto min-w-[200px] mb-2" value={assignDelivery} onChange={e => setAssignDelivery(e.target.value)}>
+            <option value="">Seleccionar delivery...</option>
+            {deliveries.map(d => <option key={d.email} value={d.email}>{d.name || d.email}</option>)}
+          </select>
+        )}
+        <textarea className="app-input mb-2" rows={3} placeholder="Ejemplo: A4800,A4599,A4601"
+          value={idsInput} onChange={e => setIdsInput(e.target.value)} />
+        <p className="text-xs text-muted-foreground mb-2">Podés separar por coma, espacio o salto de línea.</p>
+        <button className="nav-btn active text-xs" onClick={assignByIds}>Asignar IDs masivamente</button>
+      </div>
+
+      <div className="overflow-auto">
+        <table className="app-table">
+          <thead>
+            <tr>
+              {(role === 'ADMIN' || role === 'PROVEEDOR') && <th><input type="checkbox" /></th>}
+              <th>Fecha</th><th>ID</th><th>Ciudad</th><th>Cliente</th><th>Estado</th><th>Asignado a</th><th>Acción</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map(o => (
+              <tr key={o.id}>
+                {(role === 'ADMIN' || role === 'PROVEEDOR') && (
+                  <td><input type="checkbox" checked={selected.has(o.id)} onChange={() => toggleSelect(o.id)} className="accent-brand" /></td>
+                )}
+                <td className="text-xs whitespace-nowrap">{new Date(o.created_at).toLocaleDateString('es-PY')}</td>
+                <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
+                <td className="text-xs">{o.city}</td>
+                <td className="text-xs">{o.customer_name}</td>
+                <td><span className={`badge-status ${o.status === 'ENTREGADO' ? 'badge-entregado' : o.status === 'CANCELADO' ? 'badge-cancelado' : 'badge-pendiente'}`}>{o.status}</span></td>
+                <td className="text-xs">{o.assigned_delivery || '—'}</td>
+                <td>
+                  {(role === 'ADMIN' || role === 'PROVEEDOR') && (
+                    <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.assigned_delivery || ''}
+                      onChange={e => assignSingle(o.id, e.target.value)}>
+                      <option value="">Sin asignar</option>
+                      {deliveries.map(d => <option key={d.email} value={d.email}>{d.name || d.email}</option>)}
+                    </select>
+                  )}
+                </td>
+              </tr>
+            ))}
+            {filtered.length === 0 && <tr><td colSpan={8} className="text-center text-muted-foreground py-8">Sin pedidos</td></tr>}
+          </tbody>
+        </table>
       </div>
     </div>
   );
