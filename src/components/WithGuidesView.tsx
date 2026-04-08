@@ -8,6 +8,7 @@ const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 export default function WithGuidesView() {
   const { profile } = useAuth();
   const role = profile?.role || '';
+  const myEmail = profile?.email || '';
   const [orders, setOrders] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [providerFilter, setProviderFilter] = useState('');
@@ -30,8 +31,9 @@ export default function WithGuidesView() {
 
   useEffect(() => { load(); }, []);
 
-  // Extract unique providers
+  // Extract unique providers (solo para admins/despachantes)
   const allProviders = useMemo(() => {
+    if (role === 'PROVEEDOR') return []; // Proveedores no necesitan esta lista
     const set = new Set<string>();
     orders.forEach(o => {
       (o.provider_emails_list || '').split(',').forEach((e: string) => {
@@ -40,20 +42,29 @@ export default function WithGuidesView() {
       });
     });
     return [...set].sort();
-  }, [orders]);
+  }, [orders, role]);
 
   const filtered = useMemo(() => {
     return orders.filter(o => {
-      // Provider filter
-      if (providerFilter && !(o.provider_emails_list || '').toLowerCase().includes(providerFilter.toLowerCase())) return false;
-      // Search
+      // 🔥 FILTRO AUTOMÁTICO PARA PROVEEDOR
+      if (role === 'PROVEEDOR') {
+        const providerList = o.provider_emails_list || '';
+        const myEmailLower = myEmail.toLowerCase();
+        const isMine = providerList.toLowerCase().includes(myEmailLower);
+        if (!isMine) return false;
+      }
+      
+      // Filtro manual de proveedor (solo para NO proveedores)
+      if (role !== 'PROVEEDOR' && providerFilter && !(o.provider_emails_list || '').toLowerCase().includes(providerFilter.toLowerCase())) return false;
+      
+      // Búsqueda
       if (!search) return true;
       const q = search.toLowerCase();
       return (o.customer_name || '').toLowerCase().includes(q) ||
         (o.order_number || '').toLowerCase().includes(q) ||
         (o.phone || '').includes(q) || (o.city || '').toLowerCase().includes(q);
     });
-  }, [orders, search, providerFilter]);
+  }, [orders, search, providerFilter, role, myEmail]);
 
   const pendingGuides = filtered.filter(o => !o.status2 || o.status2 === '--');
   const withGuides = filtered.filter(o => o.status2 === 'GUIA GENERADA');
@@ -238,10 +249,18 @@ export default function WithGuidesView() {
         <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
         <label className="app-label !mt-0">Hasta</label>
         <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
-        <select className="app-input !w-auto min-w-[200px]" value={providerFilter} onChange={e => setProviderFilter(e.target.value)}>
-          <option value="">Todos los proveedores</option>
-          {allProviders.map(p => <option key={p} value={p}>{p}</option>)}
-        </select>
+        
+        {/* 🔥 FILTRO DE PROVEEDOR - SOLO PARA NO PROVEEDORES */}
+        {role !== 'PROVEEDOR' && (
+          <>
+            <label className="app-label !mt-0">Proveedor</label>
+            <select className="app-input !w-auto min-w-[200px]" value={providerFilter} onChange={e => setProviderFilter(e.target.value)}>
+              <option value="">Todos los proveedores</option>
+              {allProviders.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </>
+        )}
+        
         <input className="app-input flex-1 min-w-[200px]" placeholder="🔎 Buscar por cliente, teléfono, ID o ciudad"
           value={search} onChange={e => setSearch(e.target.value)} />
         <button className="nav-btn active" onClick={load}>Filtrar</button>
@@ -265,14 +284,14 @@ export default function WithGuidesView() {
               </th>
               <th>Fecha</th><th>ID</th><th>Ciudad</th><th>Cliente</th><th>Teléfono</th>
               <th>Vendedor</th><th>Proveedor</th><th>Estado 2</th><th>Guía</th>
-            </tr>
+             </tr>
           </thead>
           <tbody>
             {visibleOrders.map(o => (
               <tr key={o.id}>
                 <td className="text-center">
                   <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
-                </td>
+                 </td>
                 <td className="text-xs whitespace-nowrap">{new Date(o.created_at).toLocaleDateString('es-PY')}</td>
                 <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
                 <td className="text-xs">{o.city}</td>
@@ -296,7 +315,7 @@ export default function WithGuidesView() {
                     }} title="Copiar guía">📋</button>
                   </div>
                 </td>
-              </tr>
+               </tr>
             ))}
             {visibleOrders.length === 0 && <tr><td colSpan={10} className="text-center text-muted-foreground py-8">Sin pedidos</td></tr>}
           </tbody>
