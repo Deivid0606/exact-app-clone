@@ -27,6 +27,12 @@ const normalizeRole = (s: string | null | undefined) => {
   return r;
 };
 
+const parsePrivateEmails = (value: string | null | undefined) =>
+  (value || '')
+    .split(',')
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+
 type Tab = 'general' | 'favoritos' | 'privados';
 
 interface Product {
@@ -69,6 +75,7 @@ const isPrivateProduct = (p: Product) => Boolean(p.is_private_stock ?? p.is_priv
 const canUserSeeProduct = (p: Product, role: string, myEmail: string) => {
   const userEmail = normalizeEmail(myEmail);
   const providerEmail = normalizeEmail(p.provider_email);
+  const privateEmails = parsePrivateEmails(p.private_to_emails);
   const isPrivate = isPrivateProduct(p);
 
   if (!userEmail || !role) return false;
@@ -79,9 +86,9 @@ const canUserSeeProduct = (p: Product, role: string, myEmail: string) => {
     return providerEmail === userEmail;
   }
 
-  // Vendedor / despachante / delivery: SOLO productos públicos/libres
   if (['seller', 'despachante', 'delivery'].includes(role)) {
-    return !isPrivate;
+    if (!isPrivate) return true;
+    return privateEmails.includes(userEmail);
   }
 
   return false;
@@ -190,11 +197,24 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
     }
 
     if (tab === 'privados') {
-      if (role === 'admin' || role === 'provider') {
-        list = list.filter((p) => isPrivateProduct(p));
-      } else {
-        list = [];
-      }
+      list = list.filter((p) => {
+        const privateEmails = parsePrivateEmails(p.private_to_emails);
+        const isPrivate = isPrivateProduct(p);
+
+        if (!isPrivate) return false;
+
+        if (role === 'admin') return true;
+
+        if (role === 'provider') {
+          return normalizeEmail(p.provider_email) === myEmail;
+        }
+
+        if (['seller', 'despachante', 'delivery'].includes(role)) {
+          return privateEmails.includes(myEmail);
+        }
+
+        return false;
+      });
     }
 
     if (search) {
@@ -208,7 +228,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
     }
 
     return list;
-  }, [products, tab, search, favorites, role]);
+  }, [products, tab, search, favorites, role, myEmail]);
 
   const grouped = useMemo(() => {
     const map = new Map<
