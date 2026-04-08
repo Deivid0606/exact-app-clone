@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 
 type OrderRow = {
@@ -35,12 +36,9 @@ const statusOptions = [
   'RECHAZADO',
 ];
 
-interface CreateOrderViewProps {
-  initialSku?: string | null;
-  onSkuConsumed?: () => void;
-}
+export default function OrdersView() {
+  const { profile } = useAuth();
 
-export default function OrdersView({ initialSku, onSkuConsumed }: CreateOrderViewProps) {
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -54,8 +52,14 @@ export default function OrdersView({ initialSku, onSkuConsumed }: CreateOrderVie
   const [statusFilter, setStatusFilter] = useState('Todos los estados');
   const [selectedIds, setSelectedIds] = useState<(number | string)[]>([]);
 
+  const isVendor =
+    profile?.role === 'VENDEDOR' ||
+    profile?.role === 'VENDOR' ||
+    profile?.role === 'SELLER';
+
   const loadOrders = async () => {
     setLoading(true);
+
     try {
       const fromIso = new Date(`${fromDate}T00:00:00`).toISOString();
       const toIso = new Date(`${toDate}T23:59:59.999`).toISOString();
@@ -69,6 +73,10 @@ export default function OrdersView({ initialSku, onSkuConsumed }: CreateOrderVie
 
       if (statusFilter !== 'Todos los estados') {
         query = query.eq('status', statusFilter);
+      }
+
+      if (isVendor && profile?.email) {
+        query = query.eq('created_by', profile.email);
       }
 
       const { data, error } = await query;
@@ -86,8 +94,10 @@ export default function OrdersView({ initialSku, onSkuConsumed }: CreateOrderVie
   };
 
   useEffect(() => {
-    loadOrders();
-  }, []);
+    if (profile) {
+      loadOrders();
+    }
+  }, [profile]);
 
   const visibleOrders = useMemo(() => orders, [orders]);
 
@@ -117,7 +127,9 @@ export default function OrdersView({ initialSku, onSkuConsumed }: CreateOrderVie
 
   return (
     <div className="app-card">
-      <h3 className="text-2xl font-extrabold mb-4">Pedidos</h3>
+      <h3 className="text-2xl font-extrabold mb-4">
+        {isVendor ? 'Mis pedidos' : 'Pedidos'}
+      </h3>
 
       <div className="flex flex-wrap gap-3 items-end mb-4">
         <div>
