@@ -27,6 +27,26 @@ interface EditOrder {
   assigned_at: string;
 }
 
+// Helper para verificar si el proveedor tiene acceso al pedido
+function isProviderAllowed(order: any, userEmail: string): boolean {
+  const providerList = order.provider_emails_list;
+  if (!providerList) return false;
+
+  let emails: string[] = [];
+  if (Array.isArray(providerList)) {
+    emails = providerList;
+  } else if (typeof providerList === 'string') {
+    try {
+      const parsed = JSON.parse(providerList);
+      if (Array.isArray(parsed)) emails = parsed;
+      else emails = providerList.split(',').map(s => s.trim());
+    } catch {
+      emails = providerList.split(',').map(s => s.trim());
+    }
+  }
+  return emails.some(email => norm(email) === norm(userEmail));
+}
+
 export default function OrdersView() {
   const { profile } = useAuth();
   const role = profile?.role || '';
@@ -50,7 +70,6 @@ export default function OrdersView() {
 
   const loadOrders = async () => {
     setLoading(true);
-    const dateField = role === 'DELIVERY' ? 'assigned_at' : 'created_at';
     const [ordersRes, deliveriesRes] = await Promise.all([
       supabase.from('orders').select('*')
         .gte('created_at', dateFrom + 'T00:00:00')
@@ -67,23 +86,25 @@ export default function OrdersView() {
     setOrders(ordersRes.data || []);
     setDeliveries(deliveriesRes);
     setLoading(false);
-    // Load cities for dropdown
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
   };
 
   useEffect(() => { loadOrders(); }, []);
 
+  // Filtrado principal con reglas de negocio
   const filtered = useMemo(() => {
     const q = norm(search);
     return orders.filter(o => {
-      // Role filter
+      // 1. Filtro por rol (según imagen)
       if (role === 'VENDEDOR' && norm(o.created_by || '') !== norm(myEmail)) return false;
       if (role === 'DELIVERY' && norm(o.assigned_delivery || '') !== norm(myEmail)) return false;
+      if (role === 'PROVEEDOR' && !isProviderAllowed(o, myEmail)) return false;
+      // ADMIN y DESPACHANTE ven todos, no filtramos
 
-      // Status filter
+      // 2. Filtro por estado
       if (statusFilter && (o.status || 'PENDIENTE') !== statusFilter) return false;
 
-      // Search
+      // 3. Búsqueda por texto
       if (q) {
         const idNum = String(o.order_number || o.id || '').replace(/^[a-z]+/i, '');
         const hay = [o.customer_name, o.phone, o.order_number, o.id, idNum, o.city, o.created_by, o.assigned_delivery].map(norm).join(' ');
@@ -175,7 +196,6 @@ export default function OrdersView() {
   };
 
   const deleteOrder = async (orderId: string) => {
-    // Only admin can really delete; we just set status to CANCELADO
     const { error } = await supabase.from('orders').update({ status: 'CANCELADO', updated_at: new Date().toISOString() }).eq('id', orderId);
     if (error) { toast.error(error.message); return; }
     toast.success('Pedido cancelado');
@@ -265,7 +285,7 @@ export default function OrdersView() {
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Pedidos</h3>
 
-      {/* Filters */}
+      {/* Filtros */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <label className="app-label !mt-0">Desde</label>
         <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
@@ -285,7 +305,7 @@ export default function OrdersView() {
 
       <div className="text-xs text-muted-foreground mb-2">{filtered.length} pedidos</div>
 
-      {/* Table */}
+      {/* Tabla */}
       <div className="overflow-auto">
         <table className="app-table min-w-[1400px]">
           <thead>
@@ -398,7 +418,7 @@ export default function OrdersView() {
         </table>
       </div>
 
-      {/* Edit Order Modal */}
+      {/* Modal Editar Pedido */}
       {editOrder && (
         <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-4" onClick={() => setEditOrder(null)}>
           <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-lg space-y-3" onClick={e => e.stopPropagation()}>
@@ -452,7 +472,7 @@ export default function OrdersView() {
         </div>
       )}
 
-      {/* Guide Modal */}
+      {/* Modal Guía */}
       {guideText && createPortal(
         <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-4" onClick={() => setGuideText('')}>
           <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-xl shadow-2xl" onClick={e => e.stopPropagation()}>
