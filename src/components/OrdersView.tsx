@@ -3,7 +3,6 @@ import { createPortal } from 'react-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
-import { useLocation } from 'react-router-dom';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 const norm = (s: string) => (s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
@@ -52,10 +51,9 @@ export default function OrdersView() {
   const { profile } = useAuth();
   const role = profile?.role || '';
   const myEmail = profile?.email || '';
-  const location = useLocation();
   
-  // Detectar si estamos en la pestaña "Pedidos con guías"
-  const isGuidesTab = location.pathname.includes('pedidos-con-guias');
+  // Detectar si estamos en la pestaña "Pedidos con guías" SIN useLocation
+  const isGuidesTab = window.location.pathname.includes('pedidos-con-guias');
   const isProvider = role === 'PROVEEDOR';
 
   const [orders, setOrders] = useState<any[]>([]);
@@ -356,7 +354,7 @@ export default function OrdersView() {
           {STATUS1_ALL.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
 
-        {/* 🔥 Selector de proveedores: SOLO para ADMIN y DESPACHANTE */}
+        {/* Selector de proveedores: SOLO para ADMIN y DESPACHANTE */}
         {(role === 'ADMIN' || role === 'DESPACHANTE') && providersList.length > 0 && (
           <>
             <label className="app-label !mt-0">Proveedor</label>
@@ -373,7 +371,7 @@ export default function OrdersView() {
           </>
         )}
 
-        {/* 🔥 Si es PROVEEDOR, mostrar su email fijo (sin selector de filtro) */}
+        {/* Si es PROVEEDOR, mostrar su email fijo (sin selector de filtro) */}
         {role === 'PROVEEDOR' && (
           <div className="bg-primary/10 px-3 py-1.5 rounded-md text-sm font-medium border border-primary/20">
             📧 Proveedor: {myEmail}
@@ -416,7 +414,7 @@ export default function OrdersView() {
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <td><td colSpan={15} className="text-center text-muted-foreground py-8">Sin pedidos</td></tr>
+              <tr><td colSpan={15} className="text-center text-muted-foreground py-8">Sin pedidos</td></tr>
             )}
             {filtered.map(o => {
               const feeStored = Number(o.delivery_fee_gs || 0);
@@ -454,7 +452,7 @@ export default function OrdersView() {
                     )}
                   </td>
                   {role !== 'DELIVERY' && (
-                    <tr>
+                    <td>
                       {canEditStatus2 ? (
                         <select
                           className="app-input !py-1 !px-2 !text-[11px] !w-auto !min-w-[120px]"
