@@ -73,7 +73,7 @@ export default function OrdersView() {
   const [guideText, setGuideText] = useState('');
   const [guideOrderId, setGuideOrderId] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [providerFilter, setProviderFilter] = useState(''); // Solo para ADMIN/DESPACHANTE
+  const [providerFilter, setProviderFilter] = useState('');
   const [providersList, setProvidersList] = useState<string[]>([]);
 
   const loadOrders = async () => {
@@ -85,9 +85,8 @@ export default function OrdersView() {
       .order('created_at', { ascending: false })
       .limit(500);
 
-    // 🔥 CLAVE: Si es PROVEEDOR y está en pestaña "Pedidos con guías", filtrar automáticamente
+    // Si es PROVEEDOR y está en pestaña "Pedidos con guías", filtrar automáticamente
     if (isProvider && isGuidesTab) {
-      // Obtener todos los pedidos y filtrar por provider_emails_list
       const { data, error } = await query;
       if (error) {
         toast.error(error.message);
@@ -97,7 +96,7 @@ export default function OrdersView() {
       }
       setLoading(false);
       
-      // Cargar deliveries y client_prices igual
+      // Cargar deliveries y client_prices
       const [deliveriesRes] = await Promise.all([
         supabase.from('profiles').select('email, name, user_id').then(async (profilesRes) => {
           const profiles = profilesRes.data || [];
@@ -111,7 +110,7 @@ export default function OrdersView() {
       return;
     }
     
-    // Si NO es proveedor o NO está en pestaña guías, comportamiento normal
+    // Comportamiento normal para ADMIN, DESPACHANTE, VENDEDOR, DELIVERY
     const [ordersRes, deliveriesRes] = await Promise.all([
       query,
       supabase.from('profiles').select('email, name, user_id').then(async (profilesRes) => {
@@ -135,9 +134,9 @@ export default function OrdersView() {
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
   };
 
-  // Cargar lista de proveedores para filtro (solo si no es proveedor o no está en pestaña guías)
+  // Cargar lista de proveedores para filtro (solo si NO es proveedor)
   useEffect(() => {
-    if (!isProvider || !isGuidesTab) {
+    if (role !== 'PROVEEDOR') {
       supabase.from('profiles')
         .select('email, name')
         .eq('role', 'PROVEEDOR')
@@ -146,7 +145,7 @@ export default function OrdersView() {
           setProvidersList(emails);
         });
     }
-  }, [isProvider, isGuidesTab]);
+  }, [role]);
 
   useEffect(() => { loadOrders(); }, [dateFrom, dateTo, providerFilter]);
 
@@ -154,11 +153,10 @@ export default function OrdersView() {
   const filtered = useMemo(() => {
     const q = norm(search);
     return orders.filter(o => {
-      // 1. Filtro por rol (según imagen)
+      // 1. Filtro por rol
       if (role === 'VENDEDOR' && norm(o.created_by || '') !== norm(myEmail)) return false;
       if (role === 'DELIVERY' && norm(o.assigned_delivery || '') !== norm(myEmail)) return false;
       if (role === 'PROVEEDOR' && !isProviderAllowed(o, myEmail)) return false;
-      // ADMIN y DESPACHANTE ven todos, no filtramos
 
       // 2. Filtro por estado
       if (statusFilter && (o.status || 'PENDIENTE') !== statusFilter) return false;
@@ -353,14 +351,13 @@ export default function OrdersView() {
         <label className="app-label !mt-0">Hasta</label>
         <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
         
-        {/* 🔥 Selector de estado 1 (siempre igual) */}
         <select className="app-input !w-auto" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
           <option value="">Todos los estados</option>
           {STATUS1_ALL.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
 
-        {/* 🔥 Selector de proveedores: SOLO visible si NO es proveedor O no está en pestaña guías */}
-        {(!isProvider || !isGuidesTab) && providersList.length > 0 && (
+        {/* 🔥 Selector de proveedores: SOLO para ADMIN y DESPACHANTE */}
+        {(role === 'ADMIN' || role === 'DESPACHANTE') && providersList.length > 0 && (
           <>
             <label className="app-label !mt-0">Proveedor</label>
             <select 
@@ -376,8 +373,8 @@ export default function OrdersView() {
           </>
         )}
 
-        {/* 🔥 Si es PROVEEDOR y está en pestaña guías, mostrar su email fijo */}
-        {isProvider && isGuidesTab && (
+        {/* 🔥 Si es PROVEEDOR, mostrar su email fijo (sin selector de filtro) */}
+        {role === 'PROVEEDOR' && (
           <div className="bg-primary/10 px-3 py-1.5 rounded-md text-sm font-medium border border-primary/20">
             📧 Proveedor: {myEmail}
           </div>
@@ -419,7 +416,7 @@ export default function OrdersView() {
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={15} className="text-center text-muted-foreground py-8">Sin pedidos</td></tr>
+              <td><td colSpan={15} className="text-center text-muted-foreground py-8">Sin pedidos</td></tr>
             )}
             {filtered.map(o => {
               const feeStored = Number(o.delivery_fee_gs || 0);
@@ -457,7 +454,7 @@ export default function OrdersView() {
                     )}
                   </td>
                   {role !== 'DELIVERY' && (
-                    <td>
+                    <tr>
                       {canEditStatus2 ? (
                         <select
                           className="app-input !py-1 !px-2 !text-[11px] !w-auto !min-w-[120px]"
