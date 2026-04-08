@@ -64,18 +64,11 @@ const emptyProduct: Omit<Product, 'id'> = {
   is_private_stock: false,
 };
 
-const parsePrivateEmails = (value: string | null | undefined) =>
-  (value || '')
-    .split(',')
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
-
 const isPrivateProduct = (p: Product) => Boolean(p.is_private_stock ?? p.is_private);
 
 const canUserSeeProduct = (p: Product, role: string, myEmail: string) => {
   const userEmail = normalizeEmail(myEmail);
   const providerEmail = normalizeEmail(p.provider_email);
-  const privateEmails = parsePrivateEmails(p.private_to_emails);
   const isPrivate = isPrivateProduct(p);
 
   if (!userEmail || !role) return false;
@@ -86,9 +79,9 @@ const canUserSeeProduct = (p: Product, role: string, myEmail: string) => {
     return providerEmail === userEmail;
   }
 
+  // Vendedor / despachante / delivery: SOLO productos públicos/libres
   if (['seller', 'despachante', 'delivery'].includes(role)) {
-    if (!isPrivate) return true;
-    return privateEmails.includes(userEmail);
+    return !isPrivate;
   }
 
   return false;
@@ -197,13 +190,10 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
     }
 
     if (tab === 'privados') {
-      if (role === 'provider') {
+      if (role === 'admin' || role === 'provider') {
         list = list.filter((p) => isPrivateProduct(p));
       } else {
-        list = list.filter((p) => {
-          const allowed = parsePrivateEmails(p.private_to_emails);
-          return allowed.includes(myEmail);
-        });
+        list = [];
       }
     }
 
@@ -218,7 +208,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
     }
 
     return list;
-  }, [products, tab, search, favorites, myEmail, role]);
+  }, [products, tab, search, favorites, role]);
 
   const grouped = useMemo(() => {
     const map = new Map<
@@ -322,7 +312,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
 
   const canEdit = ['admin', 'provider', 'despachante'].includes(role);
   const canSeeRealCost = ['admin', 'provider'].includes(role);
-  const canLoadOrder = role === 'seller';
+  const canLoadOrder = ['seller', 'despachante', 'delivery'].includes(role);
 
   return (
     <div className="app-card">
@@ -376,7 +366,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
               <div className="text-[10px] text-muted-foreground">{group.email}</div>
             </div>
 
-            {group.phone && role === 'seller' && (
+            {group.phone && canLoadOrder && (
               <a
                 href={`https://wa.me/${group.phone.replace(/[^0-9]/g, '')}`}
                 target="_blank"
