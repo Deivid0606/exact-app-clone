@@ -80,14 +80,21 @@ const canUserSeeProduct = (p: Product, role: string, myEmail: string) => {
 
   if (!userEmail || !role) return false;
 
+  // ADMIN
   if (role === 'admin') return true;
 
+  // PROVEEDOR dueño
   if (role === 'provider') {
     return providerEmail === userEmail;
   }
 
+  // VENDEDOR / DESPACHANTE / DELIVERY
   if (['seller', 'despachante', 'delivery'].includes(role)) {
+
+    // públicos
     if (!isPrivate) return true;
+
+    // privados SOLO si está asignado
     return privateEmails.includes(userEmail);
   }
 
