@@ -47,30 +47,6 @@ function isProviderAllowed(order: any, userEmail: string): boolean {
   return emails.some(email => norm(email) === norm(userEmail));
 }
 
-// Helper para filtrar items por proveedor (CORREGIDO)
-function getProviderItems(items: any[], role: string, userEmail: string): any[] {
-  // Si no hay items, retornar array vacío
-  if (!items || !Array.isArray(items)) return [];
-  
-  // ADMIN y DESPACHANTE ven todos los items
-  if (role === 'ADMIN' || role === 'DESPACHANTE') {
-    return items;
-  }
-  
-  // PROVEEDOR solo ve sus items
-  if (role === 'PROVEEDOR') {
-    const normalizedUserEmail = norm(userEmail);
-    return items.filter((item: any) => {
-      const itemProvider = item.provider_email || '';
-      const normalizedItemProvider = norm(itemProvider);
-      return normalizedItemProvider === normalizedUserEmail;
-    });
-  }
-  
-  // VENDEDOR y DELIVERY ven todos los items
-  return items;
-}
-
 // Helper para parsear items_json correctamente
 function parseItemsJson(itemsJson: any): any[] {
   if (!itemsJson) return [];
@@ -84,6 +60,28 @@ function parseItemsJson(itemsJson: any): any[] {
     }
   }
   return [];
+}
+
+// Helper para obtener SOLO los items del proveedor logueado
+function getMyItems(items: any[], role: string, userEmail: string): any[] {
+  if (!items || !Array.isArray(items)) return [];
+  
+  // ADMIN y DESPACHANTE ven todos
+  if (role === 'ADMIN' || role === 'DESPACHANTE') {
+    return items;
+  }
+  
+  // PROVEEDOR solo ve sus items
+  if (role === 'PROVEEDOR') {
+    const normalizedUserEmail = norm(userEmail);
+    return items.filter((item: any) => {
+      const itemProvider = item.provider_email || '';
+      return norm(itemProvider) === normalizedUserEmail;
+    });
+  }
+  
+  // VENDEDOR y DELIVERY ven todos
+  return items;
 }
 
 export default function OrdersView() {
@@ -134,15 +132,15 @@ export default function OrdersView() {
   const filtered = useMemo(() => {
     const q = norm(search);
     return orders.filter(o => {
-      // 1. Filtro por rol
+      // Filtro por rol
       if (role === 'VENDEDOR' && norm(o.created_by || '') !== norm(myEmail)) return false;
       if (role === 'DELIVERY' && norm(o.assigned_delivery || '') !== norm(myEmail)) return false;
       if (role === 'PROVEEDOR' && !isProviderAllowed(o, myEmail)) return false;
 
-      // 2. Filtro por estado
+      // Filtro por estado
       if (statusFilter && (o.status || 'PENDIENTE') !== statusFilter) return false;
 
-      // 3. Búsqueda
+      // Búsqueda
       if (q) {
         const idNum = String(o.order_number || o.id || '').replace(/^[a-z]+/i, '');
         const hay = [o.customer_name, o.phone, o.order_number, o.id, idNum, o.city, o.created_by, o.assigned_delivery].map(norm).join(' ');
@@ -240,16 +238,12 @@ export default function OrdersView() {
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'CANCELADO' } : o));
   };
 
-  // Generar guía con filtro CORREGIDO para proveedores
+  // Generar guía - SOLO items del proveedor logueado
   const generateGuide = (o: any) => {
     try {
-      // Parsear items_json correctamente
       const allItems = parseItemsJson(o.items_json);
+      const myItems = getMyItems(allItems, role, myEmail);
       
-      // Filtrar items según el rol
-      const myItems = getProviderItems(allItems, role, myEmail);
-      
-      // Si es proveedor y no tiene items, mostrar mensaje
       if (role === 'PROVEEDOR' && myItems.length === 0) {
         toast.error('Este pedido no contiene productos de tu proveeduría');
         return;
@@ -259,7 +253,6 @@ export default function OrdersView() {
         `${i + 1}. ${it.title || it.sku || 'Item'} x${it.qty || 1} — Gs ${nf(Number(it.sale_gs || 0) * Number(it.qty || 1))}`
       ).join('\n');
 
-      // Calcular total solo de los items filtrados
       const filteredTotal = myItems.reduce((sum, it) => sum + (Number(it.sale_gs || 0) * Number(it.qty || 1)), 0);
 
       const text = [
@@ -280,7 +273,6 @@ export default function OrdersView() {
         `━━━━━━━━━━━━━━━━━━`,
         `Vendedor: ${o.created_by || ''}`,
         `Delivery: ${o.assigned_delivery || 'Sin asignar'}`,
-        role === 'PROVEEDOR' && allItems.length !== myItems.length ? `⚠️ Solo se muestran tus productos (${myItems.length} de ${allItems.length} totales)` : '',
       ].filter(Boolean).join('\n');
 
       setGuideText(text);
@@ -312,28 +304,20 @@ export default function OrdersView() {
     }
   };
 
-  // Generar guías múltiples con filtro CORREGIDO
   const bulkGenerateGuides = () => {
     const selected = filtered.filter(o => selectedIds.has(o.id));
     if (selected.length === 0) { toast.error('Seleccioná pedidos primero'); return; }
     
     let generatedCount = 0;
-    let totalHiddenItems = 0;
     const guidesArray: string[] = [];
     
     for (const o of selected) {
       const allItems = parseItemsJson(o.items_json);
-      const myItems = getProviderItems(allItems, role, myEmail);
+      const myItems = getMyItems(allItems, role, myEmail);
       
-      // Si es proveedor y no tiene items, saltar este pedido
-      if (role === 'PROVEEDOR' && myItems.length === 0) {
-        continue;
-      }
+      if (role === 'PROVEEDOR' && myItems.length === 0) continue;
       
-      const hiddenCount = allItems.length - myItems.length;
-      totalHiddenItems += hiddenCount;
       generatedCount++;
-      
       const itemsText = myItems.map((it: any, i: number) => 
         `  ${i + 1}. ${it.title || it.sku} x${it.qty} — Gs ${nf(Number(it.sale_gs || 0) * Number(it.qty || 1))}`
       ).join('\n');
@@ -357,12 +341,7 @@ ${o.obs ? 'Obs: ' + o.obs : ''}`;
     
     const allText = guidesArray.join('\n\n════════════════════\n\n');
     navigator.clipboard.writeText(allText);
-    
-    let message = `${generatedCount} guía${generatedCount !== 1 ? 's' : ''} copiada${generatedCount !== 1 ? 's' : ''}`;
-    if (role === 'PROVEEDOR' && totalHiddenItems > 0) {
-      message += ` (se ocultaron ${totalHiddenItems} producto${totalHiddenItems !== 1 ? 's' : ''} de otros proveedores)`;
-    }
-    toast.success(message);
+    toast.success(`${generatedCount} guía${generatedCount !== 1 ? 's' : ''} copiada${generatedCount !== 1 ? 's' : ''}`);
   };
 
   const statusClass = (s: string) => {
@@ -376,6 +355,9 @@ ${o.obs ? 'Obs: ' + o.obs : ''}`;
   const canEditStatus2 = role === 'ADMIN' || role === 'DESPACHANTE' || role === 'PROVEEDOR';
   const canAssign = role === 'ADMIN' || role === 'PROVEEDOR';
   const canEdit = role === 'ADMIN' || role === 'DESPACHANTE' || role === 'PROVEEDOR';
+
+  // Determinar qué columnas mostrar (ocultar "Proveedor" para PROVEEDOR)
+  const showProviderColumn = role !== 'PROVEEDOR';
 
   return (
     <div className="app-card">
@@ -414,12 +396,14 @@ ${o.obs ? 'Obs: ' + o.obs : ''}`;
               <th>ID</th>
               <th>Ciudad</th>
               <th>Cliente</th>
+              <th>Teléfono</th>
               <th>Vendedor</th>
               {role !== 'DESPACHANTE' && <th>Delivery</th>}
               <th className="text-right">Total (Gs)</th>
               <th className="text-right">{role === 'DELIVERY' ? 'Tarifa (Gs)' : 'Comisión (Gs)'}</th>
               <th>Estado 1</th>
               {role !== 'DELIVERY' && <th>Estado 2</th>}
+              {showProviderColumn && <th>Proveedor</th>}
               {canAssign && <th>Asignar</th>}
               <th>Guía</th>
               {canEdit && <th>Acciones</th>}
@@ -427,7 +411,7 @@ ${o.obs ? 'Obs: ' + o.obs : ''}`;
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={15} className="text-center text-muted-foreground py-8">Sin pedidos</td></tr>
+              <tr><td colSpan={20} className="text-center text-muted-foreground py-8">Sin pedidos</td></tr>
             )}
             {filtered.map(o => {
               const feeStored = Number(o.delivery_fee_gs || 0);
@@ -436,14 +420,25 @@ ${o.obs ? 'Obs: ' + o.obs : ''}`;
                 ? new Date(o.assigned_at).toLocaleString('es-PY')
                 : new Date(o.created_at).toLocaleString('es-PY');
 
-              // Contar productos del proveedor en este pedido (solo para mostrar badge)
-              let providerItemsCount = 0;
+              // Obtener proveedores únicos del pedido (solo para ADMIN/DESPACHANTE)
+              let uniqueProviders: string[] = [];
+              if (showProviderColumn) {
+                const allItems = parseItemsJson(o.items_json);
+                const providers = new Set<string>();
+                allItems.forEach((item: any) => {
+                  if (item.provider_email) providers.add(item.provider_email);
+                });
+                uniqueProviders = Array.from(providers);
+              }
+
+              // Para PROVEEDOR: contar sus items
+              let myItemsCount = 0;
               let otherItemsCount = 0;
               if (role === 'PROVEEDOR') {
                 const allItems = parseItemsJson(o.items_json);
-                const myItems = getProviderItems(allItems, role, myEmail);
-                providerItemsCount = myItems.length;
-                otherItemsCount = allItems.length - providerItemsCount;
+                const myItems = getMyItems(allItems, role, myEmail);
+                myItemsCount = myItems.length;
+                otherItemsCount = allItems.length - myItemsCount;
               }
 
               return (
@@ -455,13 +450,14 @@ ${o.obs ? 'Obs: ' + o.obs : ''}`;
                   <td className="font-bold text-xs">
                     {o.order_number || o.id.slice(0, 8)}
                     {role === 'PROVEEDOR' && (
-                      <span className={`text-[10px] ml-1 ${providerItemsCount === 0 ? 'text-red-500' : 'text-green-600'}`}>
-                        ({providerItemsCount} tuyo{providerItemsCount !== 1 ? 's' : ''}{otherItemsCount > 0 ? `, ${otherItemsCount} otro${otherItemsCount !== 1 ? 's' : ''}` : ''})
+                      <span className={`text-[10px] ml-1 ${myItemsCount === 0 ? 'text-red-500' : 'text-green-600'}`}>
+                        ({myItemsCount} tuyo{myItemsCount !== 1 ? 's' : ''}{otherItemsCount > 0 ? `, ${otherItemsCount} otro${otherItemsCount !== 1 ? 's' : ''}` : ''})
                       </span>
                     )}
                   </td>
                   <td className="text-xs">{o.city}</td>
                   <td className="text-xs">{o.customer_name}</td>
+                  <td className="text-xs">{o.phone}</td>
                   <td className="text-xs">{o.created_by}</td>
                   {role !== 'DESPACHANTE' && <td className="text-xs">{o.assigned_delivery || '—'}</td>}
                   <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
@@ -494,6 +490,11 @@ ${o.obs ? 'Obs: ' + o.obs : ''}`;
                       ) : (
                         <span className="text-xs text-muted-foreground">{o.status2 || '—'}</span>
                       )}
+                    </td>
+                  )}
+                  {showProviderColumn && (
+                    <td className="text-xs">
+                      {uniqueProviders.length > 0 ? uniqueProviders.join(', ') : '—'}
                     </td>
                   )}
                   {canAssign && (
