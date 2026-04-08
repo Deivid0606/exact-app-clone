@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
@@ -6,43 +6,41 @@ import { toast } from 'sonner';
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
 const normalizeEmail = (value: any) => String(value || '').trim().toLowerCase();
-const normalizeRole = (value: any) => String(value || '').trim().toLowerCase();
 
-const parsePrivateEmails = (value: any): string[] => {
-  if (!value) return [];
+const normalizeRole = (value: any) => {
+  const r = String(value || '').trim().toLowerCase();
 
-  if (Array.isArray(value)) {
-    return value.map((v) => normalizeEmail(v)).filter(Boolean);
-  }
+  if (['admin', 'administrador'].includes(r)) return 'admin';
+  if (['provider', 'proveedor'].includes(r)) return 'provider';
+  if (['seller', 'vendedor'].includes(r)) return 'seller';
+  if (['despachante', 'dispatcher'].includes(r)) return 'despachante';
+  if (['delivery', 'repartidor'].includes(r)) return 'delivery';
 
-  if (typeof value === 'string') {
-    return value
-      .split(',')
-      .map((v) => normalizeEmail(v))
-      .filter(Boolean);
-  }
-
-  return [];
+  return r;
 };
 
-const canUserSeeProduct = (product: any, profile: any) => {
+const isPrivateProduct = (product: any) =>
+  Boolean(product?.is_private_stock ?? product?.is_private);
+
+const canAccessProduct = (product: any, profile: any) => {
   const role = normalizeRole(profile?.role);
   const userEmail = normalizeEmail(profile?.email);
   const providerEmail = normalizeEmail(product?.provider_email);
-  const isPrivate = Boolean(product?.is_private_stock);
-  const privateEmails = parsePrivateEmails(product?.private_to_emails);
+  const isPrivate = isPrivateProduct(product);
 
-  if (!userEmail || !role) return false;
+  if (!role || !userEmail) return false;
 
-  if (role === 'admin') return true;
+  if (role === 'admin') {
+    return true;
+  }
 
   if (role === 'provider') {
     return providerEmail === userEmail;
   }
 
+  // vendedor / despachante / delivery: SOLO libres
   if (['seller', 'despachante', 'delivery'].includes(role)) {
-    if (!isPrivate) return true;
-    return privateEmails.includes(userEmail);
+    return !isPrivate;
   }
 
   return false;
@@ -56,6 +54,7 @@ export default function CreateOrderView({
   onSkuConsumed?: () => void;
 }) {
   const { profile } = useAuth();
+
   const [products, setProducts] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
   const [customer, setCustomer] = useState('');
@@ -69,62 +68,69 @@ export default function CreateOrderView({
     { sku: '', sale_gs: 0, qty: 1 },
   ]);
   const [saving, setSaving] = useState(false);
+  const [loadingProducts, setLoadingProducts] = useState(false);
 
   useEffect(() => {
     const loadData = async () => {
-      const { data: productsData, error: productsError } = await supabase
-        .from('products')
-        .select('*')
-        .order('title');
+      if (!profile?.email || !profile?.role) return;
 
-      if (productsError) {
-        console.error('Error cargando productos:', productsError);
-        toast.error('No se pudieron cargar los productos');
-        return;
-      }
+      setLoadingProducts(true);
 
-      const visibleProducts = (productsData || []).filter((p: any) =>
-        canUserSeeProduct(p, profile)
-      );
+      try {
+        const { data: productsData, error: productsError } = await supabase
+          .from('products')
+          .select('*')
+          .order('title');
 
-      setProducts(visibleProducts);
+        if (productsError) throw productsError;
 
-      if (initialSku) {
-        const found = visibleProducts.find((p: any) => p.sku === initialSku);
-        if (found) {
-          setItems([{ sku: initialSku, sale_gs: 0, qty: 1 }]);
+        const allProducts = productsData || [];
+        const visibleProducts = allProducts.filter((p: any) => canAccessProduct(p, profile));
+
+        setProducts(visibleProducts);
+
+        if (initialSku) {
+          const found = visibleProducts.find((p: any) => p.sku === initialSku);
+          if (found) {
+            setItems([{ sku: initialSku, sale_gs: 0, qty: 1 }]);
+          }
+          onSkuConsumed?.();
         }
-        onSkuConsumed?.();
+
+        const { data: pricesData, error: pricesError } = await supabase
+          .from('client_prices')
+          .select('*')
+          .order('city');
+
+        if (pricesError) throw pricesError;
+
+        setClientPrices(pricesData || []);
+      } catch (error: any) {
+        console.error('Error cargando datos de CreateOrderView:', error);
+        toast.error(error?.message || 'No se pudieron cargar los productos');
+      } finally {
+        setLoadingProducts(false);
       }
-
-      const { data: pricesData, error: pricesError } = await supabase
-        .from('client_prices')
-        .select('*')
-        .order('city');
-
-      if (pricesError) {
-        console.error('Error cargando precios de cliente:', pricesError);
-        toast.error('No se pudieron cargar los precios de delivery');
-        return;
-      }
-
-      setClientPrices(pricesData || []);
     };
 
-    if (profile?.email && profile?.role) {
-      loadData();
-    }
+    loadData();
   }, [initialSku, onSkuConsumed, profile?.email, profile?.role]);
 
-  const catalogMap: Record<string, any> = {};
-  products.forEach((p) => {
-    if (p.sku) catalogMap[p.sku] = p;
-  });
+  const catalogMap: Record<string, any> = useMemo(() => {
+    const map: Record<string, any> = {};
+    products.forEach((p) => {
+      if (p.sku) map[p.sku] = p;
+    });
+    return map;
+  }, [products]);
 
   const deliveryPrice =
     clientPrices.find((c) => c.city?.toLowerCase() === city.toLowerCase())?.price_gs || 0;
 
-  const totalVenta = items.reduce((s, i) => s + (Number(i.sale_gs) || 0), 0);
+  const totalVenta = items.reduce(
+    (s, i) => s + Number(i.sale_gs || 0) * Number(i.qty || 0),
+    0
+  );
 
   const totalProv = items.reduce((s, i) => {
     const p = catalogMap[i.sku];
@@ -142,6 +148,14 @@ export default function CreateOrderView({
   const updateItem = (idx: number, field: string, value: any) => {
     const copy = [...items];
     (copy[idx] as any)[field] = value;
+
+    if (field === 'sku') {
+      const selected = catalogMap[value];
+      if (selected && !copy[idx].sale_gs) {
+        copy[idx].sale_gs = Number(selected.sale_price_gs || 0);
+      }
+    }
+
     setItems(copy);
   };
 
@@ -165,11 +179,11 @@ export default function CreateOrderView({
     }
 
     const validItems = items.filter(
-      (i) => i.sku && Number(i.sale_gs) > 0 && Number(i.qty) > 0
+      (i) => i.sku && Number(i.sale_gs) > 0 && Number(i.qty) > 0 && catalogMap[i.sku]
     );
 
     if (validItems.length === 0) {
-      toast.error('Agregá al menos 1 ítem');
+      toast.error('Agregá al menos 1 ítem válido');
       return;
     }
 
@@ -209,9 +223,7 @@ export default function CreateOrderView({
         .select('id, order_number')
         .single();
 
-      if (insertError) {
-        throw insertError;
-      }
+      if (insertError) throw insertError;
 
       const generatedOrderNumber = insertedOrder?.order_number || insertedOrder?.id || 'SIN-NUMERO';
 
@@ -315,7 +327,9 @@ export default function CreateOrderView({
                 value={item.sku}
                 onChange={(e) => updateItem(idx, 'sku', e.target.value)}
               >
-                <option value="">Seleccionar producto…</option>
+                <option value="">
+                  {loadingProducts ? 'Cargando productos…' : 'Seleccionar producto…'}
+                </option>
                 {products.map((p) => (
                   <option key={p.id} value={p.sku} disabled={(p.stock || 0) <= 0}>
                     {p.title} — {p.sku} (Prov {nf(Number(p.provider_price_gs || 0))}){' '}
@@ -381,7 +395,7 @@ export default function CreateOrderView({
             </div>
           </div>
 
-          <button className="nav-btn active mt-4" onClick={saveOrder} disabled={saving}>
+          <button className="nav-btn active mt-4" onClick={saveOrder} disabled={saving || loadingProducts}>
             {saving ? (
               <span className="flex items-center gap-2">
                 <span className="btn-spinner" /> Guardando...
