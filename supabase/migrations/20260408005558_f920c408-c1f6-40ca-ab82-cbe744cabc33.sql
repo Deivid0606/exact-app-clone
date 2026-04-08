@@ -1,0 +1,1 @@
+CREATE POLICY "Authenticated can update sequence" ON public.order_sequence FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
