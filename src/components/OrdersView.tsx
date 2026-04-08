@@ -47,6 +47,28 @@ function isProviderAllowed(order: any, userEmail: string): boolean {
   return emails.some(email => norm(email) === norm(userEmail));
 }
 
+// Helper para filtrar items por proveedor (para guías)
+function filterItemsByProvider(items: any[], role: string, userEmail: string): { filteredItems: any[], originalCount: number } {
+  const originalCount = items?.length || 0;
+  
+  // ADMIN y DESPACHANTE ven todos los items
+  if (role === 'ADMIN' || role === 'DESPACHANTE') {
+    return { filteredItems: items || [], originalCount };
+  }
+  
+  // PROVEEDOR solo ve sus items
+  if (role === 'PROVEEDOR') {
+    const filtered = (items || []).filter((item: any) => {
+      const itemProvider = item.provider_email || '';
+      return norm(itemProvider) === norm(userEmail);
+    });
+    return { filteredItems: filtered, originalCount };
+  }
+  
+  // Otros roles (VENDEDOR, DELIVERY) ven todos los items
+  return { filteredItems: items || [], originalCount };
+}
+
 export default function OrdersView() {
   const { profile } = useAuth();
   const role = profile?.role || '';
@@ -95,16 +117,15 @@ export default function OrdersView() {
   const filtered = useMemo(() => {
     const q = norm(search);
     return orders.filter(o => {
-      // 1. Filtro por rol (según imagen)
+      // 1. Filtro por rol
       if (role === 'VENDEDOR' && norm(o.created_by || '') !== norm(myEmail)) return false;
       if (role === 'DELIVERY' && norm(o.assigned_delivery || '') !== norm(myEmail)) return false;
       if (role === 'PROVEEDOR' && !isProviderAllowed(o, myEmail)) return false;
-      // ADMIN y DESPACHANTE ven todos, no filtramos
 
       // 2. Filtro por estado
       if (statusFilter && (o.status || 'PENDIENTE') !== statusFilter) return false;
 
-      // 3. Búsqueda por texto
+      // 3. Búsqueda
       if (q) {
         const idNum = String(o.order_number || o.id || '').replace(/^[a-z]+/i, '');
         const hay = [o.customer_name, o.phone, o.order_number, o.id, idNum, o.city, o.created_by, o.assigned_delivery].map(norm).join(' ');
@@ -202,12 +223,31 @@ export default function OrdersView() {
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'CANCELADO' } : o));
   };
 
+  // Generar guía con filtro por proveedor
   const generateGuide = (o: any) => {
     try {
-      const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
-      const itemsText = items.map((it: any, i: number) =>
+      let items = [];
+      try {
+        items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
+      } catch {
+        items = [];
+      }
+      
+      // Filtrar items según el rol
+      const { filteredItems, originalCount } = filterItemsByProvider(items, role, myEmail);
+      
+      // Si es proveedor y no tiene items, mostrar mensaje
+      if (role === 'PROVEEDOR' && filteredItems.length === 0) {
+        toast.info('Este pedido no contiene productos de tu proveeduría');
+        return;
+      }
+
+      const itemsText = filteredItems.map((it: any, i: number) =>
         `${i + 1}. ${it.title || it.sku || 'Item'} x${it.qty || 1} — Gs ${nf(Number(it.sale_gs || 0) * Number(it.qty || 1))}`
       ).join('\n');
+
+      // Calcular total solo de los items filtrados
+      const filteredTotal = filteredItems.reduce((sum, it) => sum + (Number(it.sale_gs || 0) * Number(it.qty || 1)), 0);
 
       const text = [
         `GUÍA DE ENVÍO — ${o.order_number || o.id.slice(0, 8)}`,
@@ -219,19 +259,21 @@ export default function OrdersView() {
         `Dirección: ${o.street || ''} ${o.district ? '- ' + o.district : ''}`,
         `━━━━━━━━━━━━━━━━━━`,
         `Productos:`,
-        itemsText,
+        itemsText || '  (sin productos)',
         `━━━━━━━━━━━━━━━━━━`,
-        `Total: Gs ${nf(Number(o.total_gs || 0))}`,
+        `Total: Gs ${nf(filteredTotal)}`,
         `Delivery: Gs ${nf(Number(o.delivery_gs || 0))}`,
         o.obs ? `Observación: ${o.obs}` : '',
         `━━━━━━━━━━━━━━━━━━`,
         `Vendedor: ${o.created_by || ''}`,
         `Delivery: ${o.assigned_delivery || 'Sin asignar'}`,
+        role === 'PROVEEDOR' && originalCount !== filteredItems.length ? `⚠️ Solo se muestran ${filteredItems.length} de ${originalCount} productos (tuyos)` : '',
       ].filter(Boolean).join('\n');
 
       setGuideText(text);
       setGuideOrderId(o.order_number || o.id.slice(0, 8));
-    } catch {
+    } catch (error) {
+      console.error(error);
       toast.error('Error generando guía');
     }
   };
@@ -257,16 +299,40 @@ export default function OrdersView() {
     }
   };
 
+  // Generar guías múltiples con filtro por proveedor
   const bulkGenerateGuides = () => {
     const selected = filtered.filter(o => selectedIds.has(o.id));
     if (selected.length === 0) { toast.error('Seleccioná pedidos primero'); return; }
+    
+    let generatedCount = 0;
     const allText = selected.map(o => {
-      const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json || '[]') : (o.items_json || []);
-      const itemsText = items.map((it: any, i: number) => `  ${i + 1}. ${it.title || it.sku} x${it.qty}`).join('\n');
+      let items = [];
+      try {
+        items = typeof o.items_json === 'string' ? JSON.parse(o.items_json || '[]') : (o.items_json || []);
+      } catch {
+        items = [];
+      }
+      
+      const { filteredItems } = filterItemsByProvider(items, role, myEmail);
+      
+      // Si es proveedor y no tiene items, omitir este pedido
+      if (role === 'PROVEEDOR' && filteredItems.length === 0) return null;
+      
+      generatedCount++;
+      const itemsText = filteredItems.map((it: any, i: number) => 
+        `  ${i + 1}. ${it.title || it.sku} x${it.qty}`
+      ).join('\n');
+      
       return `${o.order_number || o.id.slice(0, 8)} — ${o.customer_name} — ${o.city}\nTeléfono: ${o.phone}\nDirección: ${o.street || ''} ${o.district || ''}\n${itemsText}\nTotal: Gs ${nf(Number(o.total_gs || 0))}\n${o.obs ? 'Obs: ' + o.obs : ''}`;
-    }).join('\n\n════════════════════\n\n');
+    }).filter(Boolean).join('\n\n════════════════════\n\n');
+    
+    if (allText.length === 0) {
+      toast.error('Ninguno de los pedidos seleccionados contiene tus productos');
+      return;
+    }
+    
     navigator.clipboard.writeText(allText);
-    toast.success(`${selected.length} guías copiadas`);
+    toast.success(`${generatedCount} guía${generatedCount !== 1 ? 's' : ''} copiada${generatedCount !== 1 ? 's' : ''}${role === 'PROVEEDOR' ? ' (solo tus productos)' : ''}`);
   };
 
   const statusClass = (s: string) => {
@@ -285,7 +351,7 @@ export default function OrdersView() {
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Pedidos</h3>
 
-      {/* Filtros */}
+      {/* Filters */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
         <label className="app-label !mt-0">Desde</label>
         <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
@@ -305,7 +371,7 @@ export default function OrdersView() {
 
       <div className="text-xs text-muted-foreground mb-2">{filtered.length} pedidos</div>
 
-      {/* Tabla */}
+      {/* Table */}
       <div className="overflow-auto">
         <table className="app-table min-w-[1400px]">
           <thead>
@@ -340,13 +406,30 @@ export default function OrdersView() {
                 ? new Date(o.assigned_at).toLocaleString('es-PY')
                 : new Date(o.created_at).toLocaleString('es-PY');
 
+              // Para mostrar cuántos productos tiene el proveedor en este pedido
+              let providerItemsCount = null;
+              if (role === 'PROVEEDOR') {
+                try {
+                  const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json || '[]') : (o.items_json || []);
+                  providerItemsCount = items.filter((item: any) => norm(item.provider_email || '') === norm(myEmail)).length;
+                } catch { providerItemsCount = 0; }
+              }
+
               return (
                 <tr key={o.id}>
                   <td className="text-center">
                     <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
                   </td>
                   <td className="whitespace-nowrap text-xs">{dateShown}</td>
-                  <td className="font-bold text-xs">{o.order_number || o.id.slice(0, 8)}</td>
+                  <td className="font-bold text-xs">
+                    {o.order_number || o.id.slice(0, 8)}
+                    {role === 'PROVEEDOR' && providerItemsCount === 0 && (
+                      <span className="text-red-500 text-[10px] ml-1">(sin tus productos)</span>
+                    )}
+                    {role === 'PROVEEDOR' && providerItemsCount > 0 && (
+                      <span className="text-green-600 text-[10px] ml-1">({providerItemsCount} prod. tuyos)</span>
+                    )}
+                  </td>
                   <td className="text-xs">{o.city}</td>
                   <td className="text-xs">{o.customer_name}</td>
                   <td className="text-xs">{o.created_by}</td>
@@ -418,7 +501,7 @@ export default function OrdersView() {
         </table>
       </div>
 
-      {/* Modal Editar Pedido */}
+      {/* Edit Order Modal */}
       {editOrder && (
         <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-4" onClick={() => setEditOrder(null)}>
           <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-lg space-y-3" onClick={e => e.stopPropagation()}>
@@ -472,7 +555,7 @@ export default function OrdersView() {
         </div>
       )}
 
-      {/* Modal Guía */}
+      {/* Guide Modal */}
       {guideText && createPortal(
         <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-4" onClick={() => setGuideText('')}>
           <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-xl shadow-2xl" onClick={e => e.stopPropagation()}>
