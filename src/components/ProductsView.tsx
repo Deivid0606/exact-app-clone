@@ -14,7 +14,18 @@ const norm = (s: string) =>
     .trim();
 
 const normalizeEmail = (s: string | null | undefined) => (s || '').trim().toLowerCase();
-const normalizeRole = (s: string | null | undefined) => (s || '').trim().toLowerCase();
+
+const normalizeRole = (s: string | null | undefined) => {
+  const r = (s || '').trim().toLowerCase();
+
+  if (['admin', 'administrador'].includes(r)) return 'admin';
+  if (['provider', 'proveedor'].includes(r)) return 'provider';
+  if (['seller', 'vendedor'].includes(r)) return 'seller';
+  if (['despachante', 'dispatcher'].includes(r)) return 'despachante';
+  if (['delivery', 'repartidor'].includes(r)) return 'delivery';
+
+  return r;
+};
 
 type Tab = 'general' | 'favoritos' | 'privados';
 
@@ -96,19 +107,20 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>('general');
-  const [favorites, setFavorites] = useState<string[]>(() => {
-    try {
-      return JSON.parse(localStorage.getItem(`favorites_${myEmail}`) || '[]');
-    } catch {
-      return [];
-    }
-  });
+  const [favorites, setFavorites] = useState<string[]>([]);
   const [editProduct, setEditProduct] = useState<(Product & { isNew?: boolean }) | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [imgIndex, setImgIndex] = useState<Record<string, number>>({});
   const [viewingImage, setViewingImage] = useState<{ url: string; title: string } | null>(null);
 
   const load = useCallback(async () => {
+    if (!role || !myEmail) {
+      setProducts([]);
+      setProfiles([]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
 
     const [prodRes, profRes] = await Promise.all([
@@ -117,12 +129,14 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
     ]);
 
     if (prodRes.error) {
+      console.error('Error cargando products:', prodRes.error);
       toast.error(prodRes.error.message);
       setLoading(false);
       return;
     }
 
     if (profRes.error) {
+      console.error('Error cargando profiles:', profRes.error);
       toast.error(profRes.error.message);
       setLoading(false);
       return;
@@ -137,11 +151,11 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
   }, [role, myEmail]);
 
   useEffect(() => {
-    if (!role || !myEmail) return;
-    load();
-  }, [load, role, myEmail]);
+    if (!myEmail) {
+      setFavorites([]);
+      return;
+    }
 
-  useEffect(() => {
     try {
       setFavorites(JSON.parse(localStorage.getItem(`favorites_${myEmail}`) || '[]'));
     } catch {
@@ -150,7 +164,13 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
   }, [myEmail]);
 
   useEffect(() => {
-    if (myEmail) localStorage.setItem(`favorites_${myEmail}`, JSON.stringify(favorites));
+    load();
+  }, [load]);
+
+  useEffect(() => {
+    if (myEmail) {
+      localStorage.setItem(`favorites_${myEmail}`, JSON.stringify(favorites));
+    }
   }, [favorites, myEmail]);
 
   const toggleFavorite = (sku: string) => {
@@ -160,7 +180,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
   const profileMap = useMemo(() => {
     const m: Record<string, { name: string; logo: string; phone: string }> = {};
     profiles.forEach((p) => {
-      m[p.email.toLowerCase()] = {
+      m[normalizeEmail(p.email)] = {
         name: p.name || p.email,
         logo: p.logo_url || '',
         phone: p.phone || '',
@@ -177,22 +197,28 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
     }
 
     if (tab === 'privados') {
-      list = list.filter((p) => {
-        const allowed = parsePrivateEmails(p.private_to_emails);
-        return allowed.includes(myEmail);
-      });
+      if (role === 'provider') {
+        list = list.filter((p) => isPrivateProduct(p));
+      } else {
+        list = list.filter((p) => {
+          const allowed = parsePrivateEmails(p.private_to_emails);
+          return allowed.includes(myEmail);
+        });
+      }
     }
 
     if (search) {
       const q = norm(search);
       list = list.filter((p) => {
-        const hay = [p.title, p.sku, p.provider_email, p.description].map((v) => norm(v || '')).join(' ');
+        const hay = [p.title, p.sku, p.provider_email, p.description]
+          .map((v) => norm(String(v || '')))
+          .join(' ');
         return hay.includes(q);
       });
     }
 
     return list;
-  }, [products, tab, search, favorites, myEmail]);
+  }, [products, tab, search, favorites, myEmail, role]);
 
   const grouped = useMemo(() => {
     const map = new Map<
@@ -202,12 +228,14 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
 
     filtered.forEach((p) => {
       const key = normalizeEmail(p.provider_email || '__sin_proveedor__');
+
       if (!map.has(key)) {
         const info = profileMap[key] || {
           name: p.provider_email || 'Sin proveedor',
           logo: '',
           phone: '',
         };
+
         map.set(key, {
           email: p.provider_email || '',
           name: info.name,
@@ -216,13 +244,16 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
           items: [],
         });
       }
+
       map.get(key)!.items.push(p);
     });
 
     return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name, 'es'));
   }, [filtered, profileMap]);
 
-  const getImages = (p: Product) => [p.image_url, p.image_url_2, p.image_url_3].filter(Boolean) as string[];
+  const getImages = (p: Product) =>
+    [p.image_url, p.image_url_2, p.image_url_3].filter(Boolean) as string[];
+
   const getInitials = (name: string) =>
     name
       .split(/\s+/)
