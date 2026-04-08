@@ -108,34 +108,31 @@ export default function CreateOrderView({
     setSaving(true);
 
     try {
-      // Generate order_number from order_sequence
-      const { data: seqData, error: seqError } = await supabase
-        .from('order_sequence')
-        .select('counter, prefix, pad')
-        .eq('id', 1)
-        .single();
-
-      if (seqError || !seqData) throw new Error('No se pudo leer el contador de órdenes');
-
-      const nextCounter = (seqData.counter || 0) + 1;
-      const prefix = seqData.prefix || 'A';
-      const pad = seqData.pad || 3;
-      const orderNumber = `${prefix}${String(nextCounter).padStart(pad, '0')}`;
-
-      // Update counter
-      const { error: updateSeqError } = await supabase
-        .from('order_sequence')
-        .update({ counter: nextCounter })
-        .eq('id', 1);
-
-      if (updateSeqError) throw new Error('No se pudo actualizar el contador');
-
       const providerEmails = [
         ...new Set(validItems.map((i) => catalogMap[i.sku]?.provider_email).filter(Boolean)),
       ];
 
+      // 1) Leer order_sequence
+      const { data: seq, error: seqError } = await supabase
+        .from('order_sequence')
+        .select('*')
+        .eq('id', 1)
+        .single();
+
+      if (seqError) {
+        throw new Error(`No se pudo leer order_sequence: ${seqError.message}`);
+      }
+
+      // 2) Incrementar contador
+      const counter = Number(seq?.counter || 0) + 1;
+      const prefix = seq?.prefix || 'A';
+      const pad = Number(seq?.pad || 3);
+
+      // 3) Generar order_number tipo A003
+      const generatedOrderNumber = `${prefix}${String(counter).padStart(pad, '0')}`;
+
       const payload = {
-        order_number: orderNumber,
+        order_number: generatedOrderNumber,
         created_by: profile?.email || null,
         customer_name: customer,
         phone,
@@ -158,20 +155,25 @@ export default function CreateOrderView({
         provider_emails_list: providerEmails.join(','),
       };
 
-      const { data: insertedOrder, error: insertError } = await supabase
-        .from('orders')
-        .insert(payload)
-        .select('id, order_number')
-        .single();
+      // 4) Guardar pedido
+      const { error: insertError } = await supabase.from('orders').insert(payload);
 
       if (insertError) {
         throw insertError;
       }
 
-      const generatedOrderNumber = insertedOrder?.order_number || insertedOrder?.id || 'SIN-NUMERO';
+      // 5) Actualizar order_sequence
+      const { error: updateSeqError } = await supabase
+        .from('order_sequence')
+        .update({ counter })
+        .eq('id', 1);
+
+      if (updateSeqError) {
+        throw new Error(`Pedido guardado pero no se actualizó order_sequence: ${updateSeqError.message}`);
+      }
 
       const { error: newsError } = await supabase.from('news').insert({
-        order_id: String(generatedOrderNumber),
+        order_id: generatedOrderNumber,
         actor_email: profile?.email,
         role_scope: profile?.role,
         message: `Nuevo pedido ${generatedOrderNumber} - ${customer} - ${city} - Gs ${nf(totalVenta)}`,
