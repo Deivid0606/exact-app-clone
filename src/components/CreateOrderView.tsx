@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
@@ -8,7 +8,7 @@ const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 const normalizeEmail = (value: any) => String(value || '').trim().toLowerCase();
 const normalizeRole = (value: any) => String(value || '').trim().toLowerCase();
 
-const extractPrivateEmails = (value: any): string[] => {
+const parsePrivateEmails = (value: any): string[] => {
   if (!value) return [];
 
   if (Array.isArray(value)) {
@@ -25,18 +25,16 @@ const extractPrivateEmails = (value: any): string[] => {
   return [];
 };
 
-const canAccessProduct = (product: any, profile: any) => {
+const canUserSeeProduct = (product: any, profile: any) => {
   const role = normalizeRole(profile?.role);
   const userEmail = normalizeEmail(profile?.email);
   const providerEmail = normalizeEmail(product?.provider_email);
   const isPrivate = Boolean(product?.is_private_stock);
-  const privateEmails = extractPrivateEmails(product?.private_to_emails);
+  const privateEmails = parsePrivateEmails(product?.private_to_emails);
 
-  if (!role || !userEmail) return false;
+  if (!userEmail || !role) return false;
 
-  if (role === 'admin') {
-    return true;
-  }
+  if (role === 'admin') return true;
 
   if (role === 'provider') {
     return providerEmail === userEmail;
@@ -47,7 +45,7 @@ const canAccessProduct = (product: any, profile: any) => {
     return privateEmails.includes(userEmail);
   }
 
-  return !isPrivate;
+  return false;
 };
 
 export default function CreateOrderView({
@@ -58,7 +56,6 @@ export default function CreateOrderView({
   onSkuConsumed?: () => void;
 }) {
   const { profile } = useAuth();
-
   const [products, setProducts] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
   const [customer, setCustomer] = useState('');
@@ -72,71 +69,62 @@ export default function CreateOrderView({
     { sku: '', sale_gs: 0, qty: 1 },
   ]);
   const [saving, setSaving] = useState(false);
-  const [loadingProducts, setLoadingProducts] = useState(false);
 
   useEffect(() => {
     const loadData = async () => {
-      if (!profile?.email || !profile?.role) return;
+      const { data: productsData, error: productsError } = await supabase
+        .from('products')
+        .select('*')
+        .order('title');
 
-      setLoadingProducts(true);
-
-      try {
-        const { data: productsData, error: productsError } = await supabase
-          .from('products')
-          .select('*')
-          .order('title');
-
-        if (productsError) throw productsError;
-
-        const allProducts = productsData || [];
-        const visibleProducts = allProducts.filter((p: any) => canAccessProduct(p, profile));
-
-        setProducts(visibleProducts);
-
-        if (initialSku) {
-          const found = visibleProducts.find((p: any) => p.sku === initialSku);
-          if (found) {
-            setItems([{ sku: initialSku, sale_gs: 0, qty: 1 }]);
-            onSkuConsumed?.();
-          } else {
-            onSkuConsumed?.();
-          }
-        }
-
-        const { data: pricesData, error: pricesError } = await supabase
-          .from('client_prices')
-          .select('*')
-          .order('city');
-
-        if (pricesError) throw pricesError;
-
-        setClientPrices(pricesData || []);
-      } catch (error: any) {
-        console.error('Error cargando datos de CreateOrderView:', error);
-        toast.error(error?.message || 'No se pudieron cargar los productos');
-      } finally {
-        setLoadingProducts(false);
+      if (productsError) {
+        console.error('Error cargando productos:', productsError);
+        toast.error('No se pudieron cargar los productos');
+        return;
       }
+
+      const visibleProducts = (productsData || []).filter((p: any) =>
+        canUserSeeProduct(p, profile)
+      );
+
+      setProducts(visibleProducts);
+
+      if (initialSku) {
+        const found = visibleProducts.find((p: any) => p.sku === initialSku);
+        if (found) {
+          setItems([{ sku: initialSku, sale_gs: 0, qty: 1 }]);
+        }
+        onSkuConsumed?.();
+      }
+
+      const { data: pricesData, error: pricesError } = await supabase
+        .from('client_prices')
+        .select('*')
+        .order('city');
+
+      if (pricesError) {
+        console.error('Error cargando precios de cliente:', pricesError);
+        toast.error('No se pudieron cargar los precios de delivery');
+        return;
+      }
+
+      setClientPrices(pricesData || []);
     };
 
-    loadData();
+    if (profile?.email && profile?.role) {
+      loadData();
+    }
   }, [initialSku, onSkuConsumed, profile?.email, profile?.role]);
 
-  const catalogMap: Record<string, any> = useMemo(() => {
-    const map: Record<string, any> = {};
-    products.forEach((p) => {
-      if (p.sku) map[p.sku] = p;
-    });
-    return map;
-  }, [products]);
+  const catalogMap: Record<string, any> = {};
+  products.forEach((p) => {
+    if (p.sku) catalogMap[p.sku] = p;
+  });
 
   const deliveryPrice =
     clientPrices.find((c) => c.city?.toLowerCase() === city.toLowerCase())?.price_gs || 0;
 
-  const totalVenta = items.reduce(
-    (s, i) => s + Number(i.sale_gs || 0) * Number(i.qty || 0),
-    0
-  );
+  const totalVenta = items.reduce((s, i) => s + (Number(i.sale_gs) || 0), 0);
 
   const totalProv = items.reduce((s, i) => {
     const p = catalogMap[i.sku];
@@ -154,14 +142,6 @@ export default function CreateOrderView({
   const updateItem = (idx: number, field: string, value: any) => {
     const copy = [...items];
     (copy[idx] as any)[field] = value;
-
-    if (field === 'sku') {
-      const selected = catalogMap[value];
-      if (selected && !copy[idx].sale_gs) {
-        copy[idx].sale_gs = Number(selected.sale_price_gs || 0);
-      }
-    }
-
     setItems(copy);
   };
 
@@ -185,11 +165,11 @@ export default function CreateOrderView({
     }
 
     const validItems = items.filter(
-      (i) => i.sku && Number(i.sale_gs) > 0 && Number(i.qty) > 0 && catalogMap[i.sku]
+      (i) => i.sku && Number(i.sale_gs) > 0 && Number(i.qty) > 0
     );
 
     if (validItems.length === 0) {
-      toast.error('Agregá al menos 1 ítem válido');
+      toast.error('Agregá al menos 1 ítem');
       return;
     }
 
@@ -229,7 +209,9 @@ export default function CreateOrderView({
         .select('id, order_number')
         .single();
 
-      if (insertError) throw insertError;
+      if (insertError) {
+        throw insertError;
+      }
 
       const generatedOrderNumber = insertedOrder?.order_number || insertedOrder?.id || 'SIN-NUMERO';
 
@@ -333,9 +315,7 @@ export default function CreateOrderView({
                 value={item.sku}
                 onChange={(e) => updateItem(idx, 'sku', e.target.value)}
               >
-                <option value="">
-                  {loadingProducts ? 'Cargando productos…' : 'Seleccionar producto…'}
-                </option>
+                <option value="">Seleccionar producto…</option>
                 {products.map((p) => (
                   <option key={p.id} value={p.sku} disabled={(p.stock || 0) <= 0}>
                     {p.title} — {p.sku} (Prov {nf(Number(p.provider_price_gs || 0))}){' '}
@@ -401,7 +381,7 @@ export default function CreateOrderView({
             </div>
           </div>
 
-          <button className="nav-btn active mt-4" onClick={saveOrder} disabled={saving || loadingProducts}>
+          <button className="nav-btn active mt-4" onClick={saveOrder} disabled={saving}>
             {saving ? (
               <span className="flex items-center gap-2">
                 <span className="btn-spinner" /> Guardando...
