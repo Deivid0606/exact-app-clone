@@ -47,26 +47,43 @@ function isProviderAllowed(order: any, userEmail: string): boolean {
   return emails.some(email => norm(email) === norm(userEmail));
 }
 
-// Helper para filtrar items por proveedor (para guías)
-function filterItemsByProvider(items: any[], role: string, userEmail: string): { filteredItems: any[], originalCount: number } {
-  const originalCount = items?.length || 0;
+// Helper para filtrar items por proveedor (CORREGIDO)
+function getProviderItems(items: any[], role: string, userEmail: string): any[] {
+  // Si no hay items, retornar array vacío
+  if (!items || !Array.isArray(items)) return [];
   
   // ADMIN y DESPACHANTE ven todos los items
   if (role === 'ADMIN' || role === 'DESPACHANTE') {
-    return { filteredItems: items || [], originalCount };
+    return items;
   }
   
   // PROVEEDOR solo ve sus items
   if (role === 'PROVEEDOR') {
-    const filtered = (items || []).filter((item: any) => {
+    const normalizedUserEmail = norm(userEmail);
+    return items.filter((item: any) => {
       const itemProvider = item.provider_email || '';
-      return norm(itemProvider) === norm(userEmail);
+      const normalizedItemProvider = norm(itemProvider);
+      return normalizedItemProvider === normalizedUserEmail;
     });
-    return { filteredItems: filtered, originalCount };
   }
   
-  // Otros roles (VENDEDOR, DELIVERY) ven todos los items
-  return { filteredItems: items || [], originalCount };
+  // VENDEDOR y DELIVERY ven todos los items
+  return items;
+}
+
+// Helper para parsear items_json correctamente
+function parseItemsJson(itemsJson: any): any[] {
+  if (!itemsJson) return [];
+  if (Array.isArray(itemsJson)) return itemsJson;
+  if (typeof itemsJson === 'string') {
+    try {
+      const parsed = JSON.parse(itemsJson);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  }
+  return [];
 }
 
 export default function OrdersView() {
@@ -223,31 +240,27 @@ export default function OrdersView() {
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'CANCELADO' } : o));
   };
 
-  // Generar guía con filtro por proveedor
+  // Generar guía con filtro CORREGIDO para proveedores
   const generateGuide = (o: any) => {
     try {
-      let items = [];
-      try {
-        items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
-      } catch {
-        items = [];
-      }
+      // Parsear items_json correctamente
+      const allItems = parseItemsJson(o.items_json);
       
       // Filtrar items según el rol
-      const { filteredItems, originalCount } = filterItemsByProvider(items, role, myEmail);
+      const myItems = getProviderItems(allItems, role, myEmail);
       
       // Si es proveedor y no tiene items, mostrar mensaje
-      if (role === 'PROVEEDOR' && filteredItems.length === 0) {
-        toast.info('Este pedido no contiene productos de tu proveeduría');
+      if (role === 'PROVEEDOR' && myItems.length === 0) {
+        toast.error('Este pedido no contiene productos de tu proveeduría');
         return;
       }
 
-      const itemsText = filteredItems.map((it: any, i: number) =>
+      const itemsText = myItems.map((it: any, i: number) =>
         `${i + 1}. ${it.title || it.sku || 'Item'} x${it.qty || 1} — Gs ${nf(Number(it.sale_gs || 0) * Number(it.qty || 1))}`
       ).join('\n');
 
       // Calcular total solo de los items filtrados
-      const filteredTotal = filteredItems.reduce((sum, it) => sum + (Number(it.sale_gs || 0) * Number(it.qty || 1)), 0);
+      const filteredTotal = myItems.reduce((sum, it) => sum + (Number(it.sale_gs || 0) * Number(it.qty || 1)), 0);
 
       const text = [
         `GUÍA DE ENVÍO — ${o.order_number || o.id.slice(0, 8)}`,
@@ -259,7 +272,7 @@ export default function OrdersView() {
         `Dirección: ${o.street || ''} ${o.district ? '- ' + o.district : ''}`,
         `━━━━━━━━━━━━━━━━━━`,
         `Productos:`,
-        itemsText || '  (sin productos)',
+        itemsText || (role === 'PROVEEDOR' ? '  (No tienes productos en este pedido)' : '  (Sin productos)'),
         `━━━━━━━━━━━━━━━━━━`,
         `Total: Gs ${nf(filteredTotal)}`,
         `Delivery: Gs ${nf(Number(o.delivery_gs || 0))}`,
@@ -267,13 +280,13 @@ export default function OrdersView() {
         `━━━━━━━━━━━━━━━━━━`,
         `Vendedor: ${o.created_by || ''}`,
         `Delivery: ${o.assigned_delivery || 'Sin asignar'}`,
-        role === 'PROVEEDOR' && originalCount !== filteredItems.length ? `⚠️ Solo se muestran ${filteredItems.length} de ${originalCount} productos (tuyos)` : '',
+        role === 'PROVEEDOR' && allItems.length !== myItems.length ? `⚠️ Solo se muestran tus productos (${myItems.length} de ${allItems.length} totales)` : '',
       ].filter(Boolean).join('\n');
 
       setGuideText(text);
       setGuideOrderId(o.order_number || o.id.slice(0, 8));
     } catch (error) {
-      console.error(error);
+      console.error('Error generando guía:', error);
       toast.error('Error generando guía');
     }
   };
@@ -299,40 +312,57 @@ export default function OrdersView() {
     }
   };
 
-  // Generar guías múltiples con filtro por proveedor
+  // Generar guías múltiples con filtro CORREGIDO
   const bulkGenerateGuides = () => {
     const selected = filtered.filter(o => selectedIds.has(o.id));
     if (selected.length === 0) { toast.error('Seleccioná pedidos primero'); return; }
     
     let generatedCount = 0;
-    const allText = selected.map(o => {
-      let items = [];
-      try {
-        items = typeof o.items_json === 'string' ? JSON.parse(o.items_json || '[]') : (o.items_json || []);
-      } catch {
-        items = [];
+    let totalHiddenItems = 0;
+    const guidesArray: string[] = [];
+    
+    for (const o of selected) {
+      const allItems = parseItemsJson(o.items_json);
+      const myItems = getProviderItems(allItems, role, myEmail);
+      
+      // Si es proveedor y no tiene items, saltar este pedido
+      if (role === 'PROVEEDOR' && myItems.length === 0) {
+        continue;
       }
       
-      const { filteredItems } = filterItemsByProvider(items, role, myEmail);
-      
-      // Si es proveedor y no tiene items, omitir este pedido
-      if (role === 'PROVEEDOR' && filteredItems.length === 0) return null;
-      
+      const hiddenCount = allItems.length - myItems.length;
+      totalHiddenItems += hiddenCount;
       generatedCount++;
-      const itemsText = filteredItems.map((it: any, i: number) => 
-        `  ${i + 1}. ${it.title || it.sku} x${it.qty}`
+      
+      const itemsText = myItems.map((it: any, i: number) => 
+        `  ${i + 1}. ${it.title || it.sku} x${it.qty} — Gs ${nf(Number(it.sale_gs || 0) * Number(it.qty || 1))}`
       ).join('\n');
       
-      return `${o.order_number || o.id.slice(0, 8)} — ${o.customer_name} — ${o.city}\nTeléfono: ${o.phone}\nDirección: ${o.street || ''} ${o.district || ''}\n${itemsText}\nTotal: Gs ${nf(Number(o.total_gs || 0))}\n${o.obs ? 'Obs: ' + o.obs : ''}`;
-    }).filter(Boolean).join('\n\n════════════════════\n\n');
+      const filteredTotal = myItems.reduce((sum, it) => sum + (Number(it.sale_gs || 0) * Number(it.qty || 1)), 0);
+      
+      const guide = `${o.order_number || o.id.slice(0, 8)} — ${o.customer_name} — ${o.city}
+Teléfono: ${o.phone}
+Dirección: ${o.street || ''} ${o.district || ''}
+${itemsText}
+Total: Gs ${nf(filteredTotal)}
+${o.obs ? 'Obs: ' + o.obs : ''}`;
+      
+      guidesArray.push(guide);
+    }
     
-    if (allText.length === 0) {
+    if (guidesArray.length === 0) {
       toast.error('Ninguno de los pedidos seleccionados contiene tus productos');
       return;
     }
     
+    const allText = guidesArray.join('\n\n════════════════════\n\n');
     navigator.clipboard.writeText(allText);
-    toast.success(`${generatedCount} guía${generatedCount !== 1 ? 's' : ''} copiada${generatedCount !== 1 ? 's' : ''}${role === 'PROVEEDOR' ? ' (solo tus productos)' : ''}`);
+    
+    let message = `${generatedCount} guía${generatedCount !== 1 ? 's' : ''} copiada${generatedCount !== 1 ? 's' : ''}`;
+    if (role === 'PROVEEDOR' && totalHiddenItems > 0) {
+      message += ` (se ocultaron ${totalHiddenItems} producto${totalHiddenItems !== 1 ? 's' : ''} de otros proveedores)`;
+    }
+    toast.success(message);
   };
 
   const statusClass = (s: string) => {
@@ -406,13 +436,14 @@ export default function OrdersView() {
                 ? new Date(o.assigned_at).toLocaleString('es-PY')
                 : new Date(o.created_at).toLocaleString('es-PY');
 
-              // Para mostrar cuántos productos tiene el proveedor en este pedido
-              let providerItemsCount = null;
+              // Contar productos del proveedor en este pedido (solo para mostrar badge)
+              let providerItemsCount = 0;
+              let otherItemsCount = 0;
               if (role === 'PROVEEDOR') {
-                try {
-                  const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json || '[]') : (o.items_json || []);
-                  providerItemsCount = items.filter((item: any) => norm(item.provider_email || '') === norm(myEmail)).length;
-                } catch { providerItemsCount = 0; }
+                const allItems = parseItemsJson(o.items_json);
+                const myItems = getProviderItems(allItems, role, myEmail);
+                providerItemsCount = myItems.length;
+                otherItemsCount = allItems.length - providerItemsCount;
               }
 
               return (
@@ -423,11 +454,10 @@ export default function OrdersView() {
                   <td className="whitespace-nowrap text-xs">{dateShown}</td>
                   <td className="font-bold text-xs">
                     {o.order_number || o.id.slice(0, 8)}
-                    {role === 'PROVEEDOR' && providerItemsCount === 0 && (
-                      <span className="text-red-500 text-[10px] ml-1">(sin tus productos)</span>
-                    )}
-                    {role === 'PROVEEDOR' && providerItemsCount > 0 && (
-                      <span className="text-green-600 text-[10px] ml-1">({providerItemsCount} prod. tuyos)</span>
+                    {role === 'PROVEEDOR' && (
+                      <span className={`text-[10px] ml-1 ${providerItemsCount === 0 ? 'text-red-500' : 'text-green-600'}`}>
+                        ({providerItemsCount} tuyo{providerItemsCount !== 1 ? 's' : ''}{otherItemsCount > 0 ? `, ${otherItemsCount} otro${otherItemsCount !== 1 ? 's' : ''}` : ''})
+                      </span>
                     )}
                   </td>
                   <td className="text-xs">{o.city}</td>
