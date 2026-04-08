@@ -64,6 +64,14 @@ function getMyItems(items: any[], role: string, userEmail: string): any[] {
   return items;
 }
 
+// Verificar si un pedido contiene productos del proveedor
+function orderHasMyProducts(order: any, role: string, userEmail: string): boolean {
+  if (role !== 'PROVEEDOR') return true;
+  const items = parseItemsJson(order.items_json);
+  const myItems = getMyItems(items, role, userEmail);
+  return myItems.length > 0;
+}
+
 export default function OrdersView() {
   const { profile } = useAuth();
   const role = profile?.role || '';
@@ -88,30 +96,19 @@ export default function OrdersView() {
   const loadOrders = async () => {
     setLoading(true);
     
-    // 🔒 CONSTRUIR CONSULTA CON FILTRO PERMANENTE POR ROL
+    // Construir la consulta base
     let query = supabase.from('orders').select('*')
       .gte('created_at', dateFrom + 'T00:00:00')
       .lte('created_at', dateTo + 'T23:59:59')
       .order('created_at', { ascending: false })
       .limit(500);
     
-    // 🔒 FILTRO PERMANENTE PARA PROVEEDOR (NO SE PUEDE CAMBIAR)
+    // 🔒 BLOQUEO PARA PROVEEDOR: Solo pedidos donde tiene productos
     if (role === 'PROVEEDOR') {
-      // Filtra por provider_emails_list (campo que contiene los emails de los proveedores autorizados)
+      // Esta es la parte clave: filtramos por provider_emails_list
+      // pero además luego en el frontend filtramos por items
       query = query.contains('provider_emails_list', [myEmail]);
     }
-    
-    // 🔒 FILTRO PERMANENTE PARA VENDEDOR
-    if (role === 'VENDEDOR') {
-      query = query.eq('created_by', myEmail);
-    }
-    
-    // 🔒 FILTRO PERMANENTE PARA DELIVERY
-    if (role === 'DELIVERY') {
-      query = query.eq('assigned_delivery', myEmail);
-    }
-    
-    // ADMIN y DESPACHANTE no tienen filtro (ven todos)
     
     const [ordersRes, deliveriesRes] = await Promise.all([
       query,
@@ -123,7 +120,14 @@ export default function OrdersView() {
       })
     ]);
     
-    setOrders(ordersRes.data || []);
+    let ordersData = ordersRes.data || [];
+    
+    // 🔒 Filtro adicional de seguridad para PROVEEDOR (verificar que realmente tenga productos)
+    if (role === 'PROVEEDOR') {
+      ordersData = ordersData.filter(order => orderHasMyProducts(order, role, myEmail));
+    }
+    
+    setOrders(ordersData);
     setDeliveries(deliveriesRes);
     setLoading(false);
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
@@ -131,14 +135,21 @@ export default function OrdersView() {
 
   useEffect(() => { loadOrders(); }, []);
 
-  // Filtros adicionales de búsqueda y estado (no afectan el filtro de proveedor)
+  // Filtrado principal con reglas de negocio
   const filtered = useMemo(() => {
     const q = norm(search);
     return orders.filter(o => {
+      // Filtro por rol (ya está pre-filtrado, pero doble seguridad)
+      if (role === 'VENDEDOR' && norm(o.created_by || '') !== norm(myEmail)) return false;
+      if (role === 'DELIVERY' && norm(o.assigned_delivery || '') !== norm(myEmail)) return false;
+      
+      // 🔒 PROVEEDOR: Solo pedidos donde tiene productos (seguridad extra)
+      if (role === 'PROVEEDOR' && !orderHasMyProducts(o, role, myEmail)) return false;
+
       // Filtro por estado
       if (statusFilter && (o.status || 'PENDIENTE') !== statusFilter) return false;
 
-      // Búsqueda por texto
+      // Búsqueda
       if (q) {
         const idNum = String(o.order_number || o.id || '').replace(/^[a-z]+/i, '');
         const hay = [o.customer_name, o.phone, o.order_number, o.id, idNum, o.city, o.created_by, o.assigned_delivery].map(norm).join(' ');
@@ -146,7 +157,7 @@ export default function OrdersView() {
       }
       return true;
     });
-  }, [orders, search, statusFilter]);
+  }, [orders, search, statusFilter, role, myEmail]);
 
   const postNews = async (message: string, orderNum: string) => {
     await supabase.from('news').insert({
@@ -353,30 +364,22 @@ ${o.obs ? 'Obs: ' + o.obs : ''}`;
   const canEditStatus2 = role === 'ADMIN' || role === 'DESPACHANTE' || role === 'PROVEEDOR';
   const canAssign = role === 'ADMIN' || role === 'PROVEEDOR';
   const canEdit = role === 'ADMIN' || role === 'DESPACHANTE' || role === 'PROVEEDOR';
+  
+  // 🔒 PROVEEDOR no puede seleccionar pedidos de otros
+  const canSelectOrders = role !== 'PROVEEDOR' || (role === 'PROVEEDOR' && filtered.some(o => {
+    const items = parseItemsJson(o.items_json);
+    const myItems = getMyItems(items, role, myEmail);
+    return myItems.length > 0;
+  }));
 
   return (
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Pedidos</h3>
       
-      {/* 🔒 Badge indicador de filtro permanente para cada rol */}
+      {/* 🔒 Indicador para PROVEEDOR */}
       {role === 'PROVEEDOR' && (
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 mb-3 text-sm text-blue-700 flex items-center gap-2">
-          <span className="text-lg">🔒</span>
-          <span>Modo Proveedor: Mostrando solo pedidos que contienen tus productos (<strong>{myEmail}</strong>)</span>
-        </div>
-      )}
-      
-      {role === 'VENDEDOR' && (
-        <div className="bg-green-50 border border-green-200 rounded-lg p-2 mb-3 text-sm text-green-700 flex items-center gap-2">
-          <span className="text-lg">🔒</span>
-          <span>Modo Vendedor: Mostrando solo pedidos que creaste</span>
-        </div>
-      )}
-      
-      {role === 'DELIVERY' && (
-        <div className="bg-purple-50 border border-purple-200 rounded-lg p-2 mb-3 text-sm text-purple-700 flex items-center gap-2">
-          <span className="text-lg">🔒</span>
-          <span>Modo Delivery: Mostrando solo pedidos asignados a vos</span>
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 mb-3 text-xs text-blue-700">
+          🔒 Modo Proveedor: Solo ves pedidos que contienen tus productos
         </div>
       )}
 
@@ -408,7 +411,12 @@ ${o.obs ? 'Obs: ' + o.obs : ''}`;
               <th className="!w-[40px] text-center">
                 <input type="checkbox" 
                   checked={selectedIds.size === filtered.length && filtered.length > 0}
-                  onChange={toggleSelectAll} />
+                  onChange={toggleSelectAll} 
+                  disabled={role === 'PROVEEDOR' && filtered.filter(o => {
+                    const items = parseItemsJson(o.items_json);
+                    return getMyItems(items, role, myEmail).length > 0;
+                  }).length === 0}
+                  title="Seleccionar todos" />
               </th>
               <th>Fecha</th>
               <th>ID</th>
@@ -428,11 +436,7 @@ ${o.obs ? 'Obs: ' + o.obs : ''}`;
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={20} className="text-center text-muted-foreground py-8">
-                {role === 'PROVEEDOR' 
-                  ? 'No hay pedidos con tus productos en el rango seleccionado' 
-                  : 'Sin pedidos'}
-              </td></tr>
+              <tr><td colSpan={20} className="text-center text-muted-foreground py-8">Sin pedidos</td></tr>
             )}
             {filtered.map(o => {
               const feeStored = Number(o.delivery_fee_gs || 0);
@@ -443,22 +447,29 @@ ${o.obs ? 'Obs: ' + o.obs : ''}`;
 
               // Para PROVEEDOR: contar sus items
               let myItemsCount = 0;
+              let otherItemsCount = 0;
               if (role === 'PROVEEDOR') {
                 const allItems = parseItemsJson(o.items_json);
                 const myItems = getMyItems(allItems, role, myEmail);
                 myItemsCount = myItems.length;
+                otherItemsCount = allItems.length - myItemsCount;
               }
 
               return (
                 <tr key={o.id}>
                   <td className="text-center">
-                    <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
+                    <input type="checkbox 
+                      checked={selectedIds.has(o.id)} 
+                      onChange={() => toggleSelect(o.id)}
+                      disabled={role === 'PROVEEDOR' && myItemsCount === 0} />
                   </td>
                   <td className="whitespace-nowrap text-xs">{dateShown}</td>
                   <td className="font-bold text-xs">
                     {o.order_number || o.id.slice(0, 8)}
-                    {role === 'PROVEEDOR' && myItemsCount > 0 && (
-                      <span className="text-green-600 text-[10px] ml-1">({myItemsCount} producto{myItemsCount !== 1 ? 's' : ''})</span>
+                    {role === 'PROVEEDOR' && (
+                      <span className={`text-[10px] ml-1 ${myItemsCount === 0 ? 'text-red-500' : 'text-green-600'}`}>
+                        ({myItemsCount} tuyo{myItemsCount !== 1 ? 's' : ''}{otherItemsCount > 0 ? `, ${otherItemsCount} otro${otherItemsCount !== 1 ? 's' : ''}` : ''})
+                      </span>
                     )}
                   </td>
                   <td className="text-xs">{o.city}</td>
@@ -514,8 +525,20 @@ ${o.obs ? 'Obs: ' + o.obs : ''}`;
                   )}
                   <td>
                     <div className="flex gap-1">
-                      <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={() => generateGuide(o)} title="Ver guía">📄</button>
-                      <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={() => { generateGuide(o); setTimeout(copyGuide, 100); }} title="Copiar guía">📋</button>
+                      <button 
+                        className="nav-btn !px-2 !py-1 !text-[10px]" 
+                        onClick={() => generateGuide(o)} 
+                        disabled={role === 'PROVEEDOR' && myItemsCount === 0}
+                        title={role === 'PROVEEDOR' && myItemsCount === 0 ? 'No tienes productos en este pedido' : 'Ver guía'}>
+                        📄
+                      </button>
+                      <button 
+                        className="nav-btn !px-2 !py-1 !text-[10px]" 
+                        onClick={() => { generateGuide(o); setTimeout(copyGuide, 100); }}
+                        disabled={role === 'PROVEEDOR' && myItemsCount === 0}
+                        title={role === 'PROVEEDOR' && myItemsCount === 0 ? 'No tienes productos en este pedido' : 'Copiar guía'}>
+                        📋
+                      </button>
                     </div>
                   </td>
                   {canEdit && (
