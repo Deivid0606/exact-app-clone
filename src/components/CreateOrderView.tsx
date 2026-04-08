@@ -108,11 +108,34 @@ export default function CreateOrderView({
     setSaving(true);
 
     try {
+      // Generate order_number from order_sequence
+      const { data: seqData, error: seqError } = await supabase
+        .from('order_sequence')
+        .select('counter, prefix, pad')
+        .eq('id', 1)
+        .single();
+
+      if (seqError || !seqData) throw new Error('No se pudo leer el contador de órdenes');
+
+      const nextCounter = (seqData.counter || 0) + 1;
+      const prefix = seqData.prefix || 'A';
+      const pad = seqData.pad || 3;
+      const orderNumber = `${prefix}${String(nextCounter).padStart(pad, '0')}`;
+
+      // Update counter
+      const { error: updateSeqError } = await supabase
+        .from('order_sequence')
+        .update({ counter: nextCounter })
+        .eq('id', 1);
+
+      if (updateSeqError) throw new Error('No se pudo actualizar el contador');
+
       const providerEmails = [
         ...new Set(validItems.map((i) => catalogMap[i.sku]?.provider_email).filter(Boolean)),
       ];
 
       const payload = {
+        order_number: orderNumber,
         created_by: profile?.email || null,
         customer_name: customer,
         phone,
