@@ -27,26 +27,6 @@ interface EditOrder {
   assigned_at: string;
 }
 
-// Helper para verificar si el proveedor tiene acceso al pedido
-function isProviderAllowed(order: any, userEmail: string): boolean {
-  const providerList = order.provider_emails_list;
-  if (!providerList) return false;
-
-  let emails: string[] = [];
-  if (Array.isArray(providerList)) {
-    emails = providerList;
-  } else if (typeof providerList === 'string') {
-    try {
-      const parsed = JSON.parse(providerList);
-      if (Array.isArray(parsed)) emails = parsed;
-      else emails = providerList.split(',').map(s => s.trim());
-    } catch {
-      emails = providerList.split(',').map(s => s.trim());
-    }
-  }
-  return emails.some(email => norm(email) === norm(userEmail));
-}
-
 // Helper para parsear items_json correctamente
 function parseItemsJson(itemsJson: any): any[] {
   if (!itemsJson) return [];
@@ -107,12 +87,34 @@ export default function OrdersView() {
 
   const loadOrders = async () => {
     setLoading(true);
+    
+    // 🔒 CONSTRUIR CONSULTA CON FILTRO PERMANENTE POR ROL
+    let query = supabase.from('orders').select('*')
+      .gte('created_at', dateFrom + 'T00:00:00')
+      .lte('created_at', dateTo + 'T23:59:59')
+      .order('created_at', { ascending: false })
+      .limit(500);
+    
+    // 🔒 FILTRO PERMANENTE PARA PROVEEDOR (NO SE PUEDE CAMBIAR)
+    if (role === 'PROVEEDOR') {
+      // Filtra por provider_emails_list (campo que contiene los emails de los proveedores autorizados)
+      query = query.contains('provider_emails_list', [myEmail]);
+    }
+    
+    // 🔒 FILTRO PERMANENTE PARA VENDEDOR
+    if (role === 'VENDEDOR') {
+      query = query.eq('created_by', myEmail);
+    }
+    
+    // 🔒 FILTRO PERMANENTE PARA DELIVERY
+    if (role === 'DELIVERY') {
+      query = query.eq('assigned_delivery', myEmail);
+    }
+    
+    // ADMIN y DESPACHANTE no tienen filtro (ven todos)
+    
     const [ordersRes, deliveriesRes] = await Promise.all([
-      supabase.from('orders').select('*')
-        .gte('created_at', dateFrom + 'T00:00:00')
-        .lte('created_at', dateTo + 'T23:59:59')
-        .order('created_at', { ascending: false })
-        .limit(500),
+      query,
       supabase.from('profiles').select('email, name, user_id').then(async (profilesRes) => {
         const profiles = profilesRes.data || [];
         const { data: roles } = await supabase.from('user_roles').select('user_id, role').eq('role', 'DELIVERY');
@@ -120,6 +122,7 @@ export default function OrdersView() {
         return profiles.filter(p => deliveryUserIds.has(p.user_id));
       })
     ]);
+    
     setOrders(ordersRes.data || []);
     setDeliveries(deliveriesRes);
     setLoading(false);
@@ -128,19 +131,14 @@ export default function OrdersView() {
 
   useEffect(() => { loadOrders(); }, []);
 
-  // Filtrado principal con reglas de negocio
+  // Filtros adicionales de búsqueda y estado (no afectan el filtro de proveedor)
   const filtered = useMemo(() => {
     const q = norm(search);
     return orders.filter(o => {
-      // Filtro por rol
-      if (role === 'VENDEDOR' && norm(o.created_by || '') !== norm(myEmail)) return false;
-      if (role === 'DELIVERY' && norm(o.assigned_delivery || '') !== norm(myEmail)) return false;
-      if (role === 'PROVEEDOR' && !isProviderAllowed(o, myEmail)) return false;
-
       // Filtro por estado
       if (statusFilter && (o.status || 'PENDIENTE') !== statusFilter) return false;
 
-      // Búsqueda
+      // Búsqueda por texto
       if (q) {
         const idNum = String(o.order_number || o.id || '').replace(/^[a-z]+/i, '');
         const hay = [o.customer_name, o.phone, o.order_number, o.id, idNum, o.city, o.created_by, o.assigned_delivery].map(norm).join(' ');
@@ -148,7 +146,7 @@ export default function OrdersView() {
       }
       return true;
     });
-  }, [orders, search, statusFilter, role, myEmail]);
+  }, [orders, search, statusFilter]);
 
   const postNews = async (message: string, orderNum: string) => {
     await supabase.from('news').insert({
@@ -356,12 +354,31 @@ ${o.obs ? 'Obs: ' + o.obs : ''}`;
   const canAssign = role === 'ADMIN' || role === 'PROVEEDOR';
   const canEdit = role === 'ADMIN' || role === 'DESPACHANTE' || role === 'PROVEEDOR';
 
-  // Determinar qué columnas mostrar (ocultar "Proveedor" para PROVEEDOR)
-  const showProviderColumn = role !== 'PROVEEDOR';
-
   return (
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Pedidos</h3>
+      
+      {/* 🔒 Badge indicador de filtro permanente para cada rol */}
+      {role === 'PROVEEDOR' && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-2 mb-3 text-sm text-blue-700 flex items-center gap-2">
+          <span className="text-lg">🔒</span>
+          <span>Modo Proveedor: Mostrando solo pedidos que contienen tus productos (<strong>{myEmail}</strong>)</span>
+        </div>
+      )}
+      
+      {role === 'VENDEDOR' && (
+        <div className="bg-green-50 border border-green-200 rounded-lg p-2 mb-3 text-sm text-green-700 flex items-center gap-2">
+          <span className="text-lg">🔒</span>
+          <span>Modo Vendedor: Mostrando solo pedidos que creaste</span>
+        </div>
+      )}
+      
+      {role === 'DELIVERY' && (
+        <div className="bg-purple-50 border border-purple-200 rounded-lg p-2 mb-3 text-sm text-purple-700 flex items-center gap-2">
+          <span className="text-lg">🔒</span>
+          <span>Modo Delivery: Mostrando solo pedidos asignados a vos</span>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-wrap items-center gap-2 mb-3">
@@ -389,8 +406,9 @@ ${o.obs ? 'Obs: ' + o.obs : ''}`;
           <thead>
             <tr>
               <th className="!w-[40px] text-center">
-                <input type="checkbox" checked={selectedIds.size === filtered.length && filtered.length > 0}
-                  onChange={toggleSelectAll} title="Seleccionar todos" />
+                <input type="checkbox" 
+                  checked={selectedIds.size === filtered.length && filtered.length > 0}
+                  onChange={toggleSelectAll} />
               </th>
               <th>Fecha</th>
               <th>ID</th>
@@ -403,7 +421,6 @@ ${o.obs ? 'Obs: ' + o.obs : ''}`;
               <th className="text-right">{role === 'DELIVERY' ? 'Tarifa (Gs)' : 'Comisión (Gs)'}</th>
               <th>Estado 1</th>
               {role !== 'DELIVERY' && <th>Estado 2</th>}
-              {showProviderColumn && <th>Proveedor</th>}
               {canAssign && <th>Asignar</th>}
               <th>Guía</th>
               {canEdit && <th>Acciones</th>}
@@ -411,7 +428,11 @@ ${o.obs ? 'Obs: ' + o.obs : ''}`;
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={20} className="text-center text-muted-foreground py-8">Sin pedidos</td></tr>
+              <tr><td colSpan={20} className="text-center text-muted-foreground py-8">
+                {role === 'PROVEEDOR' 
+                  ? 'No hay pedidos con tus productos en el rango seleccionado' 
+                  : 'Sin pedidos'}
+              </td></tr>
             )}
             {filtered.map(o => {
               const feeStored = Number(o.delivery_fee_gs || 0);
@@ -420,25 +441,12 @@ ${o.obs ? 'Obs: ' + o.obs : ''}`;
                 ? new Date(o.assigned_at).toLocaleString('es-PY')
                 : new Date(o.created_at).toLocaleString('es-PY');
 
-              // Obtener proveedores únicos del pedido (solo para ADMIN/DESPACHANTE)
-              let uniqueProviders: string[] = [];
-              if (showProviderColumn) {
-                const allItems = parseItemsJson(o.items_json);
-                const providers = new Set<string>();
-                allItems.forEach((item: any) => {
-                  if (item.provider_email) providers.add(item.provider_email);
-                });
-                uniqueProviders = Array.from(providers);
-              }
-
               // Para PROVEEDOR: contar sus items
               let myItemsCount = 0;
-              let otherItemsCount = 0;
               if (role === 'PROVEEDOR') {
                 const allItems = parseItemsJson(o.items_json);
                 const myItems = getMyItems(allItems, role, myEmail);
                 myItemsCount = myItems.length;
-                otherItemsCount = allItems.length - myItemsCount;
               }
 
               return (
@@ -449,10 +457,8 @@ ${o.obs ? 'Obs: ' + o.obs : ''}`;
                   <td className="whitespace-nowrap text-xs">{dateShown}</td>
                   <td className="font-bold text-xs">
                     {o.order_number || o.id.slice(0, 8)}
-                    {role === 'PROVEEDOR' && (
-                      <span className={`text-[10px] ml-1 ${myItemsCount === 0 ? 'text-red-500' : 'text-green-600'}`}>
-                        ({myItemsCount} tuyo{myItemsCount !== 1 ? 's' : ''}{otherItemsCount > 0 ? `, ${otherItemsCount} otro${otherItemsCount !== 1 ? 's' : ''}` : ''})
-                      </span>
+                    {role === 'PROVEEDOR' && myItemsCount > 0 && (
+                      <span className="text-green-600 text-[10px] ml-1">({myItemsCount} producto{myItemsCount !== 1 ? 's' : ''})</span>
                     )}
                   </td>
                   <td className="text-xs">{o.city}</td>
@@ -490,11 +496,6 @@ ${o.obs ? 'Obs: ' + o.obs : ''}`;
                       ) : (
                         <span className="text-xs text-muted-foreground">{o.status2 || '—'}</span>
                       )}
-                    </td>
-                  )}
-                  {showProviderColumn && (
-                    <td className="text-xs">
-                      {uniqueProviders.length > 0 ? uniqueProviders.join(', ') : '—'}
                     </td>
                   )}
                   {canAssign && (
