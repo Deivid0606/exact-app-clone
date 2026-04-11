@@ -8,6 +8,7 @@ interface UserProfile {
   role: string | null;
   approved: boolean;
   user_id: string;
+  sheet_url: string | null;
 }
 
 interface AuthContextType {
