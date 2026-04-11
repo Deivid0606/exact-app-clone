@@ -127,7 +127,19 @@ export default function ShopifyInboxView({
     }) || null;
   };
 
-  const isCityCovered = (city: string) => {
+  const getDeliveryFee = (city: string): number => {
+    if (!city) return 0;
+    const c = city.toLowerCase().trim();
+    const exact = clientPrices.find((p: any) => (p.city || '').toLowerCase().trim() === c);
+    if (exact) return Number(exact.price_gs) || 0;
+    const partial = clientPrices.find((p: any) => {
+      const pc = (p.city || '').toLowerCase().trim();
+      return c.includes(pc) || pc.includes(c);
+    });
+    return partial ? Number(partial.price_gs) || 0 : 0;
+  };
+
+
     if (!city) return false;
     const c = city.toLowerCase().trim();
     if (coveredCities.has(c)) return true;
