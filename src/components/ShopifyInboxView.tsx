@@ -220,6 +220,31 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   };
 
+  // ─── Open pre-filled form ───
+  const handleOpenForm = (order: SheetOrder) => {
+    if (!onSheetConfirm) return;
+    const normalizePhone = (p: string) => {
+      let ph = String(p || "").replace(/[\s\-().+]/g, "").trim();
+      if (ph.startsWith("595")) ph = "0" + ph.slice(3);
+      return ph;
+    };
+    const parseMoney = (v: string) => {
+      const cleaned = String(v || "").replace(/[^\d.,\-]/g, "");
+      if (!cleaned) return 0;
+      return Math.round(Number(cleaned.replace(/\./g, "").replace(",", ".")) || 0);
+    };
+    onSheetConfirm({
+      customer: (order[colKeys.name] || "").trim(),
+      phone: normalizePhone(order[colKeys.phone] || ""),
+      city: (order[colKeys.city] || "").trim(),
+      street: [(order[colKeys.street] || "").trim(), (order[colKeys.street2] || "").trim()].filter(Boolean).join(" "),
+      district: (order[colKeys.dept] || "").trim(),
+      productTitle: (order[colKeys.product] || "").trim(),
+      totalGs: parseMoney(order[colKeys.amount] || "0"),
+      qty: Number(order[colKeys.qty] || 1) || 1,
+    });
+  };
+
   // ─── Bulk load all CARGAR rows ───
   const handleBulkLoad = async () => {
     let count = 0;
