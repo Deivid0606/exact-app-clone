@@ -138,13 +138,17 @@ export default function ShopifyInboxView({
   const getRowId = (order: SheetOrder, _idx: number) => {
     const num = order[colOrderNum] || '';
     if (num) return num;
-    // Build a stable ID combining all available fields
+    // Keep import ID logic separate from per-row UI state
     const name = (order[colName] || '').trim();
     const phone = (order[colPhone] || '').trim();
     const prod = (order[colProducts] || '').trim();
     const city = (order[colCity] || '').trim();
     const total = (order[colTotal] || '').trim();
     return `r-${name}-${phone}-${prod}-${city}-${total}`;
+  };
+
+  const getStatusKey = (_order: SheetOrder, origIdx: number) => {
+    return `status:${sheetUrl || 'default'}:${origIdx}`;
   };
 
   // Match product by title
@@ -247,8 +251,9 @@ export default function ShopifyInboxView({
     return filtered
       .filter(({ order, origIdx }) => {
         const rowId = getRowId(order, origIdx);
+        const statusKey = getStatusKey(order, origIdx);
         if (importedRowIds.has(rowId)) return false;
-        if ((rowStatuses[rowId] || 'PENDIENTE') !== 'CARGAR') return false;
+        if ((rowStatuses[statusKey] || 'PENDIENTE') !== 'CARGAR') return false;
         const city = order[colCity] || '';
         if (!isCityCovered(city)) return false;
         const matched = matchProduct(order[colProducts] || '');
@@ -388,15 +393,16 @@ export default function ShopifyInboxView({
           <tbody>
             {filtered.map(({ order: o, origIdx }, i) => {
               const rowId = getRowId(o, origIdx);
+              const statusKey = getStatusKey(o, origIdx);
               const alreadyImported = importedRowIds.has(rowId);
               const totalGs = Math.round(Number((o[colTotal] || '0').replace(/[^\d.-]/g, '')) || 0);
               const city = o[colCity] || '';
               const cityOk = isCityCovered(city);
               const matched = matchProduct(o[colProducts] || '');
-              const currentStatus = alreadyImported ? 'YA_CARGADO' : (rowStatuses[rowId] || 'PENDIENTE');
+              const currentStatus = alreadyImported ? 'YA_CARGADO' : (rowStatuses[statusKey] || 'PENDIENTE');
 
               return (
-                <tr key={rowId} className={alreadyImported ? 'opacity-50' : ''}>
+                <tr key={statusKey} className={alreadyImported ? 'opacity-50' : ''}>
                   <td className="text-xs truncate max-w-[150px]">{o[colName] || '-'}</td>
                   {colProducts && (
                     <td className="text-xs truncate max-w-[180px]">{o[colProducts] || '-'}</td>
@@ -436,7 +442,7 @@ export default function ShopifyInboxView({
                         <select
                           className="app-input !py-1 !px-1.5 !text-xs !w-auto min-w-[100px]"
                           value={currentStatus}
-                          onChange={e => setRowStatus(rowId, e.target.value)}
+                          onChange={e => setRowStatus(statusKey, e.target.value)}
                         >
                           <option value="PENDIENTE">⏳ Pendiente</option>
                           <option value="A_DROPEAR">📋 A Dropear</option>
