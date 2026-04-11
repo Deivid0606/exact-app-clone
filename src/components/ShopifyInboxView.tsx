@@ -139,7 +139,7 @@ export default function ShopifyInboxView({
     return partial ? Number(partial.price_gs) || 0 : 0;
   };
 
-
+  const isCityCovered = (city: string) => {
     if (!city) return false;
     const c = city.toLowerCase().trim();
     if (coveredCities.has(c)) return true;
