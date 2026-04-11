@@ -7,14 +7,26 @@ const nf = (n: number) => new Intl.NumberFormat("es-PY").format(n);
 
 type SheetOrder = Record<string, string>;
 
-const ROW_STATUS_KEY = "shopify_row_statuses";
-const LOADED_IDS_KEY = "shopify_loaded_ids";
+const ROW_STATUS_KEY = "shopify_row_statuses_v2";
+const SHEET_CACHE_KEY = "shopify_sheet_cache";
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutos de cache
 
 function getRowId(order: SheetOrder, idx: number): string {
   const name = (order["nombre"] || order["customer name"] || order["cliente"] || "").trim();
   const phone = (order["numero"] || order["telefono"] || order["phone"] || order["tel"] || "").trim();
   const product = (order["producto"] || order["product"] || order["item"] || order["titulo"] || "").trim();
   return `${name}|${phone}|${product}|${idx}`;
+}
+
+// Mejor detección de teléfono
+function extractPhoneNumber(value: any): string {
+  if (!value) return "";
+  let phone = String(value).replace(/[\s\-().+]/g, "").trim();
+  // Si empieza con 595, convertir a 0
+  if (phone.startsWith("595")) phone = "0" + phone.slice(3);
+  // Si tiene 9 dígitos (sin 0), agregar 0
+  if (phone.length === 9 && phone.match(/^\d+$/)) phone = "0" + phone;
+  return phone;
 }
 
 interface ShopifyInboxProps {
@@ -34,6 +46,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [sheetHeaders, setSheetHeaders] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [lastSync, setLastSync] = useState<Date | null>(null);
+  const [lastCacheHit, setLastCacheHit] = useState<boolean>(false);
 
   // ─── Products & prices for auto-detect ───
   const [products, setProducts] = useState<any[]>([]);
@@ -42,9 +55,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   // ─── Per-row statuses (localStorage) ───
   const [rowStatuses, setRowStatuses] = useState<Record<string, string>>(() => {
     try { return JSON.parse(localStorage.getItem(ROW_STATUS_KEY) || "{}"); } catch { return {}; }
-  });
-  const [loadedRowIds, setLoadedRowIds] = useState<Set<string>>(() => {
-    try { return new Set(JSON.parse(localStorage.getItem(LOADED_IDS_KEY) || "[]")); } catch { return new Set(); }
   });
 
   // ─── Auto-load ───
@@ -55,15 +65,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   // ─── Filters ───
   const [filterOnlyAvailable, setFilterOnlyAvailable] = useState(false);
   const [filterOnlyCoverage, setFilterOnlyCoverage] = useState(false);
+  const [filterOnlyCargar, setFilterOnlyCargar] = useState(false);
   const [search, setSearch] = useState("");
 
   // Persist statuses
   useEffect(() => {
     localStorage.setItem(ROW_STATUS_KEY, JSON.stringify(rowStatuses));
   }, [rowStatuses]);
-  useEffect(() => {
-    localStorage.setItem(LOADED_IDS_KEY, JSON.stringify([...loadedRowIds]));
-  }, [loadedRowIds]);
 
   // Load products & prices
   useEffect(() => {
@@ -71,24 +79,33 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     supabase.from("client_prices").select("*").then(({ data }) => setClientPrices(data || []));
   }, []);
 
-  // ─── Column detection ───
+  // ─── Column detection mejorada ───
   const colKeys = useMemo(() => {
     const h = sheetHeaders;
-    const find = (...candidates: string[]) =>
-      candidates.find((c) => h.includes(c)) || "";
+    const find = (...candidates: string[]) => {
+      // Buscar coincidencia exacta o parcial (insensible a mayúsculas)
+      const lowerCandidates = candidates.map(c => c.toLowerCase());
+      const found = h.find(header => 
+        lowerCandidates.some(candidate => 
+          header.toLowerCase().includes(candidate) || candidate.includes(header.toLowerCase())
+        )
+      );
+      return found || "";
+    };
+    
     return {
-      name: find("nombre", "customer name", "cliente"),
-      phone: find("numero", "telefono", "phone", "tel"),
-      street: find("calle", "direccion", "address", "street"),
-      street2: find("calle 2", "calle2", "direccion 2", "address2"),
-      city: find("ciudad", "city"),
-      dept: find("departamento", "depto", "department", "state"),
-      product: find("producto", "product", "item", "titulo"),
-      qty: find("cantidad", "qty", "quantity"),
-      amount: find("monto", "total", "importe", "amount", "precio"),
-      email: find("email", "correo"),
-      store: find("tienda", "store"),
-      date: find("fecha", "date"),
+      name: find("nombre", "customer name", "cliente", "name", "customer"),
+      phone: find("numero", "telefono", "phone", "tel", "celular", "whatsapp", "movil"),
+      street: find("calle", "direccion", "address", "street", "calle principal"),
+      street2: find("calle 2", "calle2", "direccion 2", "address2", "calle secundaria"),
+      city: find("ciudad", "city", "localidad", "distrito"),
+      dept: find("departamento", "depto", "department", "state", "provincia"),
+      product: find("producto", "product", "item", "titulo", "nombre del producto", "descripcion"),
+      qty: find("cantidad", "qty", "quantity", "unidades", "cant"),
+      amount: find("monto", "total", "importe", "amount", "precio", "valor", "precio total"),
+      email: find("email", "correo", "mail"),
+      store: find("tienda", "store", "origen"),
+      date: find("fecha", "date", "fecha de pedido", "fecha pedido"),
     };
   }, [sheetHeaders]);
 
@@ -99,7 +116,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       const q = rawName.toLowerCase().trim();
       return (
         products.find((p) => p.title?.toLowerCase() === q) ||
-        products.find((p) => p.title?.toLowerCase().includes(q) || q.includes(p.title?.toLowerCase() || "___")) ||
+        products.find((p) => p.title?.toLowerCase().includes(q)) ||
+        products.find((p) => q.includes(p.title?.toLowerCase() || "")) ||
         null
       );
     },
@@ -126,23 +144,55 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     [clientPrices],
   );
 
-  // ─── Read sheet ───
-  const readSheet = async () => {
+  // ─── Read sheet with cache ───
+  const readSheet = async (forceRefresh = false) => {
     if (!sheetUrl) {
       toast.error("Configurá tu URL de Google Sheet en tu perfil");
       return;
     }
+    
+    // Check cache primero
+    if (!forceRefresh) {
+      try {
+        const cached = localStorage.getItem(SHEET_CACHE_KEY);
+        if (cached) {
+          const { data, timestamp, url } = JSON.parse(cached);
+          if (url === sheetUrl && (Date.now() - timestamp) < CACHE_DURATION) {
+            setSheetHeaders(data.headers || []);
+            setSheetOrders(data.orders || []);
+            setLastSync(new Date(timestamp));
+            setLastCacheHit(true);
+            toast.info(`📦 Usando cache local (${Math.round((Date.now() - timestamp) / 1000)}s)`);
+            return;
+          }
+        }
+      } catch (e) {}
+    }
+    
     setLoading(true);
+    setLastCacheHit(false);
     try {
-      const resp = await fetch(`/api/read-sheet?url=${encodeURIComponent(sheetUrl)}`);
+      const resp = await fetch(`/api/read-sheet?url=${encodeURIComponent(sheetUrl)}&t=${Date.now()}`);
       const json = await resp.json();
 
       if (json.error) {
         toast.error(json.error);
       } else {
-        setSheetHeaders(json.headers || []);
-        setSheetOrders(json.orders || []);
+        const sheetData = {
+          headers: json.headers || [],
+          orders: json.orders || []
+        };
+        setSheetHeaders(sheetData.headers);
+        setSheetOrders(sheetData.orders);
         setLastSync(new Date());
+        
+        // Guardar en cache
+        localStorage.setItem(SHEET_CACHE_KEY, JSON.stringify({
+          data: sheetData,
+          timestamp: Date.now(),
+          url: sheetUrl
+        }));
+        
         toast.success(`📊 ${json.total || 0} filas leídas del Sheet`);
       }
     } catch (err: any) {
@@ -151,18 +201,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     setLoading(false);
   };
 
-  // ─── Set row status ───
+  // ─── Set row status (solo 3 estados: CARGAR, DROPEADO, CANCELADO) ───
   const setRowStatus = (key: string, status: string) => {
     setRowStatuses((prev) => ({ ...prev, [key]: status }));
   };
 
   // ─── Build order payload ───
   const buildPayload = (order: SheetOrder, matched: any) => {
-    const normalizePhone = (p: string) => {
-      let phone = String(p || "").replace(/[\s\-().+]/g, "").trim();
-      if (phone.startsWith("595")) phone = "0" + phone.slice(3);
-      return phone;
-    };
     const parseMoney = (v: string) => {
       const cleaned = String(v || "").replace(/[^\d.,\-]/g, "");
       if (!cleaned) return 0;
@@ -170,7 +215,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     };
 
     const customer = (order[colKeys.name] || "").trim();
-    const phone = normalizePhone(order[colKeys.phone] || "");
+    const phone = extractPhoneNumber(order[colKeys.phone] || "");
     const city = (order[colKeys.city] || "").trim();
     const street = [(order[colKeys.street] || "").trim(), (order[colKeys.street2] || "").trim()].filter(Boolean).join(" ");
     const dept = (order[colKeys.dept] || "").trim();
@@ -207,8 +252,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     if (error) {
       toast.error("Error: " + error.message);
     } else {
-      const rowId = getRowId(order, idx);
-      setLoadedRowIds((prev) => new Set(prev).add(rowId));
       setRowStatus(String(idx), "CARGADO");
       toast.success("✅ Pedido cargado");
     }
@@ -217,24 +260,18 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   // ─── Open pre-filled form ───
   const handleOpenForm = (order: SheetOrder) => {
     if (!onSheetConfirm) return;
-    const normalizePhone = (p: string) => {
-      let ph = String(p || "").replace(/[\s\-().+]/g, "").trim();
-      if (ph.startsWith("595")) ph = "0" + ph.slice(3);
-      return ph;
-    };
-    const parseMoney = (v: string) => {
-      const cleaned = String(v || "").replace(/[^\d.,\-]/g, "");
-      if (!cleaned) return 0;
-      return Math.round(Number(cleaned.replace(/\./g, "").replace(",", ".")) || 0);
-    };
     onSheetConfirm({
       customer: (order[colKeys.name] || "").trim(),
-      phone: normalizePhone(order[colKeys.phone] || ""),
+      phone: extractPhoneNumber(order[colKeys.phone] || ""),
       city: (order[colKeys.city] || "").trim(),
       street: [(order[colKeys.street] || "").trim(), (order[colKeys.street2] || "").trim()].filter(Boolean).join(" "),
       district: (order[colKeys.dept] || "").trim(),
       productTitle: (order[colKeys.product] || "").trim(),
-      totalGs: parseMoney(order[colKeys.amount] || "0"),
+      totalGs: (() => {
+        const cleaned = String(order[colKeys.amount] || "").replace(/[^\d.,\-]/g, "");
+        if (!cleaned) return 0;
+        return Math.round(Number(cleaned.replace(/\./g, "").replace(",", ".")) || 0);
+      })(),
       qty: Number(order[colKeys.qty] || 1) || 1,
     });
   };
@@ -245,8 +282,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     let errors = 0;
     for (let i = 0; i < sheetOrders.length; i++) {
       const order = sheetOrders[i];
-      const rowId = getRowId(order, i);
-      const currentStatus = loadedRowIds.has(rowId) ? "CARGADO" : (rowStatuses[String(i)] || "CARGAR");
+      const currentStatus = rowStatuses[String(i)] || "CARGAR";
       if (currentStatus !== "CARGAR") continue;
 
       const productName = order[colKeys.product] || "";
@@ -258,21 +294,25 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       if (error) {
         errors++;
       } else {
-        setLoadedRowIds((prev) => new Set(prev).add(rowId));
         setRowStatus(String(i), "CARGADO");
         count++;
       }
+      
+      // Pequeña pausa para no saturar
+      if (i % 5 === 0) await new Promise(resolve => setTimeout(resolve, 100));
     }
     toast.success(`✅ ${count} cargados, ${errors} errores`);
   };
 
-  // ─── Auto-load logic ───
+  // ─── Auto-load logic con cache ───
   useEffect(() => {
     autoLoadRef.current = autoLoad;
     if (autoLoad) {
       const run = async () => {
         if (!autoLoadRef.current) return;
-        await readSheet();
+        // Usar cache primero, refresh cada 3 ciclos
+        const shouldRefresh = Math.random() < 0.33;
+        await readSheet(shouldRefresh);
         if (!autoLoadRef.current) return;
         await handleBulkLoad();
       };
@@ -291,9 +331,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return sheetOrders
       .map((o, i) => ({ order: o, idx: i }))
       .filter(({ order, idx }) => {
-        const rowId = getRowId(order, idx);
-        const status = loadedRowIds.has(rowId) ? "CARGADO" : (rowStatuses[String(idx)] || "CARGAR");
-
+        const currentStatus = rowStatuses[String(idx)] || "CARGAR";
+        
+        // Skip si ya está cargado
+        if (currentStatus === "CARGADO") return false;
+        
+        if (filterOnlyCargar && currentStatus !== "CARGAR") return false;
+        
         if (filterOnlyAvailable) {
           const productName = order[colKeys.product] || "";
           if (!matchProduct(productName)) return false;
@@ -309,9 +353,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         }
         return true;
       });
-  }, [sheetOrders, rowStatuses, loadedRowIds, filterOnlyAvailable, filterOnlyCoverage, search, colKeys, matchProduct, hasCoverage]);
+  }, [sheetOrders, rowStatuses, filterOnlyAvailable, filterOnlyCoverage, filterOnlyCargar, search, colKeys, matchProduct, hasCoverage]);
 
-  const statusOpts = ["CARGAR", "PENDIENTE", "A DROPEAR"];
+  const statusOpts = ["CARGAR", "DROPEADO", "CANCELADO"];
 
   return (
     <div className="app-card">
@@ -325,7 +369,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           </span>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button className="nav-btn active" onClick={readSheet} disabled={loading}>
+          <button className="nav-btn active" onClick={() => readSheet(true)} disabled={loading}>
             {loading ? (
               <span className="flex items-center gap-2">
                 <span className="btn-spinner" /> Leyendo...
@@ -346,6 +390,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           {lastSync && (
             <span className="text-xs text-muted-foreground self-center">
               Última sync: {lastSync.toLocaleTimeString("es-PY")}
+              {lastCacheHit && <span className="text-blue-400 ml-1">(cache)</span>}
             </span>
           )}
         </div>
@@ -357,7 +402,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       </div>
 
       {/* Filters */}
-      <div className="flex flex-wrap gap-2 mb-3">
+      <div className="flex flex-wrap gap-4 mb-3">
         <label className="flex items-center gap-1 text-xs">
           <input
             type="checkbox"
@@ -374,6 +419,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           />
           Solo con cobertura
         </label>
+        <label className="flex items-center gap-1 text-xs">
+          <input
+            type="checkbox"
+            checked={filterOnlyCargar}
+            onChange={(e) => setFilterOnlyCargar(e.target.checked)}
+          />
+          Solo estado CARGAR
+        </label>
         <input
           className="app-input !w-auto min-w-[240px] flex-1"
           placeholder="🔎 Buscar..."
@@ -383,7 +436,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       </div>
 
       <div className="text-xs text-muted-foreground mb-2">
-        {filteredOrders.length} de {sheetOrders.length} filas
+        {filteredOrders.length} pendientes de {sheetOrders.length} filas totales
+        {Object.values(rowStatuses).filter(s => s === "CARGADO").length > 0 && 
+          ` (${Object.values(rowStatuses).filter(s => s === "CARGADO").length} ya cargados)`
+        }
       </div>
 
       {/* Table */}
@@ -407,9 +463,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           </thead>
           <tbody>
             {filteredOrders.map(({ order, idx }) => {
-              const rowId = getRowId(order, idx);
-              const isLoaded = loadedRowIds.has(rowId);
-              const currentStatus = isLoaded ? "CARGADO" : (rowStatuses[String(idx)] || "CARGAR");
+              const currentStatus = rowStatuses[String(idx)] || "CARGAR";
 
               const productName = order[colKeys.product] || "";
               const matched = matchProduct(productName);
@@ -417,12 +471,15 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               const covered = hasCoverage(city);
               const deliveryPrice = getCityPrice(city);
               const phoneRaw = order[colKeys.phone] || "";
+              const extractedPhone = extractPhoneNumber(phoneRaw);
 
               return (
-                <tr key={idx} className={isLoaded ? "opacity-50" : ""}>
+                <tr key={idx}>
                   <td className="text-xs">{idx + 1}</td>
                   <td className="text-xs">{order[colKeys.name] || "—"}</td>
-                  <td className="text-xs">{phoneRaw || "—"}</td>
+                  <td className="text-xs font-mono">
+                    {extractedPhone || phoneRaw || "—"}
+                  </td>
                   <td className="text-xs">{city || "—"}</td>
                   <td className="text-right text-xs font-bold">
                     {deliveryPrice != null ? `${nf(deliveryPrice)} Gs` : <span className="text-muted-foreground">—</span>}
@@ -445,24 +502,20 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                     )}
                   </td>
                   <td>
-                    {isLoaded ? (
-                      <span className="text-xs text-green-400 font-bold">✅ Cargado</span>
-                    ) : (
-                      <select
-                        className="app-input !py-1 !px-2 !text-[11px] !w-auto !min-w-[120px]"
-                        value={currentStatus}
-                        onChange={(e) => setRowStatus(String(idx), e.target.value)}
-                      >
-                        {statusOpts.map((s) => (
-                          <option key={s} value={s}>
-                            {s}
-                          </option>
-                        ))}
-                      </select>
-                    )}
+                    <select
+                      className="app-input !py-1 !px-2 !text-[11px] !w-auto !min-w-[120px]"
+                      value={currentStatus}
+                      onChange={(e) => setRowStatus(String(idx), e.target.value)}
+                    >
+                      {statusOpts.map((s) => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
+                    </select>
                   </td>
                   <td className="flex gap-1">
-                    {!isLoaded && currentStatus === "CARGAR" && matched && (
+                    {currentStatus === "CARGAR" && matched && (
                       <button
                         className="nav-btn active !py-1 !px-2 !text-[11px]"
                         onClick={() => handleConfirm(order, idx)}
@@ -470,7 +523,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                         Cargar
                       </button>
                     )}
-                    {!isLoaded && onSheetConfirm && (
+                    {onSheetConfirm && (
                       <button
                         className="nav-btn !py-1 !px-2 !text-[11px]"
                         onClick={() => handleOpenForm(order)}
