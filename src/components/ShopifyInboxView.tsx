@@ -126,7 +126,7 @@ export default function ShopifyInboxView({
   const colQty = findCol(['cantidad', 'qty', 'quantity']);
   const colOrderNum = findCol(['pedido', 'order', 'numero', 'número', 'nro', '#', 'id']);
   const colEmail = findCol(['email', 'correo', 'mail']);
-  const colStatus = findCol(['estado', 'status']);
+  // colStatus removed — we use local rowStatuses instead of sheet status
 
   const getRowId = (order: SheetOrder, idx: number) => {
     const num = order[colOrderNum] || '';
