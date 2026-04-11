@@ -7,9 +7,9 @@ const nf = (n: number) => new Intl.NumberFormat("es-PY").format(n);
 
 type SheetOrder = Record<string, string>;
 
-const ROW_STATUS_KEY = "shopify_row_statuses_v2";
+const ROW_STATUS_KEY = "shopify_row_statuses_v3";
 const SHEET_CACHE_KEY = "shopify_sheet_cache";
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutos de cache
+const CACHE_DURATION = 5 * 60 * 1000;
 
 function getRowId(order: SheetOrder, idx: number): string {
   const name = (order["nombre"] || order["customer name"] || order["cliente"] || "").trim();
@@ -79,18 +79,15 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     loadPrices();
   }, []);
 
-  // Column detection - VERSIÓN MEJORADA
   const colKeys = useMemo(() => {
     const h = sheetHeaders;
     console.log("📋 Headers del Sheet:", h);
     
     const find = (...candidates: string[]) => {
-      // Coincidencia exacta
       for (const candidate of candidates) {
         const exact = h.find(header => header.toLowerCase() === candidate.toLowerCase());
         if (exact) return exact;
       }
-      // Coincidencia parcial
       for (const candidate of candidates) {
         const partial = h.find(header => 
           header.toLowerCase().includes(candidate.toLowerCase()) ||
@@ -117,7 +114,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     };
   }, [sheetHeaders]);
 
-  // Match product - VERSIÓN MEJORADA
   const matchProduct = useCallback(
     (rawName: string) => {
       if (!rawName || rawName === "—" || rawName === "-") return null;
@@ -125,19 +121,15 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       const q = rawName.toLowerCase().trim();
       if (q.length === 0) return null;
       
-      // 1. Búsqueda exacta
       let found = products.find((p) => p.title?.toLowerCase() === q);
       if (found) return found;
       
-      // 2. Búsqueda por inclusión (texto contiene producto)
       found = products.find((p) => q.includes(p.title?.toLowerCase() || ""));
       if (found) return found;
       
-      // 3. Búsqueda por inclusión (producto contiene texto)
       found = products.find((p) => p.title?.toLowerCase().includes(q));
       if (found) return found;
       
-      // 4. Búsqueda por palabras clave
       const keywords = q.split(/\s+/).filter(k => k.length > 3);
       for (const keyword of keywords) {
         found = products.find((p) => p.title?.toLowerCase().includes(keyword));
@@ -167,6 +159,11 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     },
     [clientPrices],
   );
+
+  // Calcular comisión
+  const calculateCommission = useCallback((salePrice: number, productCost: number, deliveryCost: number) => {
+    return salePrice - (productCost + deliveryCost);
+  }, []);
 
   const readSheet = async (forceRefresh = false) => {
     if (!sheetUrl) {
@@ -226,7 +223,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     setRowStatuses((prev) => ({ ...prev, [key]: status }));
   };
 
-  const buildPayload = (order: SheetOrder, matched: any) => {
+  const buildPayload = (order: SheetOrder, matched: any, deliveryPrice: number | null) => {
     const parseMoney = (v: string) => {
       if (!v) return 0;
       const cleaned = String(v).replace(/[^\d.,\-]/g, "");
@@ -240,8 +237,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const street = [(order[colKeys.street] || "").trim(), (order[colKeys.street2] || "").trim()].filter(Boolean).join(" ");
     const dept = (order[colKeys.dept] || "").trim();
     const qty = Number(order[colKeys.qty] || 1) || 1;
-    const rawAmount = parseMoney(order[colKeys.amount] || "0");
-    const amount = rawAmount || (matched?.provider_price_gs || 0);
+    const salePrice = parseMoney(order[colKeys.amount] || "0");
+    const productCost = matched?.provider_price_gs || 0;
+    const deliveryCost = deliveryPrice || 0;
+    const commission = calculateCommission(salePrice, productCost, deliveryCost);
 
     return {
       order_number: `SH${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 5)}`,
@@ -251,8 +250,16 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       city,
       street,
       district: dept,
-      items_json: [{ title: matched.title, qty, sale_gs: amount, sku: matched.sku || "" }],
-      total_gs: amount * qty,
+      items_json: [{ 
+        title: matched.title, 
+        qty, 
+        sale_gs: salePrice,
+        provider_price_gs: productCost,
+        sku: matched.sku || "" 
+      }],
+      total_gs: salePrice * qty,
+      delivery_cost_gs: deliveryCost,
+      commission_gs: commission,
       status: "PENDIENTE",
       obs: "",
       provider_emails_list: matched.provider_email || "",
@@ -266,7 +273,26 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       toast.error(`Producto no detectado: "${productName}"`);
       return;
     }
-    const payload = buildPayload(order, matched);
+    
+    const city = order[colKeys.city] || "";
+    const deliveryPrice = getCityPrice(city);
+    if (!deliveryPrice) {
+      toast.warning(`⚠️ Ciudad "${city}" sin cobertura de delivery. ¿Continuar?`, {
+        action: { label: "Continuar", onClick: async () => {
+          const payload = buildPayload(order, matched, deliveryPrice);
+          const { error } = await supabase.from("orders").insert(payload);
+          if (error) {
+            toast.error("Error: " + error.message);
+          } else {
+            setRowStatus(String(idx), "CARGADO");
+            toast.success("✅ Pedido cargado sin cobertura");
+          }
+        }}
+      });
+      return;
+    }
+    
+    const payload = buildPayload(order, matched, deliveryPrice);
     const { error } = await supabase.from("orders").insert(payload);
     if (error) {
       toast.error("Error: " + error.message);
@@ -298,6 +324,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     let count = 0;
     let errors = 0;
     let skipped = 0;
+    let noCoverage = 0;
     
     for (let i = 0; i < sheetOrders.length; i++) {
       const order = sheetOrders[i];
@@ -314,7 +341,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         continue;
       }
 
-      const payload = buildPayload(order, matched);
+      const city = order[colKeys.city] || "";
+      const deliveryPrice = getCityPrice(city);
+      if (!deliveryPrice) {
+        noCoverage++;
+        continue;
+      }
+
+      const payload = buildPayload(order, matched, deliveryPrice);
       const { error } = await supabase.from("orders").insert(payload);
       if (error) {
         errors++;
@@ -325,7 +359,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       
       if (i % 5 === 0) await new Promise(resolve => setTimeout(resolve, 100));
     }
-    toast.success(`✅ ${count} cargados, ${errors} errores, ${skipped} omitidos`);
+    toast.success(`✅ ${count} cargados | ❌ ${errors} errores | ⏭️ ${skipped} omitidos | 🚫 ${noCoverage} sin cobertura`);
   };
 
   useEffect(() => {
@@ -373,7 +407,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       });
   }, [sheetOrders, rowStatuses, filterOnlyAvailable, filterOnlyCoverage, filterOnlyCargar, search, colKeys, matchProduct, hasCoverage]);
 
-  const statusOpts = ["CARGAR", "DROPEADO", "CANCELADO"];
+  // Estados: CARGAR, A DROPEAR, CANCELADO
+  const statusOpts = ["CARGAR", "A DROPEAR", "CANCELADO"];
 
   return (
     <div className="app-card">
@@ -459,7 +494,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       </div>
 
       <div className="overflow-auto">
-        <table className="app-table min-w-[1100px]">
+        <table className="app-table min-w-[1300px]">
           <thead>
             <tr>
               <th>#</th>
@@ -469,7 +504,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               <th className="text-right">Delivery</th>
               <th>Producto</th>
               <th>Cant</th>
-              <th className="text-right">Monto</th>
+              <th className="text-right">Venta</th>
+              <th className="text-right">Costo</th>
+              <th className="text-right">Comisión</th>
               <th>Detectado</th>
               <th>Cobertura</th>
               <th>Estado</th>
@@ -486,9 +523,19 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               const deliveryPrice = getCityPrice(city);
               const phoneRaw = order[colKeys.phone] || "";
               const extractedPhone = extractPhoneNumber(phoneRaw);
+              
+              const parseMoney = (v: string) => {
+                if (!v) return 0;
+                const cleaned = String(v).replace(/[^\d.,\-]/g, "");
+                if (!cleaned) return 0;
+                return Math.round(Number(cleaned.replace(/\./g, "").replace(",", ".")) || 0);
+              };
+              const salePrice = parseMoney(order[colKeys.amount] || "0");
+              const productCost = matched?.provider_price_gs || 0;
+              const commission = salePrice - (productCost + (deliveryPrice || 0));
 
               return (
-                <tr key={idx}>
+                <tr key={idx} className={currentStatus !== "CARGAR" ? "opacity-60" : ""}>
                   <td className="text-xs">{idx + 1}</td>
                   <td className="text-xs">{order[colKeys.name] || "—"}</td>
                   <td className="text-xs font-mono">{extractedPhone || phoneRaw || "—"}</td>
@@ -500,15 +547,23 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                     {productName || "—"}
                   </td>
                   <td className="text-xs">{order[colKeys.qty] || "1"}</td>
-                  <td className="text-right text-xs font-bold">{order[colKeys.amount] || "—"}</td>
+                  <td className="text-right text-xs font-bold text-green-400">
+                    {salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}
+                  </td>
+                  <td className="text-right text-xs text-orange-400">
+                    {productCost > 0 ? `${nf(productCost)} Gs` : "—"}
+                  </td>
+                  <td className="text-right text-xs font-bold text-blue-400">
+                    {commission > 0 ? `+${nf(commission)} Gs` : commission < 0 ? `${nf(commission)} Gs` : "—"}
+                  </td>
                   <td className="text-xs">
                     {matched ? (
-                      <span className="text-green-400" title={`Producto: ${matched.title}`}>
-                        ✅ {matched.title?.slice(0, 20)}
+                      <span className="text-green-400" title={`Costo: ${nf(productCost)} Gs`}>
+                        ✅ {matched.title?.slice(0, 15)}
                       </span>
                     ) : (
-                      <span className="text-red-400" title={`No se encontró: "${productName}" en el catálogo`}>
-                        ❌ {productName?.slice(0, 15) || "—"}
+                      <span className="text-red-400" title={`No se encontró: "${productName}"`}>
+                        ❌
                       </span>
                     )}
                   </td>
@@ -516,12 +571,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                     {covered ? (
                       <span className="text-green-400" title={`Delivery: ${deliveryPrice?.toLocaleString()} Gs`}>✅</span>
                     ) : (
-                      <span className="text-yellow-400" title="Sin cobertura de delivery">⚠️</span>
+                      <span className="text-yellow-400" title="Sin cobertura">⚠️</span>
                     )}
                   </td>
-                  <td>
+                  <td className="min-w-[130px]">
                     <select
-                      className="app-input !py-1 !px-2 !text-[11px] !w-auto !min-w-[120px]"
+                      className="app-input !py-1 !px-2 !text-[11px] !w-full"
                       value={currentStatus}
                       onChange={(e) => setRowStatus(String(idx), e.target.value)}
                     >
@@ -530,18 +585,27 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                       ))}
                     </select>
                   </td>
-                  <td className="flex gap-1">
-                    {currentStatus === "CARGAR" && matched && (
+                  <td className="flex gap-1 min-w-[140px]">
+                    {currentStatus === "CARGAR" && matched && covered && (
                       <button
-                        className="nav-btn active !py-1 !px-2 !text-[11px]"
+                        className="nav-btn active !py-1 !px-2 !text-[11px] whitespace-nowrap"
                         onClick={() => handleConfirm(order, idx)}
                       >
-                        Cargar
+                        💰 Cargar
+                      </button>
+                    )}
+                    {currentStatus === "CARGAR" && matched && !covered && (
+                      <button
+                        className="nav-btn !py-1 !px-2 !text-[11px] whitespace-nowrap !bg-yellow-600"
+                        onClick={() => handleConfirm(order, idx)}
+                        title="Sin cobertura de delivery"
+                      >
+                        ⚠️ Cargar
                       </button>
                     )}
                     {onSheetConfirm && (
                       <button
-                        className="nav-btn !py-1 !px-2 !text-[11px]"
+                        className="nav-btn !py-1 !px-2 !text-[11px] whitespace-nowrap"
                         onClick={() => handleOpenForm(order)}
                       >
                         📝 Formulario
@@ -553,7 +617,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             })}
             {filteredOrders.length === 0 && (
               <tr>
-                <td colSpan={12} className="text-center text-muted-foreground py-8">
+                <td colSpan={14} className="text-center text-muted-foreground py-8">
                   {sheetOrders.length === 0 ? "Leé tu Sheet primero" : "Sin resultados con los filtros actuales"}
                 </td>
               </tr>
