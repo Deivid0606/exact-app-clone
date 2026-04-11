@@ -24,6 +24,15 @@ function extractPhoneNumber(value: any): string {
   return phone;
 }
 
+// Función para normalizar texto (sin acentos, minúsculas, sin caracteres especiales)
+const normalizeText = (text: string): string => {
+  return text
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "") // Elimina acentos
+    .replace(/[^a-z0-9]/g, ""); // Elimina espacios, guiones, etc.
+};
+
 // Generar ID secuencial SHOPIFY001, SHOPIFY002, etc.
 const generateSequentialId = (): string => {
   let lastNumber = parseInt(localStorage.getItem(LAST_ORDER_KEY) || '0', 10);
@@ -157,38 +166,60 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   }, [autoLoad, sheetUrl]);
 
+  // 🔥 FUNCIÓN MEJORADA - Detecta columnas SIN IMPORTAR EL ORDEN
+  // Normaliza los nombres para comparar sin acentos, espacios, mayúsculas
   const colKeys = useMemo(() => {
     const h = sheetHeaders;
+    console.log("📋 Headers del Sheet:", h);
     
+    // Función mejorada para buscar coincidencia NORMALIZADA
     const find = (...candidates: string[]) => {
-      for (const candidate of candidates) {
-        const exact = h.find(header => header.toLowerCase() === candidate.toLowerCase());
-        if (exact) return exact;
+      // Normalizar cada candidato
+      const normalizedCandidates = candidates.map(c => normalizeText(c));
+      
+      // 1. Buscar coincidencia exacta normalizada
+      for (let i = 0; i < h.length; i++) {
+        const normalizedHeader = normalizeText(h[i]);
+        for (const candidate of normalizedCandidates) {
+          if (normalizedHeader === candidate) {
+            console.log(`✅ Coincidencia exacta: "${h[i]}" para candidato "${candidates[normalizedCandidates.indexOf(candidate)]}"`);
+            return h[i];
+          }
+        }
       }
-      for (const candidate of candidates) {
-        const partial = h.find(header => 
-          header.toLowerCase().includes(candidate.toLowerCase()) ||
-          candidate.toLowerCase().includes(header.toLowerCase())
-        );
-        if (partial) return partial;
+      
+      // 2. Buscar coincidencia parcial (un contiene al otro)
+      for (let i = 0; i < h.length; i++) {
+        const normalizedHeader = normalizeText(h[i]);
+        for (const candidate of normalizedCandidates) {
+          if (normalizedHeader.includes(candidate) || candidate.includes(normalizedHeader)) {
+            console.log(`✅ Coincidencia parcial: "${h[i]}" para candidato "${candidates[normalizedCandidates.indexOf(candidate)]}"`);
+            return h[i];
+          }
+        }
       }
+      
+      console.log(`❌ No se encontró columna para: ${candidates.join(", ")}`);
       return "";
     };
     
-    return {
-      name: find("nombre", "customer name", "cliente", "name", "customer", "cliente nombre", "full name"),
-      phone: find("numero", "telefono", "phone", "tel", "celular", "whatsapp", "movil", "contacto", "número", "teléfono"),
-      street: find("calle", "direccion", "address", "street", "calle principal", "dirección"),
-      street2: find("calle 2", "calle2", "direccion 2", "address2", "calle secundaria"),
-      city: find("ciudad", "city", "localidad", "distrito", "ciudad de envío", "city name"),
-      dept: find("departamento", "depto", "department", "state", "provincia"),
-      product: find("producto", "product", "item", "titulo", "nombre del producto", "descripcion", "producto nombre", "título", "product name"),
-      qty: find("cantidad", "qty", "quantity", "unidades", "cant", "cantidad de productos", "Qty"),
-      amount: find("monto", "total", "importe", "amount", "precio", "valor", "precio total", "total gs", "Total"),
-      email: find("email", "correo", "mail", "email cliente"),
-      store: find("tienda", "store", "origen", "canal"),
-      date: find("fecha", "date", "fecha de pedido", "fecha pedido", "fecha creación", "created at"),
+    const result = {
+      name: find("nombre", "customer name", "cliente", "name", "customer", "cliente nombre", "full name", "cliente full name"),
+      phone: find("numero", "telefono", "phone", "tel", "celular", "whatsapp", "movil", "contacto", "número", "teléfono", "cel", "whatsapp number"),
+      street: find("calle", "direccion", "address", "street", "calle principal", "dirección", "direccion completa", "calle y numero"),
+      street2: find("calle 2", "calle2", "direccion 2", "address2", "calle secundaria", "entre calles", "referencia"),
+      city: find("ciudad", "city", "localidad", "distrito", "ciudad de envío", "city name", "ciudad destino", "localidad destino"),
+      dept: find("departamento", "depto", "department", "state", "provincia", "region"),
+      product: find("producto", "product", "item", "titulo", "nombre del producto", "descripcion", "producto nombre", "título", "product name", "item name", "producto adquirido"),
+      qty: find("cantidad", "qty", "quantity", "unidades", "cant", "cantidad de productos", "Qty", "numero de unidades", "cantidad pedida"),
+      amount: find("monto", "total", "importe", "amount", "precio", "valor", "precio total", "total gs", "Total", "monto total", "precio final"),
+      email: find("email", "correo", "mail", "email cliente", "correo electronico"),
+      store: find("tienda", "store", "origen", "canal", "plataforma"),
+      date: find("fecha", "date", "fecha de pedido", "fecha pedido", "fecha creación", "created at", "fecha compra"),
     };
+    
+    console.log("🔍 Columnas detectadas:", result);
+    return result;
   }, [sheetHeaders]);
 
   const matchProduct = useCallback(
@@ -311,7 +342,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const city = order[colKeys.city] || "";
     const deliveryPrice = getCityPrice(city);
     
-    // REGLA: Si no hay cobertura, no se puede cargar
     if (!deliveryPrice) {
       toast.warning(`⚠️ Ciudad "${city}" sin cobertura de delivery. No se puede cargar el pedido.`);
       return;
@@ -671,10 +701,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               const productCost = matched?.provider_price_gs || 0;
               const commission = salePrice - (productCost + (deliveryPrice || 0));
 
-              // REGLAS: El botón "Cargar" SOLO aparece si:
-              // 1. Estado es "CARGAR"
-              // 2. Producto detectado (matched)
-              // 3. Ciudad tiene cobertura (covered)
               const canLoad = currentStatus === "CARGAR" && matched && covered;
 
               return (
