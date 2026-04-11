@@ -127,27 +127,41 @@ export default function ShopifyInboxView({
     }) || null;
   };
 
-  const getDeliveryFee = (city: string): number => {
-    if (!city) return 0;
-    const c = city.toLowerCase().trim();
-    const exact = clientPrices.find((p: any) => (p.city || '').toLowerCase().trim() === c);
-    if (exact) return Number(exact.price_gs) || 0;
+  // Normalize: lowercase, remove accents, trim
+  const norm = (s: string) =>
+    s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+
+  // Try to find the best matching platform city from a sheet city string
+  const findCityMatch = (sheetCity: string): any | null => {
+    if (!sheetCity) return null;
+    const raw = norm(sheetCity);
+    // Try exact match first
+    const exact = clientPrices.find((p: any) => norm(p.city || '') === raw);
+    if (exact) return exact;
+    // Try partial: platform city contained in sheet value or vice versa
     const partial = clientPrices.find((p: any) => {
-      const pc = (p.city || '').toLowerCase().trim();
-      return c.includes(pc) || pc.includes(c);
+      const pc = norm(p.city || '');
+      return raw.includes(pc) || pc.includes(raw);
     });
-    return partial ? Number(partial.price_gs) || 0 : 0;
+    if (partial) return partial;
+    // Try splitting by common separators (dash, comma, slash) and match any part
+    const parts = raw.split(/[\-–—,\/|]+/).map(s => s.trim()).filter(Boolean);
+    for (const part of parts) {
+      const match = clientPrices.find((p: any) => {
+        const pc = norm(p.city || '');
+        return pc.includes(part) || part.includes(pc);
+      });
+      if (match) return match;
+    }
+    return null;
   };
 
-  const isCityCovered = (city: string) => {
-    if (!city) return false;
-    const c = city.toLowerCase().trim();
-    if (coveredCities.has(c)) return true;
-    for (const covered of coveredCities) {
-      if (c.includes(covered) || covered.includes(c)) return true;
-    }
-    return false;
+  const getDeliveryFee = (city: string): number => {
+    const match = findCityMatch(city);
+    return match ? Number(match.price_gs) || 0 : 0;
   };
+
+  const isCityCovered = (city: string) => !!findCityMatch(city);
 
   const filtered = useMemo(() => {
     let result = orders;

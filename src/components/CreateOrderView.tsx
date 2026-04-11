@@ -126,20 +126,32 @@ export default function CreateOrderView({
           if (sheetPrefill.email) setEmail(sheetPrefill.email);
           if (sheetPrefill.obs) setObs(sheetPrefill.obs);
 
-          // Try to match city from client_prices
-          const cityMatch = (pricesData || []).find((c: any) =>
-            c.city?.toLowerCase().trim() === (sheetPrefill.city || '').toLowerCase().trim()
-          );
+          // Try to match city from client_prices (normalize: lowercase, no accents, split separators)
+          const normCity = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+          const sheetCityNorm = normCity(sheetPrefill.city || '');
+          const findCity = (prices: any[]) => {
+            const exact = prices.find((c: any) => normCity(c.city || '') === sheetCityNorm);
+            if (exact) return exact;
+            const partial = prices.find((c: any) => {
+              const pc = normCity(c.city || '');
+              return sheetCityNorm.includes(pc) || pc.includes(sheetCityNorm);
+            });
+            if (partial) return partial;
+            const parts = sheetCityNorm.split(/[\-–—,\/|]+/).map(s => s.trim()).filter(Boolean);
+            for (const part of parts) {
+              const m = prices.find((c: any) => {
+                const pc = normCity(c.city || '');
+                return pc.includes(part) || part.includes(pc);
+              });
+              if (m) return m;
+            }
+            return null;
+          };
+          const cityMatch = findCity(pricesData || []);
           if (cityMatch) {
             setCity(cityMatch.city);
           } else if (sheetPrefill.city) {
-            // Partial match
-            const partial = (pricesData || []).find((c: any) =>
-              c.city?.toLowerCase().includes((sheetPrefill.city || '').toLowerCase()) ||
-              (sheetPrefill.city || '').toLowerCase().includes(c.city?.toLowerCase())
-            );
-            if (partial) setCity(partial.city);
-            else setCity(sheetPrefill.city);
+            setCity(sheetPrefill.city);
           }
 
           // Try to match product by title
