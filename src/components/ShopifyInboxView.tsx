@@ -30,6 +30,32 @@ const normalizeText = (text: string): string => {
     .replace(/[^a-z0-9]/g, ""); // Elimina espacios, guiones, etc.
 };
 
+// Función para limpiar cantidad (toma solo el primer número válido)
+function parseQuantity(value: any): number {
+  if (!value) return 1;
+  const str = String(value).trim();
+  // Si tiene salto de línea, tomar el primer número antes del \n
+  const firstLine = str.split('\n')[0].trim();
+  // Extraer solo dígitos (ignora cualquier texto)
+  const numMatch = firstLine.match(/\d+/);
+  if (!numMatch) return 1;
+  const num = parseInt(numMatch[0], 10);
+  return isNaN(num) ? 1 : num;
+}
+
+// Función para limpiar monto
+function parseMoney(v: string): number {
+  if (!v) return 0;
+  // Si tiene salto de línea, tomar la primera línea
+  let cleanValue = String(v).split('\n')[0].trim();
+  // Limpia el string: elimina Gs, espacios, etc.
+  let cleaned = cleanValue.replace(/[^\d.,\-]/g, "");
+  if (!cleaned) return 0;
+  // Reemplaza coma por punto para decimales, y elimina puntos de miles
+  cleaned = cleaned.replace(/\./g, "").replace(",", ".");
+  return Math.round(Number(cleaned) || 0);
+}
+
 // Generar ID secuencial SHOPIFY001, SHOPIFY002, etc.
 const generateSequentialId = (): string => {
   let lastNumber = parseInt(localStorage.getItem(LAST_ORDER_KEY) || '0', 10);
@@ -161,7 +187,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       return "";
     };
     
-    // Búsqueda específica para MONTO (tu columna exacta)
+    // Búsqueda específica para MONTO (con soporte para "TOTAL A PAGAR")
     const findAmount = () => {
       // Buscar exactamente "MONTO" o "monto"
       for (let i = 0; i < h.length; i++) {
@@ -171,8 +197,30 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           return h[i];
         }
       }
+      
+      // Buscar específicamente "TOTAL A PAGAR"
+      for (let i = 0; i < h.length; i++) {
+        const normalized = normalizeText(h[i]);
+        if (normalized === "totalapagar") {
+          console.log(`✅ Encontrado TOTAL A PAGAR exacto: "${h[i]}"`);
+          return h[i];
+        }
+      }
+      
+      // Buscar cualquier columna que contenga "total"
+      for (let i = 0; i < h.length; i++) {
+        const normalized = normalizeText(h[i]);
+        if (normalized.includes("total")) {
+          console.log(`✅ Encontrado columna con 'total': "${h[i]}"`);
+          return h[i];
+        }
+      }
+      
       // Si no, buscar con variantes
-      return find("monto", "MONTO", "total", "importe", "amount", "precio", "valor", "precio total", "total gs", "Total", "monto total", "precio final", "monto_total", "total_gs", "importe_total", "venta", "precio_venta");
+      return find("monto", "MONTO", "total", "importe", "amount", "precio", "valor", 
+                  "precio total", "total gs", "Total", "monto total", "precio final", 
+                  "monto_total", "total_gs", "importe_total", "venta", "precio_venta",
+                  "total a pagar", "TOTAL A PAGAR", "totalapagar");
     };
     
     const result = {
@@ -296,16 +344,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     setRowStatuses((prev) => ({ ...prev, [key]: status }));
   };
 
-  const parseMoney = (v: string) => {
-    if (!v) return 0;
-    // Limpia el string: elimina Gs, espacios, etc.
-    let cleaned = String(v).replace(/[^\d.,\-]/g, "");
-    if (!cleaned) return 0;
-    // Reemplaza coma por punto para decimales, y elimina puntos de miles
-    cleaned = cleaned.replace(/\./g, "").replace(",", ".");
-    return Math.round(Number(cleaned) || 0);
-  };
-
   // CARGA DIRECTA - solo si producto detectado Y ciudad con cobertura
   const handleDirectSave = async (order: SheetOrder, idx: number) => {
     const productName = order[colKeys.product] || "";
@@ -325,7 +363,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     
     const salePrice = parseMoney(order[colKeys.amount] || "0");
     const productCost = matched?.provider_price_gs || 0;
-    const qty = Number(order[colKeys.qty] || 1) || 1;
+    const qty = parseQuantity(order[colKeys.qty]);
     const commission = salePrice - (productCost + deliveryPrice);
     const orderId = generateSequentialId();
     
@@ -378,7 +416,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       district: (order[colKeys.dept] || "").trim(),
       productTitle: (order[colKeys.product] || "").trim(),
       totalGs: parseMoney(order[colKeys.amount] || "0"),
-      qty: Number(order[colKeys.qty] || 1) || 1,
+      qty: parseQuantity(order[colKeys.qty]),
     });
   };
 
@@ -410,7 +448,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       
       const salePrice = parseMoney(order[colKeys.amount] || "0");
       const productCost = matched?.provider_price_gs || 0;
-      const qty = Number(order[colKeys.qty] || 1) || 1;
+      const qty = parseQuantity(order[colKeys.qty]);
       const commission = salePrice - (productCost + deliveryPrice);
       const orderId = generateSequentialId();
       
@@ -475,7 +513,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       
       const salePrice = parseMoney(order[colKeys.amount] || "0");
       const productCost = matched?.provider_price_gs || 0;
-      const qty = Number(order[colKeys.qty] || 1) || 1;
+      const qty = parseQuantity(order[colKeys.qty]);
       const commission = salePrice - (productCost + deliveryPrice);
       const orderId = generateSequentialId();
       
@@ -669,7 +707,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                     {deliveryPrice != null ? `${nf(deliveryPrice)} Gs` : <span className="text-muted-foreground">—</span>}
                   </td>
                   <td className="text-xs truncate max-w-[180px]">{productName || "—"}</td>
-                  <td className="text-xs">{order[colKeys.qty] || "1"}</td>
+                  <td className="text-xs">{parseQuantity(order[colKeys.qty])}</td>
                   <td className="text-right text-xs font-bold text-green-400">{salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}</td>
                   <td className="text-right text-xs text-orange-400">{productCost > 0 ? `${nf(productCost)} Gs` : "—"}</td>
                   <td className={`text-right text-xs font-bold ${commission >= 0 ? "text-blue-400" : "text-red-400"}`}>
