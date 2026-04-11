@@ -37,9 +37,7 @@ const canAccessProduct = (product: any, profile: any) => {
 
   if (!role || !userEmail) return false;
 
-  if (role === 'admin') {
-    return true;
-  }
+  if (role === 'admin') return true;
 
   if (role === 'provider') {
     return providerEmail === userEmail;
@@ -53,6 +51,25 @@ const canAccessProduct = (product: any, profile: any) => {
   return false;
 };
 
+type SheetPrefill = {
+  customer?: string;
+  phone?: string;
+  city?: string;
+  street?: string;
+  district?: string;
+  email?: string;
+  productTitle?: string;
+  totalGs?: number;
+  qty?: number;
+  obs?: string;
+};
+
+type ItemRow = {
+  sku: string;
+  sale_gs: number;
+  qty: number;
+};
+
 export default function CreateOrderView({
   initialSku,
   onSkuConsumed,
@@ -61,7 +78,7 @@ export default function CreateOrderView({
 }: {
   initialSku?: string | null;
   onSkuConsumed?: () => void;
-  sheetPrefill?: { customer?: string; phone?: string; city?: string; street?: string; district?: string; email?: string; productTitle?: string; totalGs?: number; qty?: number; obs?: string } | null;
+  sheetPrefill?: SheetPrefill | null;
   onPrefillConsumed?: () => void;
 }) {
   const { profile } = useAuth();
@@ -75,9 +92,7 @@ export default function CreateOrderView({
   const [district, setDistrict] = useState('');
   const [email, setEmail] = useState('');
   const [obs, setObs] = useState('');
-  const [items, setItems] = useState<{ sku: string; sale_gs: number; qty: number }[]>([
-    { sku: '', sale_gs: 0, qty: 1 },
-  ]);
+  const [items, setItems] = useState<ItemRow[]>([{ sku: '', sale_gs: 0, qty: 1 }]);
   const [saving, setSaving] = useState(false);
   const [loadingProducts, setLoadingProducts] = useState(false);
 
@@ -117,7 +132,6 @@ export default function CreateOrderView({
 
         setClientPrices(pricesData || []);
 
-        // Auto-fill from Sheet prefill data
         if (sheetPrefill) {
           if (sheetPrefill.customer) setCustomer(sheetPrefill.customer);
           if (sheetPrefill.phone) setPhone(sheetPrefill.phone);
@@ -126,18 +140,26 @@ export default function CreateOrderView({
           if (sheetPrefill.email) setEmail(sheetPrefill.email);
           if (sheetPrefill.obs) setObs(sheetPrefill.obs);
 
-          // Try to match city from client_prices (normalize: lowercase, no accents, split separators)
-          const normCity = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+          const normCity = (s: string) =>
+            s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+
           const sheetCityNorm = normCity(sheetPrefill.city || '');
+
           const findCity = (prices: any[]) => {
             const exact = prices.find((c: any) => normCity(c.city || '') === sheetCityNorm);
             if (exact) return exact;
+
             const partial = prices.find((c: any) => {
               const pc = normCity(c.city || '');
               return sheetCityNorm.includes(pc) || pc.includes(sheetCityNorm);
             });
             if (partial) return partial;
-            const parts = sheetCityNorm.split(/[\-–—,\/|]+/).map(s => s.trim()).filter(Boolean);
+
+            const parts = sheetCityNorm
+              .split(/[\-–—,\/|]+/)
+              .map((s) => s.trim())
+              .filter(Boolean);
+
             for (const part of parts) {
               const m = prices.find((c: any) => {
                 const pc = normCity(c.city || '');
@@ -145,8 +167,10 @@ export default function CreateOrderView({
               });
               if (m) return m;
             }
+
             return null;
           };
+
           const cityMatch = findCity(pricesData || []);
           if (cityMatch) {
             setCity(cityMatch.city);
@@ -154,33 +178,53 @@ export default function CreateOrderView({
             setCity(sheetPrefill.city);
           }
 
-          // Try to match product by title
           if (sheetPrefill.productTitle) {
             const titleLower = sheetPrefill.productTitle.toLowerCase().trim();
-            // Remove emojis for comparison
-            const cleanTitle = titleLower.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '').trim();
-            
-            const exactMatch = visibleProducts.find((p: any) =>
-              p.title?.toLowerCase().trim() === titleLower ||
-              p.title?.toLowerCase().trim() === cleanTitle
+            const cleanTitle = titleLower
+              .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '')
+              .trim();
+
+            const exactMatch = visibleProducts.find(
+              (p: any) =>
+                p.title?.toLowerCase().trim() === titleLower ||
+                p.title?.toLowerCase().trim() === cleanTitle
             );
-            
+
             if (exactMatch && exactMatch.sku) {
-              setItems([{ sku: exactMatch.sku, sale_gs: sheetPrefill.totalGs || 0, qty: sheetPrefill.qty || 1 }]);
+              setItems([
+                {
+                  sku: exactMatch.sku,
+                  sale_gs: sheetPrefill.totalGs || 0,
+                  qty: sheetPrefill.qty || 1,
+                },
+              ]);
               toast.success(`🎯 Producto detectado: ${exactMatch.title}`);
             } else {
-              // Try partial match
               const partialMatch = visibleProducts.find((p: any) => {
                 const pTitle = p.title?.toLowerCase().trim() || '';
                 return pTitle.includes(cleanTitle) || cleanTitle.includes(pTitle);
               });
+
               if (partialMatch && partialMatch.sku) {
-                setItems([{ sku: partialMatch.sku, sale_gs: sheetPrefill.totalGs || 0, qty: sheetPrefill.qty || 1 }]);
+                setItems([
+                  {
+                    sku: partialMatch.sku,
+                    sale_gs: sheetPrefill.totalGs || 0,
+                    qty: sheetPrefill.qty || 1,
+                  },
+                ]);
                 toast.success(`🎯 Producto detectado (parcial): ${partialMatch.title}`);
               } else {
-                // No match - set empty item so user can choose
-                setItems([{ sku: '', sale_gs: sheetPrefill.totalGs || 0, qty: sheetPrefill.qty || 1 }]);
-                toast.info(`⚠️ Producto "${sheetPrefill.productTitle}" no encontrado en catálogo. Elegilo manualmente.`);
+                setItems([
+                  {
+                    sku: '',
+                    sale_gs: sheetPrefill.totalGs || 0,
+                    qty: sheetPrefill.qty || 1,
+                  },
+                ]);
+                toast.info(
+                  `⚠️ Producto "${sheetPrefill.productTitle}" no encontrado en catálogo. Elegilo manualmente.`
+                );
               }
             }
           }
@@ -227,7 +271,7 @@ export default function CreateOrderView({
     setItems(items.filter((_, i) => i !== idx));
   };
 
-  const updateItem = (idx: number, field: string, value: any) => {
+  const updateItem = (idx: number, field: keyof ItemRow, value: any) => {
     const copy = [...items];
     (copy[idx] as any)[field] = value;
 
@@ -299,28 +343,31 @@ export default function CreateOrderView({
         provider_emails_list: providerEmails.join(','),
       };
 
-      const { data: insertedOrder, error: insertError } = await supabase
+      console.log('Guardando pedido payload:', payload);
+
+      const { error: insertError } = await supabase
         .from('orders')
-        .insert(payload)
-        .select('id, order_number')
-        .single();
+        .insert([payload]);
 
-      if (insertError) throw insertError;
+      if (insertError) {
+        console.error('Error insertando pedido:', insertError);
+        throw insertError;
+      }
 
-      const generatedOrderNumber = insertedOrder?.order_number || insertedOrder?.id || 'SIN-NUMERO';
+      const generatedOrderNumber = 'guardado';
 
       const { error: newsError } = await supabase.from('news').insert({
         order_id: String(generatedOrderNumber),
         actor_email: profile?.email,
         role_scope: profile?.role,
-        message: `Nuevo pedido ${generatedOrderNumber} - ${customer} - ${city} - Gs ${nf(totalVenta)}`,
+        message: `Nuevo pedido - ${customer} - ${city} - Gs ${nf(totalVenta)}`,
       });
 
       if (newsError) {
         console.error('Error al crear noticia:', newsError);
       }
 
-      toast.success(`✅ Pedido ${generatedOrderNumber} guardado`);
+      toast.success('✅ Pedido guardado correctamente');
       resetForm();
     } catch (error: any) {
       console.error('Error guardando pedido:', error);
@@ -444,13 +491,13 @@ export default function CreateOrderView({
                 Prov×Cant: {nf(Number(catalogMap[item.sku]?.provider_price_gs || 0) * item.qty)}
               </span>
 
-              <button className="nav-btn text-xs" onClick={() => removeItem(idx)}>
+              <button type="button" className="nav-btn text-xs" onClick={() => removeItem(idx)}>
                 Quitar
               </button>
             </div>
           ))}
 
-          <button className="nav-btn active text-xs mt-2" onClick={addItem}>
+          <button type="button" className="nav-btn active text-xs mt-2" onClick={addItem}>
             + Agregar ítem
           </button>
 
@@ -477,7 +524,12 @@ export default function CreateOrderView({
             </div>
           </div>
 
-          <button className="nav-btn active mt-4" onClick={saveOrder} disabled={saving || loadingProducts}>
+          <button
+            type="button"
+            className="nav-btn active mt-4"
+            onClick={saveOrder}
+            disabled={saving || loadingProducts}
+          >
             {saving ? (
               <span className="flex items-center gap-2">
                 <span className="btn-spinner" /> Guardando...
