@@ -230,12 +230,61 @@ export default function ShopifyInboxView({
       return;
     }
     setBulkLoading(true);
-    let count = 0;
+    let ok = 0;
+    let fail = 0;
     for (const { order, idx } of loadableOrders) {
-      handleConfirm(order, idx);
-      count++;
+      try {
+        const rowId = getRowId(order, idx);
+        const matched = matchProduct(order[colProducts] || '');
+        if (!matched) continue;
+
+        const totalStr = order[colTotal] || '0';
+        const totalGs = Math.round(Number(totalStr.replace(/[^\d.-]/g, '')) || 0);
+        const street = order[colStreet] || '';
+        const street2 = order[colStreet2] || '';
+        const fullStreet = [street, street2].filter(Boolean).join(', ');
+        const qty = Number((order[colQty] || '1').split('\n')[0]) || 1;
+        const city = order[colCity] || '';
+        const cityMatch = findCityMatch(city);
+        const deliveryFee = cityMatch ? Number(cityMatch.price_gs) || 0 : 0;
+        const platformCity = cityMatch?.city || city;
+
+        const providerCost = Number(matched.provider_price_gs || 0) * qty;
+        const commission = totalGs - (providerCost + deliveryFee);
+
+        const payload = {
+          created_by: profile?.email || null,
+          customer_name: order[colName] || '',
+          phone: order[colPhone] || '',
+          city: platformCity,
+          street: fullStreet,
+          district: order[colDistrict] || '',
+          email: order[colEmail] || '',
+          obs: `sheet_row:${rowId}`,
+          items_json: [{
+            sku: matched.sku || '',
+            title: matched.title || '',
+            sale_gs: totalGs,
+            qty,
+            provider_price_gs: Number(matched.provider_price_gs || 0),
+            provider_email: matched.provider_email || '',
+          }],
+          total_gs: totalGs,
+          delivery_gs: deliveryFee,
+          commission_gs: commission,
+          provider_emails_list: matched.provider_email || '',
+        };
+
+        const { error } = await supabase.from('orders').insert(payload);
+        if (error) { fail++; console.error('Bulk insert error:', error); }
+        else ok++;
+      } catch (e) {
+        fail++;
+        console.error('Bulk load error:', e);
+      }
     }
-    toast.success(`🚀 ${count} pedidos enviados a cargar`);
+    toast.success(`🚀 ${ok} pedidos cargados${fail ? ` (${fail} errores)` : ''}`);
+    await loadImported();
     setBulkLoading(false);
   };
 
