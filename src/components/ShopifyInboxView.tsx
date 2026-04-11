@@ -2,7 +2,6 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
-import type { SheetPrefill } from '@/pages/Index';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
@@ -10,11 +9,7 @@ interface SheetOrder {
   [key: string]: string;
 }
 
-export default function ShopifyInboxView({
-  onConfirmOrder,
-}: {
-  onConfirmOrder: (prefill: SheetPrefill) => void;
-}) {
+export default function ShopifyInboxView() {
   const { profile } = useAuth();
   const sheetUrl = profile?.sheet_url || '';
 
