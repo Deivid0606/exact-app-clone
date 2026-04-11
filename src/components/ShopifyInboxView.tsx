@@ -209,8 +209,11 @@ export default function ShopifyInboxView({
     if (onlyCovered && colCity) {
       result = result.filter(o => isCityCovered(o[colCity] || ''));
     }
+    if (onlyMatched && colProducts) {
+      result = result.filter(o => !!matchProduct(o[colProducts] || ''));
+    }
     return result;
-  }, [orders, search, onlyCovered, coveredCities, colCity]);
+  }, [orders, search, onlyCovered, onlyMatched, coveredCities, colCity, colProducts, products]);
 
   const handleConfirm = (order: SheetOrder, idx: number) => {
     const totalStr = order[colTotal] || '0';
