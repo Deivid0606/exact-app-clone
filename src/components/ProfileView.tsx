@@ -8,7 +8,7 @@ export default function ProfileView() {
   const [form, setForm] = useState({
     name: '', phone: '', doc: '', addr: '',
     bank_name: '', bank_type: '', bank_num: '', bank_holder: '', bank_holder_ci: '',
-    wallet_provider: '', wallet_number: '', wallet_holder: '', logo_url: '',
+    wallet_provider: '', wallet_number: '', wallet_holder: '', logo_url: '', sheet_url: '',
   });
   const [saving, setSaving] = useState(false);
 
@@ -23,6 +23,7 @@ export default function ProfileView() {
           bank_holder_ci: data.bank_holder_ci || '',
           wallet_provider: data.wallet_provider || '', wallet_number: data.wallet_number || '',
           wallet_holder: data.wallet_holder || '', logo_url: data.logo_url || '',
+          sheet_url: (data as any).sheet_url || '',
         });
       });
   }, [user]);
@@ -59,6 +60,10 @@ export default function ProfileView() {
           <input className="app-input" value={form.addr} onChange={e => set('addr', e.target.value)} />
           <label className="app-label">Logo URL (para Proveedor)</label>
           <input className="app-input" value={form.logo_url} onChange={e => set('logo_url', e.target.value)} placeholder="https://...logo.png" />
+          <hr className="border-border my-3" />
+          <label className="app-label">📊 Link de Google Sheets (pedidos Shopify)</label>
+          <input className="app-input" value={form.sheet_url} onChange={e => set('sheet_url', e.target.value)} placeholder="https://docs.google.com/spreadsheets/d/..." />
+          <p className="text-[10px] text-muted-foreground mt-1">Pegá el link de tu hoja pública de Shopify para importar pedidos.</p>
         </div>
 
         {/* Banking */}
