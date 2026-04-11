@@ -7,7 +7,7 @@ const nf = (n: number) => new Intl.NumberFormat("es-PY").format(n);
 
 type SheetOrder = Record<string, string>;
 
-const ROW_STATUS_KEY = "shopify_row_statuses_v3";
+const ROW_STATUS_KEY = "shopify_row_statuses_v4";
 const SHEET_CACHE_KEY = "shopify_sheet_cache";
 const CACHE_DURATION = 5 * 60 * 1000;
 
@@ -43,12 +43,18 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [loading, setLoading] = useState(false);
   const [lastSync, setLastSync] = useState<Date | null>(null);
   const [lastCacheHit, setLastCacheHit] = useState<boolean>(false);
+  const [initialLoadDone, setInitialLoadDone] = useState(false);
 
   const [products, setProducts] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
 
   const [rowStatuses, setRowStatuses] = useState<Record<string, string>>(() => {
-    try { return JSON.parse(localStorage.getItem(ROW_STATUS_KEY) || "{}"); } catch { return {}; }
+    try { 
+      const saved = localStorage.getItem(ROW_STATUS_KEY);
+      return saved ? JSON.parse(saved) : {};
+    } catch { 
+      return {}; 
+    }
   });
 
   const [autoLoad, setAutoLoad] = useState(false);
@@ -60,10 +66,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [filterOnlyCargar, setFilterOnlyCargar] = useState(false);
   const [search, setSearch] = useState("");
 
+  // Guardar estados en localStorage
   useEffect(() => {
     localStorage.setItem(ROW_STATUS_KEY, JSON.stringify(rowStatuses));
   }, [rowStatuses]);
 
+  // Cargar productos y precios
   useEffect(() => {
     const loadProducts = async () => {
       const { data } = await supabase.from("products").select("*");
@@ -79,9 +87,17 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     loadPrices();
   }, []);
 
+  // CARGA AUTOMÁTICA al montar el componente
+  useEffect(() => {
+    if (sheetUrl && !initialLoadDone) {
+      console.log("🚀 Cargando Sheet automáticamente...");
+      readSheet(false);
+      setInitialLoadDone(true);
+    }
+  }, [sheetUrl]);
+
   const colKeys = useMemo(() => {
     const h = sheetHeaders;
-    console.log("📋 Headers del Sheet:", h);
     
     const find = (...candidates: string[]) => {
       for (const candidate of candidates) {
@@ -160,10 +176,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     [clientPrices],
   );
 
-  const calculateCommission = useCallback((salePrice: number, productCost: number, deliveryCost: number) => {
-    return salePrice - (productCost + deliveryCost);
-  }, []);
-
   const readSheet = async (forceRefresh = false) => {
     if (!sheetUrl) {
       toast.error("Configurá tu URL de Google Sheet en tu perfil");
@@ -180,7 +192,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             setSheetOrders(data.orders || []);
             setLastSync(new Date(timestamp));
             setLastCacheHit(true);
-            toast.info(`📦 Usando cache local`);
+            toast.info(`📦 Usando cache local (${Math.round((Date.now() - timestamp) / 1000)}s)`);
             return;
           }
         }
@@ -222,49 +234,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     setRowStatuses((prev) => ({ ...prev, [key]: status }));
   };
 
-  const buildPayload = (order: SheetOrder, matched: any, deliveryPrice: number | null) => {
-    const parseMoney = (v: string) => {
-      if (!v) return 0;
-      const cleaned = String(v).replace(/[^\d.,\-]/g, "");
-      if (!cleaned) return 0;
-      return Math.round(Number(cleaned.replace(/\./g, "").replace(",", ".")) || 0);
-    };
-
-    const customer = (order[colKeys.name] || "").trim();
-    const phone = extractPhoneNumber(order[colKeys.phone] || "");
-    const city = (order[colKeys.city] || "").trim();
-    const street = [(order[colKeys.street] || "").trim(), (order[colKeys.street2] || "").trim()].filter(Boolean).join(" ");
-    const dept = (order[colKeys.dept] || "").trim();
-    const qty = Number(order[colKeys.qty] || 1) || 1;
-    const salePrice = parseMoney(order[colKeys.amount] || "0");
-    const productCost = matched?.provider_price_gs || 0;
-    const deliveryCost = deliveryPrice || 0;
-    const commission = salePrice - (productCost + deliveryCost);
-
-    const obsWithCommission = `💰 Comisión: ${nf(commission)} Gs | 🚚 Delivery: ${nf(deliveryCost)} Gs | 📦 Costo: ${nf(productCost)} Gs | 🏷️ Producto: ${matched.title}`;
-
-    return {
-      order_number: `SH${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 5)}`,
-      created_by: myEmail,
-      customer_name: customer,
-      phone,
-      city,
-      street,
-      district: dept,
-      items_json: [{ 
-        title: matched.title, 
-        qty, 
-        sale_gs: salePrice,
-        provider_price_gs: productCost,
-        sku: matched.sku || "" 
-      }],
-      total_gs: salePrice * qty,
-      status: "PENDIENTE",
-      obs: obsWithCommission,
-      provider_emails_list: matched.provider_email || "",
-    };
+  const parseMoney = (v: string) => {
+    if (!v) return 0;
+    const cleaned = String(v).replace(/[^\d.,\-]/g, "");
+    if (!cleaned) return 0;
+    return Math.round(Number(cleaned.replace(/\./g, "").replace(",", ".")) || 0);
   };
 
+  // CARGA DIRECTA - con cálculo correcto de comisión
   const handleConfirm = async (order: SheetOrder, idx: number) => {
     const productName = order[colKeys.product] || "";
     const matched = matchProduct(productName);
@@ -274,29 +251,58 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
     
     const city = order[colKeys.city] || "";
-    const deliveryPrice = getCityPrice(city);
-    
-    const parseMoney = (v: string) => {
-      if (!v) return 0;
-      const cleaned = String(v).replace(/[^\d.,\-]/g, "");
-      if (!cleaned) return 0;
-      return Math.round(Number(cleaned.replace(/\./g, "").replace(",", ".")) || 0);
-    };
-    
+    const deliveryPrice = getCityPrice(city) || 0;
     const salePrice = parseMoney(order[colKeys.amount] || "0");
     const productCost = matched?.provider_price_gs || 0;
-    const commission = salePrice - (productCost + (deliveryPrice || 0));
+    const qty = Number(order[colKeys.qty] || 1) || 1;
     
-    const payload = buildPayload(order, matched, deliveryPrice);
-    const { error } = await supabase.from("orders").insert(payload);
+    // Cálculo CORRECTO de la comisión
+    const commission = salePrice - (productCost + deliveryPrice);
+    
+    console.log("========== CÁLCULO COMISIÓN ==========");
+    console.log("Producto:", matched.title);
+    console.log("Precio venta:", salePrice, "Gs");
+    console.log("Costo proveedor:", productCost, "Gs");
+    console.log("Costo delivery:", deliveryPrice, "Gs");
+    console.log("Comisión:", commission, "Gs");
+    console.log("======================================");
+    
+    const orderData = {
+      order_number: `SH${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 5)}`,
+      created_by: myEmail,
+      customer_name: (order[colKeys.name] || "").trim(),
+      phone: extractPhoneNumber(order[colKeys.phone] || ""),
+      city: city,
+      street: [(order[colKeys.street] || "").trim(), (order[colKeys.street2] || "").trim()].filter(Boolean).join(" "),
+      district: (order[colKeys.dept] || "").trim(),
+      items_json: [{ 
+        title: matched.title, 
+        qty, 
+        sale_gs: salePrice,
+        provider_price_gs: productCost,
+        sku: matched.sku || "" 
+      }],
+      total_gs: salePrice * qty,
+      status: "PENDIENTE",
+      obs: `💰 Comisión: ${commission.toLocaleString("es-PY")} Gs | Venta: ${salePrice.toLocaleString("es-PY")} Gs | Costo: ${productCost.toLocaleString("es-PY")} Gs | Delivery: ${deliveryPrice.toLocaleString("es-PY")} Gs | Producto: ${matched.title}`,
+      provider_emails_list: matched.provider_email || "",
+    };
+    
+    const { error } = await supabase.from("orders").insert(orderData);
+    
     if (error) {
       toast.error("Error: " + error.message);
     } else {
       setRowStatus(String(idx), "CARGADO");
-      toast.success(`✅ Pedido cargado | 💰 Comisión: ${nf(commission)} Gs`);
+      if (commission >= 0) {
+        toast.success(`✅ Pedido cargado | 💰 Comisión: +${commission.toLocaleString("es-PY")} Gs`);
+      } else {
+        toast.warning(`⚠️ Pedido cargado | 💰 Comisión NEGATIVA: ${commission.toLocaleString("es-PY")} Gs`);
+      }
     }
   };
 
+  // Formulario - abre el modal
   const handleOpenForm = (order: SheetOrder) => {
     if (!onSheetConfirm) return;
     onSheetConfirm({
@@ -306,11 +312,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       street: [(order[colKeys.street] || "").trim(), (order[colKeys.street2] || "").trim()].filter(Boolean).join(" "),
       district: (order[colKeys.dept] || "").trim(),
       productTitle: (order[colKeys.product] || "").trim(),
-      totalGs: (() => {
-        const cleaned = String(order[colKeys.amount] || "").replace(/[^\d.,\-]/g, "");
-        if (!cleaned) return 0;
-        return Math.round(Number(cleaned.replace(/\./g, "").replace(",", ".")) || 0);
-      })(),
+      totalGs: parseMoney(order[colKeys.amount] || "0"),
       qty: Number(order[colKeys.qty] || 1) || 1,
     });
   };
@@ -343,20 +345,34 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         noCoverage++;
         continue;
       }
-
-      const parseMoney = (v: string) => {
-        if (!v) return 0;
-        const cleaned = String(v).replace(/[^\d.,\-]/g, "");
-        if (!cleaned) return 0;
-        return Math.round(Number(cleaned.replace(/\./g, "").replace(",", ".")) || 0);
-      };
       
       const salePrice = parseMoney(order[colKeys.amount] || "0");
       const productCost = matched?.provider_price_gs || 0;
       const commission = salePrice - (productCost + deliveryPrice);
+      const qty = Number(order[colKeys.qty] || 1) || 1;
       
-      const payload = buildPayload(order, matched, deliveryPrice);
-      const { error } = await supabase.from("orders").insert(payload);
+      const orderData = {
+        order_number: `SH${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 5)}`,
+        created_by: myEmail,
+        customer_name: (order[colKeys.name] || "").trim(),
+        phone: extractPhoneNumber(order[colKeys.phone] || ""),
+        city: city,
+        street: [(order[colKeys.street] || "").trim(), (order[colKeys.street2] || "").trim()].filter(Boolean).join(" "),
+        district: (order[colKeys.dept] || "").trim(),
+        items_json: [{ 
+          title: matched.title, 
+          qty, 
+          sale_gs: salePrice,
+          provider_price_gs: productCost,
+          sku: matched.sku || "" 
+        }],
+        total_gs: salePrice * qty,
+        status: "PENDIENTE",
+        obs: `💰 Comisión: ${commission.toLocaleString("es-PY")} Gs | Venta: ${salePrice.toLocaleString("es-PY")} Gs | Costo: ${productCost.toLocaleString("es-PY")} Gs | Delivery: ${deliveryPrice.toLocaleString("es-PY")} Gs | Producto: ${matched.title}`,
+        provider_emails_list: matched.provider_email || "",
+      };
+      
+      const { error } = await supabase.from("orders").insert(orderData);
       if (error) {
         errors++;
       } else {
@@ -367,9 +383,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       
       if (i % 5 === 0) await new Promise(resolve => setTimeout(resolve, 100));
     }
-    toast.success(`✅ ${count} cargados | ❌ ${errors} errores | ⏭️ ${skipped} omitidos | 🚫 ${noCoverage} sin cobertura | 💰 Comisión total: ${nf(totalCommission)} Gs`);
+    toast.success(`✅ ${count} cargados | ❌ ${errors} errores | ⏭️ ${skipped} omitidos | 🚫 ${noCoverage} sin cobertura | 💰 Comisión total: ${totalCommission.toLocaleString("es-PY")} Gs`);
   };
 
+  // Auto-load con intervalo
   useEffect(() => {
     autoLoadRef.current = autoLoad;
     if (autoLoad) {
@@ -416,6 +433,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   }, [sheetOrders, rowStatuses, filterOnlyAvailable, filterOnlyCoverage, filterOnlyCargar, search, colKeys, matchProduct, hasCoverage]);
 
   const statusOpts = ["CARGAR", "A DROPEAR", "CANCELADO"];
+  const loadedCount = Object.values(rowStatuses).filter(s => s === "CARGADO").length;
 
   return (
     <div className="app-card">
@@ -495,9 +513,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
       <div className="text-xs text-muted-foreground mb-2">
         {filteredOrders.length} pendientes de {sheetOrders.length} filas totales
-        {Object.values(rowStatuses).filter(s => s === "CARGADO").length > 0 && 
-          ` (${Object.values(rowStatuses).filter(s => s === "CARGADO").length} ya cargados)`
-        }
+        {loadedCount > 0 && ` (${loadedCount} ya cargados)`}
       </div>
 
       <div className="overflow-auto">
@@ -531,12 +547,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               const phoneRaw = order[colKeys.phone] || "";
               const extractedPhone = extractPhoneNumber(phoneRaw);
               
-              const parseMoney = (v: string) => {
-                if (!v) return 0;
-                const cleaned = String(v).replace(/[^\d.,\-]/g, "");
-                if (!cleaned) return 0;
-                return Math.round(Number(cleaned.replace(/\./g, "").replace(",", ".")) || 0);
-              };
               const salePrice = parseMoney(order[colKeys.amount] || "0");
               const productCost = matched?.provider_price_gs || 0;
               const commission = salePrice - (productCost + (deliveryPrice || 0));
@@ -549,20 +559,20 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                   <td className="text-xs">{city || "—"}</td>
                   <td className="text-right text-xs font-bold">
                     {deliveryPrice != null ? `${nf(deliveryPrice)} Gs` : <span className="text-muted-foreground">—</span>}
-                  </td>
+                   </td>
                   <td className="text-xs truncate max-w-[180px]" title={productName}>
                     {productName || "—"}
-                  </td>
+                   </td>
                   <td className="text-xs">{order[colKeys.qty] || "1"}</td>
                   <td className="text-right text-xs font-bold text-green-400">
                     {salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}
-                  </td>
+                   </td>
                   <td className="text-right text-xs text-orange-400">
                     {productCost > 0 ? `${nf(productCost)} Gs` : "—"}
-                  </td>
-                  <td className="text-right text-xs font-bold text-blue-400">
+                   </td>
+                  <td className={`text-right text-xs font-bold ${commission >= 0 ? "text-blue-400" : "text-red-400"}`}>
                     {commission !== 0 ? `${commission > 0 ? "+" : ""}${nf(commission)} Gs` : "—"}
-                  </td>
+                   </td>
                   <td className="text-xs">
                     {matched ? (
                       <span className="text-green-400" title={`Costo: ${nf(productCost)} Gs`}>
@@ -573,14 +583,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                         ❌
                       </span>
                     )}
-                  </td>
+                   </td>
                   <td className="text-xs">
                     {covered ? (
                       <span className="text-green-400" title={`Delivery: ${deliveryPrice?.toLocaleString()} Gs`}>✅</span>
                     ) : (
                       <span className="text-yellow-400" title="Sin cobertura">⚠️</span>
                     )}
-                  </td>
+                   </td>
                   <td className="min-w-[130px]">
                     <select
                       className="app-input !py-1 !px-2 !text-[11px] !w-full"
@@ -591,35 +601,28 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                         <option key={s} value={s}>{s}</option>
                       ))}
                     </select>
-                  </td>
+                   </td>
                   <td className="flex gap-1 min-w-[140px]">
-                    {currentStatus === "CARGAR" && matched && covered && (
+                    {currentStatus === "CARGAR" && matched && (
                       <button
                         className="nav-btn active !py-1 !px-2 !text-[11px] whitespace-nowrap"
                         onClick={() => handleConfirm(order, idx)}
+                        title="Cargar pedido directamente"
                       >
                         💰 Cargar
-                      </button>
-                    )}
-                    {currentStatus === "CARGAR" && matched && !covered && (
-                      <button
-                        className="nav-btn !py-1 !px-2 !text-[11px] whitespace-nowrap !bg-yellow-600"
-                        onClick={() => handleConfirm(order, idx)}
-                        title="Sin cobertura de delivery"
-                      >
-                        ⚠️ Cargar
                       </button>
                     )}
                     {onSheetConfirm && (
                       <button
                         className="nav-btn !py-1 !px-2 !text-[11px] whitespace-nowrap"
                         onClick={() => handleOpenForm(order)}
+                        title="Abrir formulario para editar"
                       >
                         📝 Formulario
                       </button>
                     )}
-                  </td>
-                </tr>
+                   </td>
+                 </tr>
               );
             })}
             {filteredOrders.length === 0 && (
