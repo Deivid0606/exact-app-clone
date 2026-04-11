@@ -23,6 +23,7 @@ import WithGuidesView from '@/components/WithGuidesView';
 import CounterView from '@/components/CounterView';
 import MapView from '@/components/MapView';
 import ShopifyInboxView from '@/components/ShopifyInboxView';
+import ShopifyConnectionView from '@/components/ShopifyConnectionView';
 
 export default function Index() {
   const { user, profile, loading, signOut, refreshProfile } = useAuth();
@@ -120,6 +121,7 @@ export default function Index() {
       case 'counter': return <CounterView />;
       case 'mapa': return <MapView />;
       case 'shopifyInbox': return <ShopifyInboxView />;
+      case 'shopifyConnection': return <ShopifyConnectionView />;
       default: return <DashboardView />;
     }
   };

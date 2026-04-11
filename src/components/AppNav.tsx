@@ -4,7 +4,7 @@ export type ViewName =
   | 'auth' | 'dashboard' | 'news' | 'chat' | 'products' | 'earnings'
   | 'order' | 'orders' | 'rates' | 'commissions' | 'commissionRequests'
   | 'counter' | 'closures' | 'rendicionesPagadas' | 'profile' | 'users'
-  | 'assignOrders' | 'rankingDelivery' | 'withGuides' | 'shopifyInbox' | 'mapa';
+  | 'assignOrders' | 'rankingDelivery' | 'withGuides' | 'shopifyInbox' | 'shopifyConnection' | 'mapa';
 
 interface NavItem {
   id: ViewName;
@@ -23,7 +23,8 @@ const navItems: NavItem[] = [
   { id: 'earnings', label: 'Ganancias', roles: ['ADMIN', 'PROVEEDOR'] },
   { id: 'order', label: 'Cargar pedido', roles: ['VENDEDOR'] },
   { id: 'orders', label: 'Pedidos' },
-  { id: 'shopifyInbox', label: 'Pedidos Shopify + WhatsApp', roles: ['ADMIN'] },
+  { id: 'shopifyInbox', label: 'Pedidos Shopify + WhatsApp', roles: ['ADMIN', 'VENDEDOR'] },
+  { id: 'shopifyConnection', label: '🔗 Conexión Shopify', roles: ['ADMIN'] },
   { id: 'assignOrders', label: 'Asignar Pedidos', roles: ['ADMIN', 'PROVEEDOR', 'DELIVERY'] },
   { id: 'mapa', label: 'Mapa', roles: ['ADMIN', 'DELIVERY'] },
   { id: 'rates', label: 'Costos delivery', excludeRoles: ['DESPACHANTE', 'DELIVERY', 'VENDEDOR'] },
