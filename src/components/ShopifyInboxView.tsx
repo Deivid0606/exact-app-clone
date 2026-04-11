@@ -267,9 +267,9 @@ export default function ShopifyInboxView({
     setBulkLoading(true);
     let ok = 0;
     let fail = 0;
-    for (const { order, idx } of loadableOrders) {
+    for (const { order, origIdx } of loadableOrders) {
       try {
-        const rowId = getRowId(order, idx);
+        const rowId = getRowId(order, origIdx);
         const matched = matchProduct(order[colProducts] || '');
         if (!matched) continue;
 
