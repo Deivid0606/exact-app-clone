@@ -25,14 +25,35 @@ import MapView from '@/components/MapView';
 import ShopifyInboxView from '@/components/ShopifyInboxView';
 import ShopifyConnectionView from '@/components/ShopifyConnectionView';
 
+export interface SheetPrefill {
+  customer?: string;
+  phone?: string;
+  city?: string;
+  street?: string;
+  district?: string;
+  email?: string;
+  productTitle?: string;
+  totalGs?: number;
+  qty?: number;
+  obs?: string;
+}
+
 export default function Index() {
   const { user, profile, loading, signOut, refreshProfile } = useAuth();
   const [currentView, setCurrentView] = useState<ViewName>('auth');
   const [lastUpdate, setLastUpdate] = useState(() => new Date().toLocaleString('es-PY'));
   const [preSelectedSku, setPreSelectedSku] = useState<string | null>(null);
+  const [sheetPrefill, setSheetPrefill] = useState<SheetPrefill | null>(null);
 
   const handleLoadProduct = (sku: string) => {
     setPreSelectedSku(sku);
+    setSheetPrefill(null);
+    setCurrentView('order');
+  };
+
+  const handleSheetConfirm = (prefill: SheetPrefill) => {
+    setSheetPrefill(prefill);
+    setPreSelectedSku(null);
     setCurrentView('order');
   };
 
@@ -107,7 +128,14 @@ export default function Index() {
       case 'products': return <ProductsView onLoadProduct={handleLoadProduct} />;
       case 'profile': return <ProfileView />;
       case 'users': return <UsersView />;
-      case 'order': return <CreateOrderView initialSku={preSelectedSku} onSkuConsumed={() => setPreSelectedSku(null)} />;
+      case 'order': return (
+        <CreateOrderView
+          initialSku={preSelectedSku}
+          onSkuConsumed={() => setPreSelectedSku(null)}
+          sheetPrefill={sheetPrefill}
+          onPrefillConsumed={() => setSheetPrefill(null)}
+        />
+      );
       case 'rates': return <RatesView />;
       case 'commissions': return <CommissionsView />;
       case 'commissionRequests': return <CommissionRequestsView />;
@@ -120,7 +148,7 @@ export default function Index() {
       case 'withGuides': return <WithGuidesView />;
       case 'counter': return <CounterView />;
       case 'mapa': return <MapView />;
-      case 'shopifyInbox': return <ShopifyInboxView />;
+      case 'shopifyInbox': return <ShopifyInboxView onConfirmOrder={handleSheetConfirm} />;
       case 'shopifyConnection': return <ShopifyConnectionView />;
       default: return <DashboardView />;
     }

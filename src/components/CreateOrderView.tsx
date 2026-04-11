@@ -56,9 +56,13 @@ const canAccessProduct = (product: any, profile: any) => {
 export default function CreateOrderView({
   initialSku,
   onSkuConsumed,
+  sheetPrefill,
+  onPrefillConsumed,
 }: {
   initialSku?: string | null;
   onSkuConsumed?: () => void;
+  sheetPrefill?: { customer?: string; phone?: string; city?: string; street?: string; district?: string; email?: string; productTitle?: string; totalGs?: number; qty?: number; obs?: string } | null;
+  onPrefillConsumed?: () => void;
 }) {
   const { profile } = useAuth();
 
@@ -112,6 +116,65 @@ export default function CreateOrderView({
         if (pricesError) throw pricesError;
 
         setClientPrices(pricesData || []);
+
+        // Auto-fill from Sheet prefill data
+        if (sheetPrefill) {
+          if (sheetPrefill.customer) setCustomer(sheetPrefill.customer);
+          if (sheetPrefill.phone) setPhone(sheetPrefill.phone);
+          if (sheetPrefill.street) setStreet(sheetPrefill.street);
+          if (sheetPrefill.district) setDistrict(sheetPrefill.district);
+          if (sheetPrefill.email) setEmail(sheetPrefill.email);
+          if (sheetPrefill.obs) setObs(sheetPrefill.obs);
+
+          // Try to match city from client_prices
+          const cityMatch = (pricesData || []).find((c: any) =>
+            c.city?.toLowerCase().trim() === (sheetPrefill.city || '').toLowerCase().trim()
+          );
+          if (cityMatch) {
+            setCity(cityMatch.city);
+          } else if (sheetPrefill.city) {
+            // Partial match
+            const partial = (pricesData || []).find((c: any) =>
+              c.city?.toLowerCase().includes((sheetPrefill.city || '').toLowerCase()) ||
+              (sheetPrefill.city || '').toLowerCase().includes(c.city?.toLowerCase())
+            );
+            if (partial) setCity(partial.city);
+            else setCity(sheetPrefill.city);
+          }
+
+          // Try to match product by title
+          if (sheetPrefill.productTitle) {
+            const titleLower = sheetPrefill.productTitle.toLowerCase().trim();
+            // Remove emojis for comparison
+            const cleanTitle = titleLower.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '').trim();
+            
+            const exactMatch = visibleProducts.find((p: any) =>
+              p.title?.toLowerCase().trim() === titleLower ||
+              p.title?.toLowerCase().trim() === cleanTitle
+            );
+            
+            if (exactMatch && exactMatch.sku) {
+              setItems([{ sku: exactMatch.sku, sale_gs: sheetPrefill.totalGs || 0, qty: sheetPrefill.qty || 1 }]);
+              toast.success(`🎯 Producto detectado: ${exactMatch.title}`);
+            } else {
+              // Try partial match
+              const partialMatch = visibleProducts.find((p: any) => {
+                const pTitle = p.title?.toLowerCase().trim() || '';
+                return pTitle.includes(cleanTitle) || cleanTitle.includes(pTitle);
+              });
+              if (partialMatch && partialMatch.sku) {
+                setItems([{ sku: partialMatch.sku, sale_gs: sheetPrefill.totalGs || 0, qty: sheetPrefill.qty || 1 }]);
+                toast.success(`🎯 Producto detectado (parcial): ${partialMatch.title}`);
+              } else {
+                // No match - set empty item so user can choose
+                setItems([{ sku: '', sale_gs: sheetPrefill.totalGs || 0, qty: sheetPrefill.qty || 1 }]);
+                toast.info(`⚠️ Producto "${sheetPrefill.productTitle}" no encontrado en catálogo. Elegilo manualmente.`);
+              }
+            }
+          }
+
+          onPrefillConsumed?.();
+        }
       } catch (error: any) {
         console.error('Error cargando datos de CreateOrderView:', error);
         toast.error(error?.message || 'No se pudieron cargar los productos');
@@ -121,7 +184,7 @@ export default function CreateOrderView({
     };
 
     loadData();
-  }, [initialSku, onSkuConsumed, profile?.email, profile?.role]);
+  }, [initialSku, onSkuConsumed, sheetPrefill, onPrefillConsumed, profile?.email, profile?.role]);
 
   const catalogMap: Record<string, any> = useMemo(() => {
     const map: Record<string, any> = {};
