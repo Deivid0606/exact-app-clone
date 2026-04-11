@@ -10,9 +10,6 @@ type SheetOrder = Record<string, string>;
 const ROW_STATUS_KEY = "shopify_row_statuses_v5";
 const SHEET_CACHE_KEY = "shopify_sheet_cache";
 const AUTO_LOAD_KEY = "shopify_auto_load_enabled";
-const FILTER_AVAILABLE_KEY = "shopify_filter_available";
-const FILTER_COVERAGE_KEY = "shopify_filter_coverage";
-const FILTER_CARGAR_KEY = "shopify_filter_cargar";
 const LAST_ORDER_KEY = "shopify_last_order_number";
 const CACHE_DURATION = 5 * 60 * 1000;
 
@@ -82,33 +79,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   });
 
-  // Filtros PERSISTENTES
-  const [filterOnlyAvailable, setFilterOnlyAvailable] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem(FILTER_AVAILABLE_KEY);
-      return saved === "true";
-    } catch {
-      return false;
-    }
-  });
-
-  const [filterOnlyCoverage, setFilterOnlyCoverage] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem(FILTER_COVERAGE_KEY);
-      return saved === "true";
-    } catch {
-      return false;
-    }
-  });
-
-  const [filterOnlyCargar, setFilterOnlyCargar] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem(FILTER_CARGAR_KEY);
-      return saved === "true";
-    } catch {
-      return false;
-    }
-  });
+  // FILTROS FIJOS - SIEMPRE ACTIVOS, SIN POSIBILIDAD DE DESACTIVAR
+  const filterOnlyAvailable = true;  // SIEMPRE activo
+  const filterOnlyCoverage = true;   // SIEMPRE activo
+  const filterOnlyCargar = true;     // SIEMPRE activo
 
   const [search, setSearch] = useState("");
 
@@ -125,18 +99,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     localStorage.setItem(AUTO_LOAD_KEY, autoLoad.toString());
     autoLoadRef.current = autoLoad;
   }, [autoLoad]);
-
-  useEffect(() => {
-    localStorage.setItem(FILTER_AVAILABLE_KEY, filterOnlyAvailable.toString());
-  }, [filterOnlyAvailable]);
-
-  useEffect(() => {
-    localStorage.setItem(FILTER_COVERAGE_KEY, filterOnlyCoverage.toString());
-  }, [filterOnlyCoverage]);
-
-  useEffect(() => {
-    localStorage.setItem(FILTER_CARGAR_KEY, filterOnlyCargar.toString());
-  }, [filterOnlyCargar]);
 
   useEffect(() => {
     const loadProducts = async () => {
@@ -167,17 +129,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   }, [autoLoad, sheetUrl]);
 
   // 🔥 FUNCIÓN MEJORADA - Detecta columnas SIN IMPORTAR EL ORDEN
-  // Normaliza los nombres para comparar sin acentos, espacios, mayúsculas
   const colKeys = useMemo(() => {
     const h = sheetHeaders;
     console.log("📋 Headers del Sheet:", h);
     
-    // Función mejorada para buscar coincidencia NORMALIZADA
     const find = (...candidates: string[]) => {
-      // Normalizar cada candidato
       const normalizedCandidates = candidates.map(c => normalizeText(c));
       
-      // 1. Buscar coincidencia exacta normalizada
       for (let i = 0; i < h.length; i++) {
         const normalizedHeader = normalizeText(h[i]);
         for (const candidate of normalizedCandidates) {
@@ -188,7 +146,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         }
       }
       
-      // 2. Buscar coincidencia parcial (un contiene al otro)
       for (let i = 0; i < h.length; i++) {
         const normalizedHeader = normalizeText(h[i]);
         for (const candidate of normalizedCandidates) {
@@ -629,31 +586,11 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         )}
       </div>
 
+      {/* FILTROS FIJOS - SIEMPRE ACTIVOS, SIN CHECKBOXES */}
       <div className="flex flex-wrap gap-4 mb-3">
-        <label className="flex items-center gap-1 text-xs cursor-pointer">
-          <input
-            type="checkbox"
-            checked={filterOnlyAvailable}
-            onChange={(e) => setFilterOnlyAvailable(e.target.checked)}
-          />
-          Solo con producto
-        </label>
-        <label className="flex items-center gap-1 text-xs cursor-pointer">
-          <input
-            type="checkbox"
-            checked={filterOnlyCoverage}
-            onChange={(e) => setFilterOnlyCoverage(e.target.checked)}
-          />
-          Solo con cobertura
-        </label>
-        <label className="flex items-center gap-1 text-xs cursor-pointer">
-          <input
-            type="checkbox"
-            checked={filterOnlyCargar}
-            onChange={(e) => setFilterOnlyCargar(e.target.checked)}
-          />
-          Solo estado CARGAR
-        </label>
+        <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-1 rounded">✓ Solo con producto</span>
+        <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-1 rounded">✓ Solo con cobertura</span>
+        <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-1 rounded">✓ Solo estado CARGAR</span>
         <input
           className="app-input !w-auto min-w-[240px] flex-1"
           placeholder="🔎 Buscar..."
