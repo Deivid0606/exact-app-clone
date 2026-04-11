@@ -222,13 +222,14 @@ export default function ShopifyInboxView({
     });
   };
 
-  // Get all loadable orders (city covered + product detected + not imported)
+  // Get all loadable orders (status=CARGAR + city covered + product detected + not imported)
   const getLoadableOrders = () => {
     return filtered
       .map((o, i) => ({ order: o, idx: i }))
       .filter(({ order, idx }) => {
         const rowId = getRowId(order, idx);
         if (importedRowIds.has(rowId)) return false;
+        if ((rowStatuses[rowId] || 'PENDIENTE') !== 'CARGAR') return false;
         const city = order[colCity] || '';
         if (!isCityCovered(city)) return false;
         const matched = matchProduct(order[colProducts] || '');
@@ -237,7 +238,7 @@ export default function ShopifyInboxView({
       });
   };
 
-  const loadableOrders = useMemo(() => getLoadableOrders(), [filtered, importedRowIds, colCity, colProducts]);
+  const loadableOrders = useMemo(() => getLoadableOrders(), [filtered, importedRowIds, colCity, colProducts, rowStatuses]);
 
   const handleBulkLoad = async () => {
     if (loadableOrders.length === 0) {
