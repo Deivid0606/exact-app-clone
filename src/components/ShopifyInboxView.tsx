@@ -51,7 +51,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   });
 
-  // 🔥 PERSISTENCIA: Cargar estado de auto-carga desde localStorage
+  // Persistencia de auto-carga
   const [autoLoad, setAutoLoad] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem(AUTO_LOAD_KEY);
@@ -75,7 +75,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     localStorage.setItem(ROW_STATUS_KEY, JSON.stringify(rowStatuses));
   }, [rowStatuses]);
 
-  // 🔥 Guardar estado de auto-carga cuando cambie
+  // Guardar estado de auto-carga
   useEffect(() => {
     localStorage.setItem(AUTO_LOAD_KEY, autoLoad.toString());
     autoLoadRef.current = autoLoad;
@@ -97,7 +97,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     loadPrices();
   }, []);
 
-  // CARGA AUTOMÁTICA al montar el componente
+  // Carga automática al montar
   useEffect(() => {
     if (sheetUrl && !initialLoadDone) {
       console.log("🚀 Cargando Sheet automáticamente...");
@@ -106,11 +106,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   }, [sheetUrl]);
 
-  // 🔥 Iniciar auto-carga si estaba activo al recargar la página
+  // Reactivar auto-carga si estaba activo
   useEffect(() => {
     if (autoLoad && sheetUrl) {
       console.log("🤖 Auto-carga reactivado después de recargar página");
-      // Pequeño delay para asegurar que todo esté listo
       setTimeout(() => {
         runAutoCycle();
       }, 2000);
@@ -308,7 +307,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return { success: true, commission };
   };
 
-  // CARGA AUTOMÁTICA DE TODOS LOS PEDIDOS EN ESTADO CARGAR
+  // Carga automática de todos los pedidos en estado CARGAR
   const autoLoadOrders = async () => {
     if (isAutoLoadingRef.current) {
       console.log("⚠️ Auto-carga ya en progreso...");
@@ -351,10 +350,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   };
 
-  // Formulario - abre el modal
+  // 🔥 FORMULARIO - abre el modal y cambia estado a CARGADO inmediatamente
   const handleOpenForm = (order: SheetOrder, idx: number) => {
     if (!onSheetConfirm) return;
     
+    // Cambiar estado a CARGADO inmediatamente
+    setRowStatus(String(idx), "CARGADO");
+    
+    // Abrir el formulario con los datos
     onSheetConfirm({
       customer: (order[colKeys.name] || "").trim(),
       phone: extractPhoneNumber(order[colKeys.phone] || ""),
@@ -384,9 +387,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   // Configurar intervalo de auto-carga
   useEffect(() => {
     if (autoLoad) {
-      // Limpiar intervalo existente
       if (intervalRef.current) clearInterval(intervalRef.current);
-      // Iniciar nuevo intervalo
       intervalRef.current = setInterval(runAutoCycle, 60000);
     } else {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -427,7 +428,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const statusOpts = ["CARGAR", "A DROPEAR", "CANCELADO"];
   const loadedCount = Object.values(rowStatuses).filter(s => s === "CARGADO").length;
 
-  // Función para toggle auto-carga
   const toggleAutoLoad = () => {
     const newValue = !autoLoad;
     setAutoLoad(newValue);
