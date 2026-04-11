@@ -127,6 +127,18 @@ export default function ShopifyInboxView({
     }) || null;
   };
 
+  const getDeliveryFee = (city: string): number => {
+    if (!city) return 0;
+    const c = city.toLowerCase().trim();
+    const exact = clientPrices.find((p: any) => (p.city || '').toLowerCase().trim() === c);
+    if (exact) return Number(exact.price_gs) || 0;
+    const partial = clientPrices.find((p: any) => {
+      const pc = (p.city || '').toLowerCase().trim();
+      return c.includes(pc) || pc.includes(c);
+    });
+    return partial ? Number(partial.price_gs) || 0 : 0;
+  };
+
   const isCityCovered = (city: string) => {
     if (!city) return false;
     const c = city.toLowerCase().trim();
@@ -222,7 +234,7 @@ export default function ShopifyInboxView({
               <th>🔗 Producto detectado</th>
               <th>💰 Costo Prov.</th>
               {colCity && <th>🏙️ Ciudad</th>}
-              {colDistrict && <th>📍 Depto</th>}
+              <th>🚚 Delivery</th>
               {colTotal && <th>💵 Monto</th>}
               <th>Acción</th>
             </tr>
@@ -261,7 +273,13 @@ export default function ShopifyInboxView({
                       </span>
                     </td>
                   )}
-                  {colDistrict && <td className="text-xs truncate max-w-[120px]">{o[colDistrict] || '-'}</td>}
+                  <td className="text-xs font-semibold">
+                    {cityOk ? (
+                      <span className="text-accent">{nf(getDeliveryFee(city))} Gs</span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </td>
                   {colTotal && <td className="text-xs font-semibold">{nf(totalGs)} Gs</td>}
                   <td>
                     {alreadyImported ? (
