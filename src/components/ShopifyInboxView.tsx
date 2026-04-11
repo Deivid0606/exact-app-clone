@@ -233,7 +233,7 @@ export default function ShopifyInboxView({
           <input
             type="checkbox"
             checked={onlyCovered}
-            onChange={e => setOnlyCovered(e.target.checked)}
+           onChange={e => toggleOnlyCovered(e.target.checked)}
             className="accent-[hsl(var(--brand))] w-4 h-4"
           />
           🏙️ Solo ciudades con cobertura
