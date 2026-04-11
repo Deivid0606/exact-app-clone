@@ -490,7 +490,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             })}
             {filteredOrders.length === 0 && (
               <tr>
-                <td colSpan={11} className="text-center text-muted-foreground py-8">
+                <td colSpan={12} className="text-center text-muted-foreground py-8">
                   {sheetOrders.length === 0 ? "Leé tu Sheet primero" : "Sin resultados con los filtros actuales"}
                 </td>
               </tr>
