@@ -73,7 +73,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   });
 
-  // Filtros PERSISTENTES (no se desactivan solos)
+  // Filtros PERSISTENTES
   const [filterOnlyAvailable, setFilterOnlyAvailable] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem(FILTER_AVAILABLE_KEY);
@@ -117,7 +117,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     autoLoadRef.current = autoLoad;
   }, [autoLoad]);
 
-  // Guardar filtros persistentes
   useEffect(() => {
     localStorage.setItem(FILTER_AVAILABLE_KEY, filterOnlyAvailable.toString());
   }, [filterOnlyAvailable]);
@@ -300,7 +299,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return Math.round(Number(cleaned.replace(/\./g, "").replace(",", ".")) || 0);
   };
 
-  // CARGA DIRECTA con ID secuencial SHOPIFY001
+  // CARGA DIRECTA - solo si producto detectado Y ciudad con cobertura
   const handleDirectSave = async (order: SheetOrder, idx: number) => {
     const productName = order[colKeys.product] || "";
     const matched = matchProduct(productName);
@@ -310,7 +309,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
     
     const city = order[colKeys.city] || "";
-    const deliveryPrice = getCityPrice(city) || 0;
+    const deliveryPrice = getCityPrice(city);
+    
+    // REGLA: Si no hay cobertura, no se puede cargar
+    if (!deliveryPrice) {
+      toast.warning(`⚠️ Ciudad "${city}" sin cobertura de delivery. No se puede cargar el pedido.`);
+      return;
+    }
+    
     const salePrice = parseMoney(order[colKeys.amount] || "0");
     const productCost = matched?.provider_price_gs || 0;
     const qty = Number(order[colKeys.qty] || 1) || 1;
@@ -373,6 +379,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const handleBulkLoad = async () => {
     let count = 0;
     let errors = 0;
+    let skippedNoProduct = 0;
+    let skippedNoCoverage = 0;
     let totalCommission = 0;
     
     for (let i = 0; i < sheetOrders.length; i++) {
@@ -383,12 +391,17 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       const productName = order[colKeys.product] || "";
       const matched = matchProduct(productName);
       if (!matched) {
-        errors++;
+        skippedNoProduct++;
         continue;
       }
       
       const city = order[colKeys.city] || "";
-      const deliveryPrice = getCityPrice(city) || 0;
+      const deliveryPrice = getCityPrice(city);
+      if (!deliveryPrice) {
+        skippedNoCoverage++;
+        continue;
+      }
+      
       const salePrice = parseMoney(order[colKeys.amount] || "0");
       const productCost = matched?.provider_price_gs || 0;
       const qty = Number(order[colKeys.qty] || 1) || 1;
@@ -431,7 +444,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       if (count % 3 === 0) await new Promise(resolve => setTimeout(resolve, 100));
     }
     
-    toast.success(`✅ ${count} cargados | ❌ ${errors} errores | 💰 Comisión total: ${totalCommission.toLocaleString("es-PY")} Gs`);
+    toast.success(`✅ ${count} cargados | ❌ ${errors} errores | ⏭️ ${skippedNoProduct} sin producto | 🚫 ${skippedNoCoverage} sin cobertura | 💰 Comisión total: ${totalCommission.toLocaleString("es-PY")} Gs`);
   };
 
   const autoLoadOrders = async () => {
@@ -451,7 +464,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       if (!matched) continue;
       
       const city = order[colKeys.city] || "";
-      const deliveryPrice = getCityPrice(city) || 0;
+      const deliveryPrice = getCityPrice(city);
+      if (!deliveryPrice) continue;
+      
       const salePrice = parseMoney(order[colKeys.amount] || "0");
       const productCost = matched?.provider_price_gs || 0;
       const qty = Number(order[colKeys.qty] || 1) || 1;
@@ -656,13 +671,21 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               const productCost = matched?.provider_price_gs || 0;
               const commission = salePrice - (productCost + (deliveryPrice || 0));
 
+              // REGLAS: El botón "Cargar" SOLO aparece si:
+              // 1. Estado es "CARGAR"
+              // 2. Producto detectado (matched)
+              // 3. Ciudad tiene cobertura (covered)
+              const canLoad = currentStatus === "CARGAR" && matched && covered;
+
               return (
                 <tr key={idx} className={currentStatus !== "CARGAR" ? "opacity-60 line-through" : ""}>
                   <td className="text-xs">{idx + 1}</td>
                   <td className="text-xs">{order[colKeys.name] || "—"}</td>
                   <td className="text-xs font-mono">{extractedPhone || phoneRaw || "—"}</td>
                   <td className="text-xs">{city || "—"}</td>
-                  <td className="text-right text-xs font-bold">{deliveryPrice != null ? `${nf(deliveryPrice)} Gs` : "—"}</td>
+                  <td className="text-right text-xs font-bold">
+                    {deliveryPrice != null ? `${nf(deliveryPrice)} Gs` : <span className="text-muted-foreground">—</span>}
+                  </td>
                   <td className="text-xs truncate max-w-[180px]">{productName || "—"}</td>
                   <td className="text-xs">{order[colKeys.qty] || "1"}</td>
                   <td className="text-right text-xs font-bold text-green-400">{salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}</td>
@@ -671,22 +694,53 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                     {commission !== 0 ? `${commission > 0 ? "+" : ""}${nf(commission)} Gs` : "—"}
                   </td>
                   <td className="text-xs">
-                    {matched ? <span className="text-green-400">✅ {matched.title?.slice(0, 15)}</span> : <span className="text-red-400">❌</span>}
+                    {matched ? (
+                      <span className="text-green-400" title={`Costo: ${nf(productCost)} Gs`}>
+                        ✅ {matched.title?.slice(0, 15)}
+                      </span>
+                    ) : (
+                      <span className="text-red-400" title={`No se encontró: "${productName}"`}>
+                        ❌
+                      </span>
+                    )}
                   </td>
-                  <td className="text-xs">{covered ? <span className="text-green-400">✅</span> : <span className="text-yellow-400">⚠️</span>}</td>
+                  <td className="text-xs">
+                    {covered ? (
+                      <span className="text-green-400" title={`Delivery: ${deliveryPrice?.toLocaleString()} Gs`}>✅</span>
+                    ) : (
+                      <span className="text-yellow-400" title="Sin cobertura de delivery">⚠️</span>
+                    )}
+                  </td>
                   <td className="min-w-[130px]">
-                    <select className="app-input !py-1 !px-2 !text-[11px] !w-full" value={currentStatus} onChange={(e) => setRowStatus(String(idx), e.target.value)}>
+                    <select
+                      className="app-input !py-1 !px-2 !text-[11px] !w-full"
+                      value={currentStatus}
+                      onChange={(e) => setRowStatus(String(idx), e.target.value)}
+                    >
                       {statusOpts.map((s) => (<option key={s} value={s}>{s}</option>))}
                     </select>
                   </td>
                   <td className="min-w-[160px] flex gap-1">
-                    {currentStatus === "CARGAR" && matched && (
-                      <button className="nav-btn active !py-1 !px-2 !text-[11px] whitespace-nowrap" onClick={() => handleDirectSave(order, idx)}>
+                    {canLoad && (
+                      <button
+                        className="nav-btn active !py-1 !px-2 !text-[11px] whitespace-nowrap"
+                        onClick={() => handleDirectSave(order, idx)}
+                        title="Cargar pedido (Producto detectado + Ciudad con cobertura)"
+                      >
                         💰 Cargar
                       </button>
                     )}
+                    {!canLoad && currentStatus === "CARGAR" && (
+                      <span className="text-[10px] text-muted-foreground self-center">
+                        {!matched ? "⚠️ Sin producto" : !covered ? "🚫 Sin cobertura" : ""}
+                      </span>
+                    )}
                     {onSheetConfirm && (
-                      <button className="nav-btn !py-1 !px-2 !text-[11px] whitespace-nowrap" onClick={() => handleOpenForm(order, idx)}>
+                      <button
+                        className="nav-btn !py-1 !px-2 !text-[11px] whitespace-nowrap"
+                        onClick={() => handleOpenForm(order, idx)}
+                        title="Abrir formulario para editar"
+                      >
                         📝 Formulario
                       </button>
                     )}
