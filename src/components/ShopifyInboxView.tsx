@@ -11,7 +11,7 @@ const ROW_STATUS_KEY = "shopify_row_statuses_v5";
 const SHEET_CACHE_KEY = "shopify_sheet_cache";
 const AUTO_LOAD_KEY = "shopify_auto_load_enabled";
 const LAST_ORDER_KEY = "shopify_last_order_number";
-const CACHE_DURATION = 5 * 60 * 1000;
+const CACHE_DURATION = 0; // 🔥 CAMBIADO: 0 segundos = SIN CACHÉ
 
 function extractPhoneNumber(value: any): string {
   if (!value) return "";
@@ -289,27 +289,15 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     [clientPrices],
   );
 
+  // 🔥 FUNCIÓN MODIFICADA - SIN CACHÉ, SIEMPRE LEE DEL SHEET
   const readSheet = async (forceRefresh = false) => {
     if (!sheetUrl) {
       toast.error("Configurá tu URL de Google Sheet en tu perfil");
       return;
     }
     
-    if (!forceRefresh) {
-      try {
-        const cached = localStorage.getItem(SHEET_CACHE_KEY);
-        if (cached) {
-          const { data, timestamp, url } = JSON.parse(cached);
-          if (url === sheetUrl && (Date.now() - timestamp) < CACHE_DURATION) {
-            setSheetHeaders(data.headers || []);
-            setSheetOrders(data.orders || []);
-            setLastSync(new Date(timestamp));
-            setLastCacheHit(true);
-            return;
-          }
-        }
-      } catch (e) {}
-    }
+    // 🔥 ELIMINADO EL CACHÉ COMPLETAMENTE
+    // Siempre consulta el Sheet en tiempo real
     
     setLoading(true);
     setLastCacheHit(false);
@@ -328,6 +316,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         setSheetOrders(sheetData.orders);
         setLastSync(new Date());
         
+        // Opcional: Guardar en caché pero NO USARLA para lectura automática
         localStorage.setItem(SHEET_CACHE_KEY, JSON.stringify({
           data: sheetData,
           timestamp: Date.now(),
@@ -558,7 +547,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
   const runAutoCycle = async () => {
     if (!autoLoadRef.current) return;
-    await readSheet(false);
+    await readSheet(false); // 🔥 AHORA SIEMPRE LEE DEL SHEET (sin caché)
     if (!autoLoadRef.current) return;
     await autoLoadOrders();
   };
