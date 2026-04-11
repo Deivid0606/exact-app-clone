@@ -18,13 +18,10 @@ function getRowId(order: SheetOrder, idx: number): string {
   return `${name}|${phone}|${product}|${idx}`;
 }
 
-// Mejor detección de teléfono
 function extractPhoneNumber(value: any): string {
   if (!value) return "";
   let phone = String(value).replace(/[\s\-().+]/g, "").trim();
-  // Si empieza con 595, convertir a 0
   if (phone.startsWith("595")) phone = "0" + phone.slice(3);
-  // Si tiene 9 dígitos (sin 0), agregar 0
   if (phone.length === 9 && phone.match(/^\d+$/)) phone = "0" + phone;
   return phone;
 }
@@ -41,85 +38,113 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const myEmail = profile?.email || "";
   const sheetUrl = profile?.sheet_url || "";
 
-  // ─── Sheet data ───
   const [sheetOrders, setSheetOrders] = useState<SheetOrder[]>([]);
   const [sheetHeaders, setSheetHeaders] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [lastSync, setLastSync] = useState<Date | null>(null);
   const [lastCacheHit, setLastCacheHit] = useState<boolean>(false);
 
-  // ─── Products & prices for auto-detect ───
   const [products, setProducts] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
 
-  // ─── Per-row statuses (localStorage) ───
   const [rowStatuses, setRowStatuses] = useState<Record<string, string>>(() => {
     try { return JSON.parse(localStorage.getItem(ROW_STATUS_KEY) || "{}"); } catch { return {}; }
   });
 
-  // ─── Auto-load ───
   const [autoLoad, setAutoLoad] = useState(false);
   const autoLoadRef = useRef(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // ─── Filters ───
   const [filterOnlyAvailable, setFilterOnlyAvailable] = useState(false);
   const [filterOnlyCoverage, setFilterOnlyCoverage] = useState(false);
   const [filterOnlyCargar, setFilterOnlyCargar] = useState(false);
   const [search, setSearch] = useState("");
 
-  // Persist statuses
   useEffect(() => {
     localStorage.setItem(ROW_STATUS_KEY, JSON.stringify(rowStatuses));
   }, [rowStatuses]);
 
-  // Load products & prices
   useEffect(() => {
-    supabase.from("products").select("*").then(({ data }) => setProducts(data || []));
-    supabase.from("client_prices").select("*").then(({ data }) => setClientPrices(data || []));
+    const loadProducts = async () => {
+      const { data } = await supabase.from("products").select("*");
+      console.log("📦 Productos cargados:", data?.length || 0);
+      setProducts(data || []);
+    };
+    const loadPrices = async () => {
+      const { data } = await supabase.from("client_prices").select("*");
+      console.log("🏙️ Precios por ciudad cargados:", data?.length || 0);
+      setClientPrices(data || []);
+    };
+    loadProducts();
+    loadPrices();
   }, []);
 
-  // ─── Column detection mejorada ───
+  // Column detection - VERSIÓN MEJORADA
   const colKeys = useMemo(() => {
     const h = sheetHeaders;
+    console.log("📋 Headers del Sheet:", h);
+    
     const find = (...candidates: string[]) => {
-      // Buscar coincidencia exacta o parcial (insensible a mayúsculas)
-      const lowerCandidates = candidates.map(c => c.toLowerCase());
-      const found = h.find(header => 
-        lowerCandidates.some(candidate => 
-          header.toLowerCase().includes(candidate) || candidate.includes(header.toLowerCase())
-        )
-      );
-      return found || "";
+      // Coincidencia exacta
+      for (const candidate of candidates) {
+        const exact = h.find(header => header.toLowerCase() === candidate.toLowerCase());
+        if (exact) return exact;
+      }
+      // Coincidencia parcial
+      for (const candidate of candidates) {
+        const partial = h.find(header => 
+          header.toLowerCase().includes(candidate.toLowerCase()) ||
+          candidate.toLowerCase().includes(header.toLowerCase())
+        );
+        if (partial) return partial;
+      }
+      return "";
     };
     
     return {
-      name: find("nombre", "customer name", "cliente", "name", "customer"),
-      phone: find("numero", "telefono", "phone", "tel", "celular", "whatsapp", "movil"),
-      street: find("calle", "direccion", "address", "street", "calle principal"),
+      name: find("nombre", "customer name", "cliente", "name", "customer", "cliente nombre", "full name"),
+      phone: find("numero", "telefono", "phone", "tel", "celular", "whatsapp", "movil", "contacto", "número", "teléfono"),
+      street: find("calle", "direccion", "address", "street", "calle principal", "dirección"),
       street2: find("calle 2", "calle2", "direccion 2", "address2", "calle secundaria"),
-      city: find("ciudad", "city", "localidad", "distrito"),
+      city: find("ciudad", "city", "localidad", "distrito", "ciudad de envío", "city name"),
       dept: find("departamento", "depto", "department", "state", "provincia"),
-      product: find("producto", "product", "item", "titulo", "nombre del producto", "descripcion"),
-      qty: find("cantidad", "qty", "quantity", "unidades", "cant"),
-      amount: find("monto", "total", "importe", "amount", "precio", "valor", "precio total"),
-      email: find("email", "correo", "mail"),
-      store: find("tienda", "store", "origen"),
-      date: find("fecha", "date", "fecha de pedido", "fecha pedido"),
+      product: find("producto", "product", "item", "titulo", "nombre del producto", "descripcion", "producto nombre", "título", "product name"),
+      qty: find("cantidad", "qty", "quantity", "unidades", "cant", "cantidad de productos", "Qty"),
+      amount: find("monto", "total", "importe", "amount", "precio", "valor", "precio total", "total gs", "Total"),
+      email: find("email", "correo", "mail", "email cliente"),
+      store: find("tienda", "store", "origen", "canal"),
+      date: find("fecha", "date", "fecha de pedido", "fecha pedido", "fecha creación", "created at"),
     };
   }, [sheetHeaders]);
 
-  // ─── Match product ───
+  // Match product - VERSIÓN MEJORADA
   const matchProduct = useCallback(
     (rawName: string) => {
-      if (!rawName) return null;
+      if (!rawName || rawName === "—" || rawName === "-") return null;
+      
       const q = rawName.toLowerCase().trim();
-      return (
-        products.find((p) => p.title?.toLowerCase() === q) ||
-        products.find((p) => p.title?.toLowerCase().includes(q)) ||
-        products.find((p) => q.includes(p.title?.toLowerCase() || "")) ||
-        null
-      );
+      if (q.length === 0) return null;
+      
+      // 1. Búsqueda exacta
+      let found = products.find((p) => p.title?.toLowerCase() === q);
+      if (found) return found;
+      
+      // 2. Búsqueda por inclusión (texto contiene producto)
+      found = products.find((p) => q.includes(p.title?.toLowerCase() || ""));
+      if (found) return found;
+      
+      // 3. Búsqueda por inclusión (producto contiene texto)
+      found = products.find((p) => p.title?.toLowerCase().includes(q));
+      if (found) return found;
+      
+      // 4. Búsqueda por palabras clave
+      const keywords = q.split(/\s+/).filter(k => k.length > 3);
+      for (const keyword of keywords) {
+        found = products.find((p) => p.title?.toLowerCase().includes(keyword));
+        if (found) return found;
+      }
+      
+      return null;
     },
     [products],
   );
@@ -134,7 +159,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     [clientPrices],
   );
 
-  // ─── Match city coverage ───
   const hasCoverage = useCallback(
     (cityName: string) => {
       if (!cityName) return false;
@@ -144,14 +168,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     [clientPrices],
   );
 
-  // ─── Read sheet with cache ───
   const readSheet = async (forceRefresh = false) => {
     if (!sheetUrl) {
       toast.error("Configurá tu URL de Google Sheet en tu perfil");
       return;
     }
     
-    // Check cache primero
     if (!forceRefresh) {
       try {
         const cached = localStorage.getItem(SHEET_CACHE_KEY);
@@ -162,7 +184,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             setSheetOrders(data.orders || []);
             setLastSync(new Date(timestamp));
             setLastCacheHit(true);
-            toast.info(`📦 Usando cache local (${Math.round((Date.now() - timestamp) / 1000)}s)`);
+            toast.info(`📦 Usando cache local`);
             return;
           }
         }
@@ -186,7 +208,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         setSheetOrders(sheetData.orders);
         setLastSync(new Date());
         
-        // Guardar en cache
         localStorage.setItem(SHEET_CACHE_KEY, JSON.stringify({
           data: sheetData,
           timestamp: Date.now(),
@@ -201,15 +222,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     setLoading(false);
   };
 
-  // ─── Set row status (solo 3 estados: CARGAR, DROPEADO, CANCELADO) ───
   const setRowStatus = (key: string, status: string) => {
     setRowStatuses((prev) => ({ ...prev, [key]: status }));
   };
 
-  // ─── Build order payload ───
   const buildPayload = (order: SheetOrder, matched: any) => {
     const parseMoney = (v: string) => {
-      const cleaned = String(v || "").replace(/[^\d.,\-]/g, "");
+      if (!v) return 0;
+      const cleaned = String(v).replace(/[^\d.,\-]/g, "");
       if (!cleaned) return 0;
       return Math.round(Number(cleaned.replace(/\./g, "").replace(",", ".")) || 0);
     };
@@ -239,12 +259,11 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     };
   };
 
-  // ─── Confirm single order ───
   const handleConfirm = async (order: SheetOrder, idx: number) => {
     const productName = order[colKeys.product] || "";
     const matched = matchProduct(productName);
     if (!matched) {
-      toast.error("Producto no detectado en catálogo");
+      toast.error(`Producto no detectado: "${productName}"`);
       return;
     }
     const payload = buildPayload(order, matched);
@@ -257,7 +276,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   };
 
-  // ─── Open pre-filled form ───
   const handleOpenForm = (order: SheetOrder) => {
     if (!onSheetConfirm) return;
     onSheetConfirm({
@@ -276,18 +294,25 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     });
   };
 
-  // ─── Bulk load all CARGAR rows ───
   const handleBulkLoad = async () => {
     let count = 0;
     let errors = 0;
+    let skipped = 0;
+    
     for (let i = 0; i < sheetOrders.length; i++) {
       const order = sheetOrders[i];
       const currentStatus = rowStatuses[String(i)] || "CARGAR";
-      if (currentStatus !== "CARGAR") continue;
+      if (currentStatus !== "CARGAR") {
+        skipped++;
+        continue;
+      }
 
       const productName = order[colKeys.product] || "";
       const matched = matchProduct(productName);
-      if (!matched) continue;
+      if (!matched) {
+        errors++;
+        continue;
+      }
 
       const payload = buildPayload(order, matched);
       const { error } = await supabase.from("orders").insert(payload);
@@ -298,21 +323,17 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         count++;
       }
       
-      // Pequeña pausa para no saturar
       if (i % 5 === 0) await new Promise(resolve => setTimeout(resolve, 100));
     }
-    toast.success(`✅ ${count} cargados, ${errors} errores`);
+    toast.success(`✅ ${count} cargados, ${errors} errores, ${skipped} omitidos`);
   };
 
-  // ─── Auto-load logic con cache ───
   useEffect(() => {
     autoLoadRef.current = autoLoad;
     if (autoLoad) {
       const run = async () => {
         if (!autoLoadRef.current) return;
-        // Usar cache primero, refresh cada 3 ciclos
-        const shouldRefresh = Math.random() < 0.33;
-        await readSheet(shouldRefresh);
+        await readSheet(false);
         if (!autoLoadRef.current) return;
         await handleBulkLoad();
       };
@@ -326,16 +347,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     };
   }, [autoLoad]);
 
-  // ─── Filtered rows ───
   const filteredOrders = useMemo(() => {
     return sheetOrders
       .map((o, i) => ({ order: o, idx: i }))
       .filter(({ order, idx }) => {
         const currentStatus = rowStatuses[String(idx)] || "CARGAR";
         
-        // Skip si ya está cargado
         if (currentStatus === "CARGADO") return false;
-        
         if (filterOnlyCargar && currentStatus !== "CARGAR") return false;
         
         if (filterOnlyAvailable) {
@@ -361,7 +379,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">📦 Shopify Inbox — Lectura de Sheet</h3>
 
-      {/* Sheet URL & controls */}
       <div className="app-card !p-4 mb-4">
         <div className="flex flex-wrap items-center gap-2 mb-2">
           <span className="text-xs text-muted-foreground truncate max-w-[400px]">
@@ -401,7 +418,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         )}
       </div>
 
-      {/* Filters */}
       <div className="flex flex-wrap gap-4 mb-3">
         <label className="flex items-center gap-1 text-xs">
           <input
@@ -442,7 +458,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         }
       </div>
 
-      {/* Table */}
       <div className="overflow-auto">
         <table className="app-table min-w-[1100px]">
           <thead>
@@ -464,7 +479,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           <tbody>
             {filteredOrders.map(({ order, idx }) => {
               const currentStatus = rowStatuses[String(idx)] || "CARGAR";
-
               const productName = order[colKeys.product] || "";
               const matched = matchProduct(productName);
               const city = order[colKeys.city] || "";
@@ -477,28 +491,32 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                 <tr key={idx}>
                   <td className="text-xs">{idx + 1}</td>
                   <td className="text-xs">{order[colKeys.name] || "—"}</td>
-                  <td className="text-xs font-mono">
-                    {extractedPhone || phoneRaw || "—"}
-                  </td>
+                  <td className="text-xs font-mono">{extractedPhone || phoneRaw || "—"}</td>
                   <td className="text-xs">{city || "—"}</td>
                   <td className="text-right text-xs font-bold">
                     {deliveryPrice != null ? `${nf(deliveryPrice)} Gs` : <span className="text-muted-foreground">—</span>}
                   </td>
-                  <td className="text-xs truncate max-w-[180px]">{productName || "—"}</td>
+                  <td className="text-xs truncate max-w-[180px]" title={productName}>
+                    {productName || "—"}
+                  </td>
                   <td className="text-xs">{order[colKeys.qty] || "1"}</td>
                   <td className="text-right text-xs font-bold">{order[colKeys.amount] || "—"}</td>
                   <td className="text-xs">
                     {matched ? (
-                      <span className="text-green-400">✅ {matched.title?.slice(0, 20)}</span>
+                      <span className="text-green-400" title={`Producto: ${matched.title}`}>
+                        ✅ {matched.title?.slice(0, 20)}
+                      </span>
                     ) : (
-                      <span className="text-red-400">❌</span>
+                      <span className="text-red-400" title={`No se encontró: "${productName}" en el catálogo`}>
+                        ❌ {productName?.slice(0, 15) || "—"}
+                      </span>
                     )}
                   </td>
                   <td className="text-xs">
                     {covered ? (
-                      <span className="text-green-400">✅</span>
+                      <span className="text-green-400" title={`Delivery: ${deliveryPrice?.toLocaleString()} Gs`}>✅</span>
                     ) : (
-                      <span className="text-yellow-400">⚠️</span>
+                      <span className="text-yellow-400" title="Sin cobertura de delivery">⚠️</span>
                     )}
                   </td>
                   <td>
@@ -508,9 +526,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                       onChange={(e) => setRowStatus(String(idx), e.target.value)}
                     >
                       {statusOpts.map((s) => (
-                        <option key={s} value={s}>
-                          {s}
-                        </option>
+                        <option key={s} value={s}>{s}</option>
                       ))}
                     </select>
                   </td>
