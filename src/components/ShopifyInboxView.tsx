@@ -234,7 +234,7 @@ export default function ShopifyInboxView({
               <th>🔗 Producto detectado</th>
               <th>💰 Costo Prov.</th>
               {colCity && <th>🏙️ Ciudad</th>}
-              {colDistrict && <th>📍 Depto</th>}
+              <th>🚚 Delivery</th>
               {colTotal && <th>💵 Monto</th>}
               <th>Acción</th>
             </tr>
