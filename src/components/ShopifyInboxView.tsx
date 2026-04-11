@@ -245,9 +245,8 @@ export default function ShopifyInboxView({
   // Get all loadable orders (status=CARGAR + city covered + product detected + not imported)
   const getLoadableOrders = () => {
     return filtered
-      .map((o, i) => ({ order: o, idx: i }))
-      .filter(({ order, idx }) => {
-        const rowId = getRowId(order, idx);
+      .filter(({ order, origIdx }) => {
+        const rowId = getRowId(order, origIdx);
         if (importedRowIds.has(rowId)) return false;
         if ((rowStatuses[rowId] || 'PENDIENTE') !== 'CARGAR') return false;
         const city = order[colCity] || '';
