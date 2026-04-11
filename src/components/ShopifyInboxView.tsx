@@ -138,11 +138,13 @@ export default function ShopifyInboxView({
   const getRowId = (order: SheetOrder, _idx: number) => {
     const num = order[colOrderNum] || '';
     if (num) return num;
-    // Build a stable ID from customer+phone+product so it doesn't change with filtering
-    const name = (order[colName] || '').trim().substring(0, 20);
+    // Build a stable ID combining all available fields
+    const name = (order[colName] || '').trim();
     const phone = (order[colPhone] || '').trim();
-    const prod = (order[colProducts] || '').trim().substring(0, 20);
-    return `r-${name}-${phone}-${prod}` || `row-fallback-${_idx}`;
+    const prod = (order[colProducts] || '').trim();
+    const city = (order[colCity] || '').trim();
+    const total = (order[colTotal] || '').trim();
+    return `r-${name}-${phone}-${prod}-${city}-${total}`;
   };
 
   // Match product by title
@@ -198,22 +200,25 @@ export default function ShopifyInboxView({
 
   const isCityCovered = (city: string) => !!findCityMatch(city);
 
+  // Pair each order with its original index so IDs stay stable after filtering
+  const indexedOrders = useMemo(() => orders.map((o, i) => ({ order: o, origIdx: i })), [orders]);
+
   const filtered = useMemo(() => {
-    let result = orders;
+    let result = indexedOrders;
     if (search) {
       const q = search.toLowerCase();
-      result = result.filter(o =>
-        Object.values(o).some(v => v.toLowerCase().includes(q))
+      result = result.filter(({ order }) =>
+        Object.values(order).some(v => v.toLowerCase().includes(q))
       );
     }
     if (onlyCovered && colCity) {
-      result = result.filter(o => isCityCovered(o[colCity] || ''));
+      result = result.filter(({ order }) => isCityCovered(order[colCity] || ''));
     }
     if (onlyMatched && colProducts) {
-      result = result.filter(o => !!matchProduct(o[colProducts] || ''));
+      result = result.filter(({ order }) => !!matchProduct(order[colProducts] || ''));
     }
     return result;
-  }, [orders, search, onlyCovered, onlyMatched, coveredCities, colCity, colProducts, products]);
+  }, [indexedOrders, search, onlyCovered, onlyMatched, coveredCities, colCity, colProducts, products]);
 
   const handleConfirm = (order: SheetOrder, idx: number) => {
     const totalStr = order[colTotal] || '0';
@@ -240,9 +245,8 @@ export default function ShopifyInboxView({
   // Get all loadable orders (status=CARGAR + city covered + product detected + not imported)
   const getLoadableOrders = () => {
     return filtered
-      .map((o, i) => ({ order: o, idx: i }))
-      .filter(({ order, idx }) => {
-        const rowId = getRowId(order, idx);
+      .filter(({ order, origIdx }) => {
+        const rowId = getRowId(order, origIdx);
         if (importedRowIds.has(rowId)) return false;
         if ((rowStatuses[rowId] || 'PENDIENTE') !== 'CARGAR') return false;
         const city = order[colCity] || '';
@@ -263,9 +267,9 @@ export default function ShopifyInboxView({
     setBulkLoading(true);
     let ok = 0;
     let fail = 0;
-    for (const { order, idx } of loadableOrders) {
+    for (const { order, origIdx } of loadableOrders) {
       try {
-        const rowId = getRowId(order, idx);
+        const rowId = getRowId(order, origIdx);
         const matched = matchProduct(order[colProducts] || '');
         if (!matched) continue;
 
@@ -319,7 +323,7 @@ export default function ShopifyInboxView({
     setBulkLoading(false);
   };
 
-  const pendingCount = filtered.filter((_, i) => !importedRowIds.has(getRowId(filtered[i], i))).length;
+  const pendingCount = filtered.filter(({ order, origIdx }) => !importedRowIds.has(getRowId(order, origIdx))).length;
 
   if (!sheetUrl) {
     return (
@@ -382,8 +386,8 @@ export default function ShopifyInboxView({
             </tr>
           </thead>
           <tbody>
-            {filtered.map((o, i) => {
-              const rowId = getRowId(o, i);
+            {filtered.map(({ order: o, origIdx }, i) => {
+              const rowId = getRowId(o, origIdx);
               const alreadyImported = importedRowIds.has(rowId);
               const totalGs = Math.round(Number((o[colTotal] || '0').replace(/[^\d.-]/g, '')) || 0);
               const city = o[colCity] || '';
@@ -392,7 +396,7 @@ export default function ShopifyInboxView({
               const currentStatus = alreadyImported ? 'YA_CARGADO' : (rowStatuses[rowId] || 'PENDIENTE');
 
               return (
-                <tr key={i} className={alreadyImported ? 'opacity-50' : ''}>
+                <tr key={rowId} className={alreadyImported ? 'opacity-50' : ''}>
                   <td className="text-xs truncate max-w-[150px]">{o[colName] || '-'}</td>
                   {colProducts && (
                     <td className="text-xs truncate max-w-[180px]">{o[colProducts] || '-'}</td>
@@ -440,7 +444,7 @@ export default function ShopifyInboxView({
                         </select>
                         {currentStatus === 'CARGAR' && (
                           <button className="nav-btn active !py-1 !px-2 !text-xs"
-                            onClick={() => handleConfirm(o, i)}>
+                            onClick={() => handleConfirm(o, origIdx)}>
                             ➡️
                           </button>
                         )}
