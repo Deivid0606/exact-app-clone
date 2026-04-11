@@ -106,6 +106,16 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     [products],
   );
 
+  const getCityPrice = useCallback(
+    (cityName: string) => {
+      if (!cityName) return null;
+      const q = cityName.toLowerCase().trim();
+      const match = clientPrices.find((cp) => cp.city?.toLowerCase().trim() === q);
+      return match ? match.price_gs : null;
+    },
+    [clientPrices],
+  );
+
   // ─── Match city coverage ───
   const hasCoverage = useCallback(
     (cityName: string) => {
