@@ -132,6 +132,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const colKeys = useMemo(() => {
     const h = sheetHeaders;
     console.log("📋 Headers del Sheet:", h);
+    console.log("🔍 Columnas normalizadas:", h.map(hh => ({ original: hh, normalizado: normalizeText(hh) })));
     
     const find = (...candidates: string[]) => {
       const normalizedCandidates = candidates.map(c => normalizeText(c));
@@ -160,22 +161,37 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       return "";
     };
     
+    // Búsqueda específica para MONTO (tu columna exacta)
+    const findAmount = () => {
+      // Buscar exactamente "MONTO" o "monto"
+      for (let i = 0; i < h.length; i++) {
+        const normalized = normalizeText(h[i]);
+        if (normalized === "monto") {
+          console.log(`✅ Encontrado MONTO exacto: "${h[i]}"`);
+          return h[i];
+        }
+      }
+      // Si no, buscar con variantes
+      return find("monto", "MONTO", "total", "importe", "amount", "precio", "valor", "precio total", "total gs", "Total", "monto total", "precio final", "monto_total", "total_gs", "importe_total", "venta", "precio_venta");
+    };
+    
     const result = {
-      name: find("nombre", "customer name", "cliente", "name", "customer", "cliente nombre", "full name", "cliente full name"),
-      phone: find("numero", "telefono", "phone", "tel", "celular", "whatsapp", "movil", "contacto", "número", "teléfono", "cel", "whatsapp number"),
-      street: find("calle", "direccion", "address", "street", "calle principal", "dirección", "direccion completa", "calle y numero"),
-      street2: find("calle 2", "calle2", "direccion 2", "address2", "calle secundaria", "entre calles", "referencia"),
-      city: find("ciudad", "city", "localidad", "distrito", "ciudad de envío", "city name", "ciudad destino", "localidad destino"),
-      dept: find("departamento", "depto", "department", "state", "provincia", "region"),
-      product: find("producto", "product", "item", "titulo", "nombre del producto", "descripcion", "producto nombre", "título", "product name", "item name", "producto adquirido"),
-      qty: find("cantidad", "qty", "quantity", "unidades", "cant", "cantidad de productos", "Qty", "numero de unidades", "cantidad pedida"),
-      amount: find("monto", "total", "importe", "amount", "precio", "valor", "precio total", "total gs", "Total", "monto total", "precio final"),
+      name: find("nombre", "customer name", "cliente", "name", "customer", "cliente nombre", "full name", "cliente full name", "NOMBRE"),
+      phone: find("numero", "telefono", "phone", "tel", "celular", "whatsapp", "movil", "contacto", "número", "teléfono", "cel", "whatsapp number", "Teléfono"),
+      street: find("calle", "direccion", "address", "street", "calle principal", "dirección", "direccion completa", "calle y numero", "CALLE"),
+      street2: find("calle 2", "calle2", "direccion 2", "address2", "calle secundaria", "entre calles", "referencia", "CALLE2"),
+      city: find("ciudad", "city", "localidad", "distrito", "ciudad de envío", "city name", "ciudad destino", "localidad destino", "CIUDAD"),
+      dept: find("departamento", "depto", "department", "state", "provincia", "region", "DEPARTAMENTO"),
+      product: find("producto", "product", "item", "titulo", "nombre del producto", "descripcion", "producto nombre", "título", "product name", "item name", "producto adquirido", "PRODUCTO"),
+      qty: find("cantidad", "qty", "quantity", "unidades", "cant", "cantidad de productos", "Qty", "numero de unidades", "cantidad pedida", "CANTIDAD"),
+      amount: findAmount(),
       email: find("email", "correo", "mail", "email cliente", "correo electronico"),
       store: find("tienda", "store", "origen", "canal", "plataforma"),
-      date: find("fecha", "date", "fecha de pedido", "fecha pedido", "fecha creación", "created at", "fecha compra"),
+      date: find("fecha", "date", "fecha de pedido", "fecha pedido", "fecha creación", "created at", "fecha compra", "FECHA"),
     };
     
     console.log("🔍 Columnas detectadas:", result);
+    console.log("💰 Columna MONTO detectada como:", result.amount);
     return result;
   }, [sheetHeaders]);
 
@@ -282,9 +298,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
   const parseMoney = (v: string) => {
     if (!v) return 0;
-    const cleaned = String(v).replace(/[^\d.,\-]/g, "");
+    // Limpia el string: elimina Gs, espacios, etc.
+    let cleaned = String(v).replace(/[^\d.,\-]/g, "");
     if (!cleaned) return 0;
-    return Math.round(Number(cleaned.replace(/\./g, "").replace(",", ".")) || 0);
+    // Reemplaza coma por punto para decimales, y elimina puntos de miles
+    cleaned = cleaned.replace(/\./g, "").replace(",", ".");
+    return Math.round(Number(cleaned) || 0);
   };
 
   // CARGA DIRECTA - solo si producto detectado Y ciudad con cobertura
