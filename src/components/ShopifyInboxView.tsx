@@ -25,7 +25,15 @@ export default function ShopifyInboxView({
   const [imported, setImported] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
-  const [onlyCovered, setOnlyCovered] = useState(false);
+  const [onlyCovered, setOnlyCovered] = useState(() => {
+    try { return localStorage.getItem('shopify_onlyCovered') === '1'; } catch { return false; }
+  });
+  const [bulkLoading, setBulkLoading] = useState(false);
+
+  const toggleOnlyCovered = (val: boolean) => {
+    setOnlyCovered(val);
+    try { localStorage.setItem('shopify_onlyCovered', val ? '1' : '0'); } catch {}
+  };
 
   const loadImported = async () => {
     const { data } = await supabase.from('orders').select('obs')
