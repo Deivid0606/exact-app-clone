@@ -29,6 +29,21 @@ export default function ShopifyInboxView({
     try { return localStorage.getItem('shopify_onlyCovered') === '1'; } catch { return false; }
   });
   const [bulkLoading, setBulkLoading] = useState(false);
+  // Local row statuses: rowId -> 'A_DROPEAR' | 'CARGAR' | 'YA_CARGADO'
+  const [rowStatuses, setRowStatuses] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem('shopify_rowStatuses');
+      return saved ? JSON.parse(saved) : {};
+    } catch { return {}; }
+  });
+
+  const setRowStatus = (rowId: string, status: string) => {
+    setRowStatuses(prev => {
+      const next = { ...prev, [rowId]: status };
+      try { localStorage.setItem('shopify_rowStatuses', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
 
   const toggleOnlyCovered = (val: boolean) => {
     setOnlyCovered(val);
@@ -111,7 +126,7 @@ export default function ShopifyInboxView({
   const colQty = findCol(['cantidad', 'qty', 'quantity']);
   const colOrderNum = findCol(['pedido', 'order', 'numero', 'número', 'nro', '#', 'id']);
   const colEmail = findCol(['email', 'correo', 'mail']);
-  const colStatus = findCol(['estado', 'status']);
+  // colStatus removed — we use local rowStatuses instead of sheet status
 
   const getRowId = (order: SheetOrder, idx: number) => {
     const num = order[colOrderNum] || '';
@@ -207,13 +222,14 @@ export default function ShopifyInboxView({
     });
   };
 
-  // Get all loadable orders (city covered + product detected + not imported)
+  // Get all loadable orders (status=CARGAR + city covered + product detected + not imported)
   const getLoadableOrders = () => {
     return filtered
       .map((o, i) => ({ order: o, idx: i }))
       .filter(({ order, idx }) => {
         const rowId = getRowId(order, idx);
         if (importedRowIds.has(rowId)) return false;
+        if ((rowStatuses[rowId] || 'PENDIENTE') !== 'CARGAR') return false;
         const city = order[colCity] || '';
         if (!isCityCovered(city)) return false;
         const matched = matchProduct(order[colProducts] || '');
@@ -222,7 +238,7 @@ export default function ShopifyInboxView({
       });
   };
 
-  const loadableOrders = useMemo(() => getLoadableOrders(), [filtered, importedRowIds, colCity, colProducts]);
+  const loadableOrders = useMemo(() => getLoadableOrders(), [filtered, importedRowIds, colCity, colProducts, rowStatuses]);
 
   const handleBulkLoad = async () => {
     if (loadableOrders.length === 0) {
@@ -344,7 +360,7 @@ export default function ShopifyInboxView({
               {colCity && <th>🏙️ Ciudad</th>}
               <th>🚚 Delivery</th>
               {colTotal && <th>💵 Monto</th>}
-              <th>Acción</th>
+              <th>📌 Estado</th>
             </tr>
           </thead>
           <tbody>
@@ -355,6 +371,7 @@ export default function ShopifyInboxView({
               const city = o[colCity] || '';
               const cityOk = isCityCovered(city);
               const matched = matchProduct(o[colProducts] || '');
+              const currentStatus = alreadyImported ? 'YA_CARGADO' : (rowStatuses[rowId] || 'PENDIENTE');
 
               return (
                 <tr key={i} className={alreadyImported ? 'opacity-50' : ''}>
@@ -389,14 +406,27 @@ export default function ShopifyInboxView({
                     )}
                   </td>
                   {colTotal && <td className="text-xs font-semibold">{nf(totalGs)} Gs</td>}
-                  <td>
+                  <td className="text-xs">
                     {alreadyImported ? (
-                      <span className="text-xs text-green-400 font-bold">✅ Cargado</span>
+                      <span className="text-green-400 font-bold">✅ Cargado</span>
                     ) : (
-                      <button className="nav-btn active !py-1 !px-3 !text-xs"
-                        onClick={() => handleConfirm(o, i)}>
-                        ➡️ Cargar
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <select
+                          className="app-input !py-1 !px-1.5 !text-xs !w-auto min-w-[100px]"
+                          value={currentStatus}
+                          onChange={e => setRowStatus(rowId, e.target.value)}
+                        >
+                          <option value="PENDIENTE">⏳ Pendiente</option>
+                          <option value="A_DROPEAR">📋 A Dropear</option>
+                          <option value="CARGAR">✅ Cargar</option>
+                        </select>
+                        {currentStatus === 'CARGAR' && (
+                          <button className="nav-btn active !py-1 !px-2 !text-xs"
+                            onClick={() => handleConfirm(o, i)}>
+                            ➡️
+                          </button>
+                        )}
+                      </div>
                     )}
                   </td>
                 </tr>
