@@ -181,7 +181,7 @@ export default function ShopifyInboxView({
       productTitle: order[colProducts] || '',
       totalGs,
       qty: Number(qty.split('\n')[0]) || 1,
-      obs: `Importado desde Google Sheet | sheet_row:${getRowId(order, idx)}`,
+      obs: '',
     });
   };
 
@@ -263,7 +263,7 @@ export default function ShopifyInboxView({
                   </td>
                   <td className="text-xs font-semibold">
                     {matched ? (
-                      <span className="text-accent">{nf(Number(matched.provider_price_gs || 0))} Gs</span>
+                      <span className="text-white font-bold">{nf(Number(matched.provider_price_gs || 0))} Gs</span>
                     ) : '-'}
                   </td>
                   {colCity && (
@@ -275,7 +275,7 @@ export default function ShopifyInboxView({
                   )}
                   <td className="text-xs font-semibold">
                     {cityOk ? (
-                      <span className="text-accent">{nf(getDeliveryFee(city))} Gs</span>
+                      <span className="text-white font-bold">{nf(getDeliveryFee(city))} Gs</span>
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}
