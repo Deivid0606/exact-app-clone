@@ -273,7 +273,13 @@ export default function ShopifyInboxView({
                       </span>
                     </td>
                   )}
-                  {colDistrict && <td className="text-xs truncate max-w-[120px]">{o[colDistrict] || '-'}</td>}
+                  <td className="text-xs font-semibold">
+                    {cityOk ? (
+                      <span className="text-accent">{nf(getDeliveryFee(city))} Gs</span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </td>
                   {colTotal && <td className="text-xs font-semibold">{nf(totalGs)} Gs</td>}
                   <td>
                     {alreadyImported ? (
