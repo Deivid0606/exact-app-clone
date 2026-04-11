@@ -401,6 +401,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               <th>Cliente</th>
               <th>Teléfono</th>
               <th>Ciudad</th>
+              <th className="text-right">Delivery</th>
               <th>Producto</th>
               <th>Cant</th>
               <th className="text-right">Monto</th>
