@@ -207,6 +207,38 @@ export default function ShopifyInboxView({
     });
   };
 
+  // Get all loadable orders (city covered + product detected + not imported)
+  const getLoadableOrders = () => {
+    return filtered
+      .map((o, i) => ({ order: o, idx: i }))
+      .filter(({ order, idx }) => {
+        const rowId = getRowId(order, idx);
+        if (importedRowIds.has(rowId)) return false;
+        const city = order[colCity] || '';
+        if (!isCityCovered(city)) return false;
+        const matched = matchProduct(order[colProducts] || '');
+        if (!matched) return false;
+        return true;
+      });
+  };
+
+  const loadableOrders = useMemo(() => getLoadableOrders(), [filtered, importedRowIds, colCity, colProducts]);
+
+  const handleBulkLoad = async () => {
+    if (loadableOrders.length === 0) {
+      toast.error('No hay pedidos listos para carga masiva.');
+      return;
+    }
+    setBulkLoading(true);
+    let count = 0;
+    for (const { order, idx } of loadableOrders) {
+      handleConfirm(order, idx);
+      count++;
+    }
+    toast.success(`🚀 ${count} pedidos enviados a cargar`);
+    setBulkLoading(false);
+  };
+
   const pendingCount = filtered.filter((_, i) => !importedRowIds.has(getRowId(filtered[i], i))).length;
 
   if (!sheetUrl) {
