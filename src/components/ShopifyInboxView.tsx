@@ -134,13 +134,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
     setLoading(true);
     try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      
-      const resp = await fetch(
-        `${supabaseUrl}/functions/v1/read-sheet?url=${encodeURIComponent(sheetUrl)}`,
-        { headers: { Authorization: `Bearer ${anonKey}`, apikey: anonKey } },
-      );
+      const resp = await fetch(`/api/read-sheet?url=${encodeURIComponent(sheetUrl)}`);
       const json = await resp.json();
 
       if (json.error) {
