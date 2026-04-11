@@ -117,13 +117,6 @@ export default function ShopifyInboxView() {
     }
     setLoading(true);
     try {
-      const { data: json, error: fnError } = await supabase.functions.invoke("read-sheet", {
-        method: "GET",
-        headers: { "Content-Type": "application/json" },
-        body: null,
-      });
-
-      // supabase.functions.invoke doesn't support query params, so use fetch with correct key
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
       
@@ -131,8 +124,7 @@ export default function ShopifyInboxView() {
         `${supabaseUrl}/functions/v1/read-sheet?url=${encodeURIComponent(sheetUrl)}`,
         { headers: { Authorization: `Bearer ${anonKey}`, apikey: anonKey } },
       );
-      const json2 = await resp.json();
-      const result = json2;
+      const json = await resp.json();
 
       if (json.error) {
         toast.error(json.error);
