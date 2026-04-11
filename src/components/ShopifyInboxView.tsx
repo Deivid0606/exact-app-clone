@@ -386,8 +386,8 @@ export default function ShopifyInboxView({
             </tr>
           </thead>
           <tbody>
-            {filtered.map((o, i) => {
-              const rowId = getRowId(o, i);
+            {filtered.map(({ order: o, origIdx }, i) => {
+              const rowId = getRowId(o, origIdx);
               const alreadyImported = importedRowIds.has(rowId);
               const totalGs = Math.round(Number((o[colTotal] || '0').replace(/[^\d.-]/g, '')) || 0);
               const city = o[colCity] || '';
@@ -396,7 +396,7 @@ export default function ShopifyInboxView({
               const currentStatus = alreadyImported ? 'YA_CARGADO' : (rowStatuses[rowId] || 'PENDIENTE');
 
               return (
-                <tr key={i} className={alreadyImported ? 'opacity-50' : ''}>
+                <tr key={rowId} className={alreadyImported ? 'opacity-50' : ''}>
                   <td className="text-xs truncate max-w-[150px]">{o[colName] || '-'}</td>
                   {colProducts && (
                     <td className="text-xs truncate max-w-[180px]">{o[colProducts] || '-'}</td>
