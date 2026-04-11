@@ -261,6 +261,11 @@ export default function ShopifyInboxView({
         <button className="nav-btn active" onClick={fetchOrders} disabled={loading}>
           {loading ? <span className="flex items-center gap-2"><span className="btn-spinner" /> Cargando...</span> : '🔄 Sincronizar Sheet'}
         </button>
+        {loadableOrders.length > 0 && (
+          <button className="nav-btn active !bg-green-700 hover:!bg-green-600" onClick={handleBulkLoad} disabled={bulkLoading}>
+            {bulkLoading ? <span className="flex items-center gap-2"><span className="btn-spinner" /> Cargando...</span> : `🚀 Carga masiva (${loadableOrders.length})`}
+          </button>
+        )}
         <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
           <input
             type="checkbox"
