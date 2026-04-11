@@ -8,6 +8,7 @@ interface UserProfile {
   role: string | null;
   approved: boolean;
   user_id: string;
+  sheet_url: string | null;
 }
 
 interface AuthContextType {
@@ -47,6 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         role: roleData?.role || null,
         approved: roleData?.approved || false,
         user_id: userId,
+        sheet_url: (profileData as any).sheet_url || null,
       });
     }
   };

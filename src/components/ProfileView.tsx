@@ -4,7 +4,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 
 export default function ProfileView() {
-  const { user, profile } = useAuth();
+  const { user, profile, refreshProfile } = useAuth();
   const [form, setForm] = useState({
     name: '', phone: '', doc: '', addr: '',
     bank_name: '', bank_type: '', bank_num: '', bank_holder: '', bank_holder_ci: '',
@@ -34,7 +34,7 @@ export default function ProfileView() {
     const { error } = await supabase.from('profiles').update(form).eq('user_id', user.id);
     setSaving(false);
     if (error) toast.error(error.message);
-    else toast.success('Perfil guardado');
+    else { toast.success('Perfil guardado'); refreshProfile(); }
   };
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
