@@ -160,7 +160,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     [clientPrices],
   );
 
-  // Calcular comisión
   const calculateCommission = useCallback((salePrice: number, productCost: number, deliveryCost: number) => {
     return salePrice - (productCost + deliveryCost);
   }, []);
@@ -240,7 +239,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const salePrice = parseMoney(order[colKeys.amount] || "0");
     const productCost = matched?.provider_price_gs || 0;
     const deliveryCost = deliveryPrice || 0;
-    const commission = calculateCommission(salePrice, productCost, deliveryCost);
+    const commission = salePrice - (productCost + deliveryCost);
+
+    const obsWithCommission = `💰 Comisión: ${nf(commission)} Gs | 🚚 Delivery: ${nf(deliveryCost)} Gs | 📦 Costo: ${nf(productCost)} Gs | 🏷️ Producto: ${matched.title}`;
 
     return {
       order_number: `SH${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 5)}`,
@@ -258,10 +259,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         sku: matched.sku || "" 
       }],
       total_gs: salePrice * qty,
-      delivery_cost_gs: deliveryCost,
-      commission_gs: commission,
       status: "PENDIENTE",
-      obs: "",
+      obs: obsWithCommission,
       provider_emails_list: matched.provider_email || "",
     };
   };
@@ -276,21 +275,17 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     
     const city = order[colKeys.city] || "";
     const deliveryPrice = getCityPrice(city);
-    if (!deliveryPrice) {
-      toast.warning(`⚠️ Ciudad "${city}" sin cobertura de delivery. ¿Continuar?`, {
-        action: { label: "Continuar", onClick: async () => {
-          const payload = buildPayload(order, matched, deliveryPrice);
-          const { error } = await supabase.from("orders").insert(payload);
-          if (error) {
-            toast.error("Error: " + error.message);
-          } else {
-            setRowStatus(String(idx), "CARGADO");
-            toast.success("✅ Pedido cargado sin cobertura");
-          }
-        }}
-      });
-      return;
-    }
+    
+    const parseMoney = (v: string) => {
+      if (!v) return 0;
+      const cleaned = String(v).replace(/[^\d.,\-]/g, "");
+      if (!cleaned) return 0;
+      return Math.round(Number(cleaned.replace(/\./g, "").replace(",", ".")) || 0);
+    };
+    
+    const salePrice = parseMoney(order[colKeys.amount] || "0");
+    const productCost = matched?.provider_price_gs || 0;
+    const commission = salePrice - (productCost + (deliveryPrice || 0));
     
     const payload = buildPayload(order, matched, deliveryPrice);
     const { error } = await supabase.from("orders").insert(payload);
@@ -298,7 +293,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       toast.error("Error: " + error.message);
     } else {
       setRowStatus(String(idx), "CARGADO");
-      toast.success("✅ Pedido cargado");
+      toast.success(`✅ Pedido cargado | 💰 Comisión: ${nf(commission)} Gs`);
     }
   };
 
@@ -325,6 +320,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     let errors = 0;
     let skipped = 0;
     let noCoverage = 0;
+    let totalCommission = 0;
     
     for (let i = 0; i < sheetOrders.length; i++) {
       const order = sheetOrders[i];
@@ -348,6 +344,17 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         continue;
       }
 
+      const parseMoney = (v: string) => {
+        if (!v) return 0;
+        const cleaned = String(v).replace(/[^\d.,\-]/g, "");
+        if (!cleaned) return 0;
+        return Math.round(Number(cleaned.replace(/\./g, "").replace(",", ".")) || 0);
+      };
+      
+      const salePrice = parseMoney(order[colKeys.amount] || "0");
+      const productCost = matched?.provider_price_gs || 0;
+      const commission = salePrice - (productCost + deliveryPrice);
+      
       const payload = buildPayload(order, matched, deliveryPrice);
       const { error } = await supabase.from("orders").insert(payload);
       if (error) {
@@ -355,11 +362,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       } else {
         setRowStatus(String(i), "CARGADO");
         count++;
+        totalCommission += commission;
       }
       
       if (i % 5 === 0) await new Promise(resolve => setTimeout(resolve, 100));
     }
-    toast.success(`✅ ${count} cargados | ❌ ${errors} errores | ⏭️ ${skipped} omitidos | 🚫 ${noCoverage} sin cobertura`);
+    toast.success(`✅ ${count} cargados | ❌ ${errors} errores | ⏭️ ${skipped} omitidos | 🚫 ${noCoverage} sin cobertura | 💰 Comisión total: ${nf(totalCommission)} Gs`);
   };
 
   useEffect(() => {
@@ -407,7 +415,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       });
   }, [sheetOrders, rowStatuses, filterOnlyAvailable, filterOnlyCoverage, filterOnlyCargar, search, colKeys, matchProduct, hasCoverage]);
 
-  // Estados: CARGAR, A DROPEAR, CANCELADO
   const statusOpts = ["CARGAR", "A DROPEAR", "CANCELADO"];
 
   return (
@@ -554,7 +561,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                     {productCost > 0 ? `${nf(productCost)} Gs` : "—"}
                   </td>
                   <td className="text-right text-xs font-bold text-blue-400">
-                    {commission > 0 ? `+${nf(commission)} Gs` : commission < 0 ? `${nf(commission)} Gs` : "—"}
+                    {commission !== 0 ? `${commission > 0 ? "+" : ""}${nf(commission)} Gs` : "—"}
                   </td>
                   <td className="text-xs">
                     {matched ? (
