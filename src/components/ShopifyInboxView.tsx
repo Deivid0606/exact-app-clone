@@ -58,8 +58,17 @@ export default function ShopifyInboxView({
   };
 
   const loadImported = async () => {
-    const { data } = await supabase.from('orders').select('obs')
+    if (!profile?.email) {
+      setImported([]);
+      return;
+    }
+
+    const { data } = await supabase
+      .from('orders')
+      .select('obs')
+      .eq('created_by', profile.email)
       .ilike('obs', '%sheet_row:%');
+
     setImported(data || []);
   };
 
@@ -76,11 +85,15 @@ export default function ShopifyInboxView({
     return new Set((clientPrices || []).map((c: any) => (c.city || '').toLowerCase().trim()));
   }, [clientPrices]);
 
+  const compactWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim();
+
   const importedRowIds = useMemo(() => {
     const ids = new Set<string>();
     (imported || []).forEach((o: any) => {
-      const match = (o.obs || '').match(/sheet_row:([^\s|]+)/);
-      if (match) ids.add(match[1]);
+      const rawObs = String(o.obs || '');
+      const afterPrefix = rawObs.includes('sheet_row:') ? rawObs.split('sheet_row:')[1] : '';
+      const normalizedId = compactWhitespace(afterPrefix || '');
+      if (normalizedId) ids.add(normalizedId);
     });
     return ids;
   }, [imported]);
@@ -117,13 +130,37 @@ export default function ShopifyInboxView({
     loadImported();
     loadMeta();
     if (sheetUrl) fetchOrders();
-  }, [sheetUrl]);
+  }, [sheetUrl, profile?.email]);
 
   const findCol = (possibleNames: string[]) =>
     headers.find(h => possibleNames.some(p => h.includes(p))) || '';
 
+  const normalizeHeaderKey = (value: string) =>
+    value
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+
+  const findStrictCol = (possibleNames: string[]) => {
+    return headers.find((header) => {
+      const normalizedHeader = normalizeHeaderKey(header);
+      return possibleNames.some((name) => {
+        const normalizedName = normalizeHeaderKey(name);
+        return (
+          normalizedHeader === normalizedName ||
+          normalizedHeader.startsWith(`${normalizedName} `) ||
+          normalizedHeader.endsWith(` ${normalizedName}`) ||
+          normalizedHeader.includes(` ${normalizedName} `)
+        );
+      });
+    }) || '';
+  };
+
   const colName = findCol(['nombre', 'cliente', 'customer', 'name']);
   const colPhone = findCol(['telefono', 'teléfono', 'phone', 'celular', 'tel']);
+  const colDate = findCol(['fecha', 'date']);
   const colCity = findCol(['ciudad', 'city', 'localidad']);
   const colStreet = findCol(['direccion', 'dirección', 'address', 'calle', 'street']);
   const colStreet2 = headers.find(h => h === 'calle_2') || '';
@@ -131,20 +168,22 @@ export default function ShopifyInboxView({
   const colTotal = findCol(['total', 'monto', 'amount', 'precio', 'price']);
   const colProducts = findCol(['producto', 'products', 'items', 'articulo', 'artículo', 'detalle']);
   const colQty = findCol(['cantidad', 'qty', 'quantity']);
-  const colOrderNum = findCol(['pedido', 'order', 'numero', 'número', 'nro', '#', 'id']);
+  const colOrderNum = findStrictCol(['pedido', 'order', 'numero pedido', 'número pedido', 'numero', 'número', 'nro pedido', 'nro', 'id']);
   const colEmail = findCol(['email', 'correo', 'mail']);
   // colStatus removed — we use local rowStatuses instead of sheet status
 
   const getRowId = (order: SheetOrder, _idx: number) => {
-    const num = order[colOrderNum] || '';
+    const num = compactWhitespace(order[colOrderNum] || '');
     if (num) return num;
-    // Keep import ID logic separate from per-row UI state
-    const name = (order[colName] || '').trim();
-    const phone = (order[colPhone] || '').trim();
-    const prod = (order[colProducts] || '').trim();
-    const city = (order[colCity] || '').trim();
-    const total = (order[colTotal] || '').trim();
-    return `r-${name}-${phone}-${prod}-${city}-${total}`;
+
+    const date = compactWhitespace(order[colDate] || '');
+    const name = compactWhitespace(order[colName] || '');
+    const phone = compactWhitespace(order[colPhone] || '');
+    const prod = compactWhitespace(order[colProducts] || '');
+    const city = compactWhitespace(order[colCity] || '');
+    const total = compactWhitespace(order[colTotal] || '');
+
+    return compactWhitespace(`r-${date}-${name}-${phone}-${prod}-${city}-${total}`);
   };
 
   const getStatusKey = (_order: SheetOrder, origIdx: number) => {
