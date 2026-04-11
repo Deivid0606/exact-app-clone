@@ -9,6 +9,7 @@ type SheetOrder = Record<string, string>;
 
 const ROW_STATUS_KEY = "shopify_row_statuses_v5";
 const SHEET_CACHE_KEY = "shopify_sheet_cache";
+const AUTO_LOAD_KEY = "shopify_auto_load_enabled";
 const CACHE_DURATION = 5 * 60 * 1000;
 
 function extractPhoneNumber(value: any): string {
@@ -50,8 +51,17 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   });
 
-  const [autoLoad, setAutoLoad] = useState(false);
-  const autoLoadRef = useRef(false);
+  // 🔥 PERSISTENCIA: Cargar estado de auto-carga desde localStorage
+  const [autoLoad, setAutoLoad] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(AUTO_LOAD_KEY);
+      return saved === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const autoLoadRef = useRef(autoLoad);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isAutoLoadingRef = useRef(false);
 
@@ -64,6 +74,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   useEffect(() => {
     localStorage.setItem(ROW_STATUS_KEY, JSON.stringify(rowStatuses));
   }, [rowStatuses]);
+
+  // 🔥 Guardar estado de auto-carga cuando cambie
+  useEffect(() => {
+    localStorage.setItem(AUTO_LOAD_KEY, autoLoad.toString());
+    autoLoadRef.current = autoLoad;
+  }, [autoLoad]);
 
   // Cargar productos y precios
   useEffect(() => {
@@ -89,6 +105,17 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       setInitialLoadDone(true);
     }
   }, [sheetUrl]);
+
+  // 🔥 Iniciar auto-carga si estaba activo al recargar la página
+  useEffect(() => {
+    if (autoLoad && sheetUrl) {
+      console.log("🤖 Auto-carga reactivado después de recargar página");
+      // Pequeño delay para asegurar que todo esté listo
+      setTimeout(() => {
+        runAutoCycle();
+      }, 2000);
+    }
+  }, [autoLoad, sheetUrl]);
 
   const colKeys = useMemo(() => {
     const h = sheetHeaders;
@@ -307,7 +334,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         count++;
         totalCommission += result.commission;
         
-        // Pequeña pausa para no saturar
         if (count % 3 === 0) {
           await new Promise(resolve => setTimeout(resolve, 200));
         }
@@ -357,13 +383,16 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
   // Configurar intervalo de auto-carga
   useEffect(() => {
-    autoLoadRef.current = autoLoad;
     if (autoLoad) {
-      runAutoCycle();
+      // Limpiar intervalo existente
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      // Iniciar nuevo intervalo
       intervalRef.current = setInterval(runAutoCycle, 60000);
     } else {
       if (intervalRef.current) clearInterval(intervalRef.current);
+      intervalRef.current = null;
     }
+    
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
@@ -398,6 +427,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const statusOpts = ["CARGAR", "A DROPEAR", "CANCELADO"];
   const loadedCount = Object.values(rowStatuses).filter(s => s === "CARGADO").length;
 
+  // Función para toggle auto-carga
+  const toggleAutoLoad = () => {
+    const newValue = !autoLoad;
+    setAutoLoad(newValue);
+    toast.info(newValue ? "🤖 Auto-carga activada - Se mantendrá aunque recargues la página" : "⏹️ Auto-carga desactivada");
+  };
+
   return (
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">📦 Shopify Inbox — Lectura de Sheet</h3>
@@ -423,9 +459,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           </button>
           <button
             className={`nav-btn ${autoLoad ? "!bg-green-600 !text-white" : ""}`}
-            onClick={() => setAutoLoad(!autoLoad)}
+            onClick={toggleAutoLoad}
           >
-            {autoLoad ? "🤖 Auto-carga ON" : "🤖 Auto-carga OFF"}
+            {autoLoad ? "🤖 Auto-carga ON 🔒" : "🤖 Auto-carga OFF"}
           </button>
           {lastSync && (
             <span className="text-xs text-muted-foreground self-center">
@@ -436,7 +472,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         </div>
         {autoLoad && (
           <div className="text-xs text-green-400 mt-1">
-            🤖 Auto-carga activa — Lee Sheet y carga pedidos automáticamente cada 60 segundos
+            🤖 Auto-carga activa — Se mantiene aunque recargues la página. Ciclo cada 60 segundos.
           </div>
         )}
       </div>
