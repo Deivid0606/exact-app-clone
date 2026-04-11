@@ -118,7 +118,7 @@ export default function ShopifyInboxView() {
     setLoading(true);
     try {
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
       
       const resp = await fetch(
         `${supabaseUrl}/functions/v1/read-sheet?url=${encodeURIComponent(sheetUrl)}`,
