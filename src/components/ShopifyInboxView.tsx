@@ -360,7 +360,7 @@ export default function ShopifyInboxView({
               {colCity && <th>🏙️ Ciudad</th>}
               <th>🚚 Delivery</th>
               {colTotal && <th>💵 Monto</th>}
-              <th>Acción</th>
+              <th>📌 Estado</th>
             </tr>
           </thead>
           <tbody>
