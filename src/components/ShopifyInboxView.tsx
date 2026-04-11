@@ -117,14 +117,6 @@ export default function ShopifyInboxView() {
     }
     setLoading(true);
     try {
-      const { data, error } = await supabase.functions.invoke("read-sheet", {
-        method: "GET",
-        headers: { "Content-Type": "application/json" },
-        body: undefined,
-      } as any);
-
-      // Use fetch directly since invoke GET with query params is tricky
-      const projectId = import.meta.env.VITE_SUPABASE_PROJECT_ID;
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
       
