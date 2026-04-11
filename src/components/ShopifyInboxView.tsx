@@ -17,7 +17,14 @@ function getRowId(order: SheetOrder, idx: number): string {
   return `${name}|${phone}|${product}|${idx}`;
 }
 
-export default function ShopifyInboxView() {
+interface ShopifyInboxProps {
+  onSheetConfirm?: (prefill: {
+    customer?: string; phone?: string; city?: string; street?: string;
+    district?: string; productTitle?: string; totalGs?: number; qty?: number;
+  }) => void;
+}
+
+export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) {
   const { profile } = useAuth();
   const myEmail = profile?.email || "";
   const sheetUrl = profile?.sheet_url || "";
@@ -97,6 +104,16 @@ export default function ShopifyInboxView() {
       );
     },
     [products],
+  );
+
+  const getCityPrice = useCallback(
+    (cityName: string) => {
+      if (!cityName) return null;
+      const q = cityName.toLowerCase().trim();
+      const match = clientPrices.find((cp) => cp.city?.toLowerCase().trim() === q);
+      return match ? match.price_gs : null;
+    },
+    [clientPrices],
   );
 
   // ─── Match city coverage ───
@@ -201,6 +218,31 @@ export default function ShopifyInboxView() {
       setRowStatus(String(idx), "CARGADO");
       toast.success("✅ Pedido cargado");
     }
+  };
+
+  // ─── Open pre-filled form ───
+  const handleOpenForm = (order: SheetOrder) => {
+    if (!onSheetConfirm) return;
+    const normalizePhone = (p: string) => {
+      let ph = String(p || "").replace(/[\s\-().+]/g, "").trim();
+      if (ph.startsWith("595")) ph = "0" + ph.slice(3);
+      return ph;
+    };
+    const parseMoney = (v: string) => {
+      const cleaned = String(v || "").replace(/[^\d.,\-]/g, "");
+      if (!cleaned) return 0;
+      return Math.round(Number(cleaned.replace(/\./g, "").replace(",", ".")) || 0);
+    };
+    onSheetConfirm({
+      customer: (order[colKeys.name] || "").trim(),
+      phone: normalizePhone(order[colKeys.phone] || ""),
+      city: (order[colKeys.city] || "").trim(),
+      street: [(order[colKeys.street] || "").trim(), (order[colKeys.street2] || "").trim()].filter(Boolean).join(" "),
+      district: (order[colKeys.dept] || "").trim(),
+      productTitle: (order[colKeys.product] || "").trim(),
+      totalGs: parseMoney(order[colKeys.amount] || "0"),
+      qty: Number(order[colKeys.qty] || 1) || 1,
+    });
   };
 
   // ─── Bulk load all CARGAR rows ───
@@ -359,6 +401,7 @@ export default function ShopifyInboxView() {
               <th>Cliente</th>
               <th>Teléfono</th>
               <th>Ciudad</th>
+              <th className="text-right">Delivery</th>
               <th>Producto</th>
               <th>Cant</th>
               <th className="text-right">Monto</th>
@@ -378,13 +421,18 @@ export default function ShopifyInboxView() {
               const matched = matchProduct(productName);
               const city = order[colKeys.city] || "";
               const covered = hasCoverage(city);
+              const deliveryPrice = getCityPrice(city);
+              const phoneRaw = order[colKeys.phone] || "";
 
               return (
                 <tr key={idx} className={isLoaded ? "opacity-50" : ""}>
                   <td className="text-xs">{idx + 1}</td>
                   <td className="text-xs">{order[colKeys.name] || "—"}</td>
-                  <td className="text-xs">{order[colKeys.phone] || "—"}</td>
+                  <td className="text-xs">{phoneRaw || "—"}</td>
                   <td className="text-xs">{city || "—"}</td>
+                  <td className="text-right text-xs font-bold">
+                    {deliveryPrice != null ? `${nf(deliveryPrice)} Gs` : <span className="text-muted-foreground">—</span>}
+                  </td>
                   <td className="text-xs truncate max-w-[180px]">{productName || "—"}</td>
                   <td className="text-xs">{order[colKeys.qty] || "1"}</td>
                   <td className="text-right text-xs font-bold">{order[colKeys.amount] || "—"}</td>
@@ -419,7 +467,7 @@ export default function ShopifyInboxView() {
                       </select>
                     )}
                   </td>
-                  <td>
+                  <td className="flex gap-1">
                     {!isLoaded && currentStatus === "CARGAR" && matched && (
                       <button
                         className="nav-btn active !py-1 !px-2 !text-[11px]"
@@ -428,13 +476,21 @@ export default function ShopifyInboxView() {
                         Cargar
                       </button>
                     )}
+                    {!isLoaded && onSheetConfirm && (
+                      <button
+                        className="nav-btn !py-1 !px-2 !text-[11px]"
+                        onClick={() => handleOpenForm(order)}
+                      >
+                        📝 Formulario
+                      </button>
+                    )}
                   </td>
                 </tr>
               );
             })}
             {filteredOrders.length === 0 && (
               <tr>
-                <td colSpan={11} className="text-center text-muted-foreground py-8">
+                <td colSpan={12} className="text-center text-muted-foreground py-8">
                   {sheetOrders.length === 0 ? "Leé tu Sheet primero" : "Sin resultados con los filtros actuales"}
                 </td>
               </tr>
