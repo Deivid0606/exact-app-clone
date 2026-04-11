@@ -4,7 +4,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 
 export default function ProfileView() {
-  const { user, profile } = useAuth();
+  const { user, profile, refreshProfile } = useAuth();
   const [form, setForm] = useState({
     name: '', phone: '', doc: '', addr: '',
     bank_name: '', bank_type: '', bank_num: '', bank_holder: '', bank_holder_ci: '',
