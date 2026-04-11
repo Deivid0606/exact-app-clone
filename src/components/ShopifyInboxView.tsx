@@ -347,13 +347,16 @@ export default function ShopifyInboxView({
           </button>
         )}
         <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={onlyCovered}
-           onChange={e => toggleOnlyCovered(e.target.checked)}
-            className="accent-[hsl(var(--brand))] w-4 h-4"
-          />
+          <input type="checkbox" checked={onlyCovered}
+            onChange={e => toggleOnlyCovered(e.target.checked)}
+            className="accent-[hsl(var(--brand))] w-4 h-4" />
           🏙️ Solo ciudades con cobertura
+        </label>
+        <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+          <input type="checkbox" checked={onlyMatched}
+            onChange={e => toggleOnlyMatched(e.target.checked)}
+            className="accent-[hsl(var(--brand))] w-4 h-4" />
+          📦 Solo productos detectados
         </label>
         <input className="app-input !w-auto min-w-[200px] flex-1" placeholder="🔎 Buscar..."
           value={search} onChange={e => setSearch(e.target.value)} />
