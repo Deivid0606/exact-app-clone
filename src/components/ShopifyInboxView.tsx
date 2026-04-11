@@ -12,7 +12,7 @@ interface SheetOrder {
 export default function ShopifyInboxView() {
   const { profile } = useAuth();
   const myEmail = profile?.email || '';
-  const sheetUrl = (profile as any)?.sheet_url || '';
+  const sheetUrl = profile?.sheet_url || '';
 
   const [orders, setOrders] = useState<SheetOrder[]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
