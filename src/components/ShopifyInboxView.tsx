@@ -52,6 +52,10 @@ export default function ShopifyInboxView({
     setOnlyCovered(val);
     try { localStorage.setItem('shopify_onlyCovered', val ? '1' : '0'); } catch {}
   };
+  const toggleOnlyMatched = (val: boolean) => {
+    setOnlyMatched(val);
+    try { localStorage.setItem('shopify_onlyMatched', val ? '1' : '0'); } catch {}
+  };
 
   const loadImported = async () => {
     const { data } = await supabase.from('orders').select('obs')
