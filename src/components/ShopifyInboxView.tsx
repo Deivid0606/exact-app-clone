@@ -289,7 +289,7 @@ export default function ShopifyInboxView() {
     if (error) { toast.error(error.message); return; }
     const rowId = getRowId(order, idx);
     setLoadedRowIds(prev => { const n = new Set(prev); n.add(rowId); return n; });
-    setRowStatus(idx, 'CARGADO');
+    setRowStatus(String(idx), 'CARGADO');
     toast.success('✅ Pedido cargado');
   };
 
