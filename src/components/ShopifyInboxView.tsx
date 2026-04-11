@@ -370,6 +370,7 @@ export default function ShopifyInboxView({
               const city = o[colCity] || '';
               const cityOk = isCityCovered(city);
               const matched = matchProduct(o[colProducts] || '');
+              const currentStatus = alreadyImported ? 'YA_CARGADO' : (rowStatuses[rowId] || 'PENDIENTE');
 
               return (
                 <tr key={i} className={alreadyImported ? 'opacity-50' : ''}>
