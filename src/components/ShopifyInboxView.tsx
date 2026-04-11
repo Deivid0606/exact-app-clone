@@ -25,7 +25,15 @@ export default function ShopifyInboxView({
   const [imported, setImported] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
-  const [onlyCovered, setOnlyCovered] = useState(false);
+  const [onlyCovered, setOnlyCovered] = useState(() => {
+    try { return localStorage.getItem('shopify_onlyCovered') === '1'; } catch { return false; }
+  });
+  const [bulkLoading, setBulkLoading] = useState(false);
+
+  const toggleOnlyCovered = (val: boolean) => {
+    setOnlyCovered(val);
+    try { localStorage.setItem('shopify_onlyCovered', val ? '1' : '0'); } catch {}
+  };
 
   const loadImported = async () => {
     const { data } = await supabase.from('orders').select('obs')
@@ -199,6 +207,87 @@ export default function ShopifyInboxView({
     });
   };
 
+  // Get all loadable orders (city covered + product detected + not imported)
+  const getLoadableOrders = () => {
+    return filtered
+      .map((o, i) => ({ order: o, idx: i }))
+      .filter(({ order, idx }) => {
+        const rowId = getRowId(order, idx);
+        if (importedRowIds.has(rowId)) return false;
+        const city = order[colCity] || '';
+        if (!isCityCovered(city)) return false;
+        const matched = matchProduct(order[colProducts] || '');
+        if (!matched) return false;
+        return true;
+      });
+  };
+
+  const loadableOrders = useMemo(() => getLoadableOrders(), [filtered, importedRowIds, colCity, colProducts]);
+
+  const handleBulkLoad = async () => {
+    if (loadableOrders.length === 0) {
+      toast.error('No hay pedidos listos para carga masiva.');
+      return;
+    }
+    setBulkLoading(true);
+    let ok = 0;
+    let fail = 0;
+    for (const { order, idx } of loadableOrders) {
+      try {
+        const rowId = getRowId(order, idx);
+        const matched = matchProduct(order[colProducts] || '');
+        if (!matched) continue;
+
+        const totalStr = order[colTotal] || '0';
+        const totalGs = Math.round(Number(totalStr.replace(/[^\d.-]/g, '')) || 0);
+        const street = order[colStreet] || '';
+        const street2 = order[colStreet2] || '';
+        const fullStreet = [street, street2].filter(Boolean).join(', ');
+        const qty = Number((order[colQty] || '1').split('\n')[0]) || 1;
+        const city = order[colCity] || '';
+        const cityMatch = findCityMatch(city);
+        const deliveryFee = cityMatch ? Number(cityMatch.price_gs) || 0 : 0;
+        const platformCity = cityMatch?.city || city;
+
+        const providerCost = Number(matched.provider_price_gs || 0) * qty;
+        const commission = totalGs - (providerCost + deliveryFee);
+
+        const payload = {
+          created_by: profile?.email || null,
+          customer_name: order[colName] || '',
+          phone: order[colPhone] || '',
+          city: platformCity,
+          street: fullStreet,
+          district: order[colDistrict] || '',
+          email: order[colEmail] || '',
+          obs: `sheet_row:${rowId}`,
+          items_json: [{
+            sku: matched.sku || '',
+            title: matched.title || '',
+            sale_gs: totalGs,
+            qty,
+            provider_price_gs: Number(matched.provider_price_gs || 0),
+            provider_email: matched.provider_email || '',
+          }],
+          total_gs: totalGs,
+          delivery_gs: deliveryFee,
+          commission_gs: commission,
+          provider_emails_list: matched.provider_email || '',
+        };
+
+        const { error } = await supabase.from('orders').insert(payload);
+        if (error) { fail++; console.error('Bulk insert error:', error); }
+        else ok++;
+      } catch (e) {
+        fail++;
+        console.error('Bulk load error:', e);
+      }
+    }
+    toast.success(`🚀 ${ok} pedidos cargados${fail ? ` (${fail} errores)` : ''}`);
+    await loadImported();
+    setBulkLoading(false);
+  };
+
   const pendingCount = filtered.filter((_, i) => !importedRowIds.has(getRowId(filtered[i], i))).length;
 
   if (!sheetUrl) {
@@ -221,11 +310,16 @@ export default function ShopifyInboxView({
         <button className="nav-btn active" onClick={fetchOrders} disabled={loading}>
           {loading ? <span className="flex items-center gap-2"><span className="btn-spinner" /> Cargando...</span> : '🔄 Sincronizar Sheet'}
         </button>
+        {loadableOrders.length > 0 && (
+          <button className="nav-btn active !bg-green-700 hover:!bg-green-600" onClick={handleBulkLoad} disabled={bulkLoading}>
+            {bulkLoading ? <span className="flex items-center gap-2"><span className="btn-spinner" /> Cargando...</span> : `🚀 Carga masiva (${loadableOrders.length})`}
+          </button>
+        )}
         <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
           <input
             type="checkbox"
             checked={onlyCovered}
-            onChange={e => setOnlyCovered(e.target.checked)}
+           onChange={e => toggleOnlyCovered(e.target.checked)}
             className="accent-[hsl(var(--brand))] w-4 h-4"
           />
           🏙️ Solo ciudades con cobertura
