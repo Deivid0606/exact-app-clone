@@ -200,22 +200,25 @@ export default function ShopifyInboxView({
 
   const isCityCovered = (city: string) => !!findCityMatch(city);
 
+  // Pair each order with its original index so IDs stay stable after filtering
+  const indexedOrders = useMemo(() => orders.map((o, i) => ({ order: o, origIdx: i })), [orders]);
+
   const filtered = useMemo(() => {
-    let result = orders;
+    let result = indexedOrders;
     if (search) {
       const q = search.toLowerCase();
-      result = result.filter(o =>
-        Object.values(o).some(v => v.toLowerCase().includes(q))
+      result = result.filter(({ order }) =>
+        Object.values(order).some(v => v.toLowerCase().includes(q))
       );
     }
     if (onlyCovered && colCity) {
-      result = result.filter(o => isCityCovered(o[colCity] || ''));
+      result = result.filter(({ order }) => isCityCovered(order[colCity] || ''));
     }
     if (onlyMatched && colProducts) {
-      result = result.filter(o => !!matchProduct(o[colProducts] || ''));
+      result = result.filter(({ order }) => !!matchProduct(order[colProducts] || ''));
     }
     return result;
-  }, [orders, search, onlyCovered, onlyMatched, coveredCities, colCity, colProducts, products]);
+  }, [indexedOrders, search, onlyCovered, onlyMatched, coveredCities, colCity, colProducts, products]);
 
   const handleConfirm = (order: SheetOrder, idx: number) => {
     const totalStr = order[colTotal] || '0';
