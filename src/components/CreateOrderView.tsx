@@ -56,9 +56,13 @@ const canAccessProduct = (product: any, profile: any) => {
 export default function CreateOrderView({
   initialSku,
   onSkuConsumed,
+  sheetPrefill,
+  onPrefillConsumed,
 }: {
   initialSku?: string | null;
   onSkuConsumed?: () => void;
+  sheetPrefill?: { customer?: string; phone?: string; city?: string; street?: string; district?: string; email?: string; productTitle?: string; totalGs?: number; qty?: number; obs?: string } | null;
+  onPrefillConsumed?: () => void;
 }) {
   const { profile } = useAuth();
 
