@@ -195,7 +195,7 @@ export default function ShopifyInboxView({
       productTitle: order[colProducts] || '',
       totalGs,
       qty: Number(qty.split('\n')[0]) || 1,
-      obs: '',
+      obs: `sheet_row:${getRowId(order, idx)}`,
     });
   };
 
