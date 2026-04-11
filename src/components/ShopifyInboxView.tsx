@@ -28,6 +28,9 @@ export default function ShopifyInboxView({
   const [onlyCovered, setOnlyCovered] = useState(() => {
     try { return localStorage.getItem('shopify_onlyCovered') === '1'; } catch { return false; }
   });
+  const [onlyMatched, setOnlyMatched] = useState(() => {
+    try { return localStorage.getItem('shopify_onlyMatched') === '1'; } catch { return false; }
+  });
   const [bulkLoading, setBulkLoading] = useState(false);
   // Local row statuses: rowId -> 'A_DROPEAR' | 'CARGAR' | 'YA_CARGADO'
   const [rowStatuses, setRowStatuses] = useState<Record<string, string>>(() => {
