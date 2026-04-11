@@ -280,26 +280,17 @@ export default function ShopifyInboxView() {
     return result;
   }, [indexedOrders, search, onlyCovered, onlyMatched, coveredCities, colCity, colProducts, products]);
 
-  const handleConfirm = (order: SheetOrder, idx: number) => {
-    const totalStr = order[colTotal] || '0';
-    const totalGs = Math.round(Number(totalStr.replace(/[^\d.-]/g, '')) || 0);
-    const street = order[colStreet] || '';
-    const street2 = order[colStreet2] || '';
-    const fullStreet = [street, street2].filter(Boolean).join(', ');
-    const qty = order[colQty] || '1';
-
-    onConfirmOrder({
-      customer: order[colName] || '',
-      phone: order[colPhone] || '',
-      city: order[colCity] || '',
-      street: fullStreet,
-      district: order[colDistrict] || '',
-      email: order[colEmail] || '',
-      productTitle: order[colProducts] || '',
-      totalGs,
-      qty: Number(qty.split('\n')[0]) || 1,
-      obs: '',
-    });
+  const handleConfirm = async (order: SheetOrder, idx: number) => {
+    const productTitle = order[colProducts] || '';
+    const matched = matchProduct(productTitle);
+    if (!matched) { toast.error('Producto no detectado'); return; }
+    const payload = buildPayload(order, matched);
+    const { error } = await supabase.from('orders').insert(payload);
+    if (error) { toast.error(error.message); return; }
+    const rowId = getRowId(order, idx);
+    setLoadedRowIds(prev => { const n = new Set(prev); n.add(rowId); return n; });
+    setRowStatus(idx, 'CARGADO');
+    toast.success('✅ Pedido cargado');
   };
 
   // Build a single order payload
