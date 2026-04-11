@@ -28,6 +28,9 @@ export default function ShopifyInboxView({
   const [onlyCovered, setOnlyCovered] = useState(() => {
     try { return localStorage.getItem('shopify_onlyCovered') === '1'; } catch { return false; }
   });
+  const [onlyMatched, setOnlyMatched] = useState(() => {
+    try { return localStorage.getItem('shopify_onlyMatched') === '1'; } catch { return false; }
+  });
   const [bulkLoading, setBulkLoading] = useState(false);
   // Local row statuses: rowId -> 'A_DROPEAR' | 'CARGAR' | 'YA_CARGADO'
   const [rowStatuses, setRowStatuses] = useState<Record<string, string>>(() => {
@@ -48,6 +51,10 @@ export default function ShopifyInboxView({
   const toggleOnlyCovered = (val: boolean) => {
     setOnlyCovered(val);
     try { localStorage.setItem('shopify_onlyCovered', val ? '1' : '0'); } catch {}
+  };
+  const toggleOnlyMatched = (val: boolean) => {
+    setOnlyMatched(val);
+    try { localStorage.setItem('shopify_onlyMatched', val ? '1' : '0'); } catch {}
   };
 
   const loadImported = async () => {
@@ -202,8 +209,11 @@ export default function ShopifyInboxView({
     if (onlyCovered && colCity) {
       result = result.filter(o => isCityCovered(o[colCity] || ''));
     }
+    if (onlyMatched && colProducts) {
+      result = result.filter(o => !!matchProduct(o[colProducts] || ''));
+    }
     return result;
-  }, [orders, search, onlyCovered, coveredCities, colCity]);
+  }, [orders, search, onlyCovered, onlyMatched, coveredCities, colCity, colProducts, products]);
 
   const handleConfirm = (order: SheetOrder, idx: number) => {
     const totalStr = order[colTotal] || '0';
@@ -337,13 +347,16 @@ export default function ShopifyInboxView({
           </button>
         )}
         <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
-          <input
-            type="checkbox"
-            checked={onlyCovered}
-           onChange={e => toggleOnlyCovered(e.target.checked)}
-            className="accent-[hsl(var(--brand))] w-4 h-4"
-          />
+          <input type="checkbox" checked={onlyCovered}
+            onChange={e => toggleOnlyCovered(e.target.checked)}
+            className="accent-[hsl(var(--brand))] w-4 h-4" />
           🏙️ Solo ciudades con cobertura
+        </label>
+        <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+          <input type="checkbox" checked={onlyMatched}
+            onChange={e => toggleOnlyMatched(e.target.checked)}
+            className="accent-[hsl(var(--brand))] w-4 h-4" />
+          📦 Solo productos detectados
         </label>
         <input className="app-input !w-auto min-w-[200px] flex-1" placeholder="🔎 Buscar..."
           value={search} onChange={e => setSearch(e.target.value)} />
