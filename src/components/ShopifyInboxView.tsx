@@ -138,11 +138,13 @@ export default function ShopifyInboxView({
   const getRowId = (order: SheetOrder, _idx: number) => {
     const num = order[colOrderNum] || '';
     if (num) return num;
-    // Build a stable ID from customer+phone+product so it doesn't change with filtering
-    const name = (order[colName] || '').trim().substring(0, 20);
+    // Build a stable ID combining all available fields
+    const name = (order[colName] || '').trim();
     const phone = (order[colPhone] || '').trim();
-    const prod = (order[colProducts] || '').trim().substring(0, 20);
-    return `r-${name}-${phone}-${prod}` || `row-fallback-${_idx}`;
+    const prod = (order[colProducts] || '').trim();
+    const city = (order[colCity] || '').trim();
+    const total = (order[colTotal] || '').trim();
+    return `r-${name}-${phone}-${prod}-${city}-${total}`;
   };
 
   // Match product by title
