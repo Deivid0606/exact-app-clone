@@ -404,14 +404,27 @@ export default function ShopifyInboxView({
                     )}
                   </td>
                   {colTotal && <td className="text-xs font-semibold">{nf(totalGs)} Gs</td>}
-                  <td>
+                  <td className="text-xs">
                     {alreadyImported ? (
-                      <span className="text-xs text-green-400 font-bold">✅ Cargado</span>
+                      <span className="text-green-400 font-bold">✅ Cargado</span>
                     ) : (
-                      <button className="nav-btn active !py-1 !px-3 !text-xs"
-                        onClick={() => handleConfirm(o, i)}>
-                        ➡️ Cargar
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <select
+                          className="app-input !py-1 !px-1.5 !text-xs !w-auto min-w-[100px]"
+                          value={currentStatus}
+                          onChange={e => setRowStatus(rowId, e.target.value)}
+                        >
+                          <option value="PENDIENTE">⏳ Pendiente</option>
+                          <option value="A_DROPEAR">📋 A Dropear</option>
+                          <option value="CARGAR">✅ Cargar</option>
+                        </select>
+                        {currentStatus === 'CARGAR' && (
+                          <button className="nav-btn active !py-1 !px-2 !text-xs"
+                            onClick={() => handleConfirm(o, i)}>
+                            ➡️
+                          </button>
+                        )}
+                      </div>
                     )}
                   </td>
                 </tr>
