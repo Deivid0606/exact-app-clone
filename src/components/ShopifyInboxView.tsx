@@ -10,6 +10,10 @@ type SheetOrder = Record<string, string>;
 const ROW_STATUS_KEY = "shopify_row_statuses_v5";
 const SHEET_CACHE_KEY = "shopify_sheet_cache";
 const AUTO_LOAD_KEY = "shopify_auto_load_enabled";
+const FILTER_AVAILABLE_KEY = "shopify_filter_available";
+const FILTER_COVERAGE_KEY = "shopify_filter_coverage";
+const FILTER_CARGAR_KEY = "shopify_filter_cargar";
+const LAST_ORDER_KEY = "shopify_last_order_number";
 const CACHE_DURATION = 5 * 60 * 1000;
 
 function extractPhoneNumber(value: any): string {
@@ -19,6 +23,15 @@ function extractPhoneNumber(value: any): string {
   if (phone.length === 9 && phone.match(/^\d+$/)) phone = "0" + phone;
   return phone;
 }
+
+// Generar ID secuencial SHOPIFY001, SHOPIFY002, etc.
+const generateSequentialId = (): string => {
+  let lastNumber = parseInt(localStorage.getItem(LAST_ORDER_KEY) || '0', 10);
+  const newNumber = lastNumber + 1;
+  localStorage.setItem(LAST_ORDER_KEY, newNumber.toString());
+  const paddedNumber = newNumber.toString().padStart(3, '0');
+  return `SHOPIFY${paddedNumber}`;
+};
 
 interface ShopifyInboxProps {
   onSheetConfirm?: (prefill: {
@@ -60,15 +73,41 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   });
 
+  // Filtros PERSISTENTES (no se desactivan solos)
+  const [filterOnlyAvailable, setFilterOnlyAvailable] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(FILTER_AVAILABLE_KEY);
+      return saved === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const [filterOnlyCoverage, setFilterOnlyCoverage] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(FILTER_COVERAGE_KEY);
+      return saved === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const [filterOnlyCargar, setFilterOnlyCargar] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(FILTER_CARGAR_KEY);
+      return saved === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const [search, setSearch] = useState("");
+
   const autoLoadRef = useRef(autoLoad);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isAutoLoadingRef = useRef(false);
 
-  const [filterOnlyAvailable, setFilterOnlyAvailable] = useState(false);
-  const [filterOnlyCoverage, setFilterOnlyCoverage] = useState(false);
-  const [filterOnlyCargar, setFilterOnlyCargar] = useState(false);
-  const [search, setSearch] = useState("");
-
+  // Guardar estados en localStorage
   useEffect(() => {
     localStorage.setItem(ROW_STATUS_KEY, JSON.stringify(rowStatuses));
   }, [rowStatuses]);
@@ -77,6 +116,19 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     localStorage.setItem(AUTO_LOAD_KEY, autoLoad.toString());
     autoLoadRef.current = autoLoad;
   }, [autoLoad]);
+
+  // Guardar filtros persistentes
+  useEffect(() => {
+    localStorage.setItem(FILTER_AVAILABLE_KEY, filterOnlyAvailable.toString());
+  }, [filterOnlyAvailable]);
+
+  useEffect(() => {
+    localStorage.setItem(FILTER_COVERAGE_KEY, filterOnlyCoverage.toString());
+  }, [filterOnlyCoverage]);
+
+  useEffect(() => {
+    localStorage.setItem(FILTER_CARGAR_KEY, filterOnlyCargar.toString());
+  }, [filterOnlyCargar]);
 
   useEffect(() => {
     const loadProducts = async () => {
@@ -248,7 +300,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return Math.round(Number(cleaned.replace(/\./g, "").replace(",", ".")) || 0);
   };
 
-  // 🔥 CARGA DIRECTA - Guarda IGUAL que el formulario
+  // CARGA DIRECTA con ID secuencial SHOPIFY001
   const handleDirectSave = async (order: SheetOrder, idx: number) => {
     const productName = order[colKeys.product] || "";
     const matched = matchProduct(productName);
@@ -263,9 +315,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const productCost = matched?.provider_price_gs || 0;
     const qty = Number(order[colKeys.qty] || 1) || 1;
     const commission = salePrice - (productCost + deliveryPrice);
-    const orderId = `SH${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 5)}`;
+    const orderId = generateSequentialId();
     
-    // ⭐ Guardar EXACTAMENTE como lo hace el formulario (CreateOrderView)
     const payload = {
       order_number: orderId,
       created_by: myEmail,
@@ -342,7 +393,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       const productCost = matched?.provider_price_gs || 0;
       const qty = Number(order[colKeys.qty] || 1) || 1;
       const commission = salePrice - (productCost + deliveryPrice);
-      const orderId = `SH${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 5)}`;
+      const orderId = generateSequentialId();
       
       const payload = {
         order_number: orderId,
@@ -405,7 +456,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       const productCost = matched?.provider_price_gs || 0;
       const qty = Number(order[colKeys.qty] || 1) || 1;
       const commission = salePrice - (productCost + deliveryPrice);
-      const orderId = `SH${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 5)}`;
+      const orderId = generateSequentialId();
       
       const payload = {
         order_number: orderId,
@@ -534,19 +585,36 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       </div>
 
       <div className="flex flex-wrap gap-4 mb-3">
-        <label className="flex items-center gap-1 text-xs">
-          <input type="checkbox" checked={filterOnlyAvailable} onChange={(e) => setFilterOnlyAvailable(e.target.checked)} />
+        <label className="flex items-center gap-1 text-xs cursor-pointer">
+          <input
+            type="checkbox"
+            checked={filterOnlyAvailable}
+            onChange={(e) => setFilterOnlyAvailable(e.target.checked)}
+          />
           Solo con producto
         </label>
-        <label className="flex items-center gap-1 text-xs">
-          <input type="checkbox" checked={filterOnlyCoverage} onChange={(e) => setFilterOnlyCoverage(e.target.checked)} />
+        <label className="flex items-center gap-1 text-xs cursor-pointer">
+          <input
+            type="checkbox"
+            checked={filterOnlyCoverage}
+            onChange={(e) => setFilterOnlyCoverage(e.target.checked)}
+          />
           Solo con cobertura
         </label>
-        <label className="flex items-center gap-1 text-xs">
-          <input type="checkbox" checked={filterOnlyCargar} onChange={(e) => setFilterOnlyCargar(e.target.checked)} />
+        <label className="flex items-center gap-1 text-xs cursor-pointer">
+          <input
+            type="checkbox"
+            checked={filterOnlyCargar}
+            onChange={(e) => setFilterOnlyCargar(e.target.checked)}
+          />
           Solo estado CARGAR
         </label>
-        <input className="app-input !w-auto min-w-[240px] flex-1" placeholder="🔎 Buscar..." value={search} onChange={(e) => setSearch(e.target.value)} />
+        <input
+          className="app-input !w-auto min-w-[240px] flex-1"
+          placeholder="🔎 Buscar..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
       </div>
 
       <div className="text-xs text-muted-foreground mb-2">
