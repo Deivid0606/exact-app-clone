@@ -17,7 +17,14 @@ function getRowId(order: SheetOrder, idx: number): string {
   return `${name}|${phone}|${product}|${idx}`;
 }
 
-export default function ShopifyInboxView() {
+interface ShopifyInboxProps {
+  onSheetConfirm?: (prefill: {
+    customer?: string; phone?: string; city?: string; street?: string;
+    district?: string; productTitle?: string; totalGs?: number; qty?: number;
+  }) => void;
+}
+
+export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) {
   const { profile } = useAuth();
   const myEmail = profile?.email || "";
   const sheetUrl = profile?.sheet_url || "";
