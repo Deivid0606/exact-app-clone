@@ -421,13 +421,18 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               const matched = matchProduct(productName);
               const city = order[colKeys.city] || "";
               const covered = hasCoverage(city);
+              const deliveryPrice = getCityPrice(city);
+              const phoneRaw = order[colKeys.phone] || "";
 
               return (
                 <tr key={idx} className={isLoaded ? "opacity-50" : ""}>
                   <td className="text-xs">{idx + 1}</td>
                   <td className="text-xs">{order[colKeys.name] || "—"}</td>
-                  <td className="text-xs">{order[colKeys.phone] || "—"}</td>
+                  <td className="text-xs">{phoneRaw || "—"}</td>
                   <td className="text-xs">{city || "—"}</td>
+                  <td className="text-right text-xs font-bold">
+                    {deliveryPrice != null ? `${nf(deliveryPrice)} Gs` : <span className="text-muted-foreground">—</span>}
+                  </td>
                   <td className="text-xs truncate max-w-[180px]">{productName || "—"}</td>
                   <td className="text-xs">{order[colKeys.qty] || "1"}</td>
                   <td className="text-right text-xs font-bold">{order[colKeys.amount] || "—"}</td>
@@ -462,13 +467,21 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                       </select>
                     )}
                   </td>
-                  <td>
+                  <td className="flex gap-1">
                     {!isLoaded && currentStatus === "CARGAR" && matched && (
                       <button
                         className="nav-btn active !py-1 !px-2 !text-[11px]"
                         onClick={() => handleConfirm(order, idx)}
                       >
                         Cargar
+                      </button>
+                    )}
+                    {!isLoaded && onSheetConfirm && (
+                      <button
+                        className="nav-btn !py-1 !px-2 !text-[11px]"
+                        onClick={() => handleOpenForm(order)}
+                      >
+                        📝 Formulario
                       </button>
                     )}
                   </td>
