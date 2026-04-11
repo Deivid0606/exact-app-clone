@@ -1,0 +1,1 @@
+ALTER TABLE public.profiles ADD COLUMN sheet_url text DEFAULT NULL;

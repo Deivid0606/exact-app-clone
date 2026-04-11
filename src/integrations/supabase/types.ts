@@ -461,6 +461,7 @@ export type Database = {
           logo_url: string | null
           name: string | null
           phone: string | null
+          sheet_url: string | null
           updated_at: string
           user_id: string
           wallet_holder: string | null
@@ -481,6 +482,7 @@ export type Database = {
           logo_url?: string | null
           name?: string | null
           phone?: string | null
+          sheet_url?: string | null
           updated_at?: string
           user_id: string
           wallet_holder?: string | null
@@ -501,6 +503,7 @@ export type Database = {
           logo_url?: string | null
           name?: string | null
           phone?: string | null
+          sheet_url?: string | null
           updated_at?: string
           user_id?: string
           wallet_holder?: string | null
