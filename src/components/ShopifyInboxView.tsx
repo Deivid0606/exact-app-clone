@@ -5,650 +5,596 @@ import { toast } from 'sonner';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
-/* ─── helpers ─── */
-const normalizePhone = (p: string) => {
-  let phone = String(p || '').replace(/[\s\-().+]/g, '').trim();
-  if (phone.startsWith('595')) phone = '0' + phone.slice(3);
-  return phone;
-};
-
-const parseMoney = (v: string) => {
-  const cleaned = String(v || '').replace(/[^\d.,\-]/g, '');
-  if (!cleaned) return 0;
-  const normalized = cleaned.replace(/\./g, '').replace(',', '.');
-  return Math.round(Number(normalized) || 0);
-};
-
-/* ─── column detection ─── */
-const findStrictCol = (headers: string[], candidates: string[]) => {
-  for (const c of candidates) {
-    const idx = headers.findIndex(h => h === c.toLowerCase());
-    if (idx >= 0) return idx;
-  }
-  for (const c of candidates) {
-    const idx = headers.findIndex(h => h.includes(c.toLowerCase()));
-    if (idx >= 0) return idx;
-  }
-  return -1;
-};
+interface SheetOrder {
+  [key: string]: string;
+}
 
 export default function ShopifyInboxView() {
   const { profile } = useAuth();
-  const myEmail = profile?.email || '';
-  const role = profile?.role || '';
+  const sheetUrl = profile?.sheet_url || '';
 
-  /* ─── sheet-based state ─── */
-  const [sheetUrl, setSheetUrl] = useState(() => profile?.sheet_url || '');
-  const [sheetRows, setSheetRows] = useState<string[][]>([]);
-  const [sheetHeaders, setSheetHeaders] = useState<string[]>([]);
-  const [loadingSheet, setLoadingSheet] = useState(false);
+  const [orders, setOrders] = useState<SheetOrder[]>([]);
+  const [headers, setHeaders] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState('');
+  const [clientPrices, setClientPrices] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
-  const [cities, setCities] = useState<string[]>([]);
+  const [onlyCovered, setOnlyCovered] = useState(() => {
+    try { return localStorage.getItem('shopify_onlyCovered') === '1'; } catch { return false; }
+  });
+  const [onlyMatched, setOnlyMatched] = useState(() => {
+    try { return localStorage.getItem('shopify_onlyMatched') === '1'; } catch { return false; }
+  });
+  const [bulkLoading, setBulkLoading] = useState(false);
 
-  /* ─── tracking (localStorage) ─── */
+  // Track imported row IDs in localStorage (not in DB obs)
   const [loadedRowIds, setLoadedRowIds] = useState<Set<string>>(() => {
-    const saved = localStorage.getItem('shopify_loadedRowIds');
-    return saved ? new Set(JSON.parse(saved)) : new Set();
-  });
-  const [rowStatuses, setRowStatuses] = useState<Record<string, string>>(() => {
-    const saved = localStorage.getItem('shopify_rowStatuses');
-    return saved ? JSON.parse(saved) : {};
+    try {
+      const saved = localStorage.getItem('shopify_loadedRowIds');
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch { return new Set(); }
   });
 
-  /* ─── auto-load ─── */
-  const [autoLoad, setAutoLoad] = useState(() => localStorage.getItem('shopify_autoLoad') === 'true');
+  const markRowLoaded = (rowId: string) => {
+    setLoadedRowIds(prev => {
+      const next = new Set(prev);
+      next.add(rowId);
+      try { localStorage.setItem('shopify_loadedRowIds', JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  };
+
+  // Local row statuses: statusKey -> 'A_DROPEAR' | 'CARGAR' | 'PENDIENTE'
+  const [rowStatuses, setRowStatuses] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem('shopify_rowStatuses');
+      return saved ? JSON.parse(saved) : {};
+    } catch { return {}; }
+  });
+
+  const setRowStatus = (key: string, status: string) => {
+    setRowStatuses(prev => {
+      const next = { ...prev, [key]: status };
+      try { localStorage.setItem('shopify_rowStatuses', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
+
+  // Auto-load toggle
+  const [autoLoad, setAutoLoad] = useState(() => {
+    try { return localStorage.getItem('shopify_autoLoad') === '1'; } catch { return false; }
+  });
+  const autoLoadRef = useRef(autoLoad);
   const autoTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  /* ─── paste import (legacy) ─── */
-  const [paste, setPaste] = useState('');
-  const [importing, setImporting] = useState(false);
-
-  /* ─── imported orders list ─── */
-  const [imported, setImported] = useState<any[]>([]);
-  const [filterStatus, setFilterStatus] = useState('');
-  const [search, setSearch] = useState('');
-  const [dateFrom, setDateFrom] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() - 30);
-    return d.toISOString().slice(0, 10);
-  });
-  const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
-
-  /* ─── persist localStorage ─── */
-  useEffect(() => {
-    localStorage.setItem('shopify_loadedRowIds', JSON.stringify([...loadedRowIds]));
-  }, [loadedRowIds]);
-  useEffect(() => {
-    localStorage.setItem('shopify_rowStatuses', JSON.stringify(rowStatuses));
-  }, [rowStatuses]);
-  useEffect(() => {
-    localStorage.setItem('shopify_autoLoad', autoLoad ? 'true' : 'false');
-  }, [autoLoad]);
-
-  /* ─── load products & cities ─── */
-  useEffect(() => {
-    (async () => {
-      const { data: prods } = await supabase.from('products').select('*');
-      setProducts(prods || []);
-      const { data: cp } = await supabase.from('client_prices').select('city');
-      setCities((cp || []).map(c => c.city));
-    })();
-  }, []);
-
-  /* ─── load imported orders ─── */
-  const loadImported = async () => {
-    const { data } = await supabase.from('orders').select('*')
-      .gte('created_at', dateFrom + 'T00:00:00')
-      .lte('created_at', dateTo + 'T23:59:59')
-      .order('created_at', { ascending: false })
-      .limit(500);
-    setImported(data || []);
-  };
-  useEffect(() => { loadImported(); }, []);
-
-  /* ─── row ID generation ─── */
-  const getRowId = (row: string[], idx: number): string => {
-    const idCol = findStrictCol(sheetHeaders, ['id', 'order_id', 'pedido_id', 'numero']);
-    if (idCol >= 0 && row[idCol]?.trim()) return `id:${row[idCol].trim()}`;
-    const phone = normalizePhone(row[findStrictCol(sheetHeaders, ['numero', 'tel', 'telefono', 'phone'])] || '');
-    const product = (row[findStrictCol(sheetHeaders, ['producto', 'product', 'item', 'titulo'])] || '').trim();
-    const amount = parseMoney(row[findStrictCol(sheetHeaders, ['monto', 'total', 'importe', 'amount', 'precio'])] || '0');
-    if (phone || product) return `key:${phone}|${product}|${amount}`;
-    return `row:${idx}`;
-  };
-
-  const getStatusKey = (origIdx: number) => `status:${sheetUrl}:${origIdx}`;
-
-  const getRowStatus = (origIdx: number) => {
-    const key = getStatusKey(origIdx);
-    if (rowStatuses[key]) return rowStatuses[key];
-    const row = sheetRows[origIdx - (sheetHeaders.length ? 1 : 0)];
-    if (!row) return 'CARGAR';
-    const rowId = getRowId(row, origIdx);
-    return loadedRowIds.has(rowId) ? 'CARGADO' : 'CARGAR';
-  };
-
-  const setRowStatus = (origIdx: number, status: string) => {
-    const key = getStatusKey(origIdx);
-    setRowStatuses(prev => ({ ...prev, [key]: status }));
-  };
-
-  /* ─── read sheet ─── */
-  const fetchSheet = async () => {
-    if (!sheetUrl.trim()) { toast.error('Ingresá la URL de la hoja'); return; }
-    setLoadingSheet(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('read-sheet', {
-        body: { sheetUrl: sheetUrl.trim() },
-      });
-      if (error) throw error;
-      if (data?.error) throw new Error(data.error);
-      const rows: string[][] = data?.rows || [];
-      if (!rows.length) { toast.info('Hoja vacía'); setLoadingSheet(false); return; }
-
-      const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
-      const first = rows[0].map(norm);
-      const looksHeader = first.some(c => /tienda|fecha|nombre|numero|ciudad|producto|cantidad|monto|customer|phone|city|product/i.test(c));
-
-      if (looksHeader) {
-        setSheetHeaders(first);
-        setSheetRows(rows.slice(1));
-      } else {
-        setSheetHeaders([]);
-        setSheetRows(rows);
-      }
-      toast.success(`✅ ${rows.length - (looksHeader ? 1 : 0)} filas cargadas`);
-    } catch (err: any) {
-      toast.error(`Error: ${err.message}`);
+  const toggleAutoLoad = (val: boolean) => {
+    setAutoLoad(val);
+    autoLoadRef.current = val;
+    try { localStorage.setItem('shopify_autoLoad', val ? '1' : '0'); } catch {}
+    if (!val && autoTimerRef.current) {
+      clearInterval(autoTimerRef.current);
+      autoTimerRef.current = null;
     }
-    setLoadingSheet(false);
   };
 
-  /* ─── detect product & city ─── */
-  const detectProduct = (productTitle: string) => {
-    if (!productTitle) return null;
-    const q = productTitle.toLowerCase();
-    return products.find(p =>
-      p.title?.toLowerCase().includes(q) || q.includes(p.title?.toLowerCase() || '___') ||
-      (p.sku && q.includes(p.sku.toLowerCase()))
-    ) || null;
+  const toggleOnlyCovered = (val: boolean) => {
+    setOnlyCovered(val);
+    try { localStorage.setItem('shopify_onlyCovered', val ? '1' : '0'); } catch {}
+  };
+  const toggleOnlyMatched = (val: boolean) => {
+    setOnlyMatched(val);
+    try { localStorage.setItem('shopify_onlyMatched', val ? '1' : '0'); } catch {}
   };
 
-  const detectCity = (cityName: string) => {
-    if (!cityName) return false;
-    const q = cityName.toLowerCase();
-    return cities.some(c => c.toLowerCase() === q || c.toLowerCase().includes(q) || q.includes(c.toLowerCase()));
+  const loadMeta = async () => {
+    const [pricesRes, productsRes] = await Promise.all([
+      supabase.from('client_prices').select('city, price_gs'),
+      supabase.from('products').select('title, sku, provider_price_gs, provider_email'),
+    ]);
+    setClientPrices(pricesRes.data || []);
+    setProducts(productsRes.data || []);
   };
 
-  /* ─── build order payload ─── */
-  const buildPayload = (row: string[]) => {
-    const col = (candidates: string[], fallback: number) => {
-      const idx = findStrictCol(sheetHeaders, candidates);
-      return idx >= 0 ? idx : fallback;
-    };
-    const customer = (row[col(['nombre', 'cliente', 'customer', 'customer name'], 2)] || '').trim();
-    const phone = normalizePhone(row[col(['numero', 'tel', 'telefono', 'phone'], 3)] || '');
-    const street = [(row[col(['calle', 'direccion', 'address', 'street'], 4)] || '').trim(), (row[col(['calle 2', 'calle2', 'direccion 2', 'address2'], 5)] || '').trim()].filter(Boolean).join(' ');
-    const city = (row[col(['ciudad', 'city'], 6)] || '').trim();
-    const dept = (row[col(['departamento', 'depto', 'department', 'state'], 7)] || '').trim();
-    const productTitle = (row[col(['producto', 'product', 'item', 'titulo'], 8)] || '').trim();
-    const qty = Number(row[col(['cantidad', 'qty', 'quantity'], 9)] || 1) || 1;
-    const amount = parseMoney(row[col(['monto', 'total', 'importe', 'amount', 'precio'], 10)] || '0');
-    const email = (row[col(['email', 'correo'], 11)] || '').trim();
+  const coveredCities = useMemo(() => {
+    return new Set((clientPrices || []).map((c: any) => (c.city || '').toLowerCase().trim()));
+  }, [clientPrices]);
 
-    return {
-      order_number: `SH${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 5)}`,
-      created_by: myEmail,
-      customer_name: customer,
-      phone,
-      city,
-      street,
-      district: dept,
-      email: email || undefined,
-      items_json: [{ title: productTitle, qty, sale_gs: amount, sku: '' }],
-      total_gs: amount * qty,
-      status: 'PENDIENTE',
-      obs: '',
-    };
+  const compactWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim();
+
+  const fetchOrders = async () => {
+    if (!sheetUrl) {
+      toast.error('No tenés un link de Google Sheets configurado.');
+      return;
+    }
+    setLoading(true);
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      const session = (await supabase.auth.getSession()).data.session;
+
+      const res = await fetch(`${supabaseUrl}/functions/v1/read-sheet?url=${encodeURIComponent(sheetUrl)}`, {
+        headers: {
+          'Authorization': `Bearer ${session?.access_token || anonKey}`,
+          'apikey': anonKey,
+        },
+      });
+      const result = await res.json();
+      if (result.error) throw new Error(result.error);
+      setHeaders(result.headers || []);
+      setOrders(result.orders || []);
+      toast.success(`✅ ${result.total || 0} filas cargadas`);
+    } catch (err: any) {
+      toast.error(`Error al leer Sheet: ${err.message}`);
+    }
+    setLoading(false);
   };
 
-  /* ─── confirm single row ─── */
-  const handleConfirm = async (row: string[], origIdx: number) => {
-    const payload = buildPayload(row);
+  // Silent fetch for auto-load (no toast)
+  const fetchOrdersSilent = async (): Promise<{ headers: string[]; orders: SheetOrder[] } | null> => {
+    if (!sheetUrl) return null;
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      const session = (await supabase.auth.getSession()).data.session;
+
+      const res = await fetch(`${supabaseUrl}/functions/v1/read-sheet?url=${encodeURIComponent(sheetUrl)}`, {
+        headers: {
+          'Authorization': `Bearer ${session?.access_token || anonKey}`,
+          'apikey': anonKey,
+        },
+      });
+      const result = await res.json();
+      if (result.error) return null;
+      setHeaders(result.headers || []);
+      setOrders(result.orders || []);
+      return { headers: result.headers || [], orders: result.orders || [] };
+    } catch {
+      return null;
+    }
+  };
+
+  useEffect(() => {
+    loadMeta();
+    if (sheetUrl) fetchOrders();
+  }, [sheetUrl]);
+
+  const findCol = (possibleNames: string[]) =>
+    headers.find(h => possibleNames.some(p => h.includes(p))) || '';
+
+  const normalizeHeaderKey = (value: string) =>
+    value
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+
+  const findStrictCol = (possibleNames: string[]) => {
+    return headers.find((header) => {
+      const normalizedHeader = normalizeHeaderKey(header);
+      return possibleNames.some((name) => {
+        const normalizedName = normalizeHeaderKey(name);
+        return (
+          normalizedHeader === normalizedName ||
+          normalizedHeader.startsWith(`${normalizedName} `) ||
+          normalizedHeader.endsWith(` ${normalizedName}`) ||
+          normalizedHeader.includes(` ${normalizedName} `)
+        );
+      });
+    }) || '';
+  };
+
+  const colName = findCol(['nombre', 'cliente', 'customer', 'name']);
+  const colPhone = findCol(['telefono', 'teléfono', 'phone', 'celular', 'tel']);
+  const colDate = findCol(['fecha', 'date']);
+  const colCity = findCol(['ciudad', 'city', 'localidad']);
+  const colStreet = findCol(['direccion', 'dirección', 'address', 'calle', 'street']);
+  const colStreet2 = headers.find(h => h === 'calle_2') || '';
+  const colDistrict = findCol(['barrio', 'district', 'zona', 'departamento']);
+  const colTotal = findCol(['total', 'monto', 'amount', 'precio', 'price']);
+  const colProducts = findCol(['producto', 'products', 'items', 'articulo', 'artículo', 'detalle']);
+  const colQty = findCol(['cantidad', 'qty', 'quantity']);
+  const colOrderNum = findStrictCol(['pedido', 'order', 'numero pedido', 'número pedido', 'numero', 'número', 'nro pedido', 'nro', 'id']);
+  const colEmail = findCol(['email', 'correo', 'mail']);
+
+  const getRowId = useCallback((order: SheetOrder, _idx: number) => {
+    const num = compactWhitespace(order[colOrderNum] || '');
+    if (num) return num;
+
+    const date = compactWhitespace(order[colDate] || '');
+    const name = compactWhitespace(order[colName] || '');
+    const phone = compactWhitespace(order[colPhone] || '');
+    const prod = compactWhitespace(order[colProducts] || '');
+    const city = compactWhitespace(order[colCity] || '');
+    const total = compactWhitespace(order[colTotal] || '');
+
+    return compactWhitespace(`r-${date}-${name}-${phone}-${prod}-${city}-${total}`);
+  }, [colOrderNum, colDate, colName, colPhone, colProducts, colCity, colTotal]);
+
+  const getStatusKey = (_order: SheetOrder, origIdx: number) => {
+    return `status:${sheetUrl || 'default'}:${origIdx}`;
+  };
+
+  // Match product by title
+  const matchProduct = useCallback((sheetTitle: string) => {
+    if (!sheetTitle) return null;
+    const clean = sheetTitle.toLowerCase().replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '').trim();
+    const exact = products.find((p: any) => {
+      const pt = (p.title || '').toLowerCase().trim();
+      return pt === sheetTitle.toLowerCase().trim() || pt === clean;
+    });
+    if (exact) return exact;
+    return products.find((p: any) => {
+      const pt = (p.title || '').toLowerCase().trim();
+      return pt.includes(clean) || clean.includes(pt);
+    }) || null;
+  }, [products]);
+
+  const norm = (s: string) =>
+    s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+
+  const findCityMatch = useCallback((sheetCity: string): any | null => {
+    if (!sheetCity) return null;
+    const raw = norm(sheetCity);
+    const exact = clientPrices.find((p: any) => norm(p.city || '') === raw);
+    if (exact) return exact;
+    const partial = clientPrices.find((p: any) => {
+      const pc = norm(p.city || '');
+      return raw.includes(pc) || pc.includes(raw);
+    });
+    if (partial) return partial;
+    const parts = raw.split(/[\-–—,\/|]+/).map(s => s.trim()).filter(Boolean);
+    for (const part of parts) {
+      const match = clientPrices.find((p: any) => {
+        const pc = norm(p.city || '');
+        return pc.includes(part) || part.includes(pc);
+      });
+      if (match) return match;
+    }
+    return null;
+  }, [clientPrices]);
+
+  const getDeliveryFee = (city: string): number => {
+    const match = findCityMatch(city);
+    return match ? Number(match.price_gs) || 0 : 0;
+  };
+
+  const isCityCovered = (city: string) => !!findCityMatch(city);
+
+  const indexedOrders = useMemo(() => orders.map((o, i) => ({ order: o, origIdx: i })), [orders]);
+
+  const filtered = useMemo(() => {
+    let result = indexedOrders;
+    if (search) {
+      const q = search.toLowerCase();
+      result = result.filter(({ order }) =>
+        Object.values(order).some(v => v.toLowerCase().includes(q))
+      );
+    }
+    if (onlyCovered && colCity) {
+      result = result.filter(({ order }) => isCityCovered(order[colCity] || ''));
+    }
+    if (onlyMatched && colProducts) {
+      result = result.filter(({ order }) => !!matchProduct(order[colProducts] || ''));
+    }
+    return result;
+  }, [indexedOrders, search, onlyCovered, onlyMatched, coveredCities, colCity, colProducts, products]);
+
+  const handleConfirm = async (order: SheetOrder, idx: number) => {
+    const productTitle = order[colProducts] || '';
+    const matched = matchProduct(productTitle);
+    if (!matched) { toast.error('Producto no detectado'); return; }
+    const payload = buildPayload(order, matched);
     const { error } = await supabase.from('orders').insert(payload);
     if (error) { toast.error(error.message); return; }
-    const rowId = getRowId(row, origIdx);
+    const rowId = getRowId(order, idx);
     setLoadedRowIds(prev => { const n = new Set(prev); n.add(rowId); return n; });
-    setRowStatus(origIdx, 'CARGADO');
+    setRowStatus(String(idx), 'CARGADO');
     toast.success('✅ Pedido cargado');
-    loadImported();
   };
 
-  /* ─── bulk load (only rows with CARGAR status) ─── */
-  const getLoadableOrders = useCallback(() => {
-    return sheetRows.map((row, i) => {
-      const origIdx = i + (sheetHeaders.length ? 1 : 0);
-      const status = getRowStatus(origIdx);
-      if (status !== 'CARGAR') return null;
+  // Build a single order payload
+  const buildPayload = (order: SheetOrder, matched: any) => {
+    const totalStr = order[colTotal] || '0';
+    const totalGs = Math.round(Number(totalStr.replace(/[^\d.-]/g, '')) || 0);
+    const street = order[colStreet] || '';
+    const street2 = order[colStreet2] || '';
+    const fullStreet = [street, street2].filter(Boolean).join(', ');
+    const qty = Number((order[colQty] || '1').split('\n')[0]) || 1;
+    const city = order[colCity] || '';
+    const cityMatch = findCityMatch(city);
+    const deliveryFee = cityMatch ? Number(cityMatch.price_gs) || 0 : 0;
+    const platformCity = cityMatch?.city || city;
 
-      const colProduct = findStrictCol(sheetHeaders, ['producto', 'product', 'item', 'titulo']);
-      const productTitle = (row[colProduct >= 0 ? colProduct : 8] || '').trim();
-      const colCity = findStrictCol(sheetHeaders, ['ciudad', 'city']);
-      const cityName = (row[colCity >= 0 ? colCity : 6] || '').trim();
+    const providerCost = Number(matched.provider_price_gs || 0) * qty;
+    const commission = totalGs - (providerCost + deliveryFee);
 
-      const prod = detectProduct(productTitle);
-      const cityOk = detectCity(cityName);
-      if (!prod || !cityOk) return null;
+    return {
+      created_by: profile?.email || null,
+      customer_name: order[colName] || '',
+      phone: order[colPhone] || '',
+      city: platformCity,
+      street: fullStreet,
+      district: order[colDistrict] || '',
+      email: order[colEmail] || '',
+      obs: null,
+      items_json: [{
+        sku: matched.sku || '',
+        title: matched.title || '',
+        sale_gs: totalGs,
+        qty,
+        provider_price_gs: Number(matched.provider_price_gs || 0),
+        provider_email: matched.provider_email || '',
+      }],
+      total_gs: totalGs,
+      delivery_gs: deliveryFee,
+      commission_gs: commission,
+      provider_emails_list: matched.provider_email || '',
+    };
+  };
 
-      return { row, origIdx };
-    }).filter(Boolean) as { row: string[]; origIdx: number }[];
-  }, [sheetRows, sheetHeaders, rowStatuses, loadedRowIds, products, cities]);
+  // Get all loadable orders (status=CARGAR + city covered + product detected + not loaded)
+  const getLoadableOrders = () => {
+    return filtered
+      .filter(({ order, origIdx }) => {
+        const rowId = getRowId(order, origIdx);
+        const statusKey = getStatusKey(order, origIdx);
+        if (loadedRowIds.has(rowId)) return false;
+        if ((rowStatuses[statusKey] || 'CARGAR') !== 'CARGAR') return false;
+        const city = order[colCity] || '';
+        if (!isCityCovered(city)) return false;
+        const matched = matchProduct(order[colProducts] || '');
+        if (!matched) return false;
+        return true;
+      });
+  };
+
+  const loadableOrders = useMemo(() => getLoadableOrders(), [filtered, loadedRowIds, colCity, colProducts, rowStatuses]);
 
   const handleBulkLoad = async () => {
-    const loadable = getLoadableOrders();
-    if (!loadable.length) { toast.info('No hay pedidos listos para cargar'); return; }
+    if (loadableOrders.length === 0) {
+      toast.error('No hay pedidos listos para carga masiva.');
+      return;
+    }
+    setBulkLoading(true);
+    let ok = 0;
+    let fail = 0;
+    for (const { order, origIdx } of loadableOrders) {
+      try {
+        const rowId = getRowId(order, origIdx);
+        const matched = matchProduct(order[colProducts] || '');
+        if (!matched) continue;
 
-    let count = 0;
-    for (const { row, origIdx } of loadable) {
-      const payload = buildPayload(row);
-      const { error } = await supabase.from('orders').insert(payload);
-      if (!error) {
-        const rowId = getRowId(row, origIdx);
-        setLoadedRowIds(prev => { const n = new Set(prev); n.add(rowId); return n; });
-        setRowStatus(origIdx, 'CARGADO');
-        count++;
+        const payload = buildPayload(order, matched);
+        const { error } = await supabase.from('orders').insert(payload);
+        if (error) { fail++; console.error('Bulk insert error:', error); }
+        else { ok++; markRowLoaded(rowId); }
+      } catch (e) {
+        fail++;
+        console.error('Bulk load error:', e);
       }
     }
-    toast.success(`✅ ${count} pedidos cargados`);
-    loadImported();
+    toast.success(`🚀 ${ok} pedidos cargados${fail ? ` (${fail} errores)` : ''}`);
+    setBulkLoading(false);
   };
 
-  /* ─── auto-load cycle ─── */
+  // Auto-load cycle
   const runAutoLoadCycle = useCallback(async () => {
+    if (!autoLoadRef.current || !sheetUrl) return;
+
+    // Re-fetch sheet silently
+    const result = await fetchOrdersSilent();
+    if (!result) return;
+
+    // Get current loaded IDs from localStorage
+    let currentLoaded: Set<string>;
     try {
-      const { data, error } = await supabase.functions.invoke('read-sheet', {
-        body: { sheetUrl: sheetUrl.trim() },
-      });
-      if (error || data?.error) return;
-      const rows: string[][] = data?.rows || [];
-      if (!rows.length) return;
+      const saved = localStorage.getItem('shopify_loadedRowIds');
+      currentLoaded = saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch { currentLoaded = new Set(); }
 
-      const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
-      const first = rows[0].map(norm);
-      const looksHeader = first.some(c => /tienda|fecha|nombre|numero|ciudad|producto|cantidad|monto|customer|phone|city|product/i.test(c));
-      const headers = looksHeader ? first : [];
-      const dataRows = looksHeader ? rows.slice(1) : rows;
+    let currentStatuses: Record<string, string>;
+    try {
+      const saved = localStorage.getItem('shopify_rowStatuses');
+      currentStatuses = saved ? JSON.parse(saved) : {};
+    } catch { currentStatuses = {}; }
 
-      let count = 0;
-      for (let i = 0; i < dataRows.length; i++) {
-        const origIdx = i + (looksHeader ? 1 : 0);
-        const statusKey = `status:${sheetUrl}:${origIdx}`;
+    let ok = 0;
+    for (let i = 0; i < result.orders.length; i++) {
+      const order = result.orders[i];
+      const rowId = getRowId(order, i);
+      const statusKey = `status:${sheetUrl || 'default'}:${i}`;
 
-        // Check current status
-        const savedStatuses = JSON.parse(localStorage.getItem('shopify_rowStatuses') || '{}');
-        const savedIds = new Set(JSON.parse(localStorage.getItem('shopify_loadedRowIds') || '[]'));
-        const rowId = (() => {
-          const idCol = findStrictCol(headers, ['id', 'order_id', 'pedido_id', 'numero']);
-          if (idCol >= 0 && dataRows[i][idCol]?.trim()) return `id:${dataRows[i][idCol].trim()}`;
-          const phoneCol = findStrictCol(headers, ['numero', 'tel', 'telefono', 'phone']);
-          const prodCol = findStrictCol(headers, ['producto', 'product', 'item', 'titulo']);
-          const amtCol = findStrictCol(headers, ['monto', 'total', 'importe', 'amount', 'precio']);
-          const phone = normalizePhone(dataRows[i][phoneCol >= 0 ? phoneCol : 3] || '');
-          const product = (dataRows[i][prodCol >= 0 ? prodCol : 8] || '').trim();
-          const amount = parseMoney(dataRows[i][amtCol >= 0 ? amtCol : 10] || '0');
-          if (phone || product) return `key:${phone}|${product}|${amount}`;
-          return `row:${origIdx}`;
-        })();
+      if (currentLoaded.has(rowId)) continue;
+      if ((currentStatuses[statusKey] || 'CARGAR') !== 'CARGAR') continue;
 
-        const currentStatus = savedStatuses[statusKey] || (savedIds.has(rowId) ? 'CARGADO' : 'CARGAR');
-        if (currentStatus !== 'CARGAR') continue;
+      const city = order[colCity] || '';
+      if (!isCityCovered(city)) continue;
 
-        // Check product & city
-        const prodCol = findStrictCol(headers, ['producto', 'product', 'item', 'titulo']);
-        const cityCol = findStrictCol(headers, ['ciudad', 'city']);
-        const productTitle = (dataRows[i][prodCol >= 0 ? prodCol : 8] || '').trim();
-        const cityName = (dataRows[i][cityCol >= 0 ? cityCol : 6] || '').trim();
+      const matched = matchProduct(order[colProducts] || '');
+      if (!matched) continue;
 
-        const prod = detectProduct(productTitle);
-        const cityOk = detectCity(cityName);
-        if (!prod || !cityOk) continue;
-
-        // Build & insert
-        const col = (candidates: string[], fallback: number) => {
-          const idx = findStrictCol(headers, candidates);
-          return idx >= 0 ? idx : fallback;
-        };
-        const customer = (dataRows[i][col(['nombre', 'cliente', 'customer', 'customer name'], 2)] || '').trim();
-        const phone = normalizePhone(dataRows[i][col(['numero', 'tel', 'telefono', 'phone'], 3)] || '');
-        const street = [(dataRows[i][col(['calle', 'direccion', 'address', 'street'], 4)] || '').trim(), (dataRows[i][col(['calle 2', 'calle2', 'direccion 2', 'address2'], 5)] || '').trim()].filter(Boolean).join(' ');
-        const city = (dataRows[i][col(['ciudad', 'city'], 6)] || '').trim();
-        const dept = (dataRows[i][col(['departamento', 'depto', 'department', 'state'], 7)] || '').trim();
-        const qty = Number(dataRows[i][col(['cantidad', 'qty', 'quantity'], 9)] || 1) || 1;
-        const amount = parseMoney(dataRows[i][col(['monto', 'total', 'importe', 'amount', 'precio'], 10)] || '0');
-
-        const payload = {
-          order_number: `SH${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 5)}`,
-          created_by: myEmail,
-          customer_name: customer,
-          phone,
-          city,
-          street,
-          district: dept,
-          items_json: [{ title: productTitle, qty, sale_gs: amount, sku: '' }],
-          total_gs: amount * qty,
-          status: 'PENDIENTE',
-          obs: '',
-        };
-
-        const { error: insErr } = await supabase.from('orders').insert(payload);
-        if (!insErr) {
-          savedIds.add(rowId);
-          savedStatuses[statusKey] = 'CARGADO';
-          count++;
+      try {
+        const payload = buildPayload(order, matched);
+        const { error } = await supabase.from('orders').insert(payload);
+        if (!error) {
+          ok++;
+          currentLoaded.add(rowId);
         }
-      }
+      } catch { /* skip */ }
+    }
 
-      if (count > 0) {
-        localStorage.setItem('shopify_loadedRowIds', JSON.stringify([...new Set(JSON.parse(localStorage.getItem('shopify_loadedRowIds') || '[]')).add('__refresh__')]));
-        localStorage.setItem('shopify_rowStatuses', JSON.stringify(JSON.parse(localStorage.getItem('shopify_rowStatuses') || '{}')));
-        // Refresh local state
-        setLoadedRowIds(new Set(JSON.parse(localStorage.getItem('shopify_loadedRowIds') || '[]')));
-        setRowStatuses(JSON.parse(localStorage.getItem('shopify_rowStatuses') || '{}'));
-        toast.success(`⚡ Auto-carga: ${count} pedidos cargados`);
-        loadImported();
-      }
-    } catch { /* silent */ }
-  }, [sheetUrl, myEmail, products, cities]);
+    if (ok > 0) {
+      try { localStorage.setItem('shopify_loadedRowIds', JSON.stringify([...currentLoaded])); } catch {}
+      setLoadedRowIds(new Set(currentLoaded));
+      toast.success(`⚡ Auto-carga: ${ok} pedidos cargados`);
+    }
+  }, [sheetUrl, getRowId, matchProduct, findCityMatch, colCity, colProducts, products, clientPrices, profile?.email]);
 
-  /* ─── auto-load timer ─── */
+  // Start/stop auto-load timer
   useEffect(() => {
-    if (autoLoad && sheetUrl.trim()) {
+    if (autoLoad && sheetUrl) {
+      // Run immediately, then every 60 seconds
       runAutoLoadCycle();
       autoTimerRef.current = setInterval(runAutoLoadCycle, 60000);
     }
-    return () => { if (autoTimerRef.current) clearInterval(autoTimerRef.current); };
-  }, [autoLoad, runAutoLoadCycle, sheetUrl]);
-
-  /* ─── paste import (legacy) ─── */
-  const importPaste = async () => {
-    if (!paste.trim()) { toast.error('Pegá datos primero'); return; }
-    setImporting(true);
-
-    const lines = paste.trim().split(/\r?\n/).filter(l => l.trim());
-    if (!lines.length) { toast.error('Pegado vacío'); setImporting(false); return; }
-
-    const first = lines[0].split('\t').map(c => c.trim());
-    const norm = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
-    const looksHeader = first.some(c => /tienda|fecha|nombre|numero|ciudad|producto|cantidad|monto|customer|phone|city|product/i.test(c));
-
-    let header: string[] = [];
-    let start = 0;
-    if (looksHeader) { header = first.map(norm); start = 1; }
-
-    const hidx = (candidates: string[], fallback: number) => {
-      for (const c of candidates) { const i = header.indexOf(norm(c)); if (i >= 0) return i; }
-      return fallback;
+    return () => {
+      if (autoTimerRef.current) {
+        clearInterval(autoTimerRef.current);
+        autoTimerRef.current = null;
+      }
     };
+  }, [autoLoad, sheetUrl, runAutoLoadCycle]);
 
-    const col = {
-      name: hidx(['nombre', 'cliente', 'customer', 'customer name'], 2),
-      phone: hidx(['numero', 'tel', 'telefono', 'phone'], 3),
-      street1: hidx(['calle', 'direccion', 'address', 'street'], 4),
-      street2: hidx(['calle 2', 'calle2', 'direccion 2', 'address2'], 5),
-      city: hidx(['ciudad', 'city'], 6),
-      dept: hidx(['departamento', 'depto', 'department', 'state'], 7),
-      product: hidx(['producto', 'product', 'item', 'titulo'], 8),
-      qty: hidx(['cantidad', 'qty', 'quantity'], 9),
-      amount: hidx(['monto', 'total', 'importe', 'amount', 'precio'], 10),
-    };
+  const pendingCount = filtered.filter(({ order, origIdx }) => !loadedRowIds.has(getRowId(order, origIdx))).length;
 
-    let importedCount = 0, duplicates = 0, skipped = 0;
-    const existingKeys = new Set(
-      imported.map(o => {
-        const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json || '[]') : (o.items_json || []);
-        return `${o.phone}|${items[0]?.title || ''}|${o.total_gs}`;
-      })
+  if (!sheetUrl) {
+    return (
+      <div className="app-card">
+        <h3 className="text-lg font-extrabold mb-3">🛒 Pedidos de Shopify (Google Sheets)</h3>
+        <div className="p-6 text-center">
+          <p className="text-muted-foreground mb-2">No tenés un link de Google Sheets configurado.</p>
+          <p className="text-sm text-muted-foreground">Andá a <b>Perfil</b> y pegá el link de tu hoja pública de Shopify.</p>
+        </div>
+      </div>
     );
+  }
 
-    const batch: any[] = [];
-    for (let i = start; i < lines.length; i++) {
-      const cells = lines[i].split('\t');
-      if (cells.length < 3) { skipped++; continue; }
-
-      const customer = (cells[col.name] || '').trim();
-      const phone = normalizePhone(cells[col.phone] || '');
-      const product = (cells[col.product] || '').trim();
-      const qty = Number(cells[col.qty] || 1) || 1;
-      const amount = parseMoney(cells[col.amount] || '0');
-      const city = (cells[col.city] || '').trim();
-      const street = [(cells[col.street1] || '').trim(), (cells[col.street2] || '').trim()].filter(Boolean).join(' ');
-      const dept = (cells[col.dept] || '').trim();
-
-      if (!customer && !phone && !product) { skipped++; continue; }
-      const key = `${phone}|${product}|${amount}`;
-      if (existingKeys.has(key)) { duplicates++; continue; }
-      existingKeys.add(key);
-
-      batch.push({
-        order_number: `SH${Date.now().toString(36).toUpperCase()}${i}`,
-        created_by: myEmail,
-        customer_name: customer, phone, city, street, district: dept,
-        items_json: [{ title: product, qty, sale_gs: amount, sku: '' }],
-        total_gs: amount * qty,
-        status: 'PENDIENTE',
-        obs: '',
-      });
-      importedCount++;
-    }
-
-    if (batch.length) {
-      for (let i = 0; i < batch.length; i += 50) {
-        const chunk = batch.slice(i, i + 50);
-        const { error } = await supabase.from('orders').insert(chunk);
-        if (error) { toast.error(`Error en lote: ${error.message}`); break; }
-      }
-    }
-
-    toast.success(`✅ ${importedCount} importados, ${duplicates} duplicados, ${skipped} omitidos`);
-    setPaste('');
-    setImporting(false);
-    loadImported();
-  };
-
-  /* ─── filtered list ─── */
-  const statusOpts = ['PENDIENTE', 'EN RUTA', 'ENTREGADO', 'CANCELADO', 'REAGENDADO'];
-
-  const filtered = useMemo(() => {
-    return imported.filter(o => {
-      if (filterStatus && o.status !== filterStatus) return false;
-      if (search) {
-        const q = search.toLowerCase();
-        return (o.customer_name || '').toLowerCase().includes(q) ||
-          (o.phone || '').includes(q) ||
-          (o.order_number || '').toLowerCase().includes(q);
-      }
-      return true;
-    });
-  }, [imported, filterStatus, search]);
-
-  const updateStatus = async (orderId: string, status: string) => {
-    const { error } = await supabase.from('orders').update({ status, updated_at: new Date().toISOString() }).eq('id', orderId);
-    if (error) toast.error(error.message);
-    else {
-      toast.success(`Estado → ${status}`);
-      setImported(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
-    }
-  };
-
-  /* ─── render ─── */
   return (
     <div className="app-card">
-      <h3 className="text-lg font-extrabold mb-3">Pedidos de Shopify + WhatsApp</h3>
+      <h3 className="text-lg font-extrabold mb-3">🛒 Pedidos de Shopify (Google Sheets)</h3>
 
-      {/* ── Sheet URL section ── */}
-      <div className="app-card !p-4 mb-4">
-        <h4 className="font-bold mb-2">📊 Leer desde Google Sheet</h4>
-        <div className="flex gap-2 mb-2 flex-wrap">
-          <input
-            className="app-input flex-1 min-w-[300px]"
-            placeholder="URL de la hoja de Google Sheets..."
-            value={sheetUrl}
-            onChange={e => setSheetUrl(e.target.value)}
-          />
-          <button className="nav-btn active" onClick={fetchSheet} disabled={loadingSheet}>
-            {loadingSheet ? <span className="flex items-center gap-2"><span className="btn-spinner" /> Leyendo...</span> : '📥 Leer hoja'}
+      <div className="flex flex-wrap gap-2 mb-3 items-center">
+        <button className="nav-btn active" onClick={fetchOrders} disabled={loading}>
+          {loading ? <span className="flex items-center gap-2"><span className="btn-spinner" /> Cargando...</span> : '🔄 Sincronizar Sheet'}
+        </button>
+        {loadableOrders.length > 0 && (
+          <button className="nav-btn active !bg-green-700 hover:!bg-green-600" onClick={handleBulkLoad} disabled={bulkLoading}>
+            {bulkLoading ? <span className="flex items-center gap-2"><span className="btn-spinner" /> Cargando...</span> : `🚀 Carga masiva (${loadableOrders.length})`}
           </button>
-          <button
-            className={`nav-btn ${autoLoad ? 'active !bg-green-600' : ''}`}
-            onClick={() => setAutoLoad(prev => !prev)}
-            title={autoLoad ? 'Auto-carga activa (cada 60s)' : 'Activar auto-carga'}
-          >
-            ⚡ Auto-carga {autoLoad ? 'ON' : 'OFF'}
-          </button>
-        </div>
-        {autoLoad && (
-          <div className="text-xs text-green-400 mb-2 flex items-center gap-1">
-            <span className="inline-block w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-            Auto-carga activa — sincronizando cada 60 segundos
-          </div>
         )}
-
-        {/* ── Sheet rows table ── */}
-        {sheetRows.length > 0 && (
-          <div className="mt-3">
-            <div className="flex justify-between items-center mb-2">
-              <span className="text-sm font-bold">{sheetRows.length} filas de la hoja</span>
-              <button className="nav-btn active text-xs" onClick={handleBulkLoad}>
-                🚀 Cargar todos los listos
-              </button>
-            </div>
-            <div className="overflow-auto max-h-[400px]">
-              <table className="app-table min-w-[900px]">
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    {sheetHeaders.length > 0
-                      ? sheetHeaders.map((h, i) => <th key={i} className="text-xs capitalize">{h}</th>)
-                      : sheetRows[0]?.map((_, i) => <th key={i}>Col {i + 1}</th>)}
-                    <th>Producto</th><th>Ciudad</th><th>Estado</th><th>Acción</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sheetRows.map((row, i) => {
-                    const origIdx = i + (sheetHeaders.length ? 1 : 0);
-                    const colProduct = findStrictCol(sheetHeaders, ['producto', 'product', 'item', 'titulo']);
-                    const colCity = findStrictCol(sheetHeaders, ['ciudad', 'city']);
-                    const productTitle = (row[colProduct >= 0 ? colProduct : 8] || '').trim();
-                    const cityName = (row[colCity >= 0 ? colCity : 6] || '').trim();
-                    const prod = detectProduct(productTitle);
-                    const cityOk = detectCity(cityName);
-                    const status = getRowStatus(origIdx);
-                    const isLoaded = status === 'CARGADO';
-
-                    return (
-                      <tr key={i} className={isLoaded ? 'opacity-50' : ''}>
-                        <td className="text-xs text-muted-foreground">{origIdx}</td>
-                        {row.map((cell, j) => (
-                          <td key={j} className="text-xs truncate max-w-[140px]" title={cell}>{cell}</td>
-                        ))}
-                        <td className="text-xs">
-                          {prod ? <span className="text-green-400">✅ {prod.title?.slice(0, 20)}</span> : <span className="text-yellow-400">⚠️ No detectado</span>}
-                        </td>
-                        <td className="text-xs">
-                          {cityOk ? <span className="text-green-400">✅</span> : <span className="text-yellow-400">⚠️</span>}
-                        </td>
-                        <td>
-                          <select
-                            className="app-input !py-1 !px-2 !text-[11px] !w-auto !min-w-[100px]"
-                            value={status}
-                            onChange={e => setRowStatus(origIdx, e.target.value)}
-                          >
-                            <option value="CARGAR">CARGAR</option>
-                            <option value="PENDIENTE">PENDIENTE</option>
-                            <option value="CARGADO">CARGADO</option>
-                            <option value="OMITIR">OMITIR</option>
-                          </select>
-                        </td>
-                        <td>
-                          {!isLoaded && (
-                            <button className="nav-btn active text-xs !py-1 !px-2" onClick={() => handleConfirm(row, origIdx)}>
-                              Cargar
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* ── Paste import (legacy) ── */}
-      <div className="app-card !p-4 mb-4">
-        <h4 className="font-bold mb-2">📋 Importar desde planilla (pegado)</h4>
-        <p className="text-xs text-muted-foreground mb-3">
-          Pegá las filas desde tu planilla (Ctrl+C / Ctrl+V). Detecta encabezados automáticamente.
-        </p>
-        <textarea className="app-input" rows={4} placeholder="Pegá acá las filas de tu planilla..." value={paste} onChange={e => setPaste(e.target.value)} />
-        <div className="flex gap-2 mt-2">
-          <button className="nav-btn active" onClick={importPaste} disabled={importing}>
-            {importing ? <span className="flex items-center gap-2"><span className="btn-spinner" /> Importando...</span> : 'Guardar / Importar'}
-          </button>
-          <button className="nav-btn" onClick={() => setPaste('')}>Limpiar</button>
-        </div>
-      </div>
-
-      {/* ── Imported orders list ── */}
-      <div className="flex flex-wrap gap-2 mb-3">
-        <label className="app-label !mt-0">Desde</label>
-        <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-        <label className="app-label !mt-0">Hasta</label>
-        <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
-        <select className="app-input !w-auto min-w-[160px]" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-          <option value="">Todos los estados</option>
-          {statusOpts.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <input className="app-input !w-auto min-w-[240px] flex-1" placeholder="🔎 Buscar por cliente, teléfono o ID"
+        <button
+          className={`nav-btn ${autoLoad ? 'active !bg-amber-600 hover:!bg-amber-500' : ''}`}
+          onClick={() => toggleAutoLoad(!autoLoad)}
+        >
+          {autoLoad ? '⚡ Auto-carga ON' : '⚡ Auto-carga OFF'}
+        </button>
+        <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+          <input type="checkbox" checked={onlyCovered}
+            onChange={e => toggleOnlyCovered(e.target.checked)}
+            className="accent-[hsl(var(--brand))] w-4 h-4" />
+          🏙️ Solo ciudades con cobertura
+        </label>
+        <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+          <input type="checkbox" checked={onlyMatched}
+            onChange={e => toggleOnlyMatched(e.target.checked)}
+            className="accent-[hsl(var(--brand))] w-4 h-4" />
+          📦 Solo productos detectados
+        </label>
+        <input className="app-input !w-auto min-w-[200px] flex-1" placeholder="🔎 Buscar..."
           value={search} onChange={e => setSearch(e.target.value)} />
-        <button className="nav-btn active" onClick={loadImported}>Filtrar</button>
       </div>
 
-      <div className="text-xs text-muted-foreground mb-2">{filtered.length} pedidos importados</div>
+      {autoLoad && (
+        <div className="text-xs text-amber-400 mb-2 flex items-center gap-1">
+          <span className="animate-pulse">⚡</span> Carga automática activa — sincroniza y carga cada 60 segundos
+        </div>
+      )}
+
+      <div className="text-xs text-muted-foreground mb-2">
+        {filtered.length} filas • {pendingCount} sin cargar
+        {onlyCovered && <span className="ml-1">• Filtro: solo ciudades cubiertas ({coveredCities.size})</span>}
+      </div>
 
       <div className="overflow-auto">
-        <table className="app-table min-w-[1000px]">
+        <table className="app-table min-w-[1100px]">
           <thead>
             <tr>
-              <th>Fecha</th><th>ID</th><th>Cliente</th><th>Teléfono</th><th>Ciudad</th>
-              <th>Producto</th><th className="text-right">Monto (Gs)</th><th>Estado</th>
+              <th>👤 Cliente</th>
+              {colProducts && <th>📦 Producto</th>}
+              <th>🔗 Producto detectado</th>
+              <th>💰 Costo Prov.</th>
+              {colCity && <th>🏙️ Ciudad</th>}
+              <th>🚚 Delivery</th>
+              {colTotal && <th>💵 Monto</th>}
+              <th>📌 Estado</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map(o => {
-              const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json || '[]') : (o.items_json || []);
-              const productName = items[0]?.title || '—';
+            {filtered.map(({ order: o, origIdx }) => {
+              const rowId = getRowId(o, origIdx);
+              const statusKey = getStatusKey(o, origIdx);
+              const alreadyLoaded = loadedRowIds.has(rowId);
+              const totalGs = Math.round(Number((o[colTotal] || '0').replace(/[^\d.-]/g, '')) || 0);
+              const city = o[colCity] || '';
+              const cityOk = isCityCovered(city);
+              const matched = matchProduct(o[colProducts] || '');
+              const currentStatus = alreadyLoaded ? 'YA_CARGADO' : (rowStatuses[statusKey] || 'CARGAR');
+
               return (
-                <tr key={o.id}>
-                  <td className="text-xs whitespace-nowrap">{new Date(o.created_at).toLocaleDateString('es-PY')}</td>
-                  <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
-                  <td className="text-xs">{o.customer_name}</td>
-                  <td className="text-xs">{o.phone}</td>
-                  <td className="text-xs">{o.city}</td>
-                  <td className="text-xs truncate max-w-[200px]">{productName}</td>
-                  <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
-                  <td>
-                    <select className="app-input !py-1 !px-2 !text-[11px] !w-auto !min-w-[120px]"
-                      value={o.status || 'PENDIENTE'}
-                      onChange={e => updateStatus(o.id, e.target.value)}>
-                      {statusOpts.map(s => <option key={s} value={s}>{s}</option>)}
-                    </select>
+                <tr key={statusKey} className={alreadyLoaded ? 'opacity-50' : ''}>
+                  <td className="text-xs truncate max-w-[150px]">{o[colName] || '-'}</td>
+                  {colProducts && (
+                    <td className="text-xs truncate max-w-[180px]">{o[colProducts] || '-'}</td>
+                  )}
+                  <td className="text-xs">
+                    {matched ? (
+                      <span className="text-green-400 font-semibold">✅ {matched.title}</span>
+                    ) : (
+                      <span className="text-yellow-500">⚠️ No detectado</span>
+                    )}
+                  </td>
+                  <td className="text-xs font-semibold">
+                    {matched ? (
+                      <span className="text-white font-bold">{nf(Number(matched.provider_price_gs || 0))} Gs</span>
+                    ) : '-'}
+                  </td>
+                  {colCity && (
+                    <td className="text-xs">
+                      <span className={cityOk ? 'text-green-400' : 'text-red-400'}>
+                        {cityOk ? '✅' : '❌'} {city || '-'}
+                      </span>
+                    </td>
+                  )}
+                  <td className="text-xs font-semibold">
+                    {cityOk ? (
+                      <span className="text-white font-bold">{nf(getDeliveryFee(city))} Gs</span>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </td>
+                  {colTotal && <td className="text-xs font-semibold">{nf(totalGs)} Gs</td>}
+                  <td className="text-xs">
+                    {alreadyLoaded ? (
+                      <span className="text-green-400 font-bold">✅ Cargado</span>
+                    ) : (
+                      <div className="flex items-center gap-1">
+                        <select
+                          className="app-input !py-1 !px-1.5 !text-xs !w-auto min-w-[100px]"
+                          value={currentStatus}
+                          onChange={e => setRowStatus(statusKey, e.target.value)}
+                        >
+                          <option value="PENDIENTE">⏳ Pendiente</option>
+                          <option value="A_DROPEAR">📋 A Dropear</option>
+                          <option value="CARGAR">✅ Cargar</option>
+                        </select>
+                        {currentStatus === 'CARGAR' && (
+                          <button className="nav-btn active !py-1 !px-2 !text-xs"
+                            onClick={() => handleConfirm(o, origIdx)}>
+                            ➡️
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </td>
                 </tr>
               );
             })}
-            {filtered.length === 0 && <tr><td colSpan={8} className="text-center text-muted-foreground py-8">Sin pedidos importados</td></tr>}
+            {filtered.length === 0 && (
+              <tr><td colSpan={8} className="text-center text-muted-foreground py-8">
+                {loading ? 'Cargando...' : 'Sin datos'}
+              </td></tr>
+            )}
           </tbody>
         </table>
       </div>
