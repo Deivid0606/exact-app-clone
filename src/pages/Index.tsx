@@ -148,7 +148,7 @@ export default function Index() {
       case 'withGuides': return <WithGuidesView />;
       case 'counter': return <CounterView />;
       case 'mapa': return <MapView />;
-      case 'shopifyInbox': return <ShopifyInboxView onConfirmOrder={handleSheetConfirm} />;
+      case 'shopifyInbox': return <ShopifyInboxView />;
       case 'shopifyConnection': return <ShopifyConnectionView />;
       default: return <DashboardView />;
     }
