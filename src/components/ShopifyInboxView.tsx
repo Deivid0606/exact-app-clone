@@ -323,7 +323,7 @@ export default function ShopifyInboxView({
     setBulkLoading(false);
   };
 
-  const pendingCount = filtered.filter((_, i) => !importedRowIds.has(getRowId(filtered[i], i))).length;
+  const pendingCount = filtered.filter(({ order, origIdx }) => !importedRowIds.has(getRowId(order, origIdx))).length;
 
   if (!sheetUrl) {
     return (
