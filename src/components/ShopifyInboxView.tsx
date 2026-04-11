@@ -29,6 +29,21 @@ export default function ShopifyInboxView({
     try { return localStorage.getItem('shopify_onlyCovered') === '1'; } catch { return false; }
   });
   const [bulkLoading, setBulkLoading] = useState(false);
+  // Local row statuses: rowId -> 'A_DROPEAR' | 'CARGAR' | 'YA_CARGADO'
+  const [rowStatuses, setRowStatuses] = useState<Record<string, string>>(() => {
+    try {
+      const saved = localStorage.getItem('shopify_rowStatuses');
+      return saved ? JSON.parse(saved) : {};
+    } catch { return {}; }
+  });
+
+  const setRowStatus = (rowId: string, status: string) => {
+    setRowStatuses(prev => {
+      const next = { ...prev, [rowId]: status };
+      try { localStorage.setItem('shopify_rowStatuses', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
 
   const toggleOnlyCovered = (val: boolean) => {
     setOnlyCovered(val);
