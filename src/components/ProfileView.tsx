@@ -34,7 +34,7 @@ export default function ProfileView() {
     const { error } = await supabase.from('profiles').update(form).eq('user_id', user.id);
     setSaving(false);
     if (error) toast.error(error.message);
-    else toast.success('Perfil guardado');
+    else { toast.success('Perfil guardado'); refreshProfile(); }
   };
 
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
