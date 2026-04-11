@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
@@ -22,7 +22,6 @@ export default function ShopifyInboxView({
   const [headers, setHeaders] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
-  const [imported, setImported] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [onlyCovered, setOnlyCovered] = useState(() => {
@@ -32,7 +31,25 @@ export default function ShopifyInboxView({
     try { return localStorage.getItem('shopify_onlyMatched') === '1'; } catch { return false; }
   });
   const [bulkLoading, setBulkLoading] = useState(false);
-  // Local row statuses: rowId -> 'A_DROPEAR' | 'CARGAR' | 'YA_CARGADO'
+
+  // Track imported row IDs in localStorage (not in DB obs)
+  const [loadedRowIds, setLoadedRowIds] = useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem('shopify_loadedRowIds');
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch { return new Set(); }
+  });
+
+  const markRowLoaded = (rowId: string) => {
+    setLoadedRowIds(prev => {
+      const next = new Set(prev);
+      next.add(rowId);
+      try { localStorage.setItem('shopify_loadedRowIds', JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  };
+
+  // Local row statuses: statusKey -> 'A_DROPEAR' | 'CARGAR' | 'PENDIENTE'
   const [rowStatuses, setRowStatuses] = useState<Record<string, string>>(() => {
     try {
       const saved = localStorage.getItem('shopify_rowStatuses');
@@ -40,12 +57,29 @@ export default function ShopifyInboxView({
     } catch { return {}; }
   });
 
-  const setRowStatus = (rowId: string, status: string) => {
+  const setRowStatus = (key: string, status: string) => {
     setRowStatuses(prev => {
-      const next = { ...prev, [rowId]: status };
+      const next = { ...prev, [key]: status };
       try { localStorage.setItem('shopify_rowStatuses', JSON.stringify(next)); } catch {}
       return next;
     });
+  };
+
+  // Auto-load toggle
+  const [autoLoad, setAutoLoad] = useState(() => {
+    try { return localStorage.getItem('shopify_autoLoad') === '1'; } catch { return false; }
+  });
+  const autoLoadRef = useRef(autoLoad);
+  const autoTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const toggleAutoLoad = (val: boolean) => {
+    setAutoLoad(val);
+    autoLoadRef.current = val;
+    try { localStorage.setItem('shopify_autoLoad', val ? '1' : '0'); } catch {}
+    if (!val && autoTimerRef.current) {
+      clearInterval(autoTimerRef.current);
+      autoTimerRef.current = null;
+    }
   };
 
   const toggleOnlyCovered = (val: boolean) => {
@@ -55,21 +89,6 @@ export default function ShopifyInboxView({
   const toggleOnlyMatched = (val: boolean) => {
     setOnlyMatched(val);
     try { localStorage.setItem('shopify_onlyMatched', val ? '1' : '0'); } catch {}
-  };
-
-  const loadImported = async () => {
-    if (!profile?.email) {
-      setImported([]);
-      return;
-    }
-
-    const { data } = await supabase
-      .from('orders')
-      .select('obs')
-      .eq('created_by', profile.email)
-      .ilike('obs', '%sheet_row:%');
-
-    setImported(data || []);
   };
 
   const loadMeta = async () => {
@@ -86,17 +105,6 @@ export default function ShopifyInboxView({
   }, [clientPrices]);
 
   const compactWhitespace = (value: string) => value.replace(/\s+/g, ' ').trim();
-
-  const importedRowIds = useMemo(() => {
-    const ids = new Set<string>();
-    (imported || []).forEach((o: any) => {
-      const rawObs = String(o.obs || '');
-      const afterPrefix = rawObs.includes('sheet_row:') ? rawObs.split('sheet_row:')[1] : '';
-      const normalizedId = compactWhitespace(afterPrefix || '');
-      if (normalizedId) ids.add(normalizedId);
-    });
-    return ids;
-  }, [imported]);
 
   const fetchOrders = async () => {
     if (!sheetUrl) {
@@ -126,11 +134,34 @@ export default function ShopifyInboxView({
     setLoading(false);
   };
 
+  // Silent fetch for auto-load (no toast)
+  const fetchOrdersSilent = async (): Promise<{ headers: string[]; orders: SheetOrder[] } | null> => {
+    if (!sheetUrl) return null;
+    try {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const anonKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      const session = (await supabase.auth.getSession()).data.session;
+
+      const res = await fetch(`${supabaseUrl}/functions/v1/read-sheet?url=${encodeURIComponent(sheetUrl)}`, {
+        headers: {
+          'Authorization': `Bearer ${session?.access_token || anonKey}`,
+          'apikey': anonKey,
+        },
+      });
+      const result = await res.json();
+      if (result.error) return null;
+      setHeaders(result.headers || []);
+      setOrders(result.orders || []);
+      return { headers: result.headers || [], orders: result.orders || [] };
+    } catch {
+      return null;
+    }
+  };
+
   useEffect(() => {
-    loadImported();
     loadMeta();
     if (sheetUrl) fetchOrders();
-  }, [sheetUrl, profile?.email]);
+  }, [sheetUrl]);
 
   const findCol = (possibleNames: string[]) =>
     headers.find(h => possibleNames.some(p => h.includes(p))) || '';
@@ -170,9 +201,8 @@ export default function ShopifyInboxView({
   const colQty = findCol(['cantidad', 'qty', 'quantity']);
   const colOrderNum = findStrictCol(['pedido', 'order', 'numero pedido', 'número pedido', 'numero', 'número', 'nro pedido', 'nro', 'id']);
   const colEmail = findCol(['email', 'correo', 'mail']);
-  // colStatus removed — we use local rowStatuses instead of sheet status
 
-  const getRowId = (order: SheetOrder, _idx: number) => {
+  const getRowId = useCallback((order: SheetOrder, _idx: number) => {
     const num = compactWhitespace(order[colOrderNum] || '');
     if (num) return num;
 
@@ -184,47 +214,40 @@ export default function ShopifyInboxView({
     const total = compactWhitespace(order[colTotal] || '');
 
     return compactWhitespace(`r-${date}-${name}-${phone}-${prod}-${city}-${total}`);
-  };
+  }, [colOrderNum, colDate, colName, colPhone, colProducts, colCity, colTotal]);
 
   const getStatusKey = (_order: SheetOrder, origIdx: number) => {
     return `status:${sheetUrl || 'default'}:${origIdx}`;
   };
 
   // Match product by title
-  const matchProduct = (sheetTitle: string) => {
+  const matchProduct = useCallback((sheetTitle: string) => {
     if (!sheetTitle) return null;
     const clean = sheetTitle.toLowerCase().replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '').trim();
-    // Exact match
     const exact = products.find((p: any) => {
       const pt = (p.title || '').toLowerCase().trim();
       return pt === sheetTitle.toLowerCase().trim() || pt === clean;
     });
     if (exact) return exact;
-    // Partial match
     return products.find((p: any) => {
       const pt = (p.title || '').toLowerCase().trim();
       return pt.includes(clean) || clean.includes(pt);
     }) || null;
-  };
+  }, [products]);
 
-  // Normalize: lowercase, remove accents, trim
   const norm = (s: string) =>
     s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
 
-  // Try to find the best matching platform city from a sheet city string
-  const findCityMatch = (sheetCity: string): any | null => {
+  const findCityMatch = useCallback((sheetCity: string): any | null => {
     if (!sheetCity) return null;
     const raw = norm(sheetCity);
-    // Try exact match first
     const exact = clientPrices.find((p: any) => norm(p.city || '') === raw);
     if (exact) return exact;
-    // Try partial: platform city contained in sheet value or vice versa
     const partial = clientPrices.find((p: any) => {
       const pc = norm(p.city || '');
       return raw.includes(pc) || pc.includes(raw);
     });
     if (partial) return partial;
-    // Try splitting by common separators (dash, comma, slash) and match any part
     const parts = raw.split(/[\-–—,\/|]+/).map(s => s.trim()).filter(Boolean);
     for (const part of parts) {
       const match = clientPrices.find((p: any) => {
@@ -234,7 +257,7 @@ export default function ShopifyInboxView({
       if (match) return match;
     }
     return null;
-  };
+  }, [clientPrices]);
 
   const getDeliveryFee = (city: string): number => {
     const match = findCityMatch(city);
@@ -243,7 +266,6 @@ export default function ShopifyInboxView({
 
   const isCityCovered = (city: string) => !!findCityMatch(city);
 
-  // Pair each order with its original index so IDs stay stable after filtering
   const indexedOrders = useMemo(() => orders.map((o, i) => ({ order: o, origIdx: i })), [orders]);
 
   const filtered = useMemo(() => {
@@ -281,17 +303,57 @@ export default function ShopifyInboxView({
       productTitle: order[colProducts] || '',
       totalGs,
       qty: Number(qty.split('\n')[0]) || 1,
-      obs: `sheet_row:${getRowId(order, idx)}`,
+      obs: '',
     });
   };
 
-  // Get all loadable orders (status=CARGAR + city covered + product detected + not imported)
+  // Build a single order payload
+  const buildPayload = (order: SheetOrder, matched: any) => {
+    const totalStr = order[colTotal] || '0';
+    const totalGs = Math.round(Number(totalStr.replace(/[^\d.-]/g, '')) || 0);
+    const street = order[colStreet] || '';
+    const street2 = order[colStreet2] || '';
+    const fullStreet = [street, street2].filter(Boolean).join(', ');
+    const qty = Number((order[colQty] || '1').split('\n')[0]) || 1;
+    const city = order[colCity] || '';
+    const cityMatch = findCityMatch(city);
+    const deliveryFee = cityMatch ? Number(cityMatch.price_gs) || 0 : 0;
+    const platformCity = cityMatch?.city || city;
+
+    const providerCost = Number(matched.provider_price_gs || 0) * qty;
+    const commission = totalGs - (providerCost + deliveryFee);
+
+    return {
+      created_by: profile?.email || null,
+      customer_name: order[colName] || '',
+      phone: order[colPhone] || '',
+      city: platformCity,
+      street: fullStreet,
+      district: order[colDistrict] || '',
+      email: order[colEmail] || '',
+      obs: null,
+      items_json: [{
+        sku: matched.sku || '',
+        title: matched.title || '',
+        sale_gs: totalGs,
+        qty,
+        provider_price_gs: Number(matched.provider_price_gs || 0),
+        provider_email: matched.provider_email || '',
+      }],
+      total_gs: totalGs,
+      delivery_gs: deliveryFee,
+      commission_gs: commission,
+      provider_emails_list: matched.provider_email || '',
+    };
+  };
+
+  // Get all loadable orders (status=CARGAR + city covered + product detected + not loaded)
   const getLoadableOrders = () => {
     return filtered
       .filter(({ order, origIdx }) => {
         const rowId = getRowId(order, origIdx);
         const statusKey = getStatusKey(order, origIdx);
-        if (importedRowIds.has(rowId)) return false;
+        if (loadedRowIds.has(rowId)) return false;
         if ((rowStatuses[statusKey] || 'CARGAR') !== 'CARGAR') return false;
         const city = order[colCity] || '';
         if (!isCityCovered(city)) return false;
@@ -301,7 +363,7 @@ export default function ShopifyInboxView({
       });
   };
 
-  const loadableOrders = useMemo(() => getLoadableOrders(), [filtered, importedRowIds, colCity, colProducts, rowStatuses]);
+  const loadableOrders = useMemo(() => getLoadableOrders(), [filtered, loadedRowIds, colCity, colProducts, rowStatuses]);
 
   const handleBulkLoad = async () => {
     if (loadableOrders.length === 0) {
@@ -317,57 +379,88 @@ export default function ShopifyInboxView({
         const matched = matchProduct(order[colProducts] || '');
         if (!matched) continue;
 
-        const totalStr = order[colTotal] || '0';
-        const totalGs = Math.round(Number(totalStr.replace(/[^\d.-]/g, '')) || 0);
-        const street = order[colStreet] || '';
-        const street2 = order[colStreet2] || '';
-        const fullStreet = [street, street2].filter(Boolean).join(', ');
-        const qty = Number((order[colQty] || '1').split('\n')[0]) || 1;
-        const city = order[colCity] || '';
-        const cityMatch = findCityMatch(city);
-        const deliveryFee = cityMatch ? Number(cityMatch.price_gs) || 0 : 0;
-        const platformCity = cityMatch?.city || city;
-
-        const providerCost = Number(matched.provider_price_gs || 0) * qty;
-        const commission = totalGs - (providerCost + deliveryFee);
-
-        const payload = {
-          created_by: profile?.email || null,
-          customer_name: order[colName] || '',
-          phone: order[colPhone] || '',
-          city: platformCity,
-          street: fullStreet,
-          district: order[colDistrict] || '',
-          email: order[colEmail] || '',
-          obs: `sheet_row:${rowId}`,
-          items_json: [{
-            sku: matched.sku || '',
-            title: matched.title || '',
-            sale_gs: totalGs,
-            qty,
-            provider_price_gs: Number(matched.provider_price_gs || 0),
-            provider_email: matched.provider_email || '',
-          }],
-          total_gs: totalGs,
-          delivery_gs: deliveryFee,
-          commission_gs: commission,
-          provider_emails_list: matched.provider_email || '',
-        };
-
+        const payload = buildPayload(order, matched);
         const { error } = await supabase.from('orders').insert(payload);
         if (error) { fail++; console.error('Bulk insert error:', error); }
-        else ok++;
+        else { ok++; markRowLoaded(rowId); }
       } catch (e) {
         fail++;
         console.error('Bulk load error:', e);
       }
     }
     toast.success(`🚀 ${ok} pedidos cargados${fail ? ` (${fail} errores)` : ''}`);
-    await loadImported();
     setBulkLoading(false);
   };
 
-  const pendingCount = filtered.filter(({ order, origIdx }) => !importedRowIds.has(getRowId(order, origIdx))).length;
+  // Auto-load cycle
+  const runAutoLoadCycle = useCallback(async () => {
+    if (!autoLoadRef.current || !sheetUrl) return;
+
+    // Re-fetch sheet silently
+    const result = await fetchOrdersSilent();
+    if (!result) return;
+
+    // Get current loaded IDs from localStorage
+    let currentLoaded: Set<string>;
+    try {
+      const saved = localStorage.getItem('shopify_loadedRowIds');
+      currentLoaded = saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch { currentLoaded = new Set(); }
+
+    let currentStatuses: Record<string, string>;
+    try {
+      const saved = localStorage.getItem('shopify_rowStatuses');
+      currentStatuses = saved ? JSON.parse(saved) : {};
+    } catch { currentStatuses = {}; }
+
+    let ok = 0;
+    for (let i = 0; i < result.orders.length; i++) {
+      const order = result.orders[i];
+      const rowId = getRowId(order, i);
+      const statusKey = `status:${sheetUrl || 'default'}:${i}`;
+
+      if (currentLoaded.has(rowId)) continue;
+      if ((currentStatuses[statusKey] || 'CARGAR') !== 'CARGAR') continue;
+
+      const city = order[colCity] || '';
+      if (!isCityCovered(city)) continue;
+
+      const matched = matchProduct(order[colProducts] || '');
+      if (!matched) continue;
+
+      try {
+        const payload = buildPayload(order, matched);
+        const { error } = await supabase.from('orders').insert(payload);
+        if (!error) {
+          ok++;
+          currentLoaded.add(rowId);
+        }
+      } catch { /* skip */ }
+    }
+
+    if (ok > 0) {
+      try { localStorage.setItem('shopify_loadedRowIds', JSON.stringify([...currentLoaded])); } catch {}
+      setLoadedRowIds(new Set(currentLoaded));
+      toast.success(`⚡ Auto-carga: ${ok} pedidos cargados`);
+    }
+  }, [sheetUrl, getRowId, matchProduct, findCityMatch, colCity, colProducts, products, clientPrices, profile?.email]);
+
+  // Start/stop auto-load timer
+  useEffect(() => {
+    if (autoLoad && sheetUrl) {
+      // Run immediately, then every 60 seconds
+      runAutoLoadCycle();
+      autoTimerRef.current = setInterval(runAutoLoadCycle, 60000);
+    }
+    return () => {
+      if (autoTimerRef.current) {
+        clearInterval(autoTimerRef.current);
+        autoTimerRef.current = null;
+      }
+    };
+  }, [autoLoad, sheetUrl, runAutoLoadCycle]);
+
+  const pendingCount = filtered.filter(({ order, origIdx }) => !loadedRowIds.has(getRowId(order, origIdx))).length;
 
   if (!sheetUrl) {
     return (
@@ -394,6 +487,12 @@ export default function ShopifyInboxView({
             {bulkLoading ? <span className="flex items-center gap-2"><span className="btn-spinner" /> Cargando...</span> : `🚀 Carga masiva (${loadableOrders.length})`}
           </button>
         )}
+        <button
+          className={`nav-btn ${autoLoad ? 'active !bg-amber-600 hover:!bg-amber-500' : ''}`}
+          onClick={() => toggleAutoLoad(!autoLoad)}
+        >
+          {autoLoad ? '⚡ Auto-carga ON' : '⚡ Auto-carga OFF'}
+        </button>
         <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
           <input type="checkbox" checked={onlyCovered}
             onChange={e => toggleOnlyCovered(e.target.checked)}
@@ -409,6 +508,12 @@ export default function ShopifyInboxView({
         <input className="app-input !w-auto min-w-[200px] flex-1" placeholder="🔎 Buscar..."
           value={search} onChange={e => setSearch(e.target.value)} />
       </div>
+
+      {autoLoad && (
+        <div className="text-xs text-amber-400 mb-2 flex items-center gap-1">
+          <span className="animate-pulse">⚡</span> Carga automática activa — sincroniza y carga cada 60 segundos
+        </div>
+      )}
 
       <div className="text-xs text-muted-foreground mb-2">
         {filtered.length} filas • {pendingCount} sin cargar
@@ -430,18 +535,18 @@ export default function ShopifyInboxView({
             </tr>
           </thead>
           <tbody>
-            {filtered.map(({ order: o, origIdx }, i) => {
+            {filtered.map(({ order: o, origIdx }) => {
               const rowId = getRowId(o, origIdx);
               const statusKey = getStatusKey(o, origIdx);
-              const alreadyImported = importedRowIds.has(rowId);
+              const alreadyLoaded = loadedRowIds.has(rowId);
               const totalGs = Math.round(Number((o[colTotal] || '0').replace(/[^\d.-]/g, '')) || 0);
               const city = o[colCity] || '';
               const cityOk = isCityCovered(city);
               const matched = matchProduct(o[colProducts] || '');
-              const currentStatus = alreadyImported ? 'YA_CARGADO' : (rowStatuses[statusKey] || 'CARGAR');
+              const currentStatus = alreadyLoaded ? 'YA_CARGADO' : (rowStatuses[statusKey] || 'CARGAR');
 
               return (
-                <tr key={statusKey} className={alreadyImported ? 'opacity-50' : ''}>
+                <tr key={statusKey} className={alreadyLoaded ? 'opacity-50' : ''}>
                   <td className="text-xs truncate max-w-[150px]">{o[colName] || '-'}</td>
                   {colProducts && (
                     <td className="text-xs truncate max-w-[180px]">{o[colProducts] || '-'}</td>
@@ -474,7 +579,7 @@ export default function ShopifyInboxView({
                   </td>
                   {colTotal && <td className="text-xs font-semibold">{nf(totalGs)} Gs</td>}
                   <td className="text-xs">
-                    {alreadyImported ? (
+                    {alreadyLoaded ? (
                       <span className="text-green-400 font-bold">✅ Cargado</span>
                     ) : (
                       <div className="flex items-center gap-1">
