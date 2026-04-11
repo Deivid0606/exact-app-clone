@@ -253,7 +253,7 @@ export default function ShopifyInboxView({
         const rowId = getRowId(order, origIdx);
         const statusKey = getStatusKey(order, origIdx);
         if (importedRowIds.has(rowId)) return false;
-        if ((rowStatuses[statusKey] || 'PENDIENTE') !== 'CARGAR') return false;
+        if ((rowStatuses[statusKey] || 'CARGAR') !== 'CARGAR') return false;
         const city = order[colCity] || '';
         if (!isCityCovered(city)) return false;
         const matched = matchProduct(order[colProducts] || '');
@@ -399,7 +399,7 @@ export default function ShopifyInboxView({
               const city = o[colCity] || '';
               const cityOk = isCityCovered(city);
               const matched = matchProduct(o[colProducts] || '');
-              const currentStatus = alreadyImported ? 'YA_CARGADO' : (rowStatuses[statusKey] || 'PENDIENTE');
+              const currentStatus = alreadyImported ? 'YA_CARGADO' : (rowStatuses[statusKey] || 'CARGAR');
 
               return (
                 <tr key={statusKey} className={alreadyImported ? 'opacity-50' : ''}>
