@@ -25,10 +25,9 @@ interface ShopifyInboxProps {
     customer?: string; phone?: string; city?: string; street?: string;
     district?: string; productTitle?: string; totalGs?: number; qty?: number;
   }) => void;
-  onDirectSave?: (orderData: any) => Promise<{ success: boolean; error?: string }>;
 }
 
-export default function ShopifyInboxView({ onSheetConfirm, onDirectSave }: ShopifyInboxProps) {
+export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) {
   const { profile } = useAuth();
   const myEmail = profile?.email || "";
   const sheetUrl = profile?.sheet_url || "";
@@ -52,7 +51,6 @@ export default function ShopifyInboxView({ onSheetConfirm, onDirectSave }: Shopi
     }
   });
 
-  // Persistencia de auto-carga
   const [autoLoad, setAutoLoad] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem(AUTO_LOAD_KEY);
@@ -71,46 +69,37 @@ export default function ShopifyInboxView({ onSheetConfirm, onDirectSave }: Shopi
   const [filterOnlyCargar, setFilterOnlyCargar] = useState(false);
   const [search, setSearch] = useState("");
 
-  // Guardar estados en localStorage
   useEffect(() => {
     localStorage.setItem(ROW_STATUS_KEY, JSON.stringify(rowStatuses));
   }, [rowStatuses]);
 
-  // Guardar estado de auto-carga
   useEffect(() => {
     localStorage.setItem(AUTO_LOAD_KEY, autoLoad.toString());
     autoLoadRef.current = autoLoad;
   }, [autoLoad]);
 
-  // Cargar productos y precios
   useEffect(() => {
     const loadProducts = async () => {
       const { data } = await supabase.from("products").select("*");
-      console.log("📦 Productos cargados:", data?.length || 0);
       setProducts(data || []);
     };
     const loadPrices = async () => {
       const { data } = await supabase.from("client_prices").select("*");
-      console.log("🏙️ Precios por ciudad cargados:", data?.length || 0);
       setClientPrices(data || []);
     };
     loadProducts();
     loadPrices();
   }, []);
 
-  // Carga automática al montar
   useEffect(() => {
     if (sheetUrl && !initialLoadDone) {
-      console.log("🚀 Cargando Sheet automáticamente...");
       readSheet(false);
       setInitialLoadDone(true);
     }
   }, [sheetUrl]);
 
-  // Reactivar auto-carga si estaba activo
   useEffect(() => {
     if (autoLoad && sheetUrl) {
-      console.log("🤖 Auto-carga reactivado después de recargar página");
       setTimeout(() => {
         runAutoCycle();
       }, 2000);
@@ -213,7 +202,6 @@ export default function ShopifyInboxView({ onSheetConfirm, onDirectSave }: Shopi
             setSheetOrders(data.orders || []);
             setLastSync(new Date(timestamp));
             setLastCacheHit(true);
-            console.log("📦 Usando cache local");
             return;
           }
         }
@@ -242,8 +230,6 @@ export default function ShopifyInboxView({ onSheetConfirm, onDirectSave }: Shopi
           timestamp: Date.now(),
           url: sheetUrl
         }));
-        
-        console.log(`📊 ${json.total || 0} filas leídas del Sheet`);
       }
     } catch (err: any) {
       toast.error("Error leyendo Sheet: " + (err.message || err));
@@ -262,7 +248,7 @@ export default function ShopifyInboxView({ onSheetConfirm, onDirectSave }: Shopi
     return Math.round(Number(cleaned.replace(/\./g, "").replace(",", ".")) || 0);
   };
 
-  // 🔥 FUNCIÓN DE CARGA DIRECTA (usa la misma lógica que el formulario)
+  // 🔥 CARGA DIRECTA - Guarda IGUAL que el formulario
   const handleDirectSave = async (order: SheetOrder, idx: number) => {
     const productName = order[colKeys.product] || "";
     const matched = matchProduct(productName);
@@ -277,11 +263,10 @@ export default function ShopifyInboxView({ onSheetConfirm, onDirectSave }: Shopi
     const productCost = matched?.provider_price_gs || 0;
     const qty = Number(order[colKeys.qty] || 1) || 1;
     const commission = salePrice - (productCost + deliveryPrice);
-    
-    // Generar ID único
     const orderId = `SH${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 5)}`;
     
-    const orderData = {
+    // ⭐ Guardar EXACTAMENTE como lo hace el formulario (CreateOrderView)
+    const payload = {
       order_number: orderId,
       created_by: myEmail,
       customer_name: (order[colKeys.name] || "").trim(),
@@ -289,45 +274,36 @@ export default function ShopifyInboxView({ onSheetConfirm, onDirectSave }: Shopi
       city: city,
       street: [(order[colKeys.street] || "").trim(), (order[colKeys.street2] || "").trim()].filter(Boolean).join(" "),
       district: (order[colKeys.dept] || "").trim(),
+      email: order[colKeys.email] || "",
+      obs: `💰 Comisión: ${commission.toLocaleString("es-PY")} Gs | Venta: ${salePrice.toLocaleString("es-PY")} Gs | Costo: ${productCost.toLocaleString("es-PY")} Gs | Delivery: ${deliveryPrice.toLocaleString("es-PY")} Gs | Producto: ${matched.title}`,
       items_json: [{ 
+        sku: matched.sku || "",
         title: matched.title, 
-        qty, 
+        qty: qty, 
         sale_gs: salePrice,
         provider_price_gs: productCost,
-        sku: matched.sku || "" 
+        provider_email: matched.provider_email || "",
       }],
       total_gs: salePrice * qty,
-      status: "PENDIENTE",
-      obs: `💰 Comisión: ${commission.toLocaleString("es-PY")} Gs | Venta: ${salePrice.toLocaleString("es-PY")} Gs | Costo: ${productCost.toLocaleString("es-PY")} Gs | Delivery: ${deliveryPrice.toLocaleString("es-PY")} Gs | Producto: ${matched.title}`,
+      delivery_gs: deliveryPrice,
+      commission_gs: commission,
       provider_emails_list: matched.provider_email || "",
     };
     
-    // Si hay una función de guardado externa (del formulario), usarla
-    if (onDirectSave) {
-      const result = await onDirectSave(orderData);
-      if (result.success) {
-        setRowStatus(String(idx), "CARGADO");
-        toast.success(`✅ Pedido ${orderId} cargado | 💰 Comisión: ${commission.toLocaleString("es-PY")} Gs`);
-      } else {
-        toast.error(`Error: ${result.error}`);
-      }
+    const { error } = await supabase.from("orders").insert(payload);
+    
+    if (error) {
+      toast.error("Error: " + error.message);
     } else {
-      // Guardar directamente en Supabase
-      const { error } = await supabase.from("orders").insert(orderData);
-      if (error) {
-        toast.error("Error: " + error.message);
+      setRowStatus(String(idx), "CARGADO");
+      if (commission >= 0) {
+        toast.success(`✅ Pedido ${orderId} cargado | 💰 Comisión: +${commission.toLocaleString("es-PY")} Gs`);
       } else {
-        setRowStatus(String(idx), "CARGADO");
-        if (commission >= 0) {
-          toast.success(`✅ Pedido ${orderId} cargado | 💰 Comisión: +${commission.toLocaleString("es-PY")} Gs`);
-        } else {
-          toast.warning(`⚠️ Pedido ${orderId} cargado | 💰 Comisión NEGATIVA: ${commission.toLocaleString("es-PY")} Gs`);
-        }
+        toast.warning(`⚠️ Pedido ${orderId} cargado | 💰 Comisión NEGATIVA: ${commission.toLocaleString("es-PY")} Gs`);
       }
     }
   };
 
-  // Formulario - abre el modal
   const handleOpenForm = (order: SheetOrder, idx: number) => {
     if (!onSheetConfirm) return;
     
@@ -343,7 +319,6 @@ export default function ShopifyInboxView({ onSheetConfirm, onDirectSave }: Shopi
     });
   };
 
-  // Carga manual de todos los pedidos
   const handleBulkLoad = async () => {
     let count = 0;
     let errors = 0;
@@ -367,29 +342,33 @@ export default function ShopifyInboxView({ onSheetConfirm, onDirectSave }: Shopi
       const productCost = matched?.provider_price_gs || 0;
       const qty = Number(order[colKeys.qty] || 1) || 1;
       const commission = salePrice - (productCost + deliveryPrice);
+      const orderId = `SH${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 5)}`;
       
-      const orderData = {
-        order_number: `SH${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 5)}`,
+      const payload = {
+        order_number: orderId,
         created_by: myEmail,
         customer_name: (order[colKeys.name] || "").trim(),
         phone: extractPhoneNumber(order[colKeys.phone] || ""),
         city: city,
         street: [(order[colKeys.street] || "").trim(), (order[colKeys.street2] || "").trim()].filter(Boolean).join(" "),
         district: (order[colKeys.dept] || "").trim(),
+        email: order[colKeys.email] || "",
+        obs: `💰 Comisión: ${commission.toLocaleString("es-PY")} Gs | Venta: ${salePrice.toLocaleString("es-PY")} Gs | Costo: ${productCost.toLocaleString("es-PY")} Gs | Delivery: ${deliveryPrice.toLocaleString("es-PY")} Gs | Producto: ${matched.title}`,
         items_json: [{ 
+          sku: matched.sku || "",
           title: matched.title, 
-          qty, 
+          qty: qty, 
           sale_gs: salePrice,
           provider_price_gs: productCost,
-          sku: matched.sku || "" 
+          provider_email: matched.provider_email || "",
         }],
         total_gs: salePrice * qty,
-        status: "PENDIENTE",
-        obs: `💰 Comisión: ${commission.toLocaleString("es-PY")} Gs | Venta: ${salePrice.toLocaleString("es-PY")} Gs | Costo: ${productCost.toLocaleString("es-PY")} Gs | Delivery: ${deliveryPrice.toLocaleString("es-PY")} Gs | Producto: ${matched.title}`,
+        delivery_gs: deliveryPrice,
+        commission_gs: commission,
         provider_emails_list: matched.provider_email || "",
       };
       
-      const { error } = await supabase.from("orders").insert(orderData);
+      const { error } = await supabase.from("orders").insert(payload);
       if (error) {
         errors++;
       } else {
@@ -404,7 +383,6 @@ export default function ShopifyInboxView({ onSheetConfirm, onDirectSave }: Shopi
     toast.success(`✅ ${count} cargados | ❌ ${errors} errores | 💰 Comisión total: ${totalCommission.toLocaleString("es-PY")} Gs`);
   };
 
-  // Auto-carga de pedidos
   const autoLoadOrders = async () => {
     if (isAutoLoadingRef.current) return;
     isAutoLoadingRef.current = true;
@@ -427,29 +405,33 @@ export default function ShopifyInboxView({ onSheetConfirm, onDirectSave }: Shopi
       const productCost = matched?.provider_price_gs || 0;
       const qty = Number(order[colKeys.qty] || 1) || 1;
       const commission = salePrice - (productCost + deliveryPrice);
+      const orderId = `SH${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 5)}`;
       
-      const orderData = {
-        order_number: `SH${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 5)}`,
+      const payload = {
+        order_number: orderId,
         created_by: myEmail,
         customer_name: (order[colKeys.name] || "").trim(),
         phone: extractPhoneNumber(order[colKeys.phone] || ""),
         city: city,
         street: [(order[colKeys.street] || "").trim(), (order[colKeys.street2] || "").trim()].filter(Boolean).join(" "),
         district: (order[colKeys.dept] || "").trim(),
+        email: order[colKeys.email] || "",
+        obs: `💰 Comisión: ${commission.toLocaleString("es-PY")} Gs | Venta: ${salePrice.toLocaleString("es-PY")} Gs | Costo: ${productCost.toLocaleString("es-PY")} Gs | Delivery: ${deliveryPrice.toLocaleString("es-PY")} Gs | Producto: ${matched.title}`,
         items_json: [{ 
+          sku: matched.sku || "",
           title: matched.title, 
-          qty, 
+          qty: qty, 
           sale_gs: salePrice,
           provider_price_gs: productCost,
-          sku: matched.sku || "" 
+          provider_email: matched.provider_email || "",
         }],
         total_gs: salePrice * qty,
-        status: "PENDIENTE",
-        obs: `💰 Comisión: ${commission.toLocaleString("es-PY")} Gs | Venta: ${salePrice.toLocaleString("es-PY")} Gs | Costo: ${productCost.toLocaleString("es-PY")} Gs | Delivery: ${deliveryPrice.toLocaleString("es-PY")} Gs | Producto: ${matched.title}`,
+        delivery_gs: deliveryPrice,
+        commission_gs: commission,
         provider_emails_list: matched.provider_email || "",
       };
       
-      const { error } = await supabase.from("orders").insert(orderData);
+      const { error } = await supabase.from("orders").insert(payload);
       if (!error) {
         setRowStatus(String(i), "CARGADO");
         count++;
@@ -471,7 +453,6 @@ export default function ShopifyInboxView({ onSheetConfirm, onDirectSave }: Shopi
     await autoLoadOrders();
   };
 
-  // Configurar intervalo de auto-carga
   useEffect(() => {
     if (autoLoad) {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -630,14 +611,14 @@ export default function ShopifyInboxView({ onSheetConfirm, onDirectSave }: Shopi
                       {statusOpts.map((s) => (<option key={s} value={s}>{s}</option>))}
                     </select>
                   </td>
-                  <td className="min-w-[140px] flex gap-1">
+                  <td className="min-w-[160px] flex gap-1">
                     {currentStatus === "CARGAR" && matched && (
-                      <button className="nav-btn active !py-1 !px-2 !text-[11px] whitespace-nowrap" onClick={() => handleDirectSave(order, idx)} title="Cargar pedido directamente">
+                      <button className="nav-btn active !py-1 !px-2 !text-[11px] whitespace-nowrap" onClick={() => handleDirectSave(order, idx)}>
                         💰 Cargar
                       </button>
                     )}
                     {onSheetConfirm && (
-                      <button className="nav-btn !py-1 !px-2 !text-[11px] whitespace-nowrap" onClick={() => handleOpenForm(order, idx)} title="Abrir formulario">
+                      <button className="nav-btn !py-1 !px-2 !text-[11px] whitespace-nowrap" onClick={() => handleOpenForm(order, idx)}>
                         📝 Formulario
                       </button>
                     )}
