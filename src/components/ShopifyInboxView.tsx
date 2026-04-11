@@ -444,7 +444,7 @@ export default function ShopifyInboxView({
                         </select>
                         {currentStatus === 'CARGAR' && (
                           <button className="nav-btn active !py-1 !px-2 !text-xs"
-                            onClick={() => handleConfirm(o, i)}>
+                            onClick={() => handleConfirm(o, origIdx)}>
                             ➡️
                           </button>
                         )}
