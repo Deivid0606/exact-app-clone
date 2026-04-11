@@ -23,12 +23,28 @@ export default function ShopifyInboxView({
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [imported, setImported] = useState<any[]>([]);
+  const [clientPrices, setClientPrices] = useState<any[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
+  const [onlyCovered, setOnlyCovered] = useState(false);
 
   const loadImported = async () => {
     const { data } = await supabase.from('orders').select('obs')
       .ilike('obs', '%sheet_row:%');
     setImported(data || []);
   };
+
+  const loadMeta = async () => {
+    const [pricesRes, productsRes] = await Promise.all([
+      supabase.from('client_prices').select('city, price_gs'),
+      supabase.from('products').select('title, sku, provider_price_gs, provider_email'),
+    ]);
+    setClientPrices(pricesRes.data || []);
+    setProducts(productsRes.data || []);
+  };
+
+  const coveredCities = useMemo(() => {
+    return new Set((clientPrices || []).map((c: any) => (c.city || '').toLowerCase().trim()));
+  }, [clientPrices]);
 
   const importedRowIds = useMemo(() => {
     const ids = new Set<string>();
@@ -69,6 +85,7 @@ export default function ShopifyInboxView({
 
   useEffect(() => {
     loadImported();
+    loadMeta();
     if (sheetUrl) fetchOrders();
   }, [sheetUrl]);
 
@@ -93,13 +110,46 @@ export default function ShopifyInboxView({
     return num || `row-${idx}`;
   };
 
+  // Match product by title
+  const matchProduct = (sheetTitle: string) => {
+    if (!sheetTitle) return null;
+    const clean = sheetTitle.toLowerCase().replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '').trim();
+    // Exact match
+    const exact = products.find((p: any) => {
+      const pt = (p.title || '').toLowerCase().trim();
+      return pt === sheetTitle.toLowerCase().trim() || pt === clean;
+    });
+    if (exact) return exact;
+    // Partial match
+    return products.find((p: any) => {
+      const pt = (p.title || '').toLowerCase().trim();
+      return pt.includes(clean) || clean.includes(pt);
+    }) || null;
+  };
+
+  const isCityCovered = (city: string) => {
+    if (!city) return false;
+    const c = city.toLowerCase().trim();
+    if (coveredCities.has(c)) return true;
+    for (const covered of coveredCities) {
+      if (c.includes(covered) || covered.includes(c)) return true;
+    }
+    return false;
+  };
+
   const filtered = useMemo(() => {
-    if (!search) return orders;
-    const q = search.toLowerCase();
-    return orders.filter(o =>
-      Object.values(o).some(v => v.toLowerCase().includes(q))
-    );
-  }, [orders, search]);
+    let result = orders;
+    if (search) {
+      const q = search.toLowerCase();
+      result = result.filter(o =>
+        Object.values(o).some(v => v.toLowerCase().includes(q))
+      );
+    }
+    if (onlyCovered && colCity) {
+      result = result.filter(o => isCityCovered(o[colCity] || ''));
+    }
+    return result;
+  }, [orders, search, onlyCovered, coveredCities, colCity]);
 
   const handleConfirm = (order: SheetOrder, idx: number) => {
     const totalStr = order[colTotal] || '0';
@@ -124,7 +174,6 @@ export default function ShopifyInboxView({
   };
 
   const pendingCount = filtered.filter((_, i) => !importedRowIds.has(getRowId(filtered[i], i))).length;
-  const displayCols = [colName, colProducts, colCity, colDistrict, colTotal, colPhone, colStatus].filter(Boolean);
 
   if (!sheetUrl) {
     return (
@@ -146,29 +195,35 @@ export default function ShopifyInboxView({
         <button className="nav-btn active" onClick={fetchOrders} disabled={loading}>
           {loading ? <span className="flex items-center gap-2"><span className="btn-spinner" /> Cargando...</span> : '🔄 Sincronizar Sheet'}
         </button>
-        <input className="app-input !w-auto min-w-[240px] flex-1" placeholder="🔎 Buscar..."
+        <label className="flex items-center gap-1.5 text-xs cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={onlyCovered}
+            onChange={e => setOnlyCovered(e.target.checked)}
+            className="accent-[hsl(var(--brand))] w-4 h-4"
+          />
+          🏙️ Solo ciudades con cobertura
+        </label>
+        <input className="app-input !w-auto min-w-[200px] flex-1" placeholder="🔎 Buscar..."
           value={search} onChange={e => setSearch(e.target.value)} />
       </div>
 
       <div className="text-xs text-muted-foreground mb-2">
         {filtered.length} filas • {pendingCount} sin cargar
+        {onlyCovered && <span className="ml-1">• Filtro: solo ciudades cubiertas ({coveredCities.size})</span>}
       </div>
 
       <div className="overflow-auto">
-        <table className="app-table min-w-[900px]">
+        <table className="app-table min-w-[1100px]">
           <thead>
             <tr>
-              {displayCols.map(h => (
-                <th key={h} className="capitalize">
-                  {h === colProducts ? '📦 Producto' :
-                   h === colCity ? '🏙️ Ciudad' :
-                   h === colTotal ? '💰 Monto' :
-                   h === colName ? '👤 Cliente' :
-                   h === colPhone ? '📱 Tel' :
-                   h === colDistrict ? '📍 Depto' :
-                   h === colStatus ? '📋 Estado' : h}
-                </th>
-              ))}
+              <th>👤 Cliente</th>
+              {colProducts && <th>📦 Producto</th>}
+              <th>🔗 Producto detectado</th>
+              <th>💰 Costo Prov.</th>
+              {colCity && <th>🏙️ Ciudad</th>}
+              {colDistrict && <th>📍 Depto</th>}
+              {colTotal && <th>💵 Monto</th>}
               <th>Acción</th>
             </tr>
           </thead>
@@ -177,21 +232,44 @@ export default function ShopifyInboxView({
               const rowId = getRowId(o, i);
               const alreadyImported = importedRowIds.has(rowId);
               const totalGs = Math.round(Number((o[colTotal] || '0').replace(/[^\d.-]/g, '')) || 0);
+              const city = o[colCity] || '';
+              const cityOk = isCityCovered(city);
+              const matched = matchProduct(o[colProducts] || '');
 
               return (
                 <tr key={i} className={alreadyImported ? 'opacity-50' : ''}>
-                  {displayCols.map(h => (
-                    <td key={h} className="text-xs truncate max-w-[200px]">
-                      {h === colTotal ? `${nf(totalGs)} Gs` : (o[h] || '-')}
+                  <td className="text-xs truncate max-w-[150px]">{o[colName] || '-'}</td>
+                  {colProducts && (
+                    <td className="text-xs truncate max-w-[180px]">{o[colProducts] || '-'}</td>
+                  )}
+                  <td className="text-xs">
+                    {matched ? (
+                      <span className="text-green-400 font-semibold">✅ {matched.title}</span>
+                    ) : (
+                      <span className="text-yellow-500">⚠️ No detectado</span>
+                    )}
+                  </td>
+                  <td className="text-xs font-semibold">
+                    {matched ? (
+                      <span className="text-accent">{nf(Number(matched.provider_price_gs || 0))} Gs</span>
+                    ) : '-'}
+                  </td>
+                  {colCity && (
+                    <td className="text-xs">
+                      <span className={cityOk ? 'text-green-400' : 'text-red-400'}>
+                        {cityOk ? '✅' : '❌'} {city || '-'}
+                      </span>
                     </td>
-                  ))}
+                  )}
+                  {colDistrict && <td className="text-xs truncate max-w-[120px]">{o[colDistrict] || '-'}</td>}
+                  {colTotal && <td className="text-xs font-semibold">{nf(totalGs)} Gs</td>}
                   <td>
                     {alreadyImported ? (
                       <span className="text-xs text-green-400 font-bold">✅ Cargado</span>
                     ) : (
                       <button className="nav-btn active !py-1 !px-3 !text-xs"
                         onClick={() => handleConfirm(o, i)}>
-                        ➡️ Cargar pedido
+                        ➡️ Cargar
                       </button>
                     )}
                   </td>
@@ -199,8 +277,8 @@ export default function ShopifyInboxView({
               );
             })}
             {filtered.length === 0 && (
-              <tr><td colSpan={displayCols.length + 1} className="text-center text-muted-foreground py-8">
-                {loading ? 'Cargando...' : 'Sin datos en el Sheet'}
+              <tr><td colSpan={8} className="text-center text-muted-foreground py-8">
+                {loading ? 'Cargando...' : 'Sin datos'}
               </td></tr>
             )}
           </tbody>
