@@ -7,16 +7,9 @@ const nf = (n: number) => new Intl.NumberFormat("es-PY").format(n);
 
 type SheetOrder = Record<string, string>;
 
-const ROW_STATUS_KEY = "shopify_row_statuses_v4";
+const ROW_STATUS_KEY = "shopify_row_statuses_v5";
 const SHEET_CACHE_KEY = "shopify_sheet_cache";
 const CACHE_DURATION = 5 * 60 * 1000;
-
-function getRowId(order: SheetOrder, idx: number): string {
-  const name = (order["nombre"] || order["customer name"] || order["cliente"] || "").trim();
-  const phone = (order["numero"] || order["telefono"] || order["phone"] || order["tel"] || "").trim();
-  const product = (order["producto"] || order["product"] || order["item"] || order["titulo"] || "").trim();
-  return `${name}|${phone}|${product}|${idx}`;
-}
 
 function extractPhoneNumber(value: any): string {
   if (!value) return "";
@@ -60,6 +53,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [autoLoad, setAutoLoad] = useState(false);
   const autoLoadRef = useRef(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isAutoLoadingRef = useRef(false);
 
   const [filterOnlyAvailable, setFilterOnlyAvailable] = useState(false);
   const [filterOnlyCoverage, setFilterOnlyCoverage] = useState(false);
@@ -192,7 +186,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             setSheetOrders(data.orders || []);
             setLastSync(new Date(timestamp));
             setLastCacheHit(true);
-            toast.info(`📦 Usando cache local (${Math.round((Date.now() - timestamp) / 1000)}s)`);
+            console.log("📦 Usando cache local");
             return;
           }
         }
@@ -222,7 +216,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           url: sheetUrl
         }));
         
-        toast.success(`📊 ${json.total || 0} filas leídas del Sheet`);
+        console.log(`📊 ${json.total || 0} filas leídas del Sheet`);
       }
     } catch (err: any) {
       toast.error("Error leyendo Sheet: " + (err.message || err));
@@ -241,13 +235,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return Math.round(Number(cleaned.replace(/\./g, "").replace(",", ".")) || 0);
   };
 
-  // CARGA DIRECTA - con cálculo correcto de comisión
-  const handleConfirm = async (order: SheetOrder, idx: number) => {
+  // Función para cargar un pedido individual
+  const loadSingleOrder = async (order: SheetOrder, idx: number): Promise<{ success: boolean; commission: number }> => {
     const productName = order[colKeys.product] || "";
     const matched = matchProduct(productName);
     if (!matched) {
-      toast.error(`Producto no detectado: "${productName}"`);
-      return;
+      return { success: false, commission: 0 };
     }
     
     const city = order[colKeys.city] || "";
@@ -255,17 +248,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const salePrice = parseMoney(order[colKeys.amount] || "0");
     const productCost = matched?.provider_price_gs || 0;
     const qty = Number(order[colKeys.qty] || 1) || 1;
-    
-    // Cálculo CORRECTO de la comisión
     const commission = salePrice - (productCost + deliveryPrice);
-    
-    console.log("========== CÁLCULO COMISIÓN ==========");
-    console.log("Producto:", matched.title);
-    console.log("Precio venta:", salePrice, "Gs");
-    console.log("Costo proveedor:", productCost, "Gs");
-    console.log("Costo delivery:", deliveryPrice, "Gs");
-    console.log("Comisión:", commission, "Gs");
-    console.log("======================================");
     
     const orderData = {
       order_number: `SH${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 5)}`,
@@ -291,20 +274,61 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const { error } = await supabase.from("orders").insert(orderData);
     
     if (error) {
-      toast.error("Error: " + error.message);
-    } else {
-      setRowStatus(String(idx), "CARGADO");
-      if (commission >= 0) {
-        toast.success(`✅ Pedido cargado | 💰 Comisión: +${commission.toLocaleString("es-PY")} Gs`);
+      console.error("Error al cargar:", error);
+      return { success: false, commission: 0 };
+    }
+    
+    return { success: true, commission };
+  };
+
+  // CARGA AUTOMÁTICA DE TODOS LOS PEDIDOS EN ESTADO CARGAR
+  const autoLoadOrders = async () => {
+    if (isAutoLoadingRef.current) {
+      console.log("⚠️ Auto-carga ya en progreso...");
+      return;
+    }
+    
+    isAutoLoadingRef.current = true;
+    let count = 0;
+    let errors = 0;
+    let totalCommission = 0;
+    
+    console.log("🚀 Iniciando auto-carga de pedidos...");
+    
+    for (let i = 0; i < sheetOrders.length; i++) {
+      const currentStatus = rowStatuses[String(i)] || "CARGAR";
+      if (currentStatus !== "CARGAR") continue;
+      
+      const order = sheetOrders[i];
+      const result = await loadSingleOrder(order, i);
+      
+      if (result.success) {
+        setRowStatus(String(i), "CARGADO");
+        count++;
+        totalCommission += result.commission;
+        
+        // Pequeña pausa para no saturar
+        if (count % 3 === 0) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
       } else {
-        toast.warning(`⚠️ Pedido cargado | 💰 Comisión NEGATIVA: ${commission.toLocaleString("es-PY")} Gs`);
+        errors++;
       }
+    }
+    
+    isAutoLoadingRef.current = false;
+    
+    if (count > 0) {
+      toast.success(`🤖 Auto-carga: ${count} pedidos cargados | 💰 Comisión total: ${totalCommission.toLocaleString("es-PY")} Gs`);
+    } else if (errors > 0) {
+      toast.warning(`🤖 Auto-carga: ${errors} errores, ningún pedido cargado`);
     }
   };
 
   // Formulario - abre el modal
-  const handleOpenForm = (order: SheetOrder) => {
+  const handleOpenForm = (order: SheetOrder, idx: number) => {
     if (!onSheetConfirm) return;
+    
     onSheetConfirm({
       customer: (order[colKeys.name] || "").trim(),
       phone: extractPhoneNumber(order[colKeys.phone] || ""),
@@ -317,87 +341,26 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     });
   };
 
+  // Carga manual de todos los pedidos
   const handleBulkLoad = async () => {
-    let count = 0;
-    let errors = 0;
-    let skipped = 0;
-    let noCoverage = 0;
-    let totalCommission = 0;
-    
-    for (let i = 0; i < sheetOrders.length; i++) {
-      const order = sheetOrders[i];
-      const currentStatus = rowStatuses[String(i)] || "CARGAR";
-      if (currentStatus !== "CARGAR") {
-        skipped++;
-        continue;
-      }
-
-      const productName = order[colKeys.product] || "";
-      const matched = matchProduct(productName);
-      if (!matched) {
-        errors++;
-        continue;
-      }
-
-      const city = order[colKeys.city] || "";
-      const deliveryPrice = getCityPrice(city);
-      if (!deliveryPrice) {
-        noCoverage++;
-        continue;
-      }
-      
-      const salePrice = parseMoney(order[colKeys.amount] || "0");
-      const productCost = matched?.provider_price_gs || 0;
-      const commission = salePrice - (productCost + deliveryPrice);
-      const qty = Number(order[colKeys.qty] || 1) || 1;
-      
-      const orderData = {
-        order_number: `SH${Date.now().toString(36).toUpperCase()}${Math.random().toString(36).slice(2, 5)}`,
-        created_by: myEmail,
-        customer_name: (order[colKeys.name] || "").trim(),
-        phone: extractPhoneNumber(order[colKeys.phone] || ""),
-        city: city,
-        street: [(order[colKeys.street] || "").trim(), (order[colKeys.street2] || "").trim()].filter(Boolean).join(" "),
-        district: (order[colKeys.dept] || "").trim(),
-        items_json: [{ 
-          title: matched.title, 
-          qty, 
-          sale_gs: salePrice,
-          provider_price_gs: productCost,
-          sku: matched.sku || "" 
-        }],
-        total_gs: salePrice * qty,
-        status: "PENDIENTE",
-        obs: `💰 Comisión: ${commission.toLocaleString("es-PY")} Gs | Venta: ${salePrice.toLocaleString("es-PY")} Gs | Costo: ${productCost.toLocaleString("es-PY")} Gs | Delivery: ${deliveryPrice.toLocaleString("es-PY")} Gs | Producto: ${matched.title}`,
-        provider_emails_list: matched.provider_email || "",
-      };
-      
-      const { error } = await supabase.from("orders").insert(orderData);
-      if (error) {
-        errors++;
-      } else {
-        setRowStatus(String(i), "CARGADO");
-        count++;
-        totalCommission += commission;
-      }
-      
-      if (i % 5 === 0) await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    toast.success(`✅ ${count} cargados | ❌ ${errors} errores | ⏭️ ${skipped} omitidos | 🚫 ${noCoverage} sin cobertura | 💰 Comisión total: ${totalCommission.toLocaleString("es-PY")} Gs`);
+    await autoLoadOrders();
   };
 
-  // Auto-load con intervalo
+  // Auto-load completo: lee Sheet + carga pedidos
+  const runAutoCycle = async () => {
+    if (!autoLoadRef.current) return;
+    console.log("🔄 Ciclo automático iniciado...");
+    await readSheet(false);
+    if (!autoLoadRef.current) return;
+    await autoLoadOrders();
+  };
+
+  // Configurar intervalo de auto-carga
   useEffect(() => {
     autoLoadRef.current = autoLoad;
     if (autoLoad) {
-      const run = async () => {
-        if (!autoLoadRef.current) return;
-        await readSheet(false);
-        if (!autoLoadRef.current) return;
-        await handleBulkLoad();
-      };
-      run();
-      intervalRef.current = setInterval(run, 60000);
+      runAutoCycle();
+      intervalRef.current = setInterval(runAutoCycle, 60000);
     } else {
       if (intervalRef.current) clearInterval(intervalRef.current);
     }
@@ -459,10 +422,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             🚀 Cargar todos (CARGAR)
           </button>
           <button
-            className={`nav-btn ${autoLoad ? "!bg-yellow-600 !text-white" : ""}`}
+            className={`nav-btn ${autoLoad ? "!bg-green-600 !text-white" : ""}`}
             onClick={() => setAutoLoad(!autoLoad)}
           >
-            {autoLoad ? "⚡ Auto-carga ON" : "⚡ Auto-carga OFF"}
+            {autoLoad ? "🤖 Auto-carga ON" : "🤖 Auto-carga OFF"}
           </button>
           {lastSync && (
             <span className="text-xs text-muted-foreground self-center">
@@ -472,8 +435,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           )}
         </div>
         {autoLoad && (
-          <div className="text-xs text-yellow-400 mt-1">
-            🔄 Auto-carga activa — sincroniza y carga cada 60 segundos
+          <div className="text-xs text-green-400 mt-1">
+            🤖 Auto-carga activa — Lee Sheet y carga pedidos automáticamente cada 60 segundos
           </div>
         )}
       </div>
@@ -552,27 +515,27 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               const commission = salePrice - (productCost + (deliveryPrice || 0));
 
               return (
-                <tr key={idx} className={currentStatus !== "CARGAR" ? "opacity-60" : ""}>
+                <tr key={idx} className={currentStatus !== "CARGAR" ? "opacity-60 line-through" : ""}>
                   <td className="text-xs">{idx + 1}</td>
                   <td className="text-xs">{order[colKeys.name] || "—"}</td>
                   <td className="text-xs font-mono">{extractedPhone || phoneRaw || "—"}</td>
                   <td className="text-xs">{city || "—"}</td>
                   <td className="text-right text-xs font-bold">
                     {deliveryPrice != null ? `${nf(deliveryPrice)} Gs` : <span className="text-muted-foreground">—</span>}
-                   </td>
+                  </td>
                   <td className="text-xs truncate max-w-[180px]" title={productName}>
                     {productName || "—"}
-                   </td>
+                  </td>
                   <td className="text-xs">{order[colKeys.qty] || "1"}</td>
                   <td className="text-right text-xs font-bold text-green-400">
                     {salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}
-                   </td>
+                  </td>
                   <td className="text-right text-xs text-orange-400">
                     {productCost > 0 ? `${nf(productCost)} Gs` : "—"}
-                   </td>
+                  </td>
                   <td className={`text-right text-xs font-bold ${commission >= 0 ? "text-blue-400" : "text-red-400"}`}>
                     {commission !== 0 ? `${commission > 0 ? "+" : ""}${nf(commission)} Gs` : "—"}
-                   </td>
+                  </td>
                   <td className="text-xs">
                     {matched ? (
                       <span className="text-green-400" title={`Costo: ${nf(productCost)} Gs`}>
@@ -583,14 +546,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                         ❌
                       </span>
                     )}
-                   </td>
+                  </td>
                   <td className="text-xs">
                     {covered ? (
                       <span className="text-green-400" title={`Delivery: ${deliveryPrice?.toLocaleString()} Gs`}>✅</span>
                     ) : (
                       <span className="text-yellow-400" title="Sin cobertura">⚠️</span>
                     )}
-                   </td>
+                  </td>
                   <td className="min-w-[130px]">
                     <select
                       className="app-input !py-1 !px-2 !text-[11px] !w-full"
@@ -601,34 +564,25 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                         <option key={s} value={s}>{s}</option>
                       ))}
                     </select>
-                   </td>
-                  <td className="flex gap-1 min-w-[140px]">
-                    {currentStatus === "CARGAR" && matched && (
-                      <button
-                        className="nav-btn active !py-1 !px-2 !text-[11px] whitespace-nowrap"
-                        onClick={() => handleConfirm(order, idx)}
-                        title="Cargar pedido directamente"
-                      >
-                        💰 Cargar
-                      </button>
-                    )}
+                  </td>
+                  <td className="min-w-[120px]">
                     {onSheetConfirm && (
                       <button
-                        className="nav-btn !py-1 !px-2 !text-[11px] whitespace-nowrap"
-                        onClick={() => handleOpenForm(order)}
-                        title="Abrir formulario para editar"
+                        className="nav-btn active !py-1 !px-2 !text-[11px] whitespace-nowrap w-full"
+                        onClick={() => handleOpenForm(order, idx)}
+                        title="Abrir formulario para cargar el pedido"
                       >
-                        📝 Formulario
+                        📝 Ir a Formulario
                       </button>
                     )}
-                   </td>
-                 </tr>
+                  </td>
+                </tr>
               );
             })}
             {filteredOrders.length === 0 && (
               <tr>
                 <td colSpan={14} className="text-center text-muted-foreground py-8">
-                  {sheetOrders.length === 0 ? "Leé tu Sheet primero" : "Sin resultados con los filtros actuales"}
+                  {sheetOrders.length === 0 ? "Leé tu Sheet primero" : "🎉 Todos los pedidos han sido cargados"}
                 </td>
               </tr>
             )}
