@@ -18,7 +18,6 @@ Deno.serve(async (req) => {
       })
     }
 
-    // Extract spreadsheet ID from various Google Sheets URL formats
     const match = sheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/)
     if (!match) {
       return new Response(JSON.stringify({ error: 'URL de Google Sheets inválida' }), {
@@ -27,36 +26,47 @@ Deno.serve(async (req) => {
     }
 
     const spreadsheetId = match[1]
-
-    // Extract gid (sheet tab) if present
     const gidMatch = sheetUrl.match(/gid=(\d+)/)
     const gid = gidMatch ? gidMatch[1] : '0'
 
-    // Use the public CSV export endpoint (no API key needed for public sheets)
     const csvUrl = `https://docs.google.com/spreadsheets/d/${spreadsheetId}/export?format=csv&gid=${gid}`
 
     const response = await fetch(csvUrl)
     if (!response.ok) {
-      const text = await response.text()
+      await response.text()
       return new Response(JSON.stringify({ error: `No se pudo leer el Sheet. ¿Está público? [${response.status}]` }), {
         status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       })
     }
 
     const csvText = await response.text()
-    
-    // Parse CSV
     const rows = parseCSV(csvText)
     if (rows.length < 2) {
-      return new Response(JSON.stringify({ error: 'El Sheet está vacío o solo tiene encabezados', headers: rows[0] || [], rows: [] }), {
+      return new Response(JSON.stringify({ error: 'El Sheet está vacío o solo tiene encabezados', headers: rows[0] || [], orders: [] }), {
         status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
       })
     }
 
-    const headers = rows[0].map((h: string) => h.trim().toLowerCase())
+    // Handle duplicate header names by appending _2, _3, etc.
+    const rawHeaders = rows[0].map((h: string) => h.trim().toLowerCase())
+    const headers: string[] = []
+    const headerCount: Record<string, number> = {}
+    for (const h of rawHeaders) {
+      if (!h) {
+        headers.push(`_col${headers.length}`)
+        continue
+      }
+      if (headerCount[h]) {
+        headerCount[h]++
+        headers.push(`${h}_${headerCount[h]}`)
+      } else {
+        headerCount[h] = 1
+        headers.push(h)
+      }
+    }
+
     const dataRows = rows.slice(1).filter((r: string[]) => r.some(c => c.trim() !== ''))
 
-    // Map rows to objects using headers
     const orders = dataRows.map((row: string[]) => {
       const obj: Record<string, string> = {}
       headers.forEach((h: string, i: number) => {
