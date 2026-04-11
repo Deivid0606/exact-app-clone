@@ -128,9 +128,14 @@ export default function ShopifyInboxView({
   const colEmail = findCol(['email', 'correo', 'mail']);
   // colStatus removed — we use local rowStatuses instead of sheet status
 
-  const getRowId = (order: SheetOrder, idx: number) => {
+  const getRowId = (order: SheetOrder, _idx: number) => {
     const num = order[colOrderNum] || '';
-    return num || `row-${idx}`;
+    if (num) return num;
+    // Build a stable ID from customer+phone+product so it doesn't change with filtering
+    const name = (order[colName] || '').trim().substring(0, 20);
+    const phone = (order[colPhone] || '').trim();
+    const prod = (order[colProducts] || '').trim().substring(0, 20);
+    return `r-${name}-${phone}-${prod}` || `row-fallback-${_idx}`;
   };
 
   // Match product by title
