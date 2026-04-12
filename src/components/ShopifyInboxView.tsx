@@ -15,7 +15,7 @@ const ACTIVE_FILTER_KEY = "shopify_active_filter";
 type OrderStatus = "CARGAR" | "A DROPEAR" | "CARGADO" | "CARGADO_MANUAL";
 type FilterType = "TODOS" | "CARGAR" | "CARGADO" | "CARGADO_MANUAL" | "A DROPEAR";
 
-// ========== FUNCIONES CORREGIDAS ==========
+// ========== FUNCIONES ==========
 
 function extractPhoneNumber(value: any): string {
   if (!value) return "";
@@ -33,14 +33,11 @@ const normalizeText = (text: string): string => {
     .replace(/[^a-z0-9]/g, "");
 };
 
-// NUEVA: Normalización flexible de ciudades
 const normalizeCityName = (city: string): string => {
   if (!city) return "";
   
-  // Eliminar todo lo que esté después de un guión (ej: "Ciudad del este - ALTO PARANÁ" → "Ciudad del este")
   let normalized = city.split("-")[0].trim();
   
-  // Normalizar texto completo
   normalized = normalized
     .toLowerCase()
     .normalize("NFD")
@@ -50,7 +47,6 @@ const normalizeCityName = (city: string): string => {
   return normalized;
 };
 
-// Lista de ciudades normalizadas para comparación rápida
 const getNormalizedCityList = (cities: string[]): Map<string, string> => {
   const map = new Map<string, string>();
   for (const city of cities) {
@@ -247,7 +243,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   }, [sheetUrl]);
 
-  // Detección de columnas
+  // ========== DETECCIÓN DE COLUMNAS CON "PRODUCTO OK" ==========
   const colKeys = useMemo(() => {
     const h = sheetHeaders;
     console.log("📋 Headers del Sheet:", h);
@@ -307,7 +303,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       street2: find("calle 2", "calle2", "direccion 2", "address2"),
       city: find("ciudad", "city", "localidad", "distrito", "CIUDAD"),
       dept: find("departamento", "depto", "department", "state"),
-      product: find("producto", "product", "item", "titulo", "PRODUCTO"),
+      // NUEVO: "PRODUCTO OK" como primera opción
+      product: find("PRODUCTO OK", "producto", "product", "item", "titulo", "PRODUCTO"),
       qty: find("cantidad", "qty", "quantity", "unidades", "CANTIDAD"),
       amount: findAmount(),
       email: find("email", "correo", "mail"),
@@ -315,42 +312,33 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     };
   }, [sheetHeaders]);
 
-  // Match de producto (sin cambios)
+  // ========== NUEVA FUNCIÓN DE MATCHING EXACTO ==========
   const matchProduct = useCallback(
     (rawName: string) => {
       if (!rawName || rawName === "—" || rawName === "-") return null;
       
-      const q = rawName.toLowerCase().trim();
-      if (q.length === 0) return null;
+      // Normalizar el nombre del sheet
+      const normalizedSheetName = normalizeText(rawName);
       
-      let found = products.find((p) => p.title?.toLowerCase() === q);
-      if (found) return found;
+      if (normalizedSheetName.length === 0) return null;
       
-      found = products.find((p) => q.includes(p.title?.toLowerCase() || ""));
-      if (found) return found;
+      // Buscar coincidencia EXACTA después de normalizar
+      const found = products.find((p) => {
+        const normalizedSystemName = normalizeText(p.title || "");
+        return normalizedSystemName === normalizedSheetName;
+      });
       
-      found = products.find((p) => p.title?.toLowerCase().includes(q));
-      if (found) return found;
-      
-      const keywords = q.split(/\s+/).filter(k => k.length > 3);
-      for (const keyword of keywords) {
-        found = products.find((p) => p.title?.toLowerCase().includes(keyword));
-        if (found) return found;
-      }
-      
-      return null;
+      return found || null;
     },
     [products],
   );
 
-  // NUEVA: Función mejorada para obtener precio de ciudad con normalización
   const getCityPrice = useCallback(
     (cityName: string) => {
       if (!cityName) return null;
       
       const normalizedInput = normalizeCityName(cityName);
       
-      // Buscar coincidencia exacta normalizada
       const match = clientPrices.find((cp) => {
         const normalizedCity = normalizeCityName(cp.city || "");
         return normalizedCity === normalizedInput;
@@ -361,7 +349,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     [clientPrices],
   );
 
-  // NUEVA: Función mejorada para verificar cobertura con normalización
   const hasCoverage = useCallback(
     (cityName: string) => {
       if (!cityName) return false;
@@ -405,7 +392,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     setRowStatuses((prev) => ({ ...prev, [key]: status }));
   }, []);
 
-  // Función para cargar pedido (automático o manual)
+  // ========== FUNCIÓN LOADORDER CON obs = "" ==========
   const loadOrder = useCallback(async (
     order: SheetOrder, 
     idx: number, 
@@ -449,7 +436,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       street: (order[colKeys.street] || "").trim(),
       district: (order[colKeys.dept] || "").trim(),
       email: order[colKeys.email] || "",
-      obs: `💰 Comisión: ${commission.toLocaleString("es-PY")} Gs | Venta: ${salePrice.toLocaleString("es-PY")} Gs | Costo: ${productCost.toLocaleString("es-PY")} Gs | Delivery: ${deliveryPrice.toLocaleString("es-PY")} Gs | Producto: ${matched.title} | Origen: ${source === "auto" ? "Automático" : "Manual"}`,
+      obs: "", // ✅ OBSERVACIÓN VACÍA
       items_json: [{ 
         sku: matched.sku || "",
         title: matched.title, 
@@ -505,6 +492,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     });
   }, [colKeys, onSheetConfirm]);
 
+  // ========== BULK LOAD CON obs = "" ==========
   const handleBulkLoad = useCallback(async () => {
     let count = 0;
     let errors = 0;
@@ -552,7 +540,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         street: (order[colKeys.street] || "").trim(),
         district: (order[colKeys.dept] || "").trim(),
         email: order[colKeys.email] || "",
-        obs: `💰 Comisión: ${commission.toLocaleString("es-PY")} Gs | Venta: ${salePrice.toLocaleString("es-PY")} Gs | Costo: ${productCost.toLocaleString("es-PY")} Gs | Delivery: ${deliveryPrice.toLocaleString("es-PY")} Gs | Producto: ${matched.title}`,
+        obs: "", // ✅ OBSERVACIÓN VACÍA
         items_json: [{ 
           sku: matched.sku || "",
           title: matched.title, 
@@ -582,7 +570,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     toast.success(`✅ ${count} cargados | ❌ ${errors} errores | ⏭️ ${skippedNoProduct} sin producto | 🚫 ${skippedNoCoverage} sin cobertura | 💰 ${skippedNoAmount} sin monto | 💰 Comisión total: ${totalCommission.toLocaleString("es-PY")} Gs`);
   }, [sheetOrders, rowStatuses, colKeys, matchProduct, getCityPrice, myEmail, setRowStatus]);
 
-  // Función de auto-carga
+  // ========== AUTO LOAD ORDERS CON obs = "" ==========
   const autoLoadOrders = useCallback(async () => {
     if (isAutoLoadingRef.current) {
       console.log("⏸️ Auto-carga ya en ejecución, omitiendo...");
@@ -634,7 +622,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           street: (order[colKeys.street] || "").trim(),
           district: (order[colKeys.dept] || "").trim(),
           email: order[colKeys.email] || "",
-          obs: `💰 Comisión: ${commission.toLocaleString("es-PY")} Gs | Venta: ${salePrice.toLocaleString("es-PY")} Gs | Costo: ${productCost.toLocaleString("es-PY")} Gs | Delivery: ${deliveryPrice.toLocaleString("es-PY")} Gs | Producto: ${matched.title} | Origen: Automático`,
+          obs: "", // ✅ OBSERVACIÓN VACÍA
           items_json: [{ 
             sku: matched.sku || "",
             title: matched.title, 
@@ -727,20 +715,18 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return getAmountFromRow(order, colKeys.amount);
   };
 
-  // NUEVA: Filtrado de órdenes basado en el filtro activo
+  // Filtrado de órdenes
   const filteredOrders = useMemo(() => {
     return sheetOrders
       .map((o, i) => ({ order: o, idx: i }))
       .filter(({ order, idx }) => {
         const currentStatus = rowStatuses[String(idx)] || "CARGAR";
         
-        // Aplicar filtro por estado
         if (activeFilter === "CARGAR" && currentStatus !== "CARGAR") return false;
         if (activeFilter === "CARGADO" && currentStatus !== "CARGADO") return false;
         if (activeFilter === "CARGADO_MANUAL" && currentStatus !== "CARGADO_MANUAL") return false;
         if (activeFilter === "A DROPEAR" && currentStatus !== "A DROPEAR") return false;
         
-        // Filtros de disponibilidad y cobertura (solo para pendientes y no cargados)
         if (filterOnlyAvailable && currentStatus === "CARGAR") {
           const productName = order[colKeys.product] || "";
           if (!matchProduct(productName)) return false;
@@ -750,7 +736,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           if (!hasCoverage(city)) return false;
         }
         
-        // Búsqueda
         if (search) {
           const q = search.toLowerCase();
           const vals = Object.values(order).join(" ").toLowerCase();
@@ -760,7 +745,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       });
   }, [sheetOrders, rowStatuses, activeFilter, search, colKeys, matchProduct, hasCoverage, filterOnlyAvailable, filterOnlyCoverage]);
 
-  // Contadores para cada filtro
   const counts = useMemo(() => {
     const cargar = Object.values(rowStatuses).filter(s => s === "CARGAR").length;
     const cargado = Object.values(rowStatuses).filter(s => s === "CARGADO").length;
@@ -771,12 +755,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return { cargar, cargado, cargadoManual, aDropear, total };
   }, [rowStatuses, sheetOrders.length]);
 
-  // NUEVA: Función para cambiar filtro
   const changeFilter = (filter: FilterType) => {
     setActiveFilter(filter);
   };
 
-  // NUEVA: Determinar clase CSS según estado
   const getRowClassName = (status: OrderStatus): string => {
     if (status === "CARGADO" || status === "CARGADO_MANUAL") {
       return "bg-green-500/10 hover:bg-green-500/20 transition-colors";
@@ -787,7 +769,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return "hover:bg-muted/50 transition-colors";
   };
 
-  // NUEVA: Mostrar badge de estado
   const getStatusBadge = (status: OrderStatus): JSX.Element => {
     const styles = {
       CARGAR: "bg-blue-500/20 text-blue-300",
@@ -843,7 +824,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         )}
       </div>
 
-      {/* NUEVO: Filtros principales */}
+      {/* Filtros principales */}
       <div className="flex flex-wrap gap-2 mb-4 border-b border-border pb-3">
         <button
           onClick={() => changeFilter("TODOS")}
