@@ -12,6 +12,8 @@ const SHEET_CACHE_KEY = "shopify_sheet_cache";
 const AUTO_LOAD_KEY = "shopify_auto_load_enabled";
 const LAST_ORDER_KEY = "shopify_last_order_number";
 
+// ========== FUNCIONES MEJORADAS ==========
+
 function extractPhoneNumber(value: any): string {
   if (!value) return "";
   let phone = String(value).replace(/[\s\-().+]/g, "").trim();
@@ -25,27 +27,51 @@ const normalizeText = (text: string): string => {
   return text
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // Elimina acentos
-    .replace(/[^a-z0-9]/g, ""); // Elimina espacios, guiones, etc.
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]/g, "");
 };
 
-// Función para limpiar cantidad (toma solo el primer número válido)
+// Función MEJORADA para limpiar cantidad (toma el PRIMER número válido)
 function parseQuantity(value: any): number {
   if (!value) return 1;
-  const str = String(value).trim();
-  const firstLine = str.split('\n')[0].trim();
-  const numMatch = firstLine.match(/\d+/);
+  
+  let str = String(value).trim();
+  
+  // Si tiene salto de línea, tomar solo la primera línea
+  if (str.includes('\n')) {
+    str = str.split('\n')[0].trim();
+  }
+  
+  // Si tiene comillas, removerlas
+  str = str.replace(/["']/g, '');
+  
+  // Extraer el primer número encontrado (ignora cualquier texto)
+  const numMatch = str.match(/\d+/);
   if (!numMatch) return 1;
+  
   const num = parseInt(numMatch[0], 10);
   return isNaN(num) ? 1 : num;
 }
 
-// Función para limpiar monto
+// Función MEJORADA para limpiar monto
 function parseMoney(v: string): number {
   if (!v) return 0;
-  let cleanValue = String(v).split('\n')[0].trim();
+  
+  let cleanValue = String(v);
+  
+  // Si tiene salto de línea, tomar la primera línea
+  if (cleanValue.includes('\n')) {
+    cleanValue = cleanValue.split('\n')[0].trim();
+  }
+  
+  // Remover comillas si existen
+  cleanValue = cleanValue.replace(/["']/g, '');
+  
+  // Limpia el string: elimina Gs, espacios, etc.
   let cleaned = cleanValue.replace(/[^\d.,\-]/g, "");
   if (!cleaned) return 0;
+  
+  // Reemplaza coma por punto para decimales, y elimina puntos de miles
   cleaned = cleaned.replace(/\./g, "").replace(",", ".");
   return Math.round(Number(cleaned) || 0);
 }
@@ -57,34 +83,6 @@ const generateSequentialId = (): string => {
   localStorage.setItem(LAST_ORDER_KEY, newNumber.toString());
   const paddedNumber = newNumber.toString().padStart(3, '0');
   return `SHOPIFY${paddedNumber}`;
-};
-
-// 🔥 NUEVA FUNCIÓN: Detecta el tipo de columna para CADA FILA
-const detectColumnType = (headers: string[], sampleValue: string): string => {
-  const normalizedValue = normalizeText(sampleValue);
-  
-  // Patrones para cada tipo de dato
-  const patterns = {
-    name: ["nombre", "cliente", "customer", "name", "fullname"],
-    phone: ["telefono", "phone", "tel", "celular", "whatsapp", "movil"],
-    city: ["ciudad", "city", "localidad", "distrito"],
-    street: ["calle", "direccion", "address", "street"],
-    product: ["producto", "product", "item", "titulo"],
-    qty: ["cantidad", "qty", "quantity", "unidades"],
-    amount: ["monto", "total", "importe", "precio", "amount"],
-    email: ["email", "correo", "mail"],
-    date: ["fecha", "date"]
-  };
-  
-  for (const [type, keywords] of Object.entries(patterns)) {
-    for (const keyword of keywords) {
-      if (normalizedValue.includes(keyword)) {
-        return type;
-      }
-    }
-  }
-  
-  return "unknown";
 };
 
 interface ShopifyInboxProps {
@@ -126,6 +124,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   });
 
+  // FILTROS FIJOS - SIEMPRE ACTIVOS
   const filterOnlyAvailable = true;
   const filterOnlyCoverage = true;
   const filterOnlyCargar = true;
@@ -135,6 +134,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isAutoLoadingRef = useRef(false);
 
+  // Guardar estados en localStorage
   useEffect(() => {
     localStorage.setItem(ROW_STATUS_KEY, JSON.stringify(rowStatuses));
   }, [rowStatuses]);
@@ -172,70 +172,59 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   }, [autoLoad, sheetUrl]);
 
-  // 🔥 NUEVA FUNCIÓN: Extrae datos de UNA FILA específica sin depender de columnas fijas
-  const extractRowData = useCallback((row: SheetOrder, headers: string[]) => {
-    const result: Record<string, any> = {};
+  // 🔥 Detección de columnas
+  const colKeys = useMemo(() => {
+    const h = sheetHeaders;
     
-    // Para cada celda en la fila, intentar determinar qué contiene
-    for (const header of headers) {
-      const value = row[header];
-      if (!value || value === "" || value === "—" || value === "-") continue;
+    const find = (...candidates: string[]) => {
+      const normalizedCandidates = candidates.map(c => normalizeText(c));
       
-      const normalizedHeader = normalizeText(header);
-      const stringValue = String(value);
-      const normalizedValue = normalizeText(stringValue);
+      for (let i = 0; i < h.length; i++) {
+        const normalizedHeader = normalizeText(h[i]);
+        for (const candidate of normalizedCandidates) {
+          if (normalizedHeader === candidate) {
+            return h[i];
+          }
+        }
+      }
       
-      // Detectar por el header primero
-      if (normalizedHeader.includes("nombre") || normalizedHeader.includes("cliente") || normalizedHeader.includes("customer")) {
-        result.customer_name = stringValue.trim();
-      }
-      else if (normalizedHeader.includes("telefono") || normalizedHeader.includes("phone") || normalizedHeader.includes("cel")) {
-        result.phone = extractPhoneNumber(stringValue);
-      }
-      else if (normalizedHeader.includes("ciudad") || normalizedHeader.includes("city") || normalizedHeader.includes("localidad")) {
-        result.city = stringValue.trim();
-      }
-      else if (normalizedHeader.includes("calle") || normalizedHeader.includes("direccion") || normalizedHeader.includes("address")) {
-        result.street = stringValue.trim();
-      }
-      else if (normalizedHeader.includes("producto") || normalizedHeader.includes("product") || normalizedHeader.includes("item")) {
-        result.product = stringValue.trim();
-      }
-      else if (normalizedHeader.includes("cantidad") || normalizedHeader.includes("qty") || normalizedHeader.includes("quantity")) {
-        result.qty = parseQuantity(stringValue);
-      }
-      else if (normalizedHeader.includes("monto") || normalizedHeader.includes("total") || normalizedHeader.includes("importe") || 
-               normalizedHeader.includes("precio") || normalizedHeader.includes("amount")) {
-        result.amount = parseMoney(stringValue);
-      }
-      else if (normalizedHeader.includes("email") || normalizedHeader.includes("correo")) {
-        result.email = stringValue.trim();
-      }
-      else if (normalizedHeader.includes("fecha") || normalizedHeader.includes("date")) {
-        result.date = stringValue;
-      }
-      else {
-        // Si no coincide con ningún header, intentar detectar por el contenido
-        if (!result.customer_name && stringValue.length > 3 && stringValue.length < 100 && !stringValue.includes("@") && !/\d/.test(stringValue)) {
-          result.customer_name = stringValue.trim();
-        }
-        else if (!result.phone && (stringValue.match(/\d/g) || []).length >= 8) {
-          result.phone = extractPhoneNumber(stringValue);
-        }
-        else if (!result.city && stringValue.length > 3 && stringValue.length < 50 && !/\d/.test(stringValue)) {
-          result.city = stringValue.trim();
-        }
-        else if (!result.product && stringValue.length > 5 && stringValue.length < 200) {
-          result.product = stringValue.trim();
-        }
-        else if (!result.amount && stringValue.match(/\d/g) && (stringValue.match(/\d/g) || []).length >= 4) {
-          result.amount = parseMoney(stringValue);
+      for (let i = 0; i < h.length; i++) {
+        const normalizedHeader = normalizeText(h[i]);
+        for (const candidate of normalizedCandidates) {
+          if (normalizedHeader.includes(candidate) || candidate.includes(normalizedHeader)) {
+            return h[i];
+          }
         }
       }
-    }
+      
+      return "";
+    };
     
-    return result;
-  }, []);
+    const findAmount = () => {
+      for (let i = 0; i < h.length; i++) {
+        const normalized = normalizeText(h[i]);
+        if (normalized === "monto") return h[i];
+        if (normalized === "totalapagar") return h[i];
+        if (normalized.includes("total")) return h[i];
+      }
+      return find("monto", "total", "importe", "amount", "precio", 
+                  "total a pagar", "TOTAL A PAGAR", "totalapagar");
+    };
+    
+    return {
+      name: find("nombre", "cliente", "customer", "name", "NOMBRE"),
+      phone: find("telefono", "phone", "tel", "celular", "whatsapp", "Teléfono"),
+      street: find("calle", "direccion", "address", "street", "CALLE"),
+      street2: find("calle 2", "calle2", "direccion 2", "address2"),
+      city: find("ciudad", "city", "localidad", "distrito", "CIUDAD"),
+      dept: find("departamento", "depto", "department", "state"),
+      product: find("producto", "product", "item", "titulo", "PRODUCTO"),
+      qty: find("cantidad", "qty", "quantity", "unidades", "CANTIDAD"),
+      amount: findAmount(),
+      email: find("email", "correo", "mail"),
+      date: find("fecha", "date", "fecha de pedido"),
+    };
+  }, [sheetHeaders]);
 
   const matchProduct = useCallback(
     (rawName: string) => {
@@ -311,47 +300,38 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     setRowStatuses((prev) => ({ ...prev, [key]: status }));
   };
 
-  // CARGA DIRECTA - Usa la nueva función extractRowData
+  // CARGA DIRECTA - usando parseQuantity y parseMoney mejorados
   const handleDirectSave = async (order: SheetOrder, idx: number) => {
-    const rowData = extractRowData(order, sheetHeaders);
-    
-    if (!rowData.product) {
-      toast.error(`No se pudo detectar el producto en la fila ${idx + 1}`);
-      return;
-    }
-    
-    const matched = matchProduct(rowData.product);
+    const productName = order[colKeys.product] || "";
+    const matched = matchProduct(productName);
     if (!matched) {
-      toast.error(`Producto no detectado: "${rowData.product}"`);
+      toast.error(`Producto no detectado: "${productName}"`);
       return;
     }
     
-    if (!rowData.city) {
-      toast.warning(`⚠️ No se pudo detectar la ciudad en la fila ${idx + 1}`);
-      return;
-    }
+    const city = order[colKeys.city] || "";
+    const deliveryPrice = getCityPrice(city);
     
-    const deliveryPrice = getCityPrice(rowData.city);
     if (!deliveryPrice) {
-      toast.warning(`⚠️ Ciudad "${rowData.city}" sin cobertura de delivery. No se puede cargar el pedido.`);
+      toast.warning(`⚠️ Ciudad "${city}" sin cobertura de delivery. No se puede cargar el pedido.`);
       return;
     }
     
-    const salePrice = rowData.amount || 0;
+    const salePrice = parseMoney(order[colKeys.amount] || "0");
     const productCost = matched?.provider_price_gs || 0;
-    const qty = rowData.qty || 1;
+    const qty = parseQuantity(order[colKeys.qty]);  // ✅ USANDO FUNCIÓN MEJORADA
     const commission = salePrice - (productCost + deliveryPrice);
     const orderId = generateSequentialId();
     
     const payload = {
       order_number: orderId,
       created_by: myEmail,
-      customer_name: rowData.customer_name || "",
-      phone: rowData.phone || "",
-      city: rowData.city,
-      street: rowData.street || "",
-      district: "",
-      email: rowData.email || "",
+      customer_name: (order[colKeys.name] || "").trim(),
+      phone: extractPhoneNumber(order[colKeys.phone] || ""),
+      city: city,
+      street: [(order[colKeys.street] || "").trim(), (order[colKeys.street2] || "").trim()].filter(Boolean).join(" "),
+      district: (order[colKeys.dept] || "").trim(),
+      email: order[colKeys.email] || "",
       obs: `💰 Comisión: ${commission.toLocaleString("es-PY")} Gs | Venta: ${salePrice.toLocaleString("es-PY")} Gs | Costo: ${productCost.toLocaleString("es-PY")} Gs | Delivery: ${deliveryPrice.toLocaleString("es-PY")} Gs | Producto: ${matched.title}`,
       items_json: [{ 
         sku: matched.sku || "",
@@ -383,17 +363,16 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
   const handleOpenForm = (order: SheetOrder, idx: number) => {
     if (!onSheetConfirm) return;
-    const rowData = extractRowData(order, sheetHeaders);
     
     onSheetConfirm({
-      customer: rowData.customer_name || "",
-      phone: rowData.phone || "",
-      city: rowData.city || "",
-      street: rowData.street || "",
-      district: "",
-      productTitle: rowData.product || "",
-      totalGs: rowData.amount || 0,
-      qty: rowData.qty || 1,
+      customer: (order[colKeys.name] || "").trim(),
+      phone: extractPhoneNumber(order[colKeys.phone] || ""),
+      city: (order[colKeys.city] || "").trim(),
+      street: [(order[colKeys.street] || "").trim(), (order[colKeys.street2] || "").trim()].filter(Boolean).join(" "),
+      district: (order[colKeys.dept] || "").trim(),
+      productTitle: (order[colKeys.product] || "").trim(),
+      totalGs: parseMoney(order[colKeys.amount] || "0"),
+      qty: parseQuantity(order[colKeys.qty]),  // ✅ USANDO FUNCIÓN MEJORADA
     });
   };
 
@@ -402,52 +381,42 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     let errors = 0;
     let skippedNoProduct = 0;
     let skippedNoCoverage = 0;
-    let skippedNoData = 0;
     let totalCommission = 0;
     
     for (let i = 0; i < sheetOrders.length; i++) {
       const currentStatus = rowStatuses[String(i)] || "CARGAR";
       if (currentStatus !== "CARGAR") continue;
       
-      const rowData = extractRowData(sheetOrders[i], sheetHeaders);
-      
-      if (!rowData.product) {
-        skippedNoData++;
-        continue;
-      }
-      
-      const matched = matchProduct(rowData.product);
+      const order = sheetOrders[i];
+      const productName = order[colKeys.product] || "";
+      const matched = matchProduct(productName);
       if (!matched) {
         skippedNoProduct++;
         continue;
       }
       
-      if (!rowData.city) {
-        skippedNoData++;
-        continue;
-      }
-      
-      const deliveryPrice = getCityPrice(rowData.city);
+      const city = order[colKeys.city] || "";
+      const deliveryPrice = getCityPrice(city);
       if (!deliveryPrice) {
         skippedNoCoverage++;
         continue;
       }
       
-      const salePrice = rowData.amount || 0;
+      const salePrice = parseMoney(order[colKeys.amount] || "0");
       const productCost = matched?.provider_price_gs || 0;
-      const qty = rowData.qty || 1;
+      const qty = parseQuantity(order[colKeys.qty]);  // ✅ USANDO FUNCIÓN MEJORADA
       const commission = salePrice - (productCost + deliveryPrice);
       const orderId = generateSequentialId();
       
       const payload = {
         order_number: orderId,
         created_by: myEmail,
-        customer_name: rowData.customer_name || "",
-        phone: rowData.phone || "",
-        city: rowData.city,
-        street: rowData.street || "",
-        district: "",
-        email: rowData.email || "",
+        customer_name: (order[colKeys.name] || "").trim(),
+        phone: extractPhoneNumber(order[colKeys.phone] || ""),
+        city: city,
+        street: [(order[colKeys.street] || "").trim(), (order[colKeys.street2] || "").trim()].filter(Boolean).join(" "),
+        district: (order[colKeys.dept] || "").trim(),
+        email: order[colKeys.email] || "",
         obs: `💰 Comisión: ${commission.toLocaleString("es-PY")} Gs | Venta: ${salePrice.toLocaleString("es-PY")} Gs | Costo: ${productCost.toLocaleString("es-PY")} Gs | Delivery: ${deliveryPrice.toLocaleString("es-PY")} Gs | Producto: ${matched.title}`,
         items_json: [{ 
           sku: matched.sku || "",
@@ -475,7 +444,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       if (count % 3 === 0) await new Promise(resolve => setTimeout(resolve, 100));
     }
     
-    toast.success(`✅ ${count} cargados | ❌ ${errors} errores | ⏭️ ${skippedNoProduct} sin producto | 🚫 ${skippedNoCoverage} sin cobertura | ⚠️ ${skippedNoData} sin datos | 💰 Comisión total: ${totalCommission.toLocaleString("es-PY")} Gs`);
+    toast.success(`✅ ${count} cargados | ❌ ${errors} errores | ⏭️ ${skippedNoProduct} sin producto | 🚫 ${skippedNoCoverage} sin cobertura | 💰 Comisión total: ${totalCommission.toLocaleString("es-PY")} Gs`);
   };
 
   const autoLoadOrders = async () => {
@@ -489,31 +458,30 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       const currentStatus = rowStatuses[String(i)] || "CARGAR";
       if (currentStatus !== "CARGAR") continue;
       
-      const rowData = extractRowData(sheetOrders[i], sheetHeaders);
-      
-      if (!rowData.product) continue;
-      const matched = matchProduct(rowData.product);
+      const order = sheetOrders[i];
+      const productName = order[colKeys.product] || "";
+      const matched = matchProduct(productName);
       if (!matched) continue;
       
-      if (!rowData.city) continue;
-      const deliveryPrice = getCityPrice(rowData.city);
+      const city = order[colKeys.city] || "";
+      const deliveryPrice = getCityPrice(city);
       if (!deliveryPrice) continue;
       
-      const salePrice = rowData.amount || 0;
+      const salePrice = parseMoney(order[colKeys.amount] || "0");
       const productCost = matched?.provider_price_gs || 0;
-      const qty = rowData.qty || 1;
+      const qty = parseQuantity(order[colKeys.qty]);  // ✅ USANDO FUNCIÓN MEJORADA
       const commission = salePrice - (productCost + deliveryPrice);
       const orderId = generateSequentialId();
       
       const payload = {
         order_number: orderId,
         created_by: myEmail,
-        customer_name: rowData.customer_name || "",
-        phone: rowData.phone || "",
-        city: rowData.city,
-        street: rowData.street || "",
-        district: "",
-        email: rowData.email || "",
+        customer_name: (order[colKeys.name] || "").trim(),
+        phone: extractPhoneNumber(order[colKeys.phone] || ""),
+        city: city,
+        street: [(order[colKeys.street] || "").trim(), (order[colKeys.street2] || "").trim()].filter(Boolean).join(" "),
+        district: (order[colKeys.dept] || "").trim(),
+        email: order[colKeys.email] || "",
         obs: `💰 Comisión: ${commission.toLocaleString("es-PY")} Gs | Venta: ${salePrice.toLocaleString("es-PY")} Gs | Costo: ${productCost.toLocaleString("es-PY")} Gs | Delivery: ${deliveryPrice.toLocaleString("es-PY")} Gs | Producto: ${matched.title}`,
         items_json: [{ 
           sku: matched.sku || "",
@@ -564,30 +532,29 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     };
   }, [autoLoad]);
 
-  // Filtrar órdenes usando extractRowData
   const filteredOrders = useMemo(() => {
     return sheetOrders
-      .map((o, i) => ({ order: o, idx: i, data: extractRowData(o, sheetHeaders) }))
-      .filter(({ data, idx }) => {
+      .map((o, i) => ({ order: o, idx: i }))
+      .filter(({ order, idx }) => {
         const currentStatus = rowStatuses[String(idx)] || "CARGAR";
         if (currentStatus === "CARGADO") return false;
         if (filterOnlyCargar && currentStatus !== "CARGAR") return false;
         if (filterOnlyAvailable) {
-          if (!data.product) return false;
-          if (!matchProduct(data.product)) return false;
+          const productName = order[colKeys.product] || "";
+          if (!matchProduct(productName)) return false;
         }
         if (filterOnlyCoverage) {
-          if (!data.city) return false;
-          if (!hasCoverage(data.city)) return false;
+          const city = order[colKeys.city] || "";
+          if (!hasCoverage(city)) return false;
         }
         if (search) {
           const q = search.toLowerCase();
-          const vals = Object.values(data).join(" ").toLowerCase();
+          const vals = Object.values(order).join(" ").toLowerCase();
           if (!vals.includes(q)) return false;
         }
         return true;
       });
-  }, [sheetOrders, rowStatuses, filterOnlyAvailable, filterOnlyCoverage, filterOnlyCargar, search, sheetHeaders, extractRowData, matchProduct, hasCoverage]);
+  }, [sheetOrders, rowStatuses, filterOnlyAvailable, filterOnlyCoverage, filterOnlyCargar, search, colKeys, matchProduct, hasCoverage]);
 
   const statusOpts = ["CARGAR", "A DROPEAR", "CANCELADO"];
   const loadedCount = Object.values(rowStatuses).filter(s => s === "CARGADO").length;
@@ -616,7 +583,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             🚀 Cargar todos
           </button>
           <button className={`nav-btn ${autoLoad ? "!bg-green-600 !text-white" : ""}`} onClick={toggleAutoLoad}>
-            {autoLoad ? "🤖 Auto-carga ON 🔒" : "🤖 Auto-carga OFF"}
+            {autoLoad ? "🤖 Auto-carga ON" : "🤖 Auto-carga OFF"}
           </button>
           {lastSync && (
             <span className="text-xs text-muted-foreground self-center">
@@ -631,6 +598,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         )}
       </div>
 
+      {/* FILTROS FIJOS */}
       <div className="flex flex-wrap gap-4 mb-3">
         <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-1 rounded">✓ Solo con producto</span>
         <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-1 rounded">✓ Solo con cobertura</span>
@@ -668,28 +636,34 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             </tr>
           </thead>
           <tbody>
-            {filteredOrders.map(({ order, idx, data }) => {
+            {filteredOrders.map(({ order, idx }) => {
               const currentStatus = rowStatuses[String(idx)] || "CARGAR";
-              const matched = matchProduct(data.product || "");
-              const covered = data.city ? hasCoverage(data.city) : false;
-              const deliveryPrice = data.city ? getCityPrice(data.city) : null;
-              const salePrice = data.amount || 0;
+              const productName = order[colKeys.product] || "";
+              const matched = matchProduct(productName);
+              const city = order[colKeys.city] || "";
+              const covered = hasCoverage(city);
+              const deliveryPrice = getCityPrice(city);
+              const phoneRaw = order[colKeys.phone] || "";
+              const extractedPhone = extractPhoneNumber(phoneRaw);
+              const salePrice = parseMoney(order[colKeys.amount] || "0");
               const productCost = matched?.provider_price_gs || 0;
+              const qty = parseQuantity(order[colKeys.qty]);  // ✅ USANDO FUNCIÓN MEJORADA
               const commission = salePrice - (productCost + (deliveryPrice || 0));
+
               const canLoad = currentStatus === "CARGAR" && matched && covered;
 
               return (
                 <tr key={idx} className={currentStatus !== "CARGAR" ? "opacity-60 line-through" : ""}>
                   <td className="text-xs">{idx + 1}</td>
-                  <td className="text-xs">{data.customer_name || "—"}</td>
-                  <td className="text-xs font-mono">{data.phone || "—"}</td>
-                  <td className="text-xs">{data.city || "—"}</td>
-                  <td className="text-xs">{data.street || "—"}</td>
+                  <td className="text-xs">{order[colKeys.name] || "—"}</td>
+                  <td className="text-xs font-mono">{extractedPhone || phoneRaw || "—"}</td>
+                  <td className="text-xs">{city || "—"}</td>
+                  <td className="text-xs">{order[colKeys.street] || "—"}</td>
                   <td className="text-right text-xs font-bold">
                     {deliveryPrice != null ? `${nf(deliveryPrice)} Gs` : <span className="text-muted-foreground">—</span>}
                   </td>
-                  <td className="text-xs truncate max-w-[180px]">{data.product || "—"}</td>
-                  <td className="text-xs">{data.qty || 1}</td>
+                  <td className="text-xs truncate max-w-[180px]">{productName || "—"}</td>
+                  <td className="text-xs">{qty}</td>  {/* ✅ MOSTRANDO CANTIDAD CORRECTA */}
                   <td className="text-right text-xs font-bold text-green-400">{salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}</td>
                   <td className="text-right text-xs text-orange-400">{productCost > 0 ? `${nf(productCost)} Gs` : "—"}</td>
                   <td className={`text-right text-xs font-bold ${commission >= 0 ? "text-blue-400" : "text-red-400"}`}>
@@ -716,7 +690,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                     )}
                     {!canLoad && currentStatus === "CARGAR" && (
                       <span className="text-[10px] text-muted-foreground self-center">
-                        {!data.product ? "⚠️ Sin producto" : !matched ? "❌ Producto no existe" : !data.city ? "⚠️ Sin ciudad" : !covered ? "🚫 Sin cobertura" : ""}
+                        {!matched ? "⚠️ Sin producto" : !covered ? "🚫 Sin cobertura" : ""}
                       </span>
                     )}
                     {onSheetConfirm && (
