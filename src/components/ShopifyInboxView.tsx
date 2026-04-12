@@ -7,9 +7,7 @@ const nf = (n: number) => new Intl.NumberFormat("es-PY").format(n);
 
 type SheetOrder = Record<string, string>;
 
-const ROW_STATUS_KEY = "shopify_row_statuses_v5";
 const AUTO_LOAD_KEY = "shopify_auto_load_enabled";
-const LAST_ORDER_KEY = "shopify_last_order_number";
 
 // ========== FUNCIONES CORREGIDAS ==========
 
@@ -118,11 +116,9 @@ const getAmountFromRow = (order: SheetOrder, amountColumn: string): number => {
 };
 
 const generateSequentialId = (): string => {
-  let lastNumber = parseInt(localStorage.getItem(LAST_ORDER_KEY) || '0', 10);
-  const newNumber = lastNumber + 1;
-  localStorage.setItem(LAST_ORDER_KEY, newNumber.toString());
-  const paddedNumber = newNumber.toString().padStart(3, '0');
-  return `SHOPIFY${paddedNumber}`;
+  const timestamp = Date.now().toString().slice(-6);
+  const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+  return `SHOPIFY${timestamp}${random}`;
 };
 
 interface ShopifyInboxProps {
@@ -131,6 +127,17 @@ interface ShopifyInboxProps {
     district?: string; productTitle?: string; totalGs?: number; qty?: number;
   }) => void;
 }
+
+// Estados disponibles
+type OrderStatus = "PENDIENTE" | "PEDIDO CARGADO" | "A DROPEAR" | "CARGADO MANUAL";
+
+const STATUS_OPTIONS: OrderStatus[] = ["PENDIENTE", "PEDIDO CARGADO", "A DROPEAR", "CARGADO MANUAL"];
+const STATUS_COLORS: Record<OrderStatus, string> = {
+  "PENDIENTE": "",
+  "PEDIDO CARGADO": "bg-green-500/20 border-green-500/50",
+  "A DROPEAR": "bg-yellow-500/20 border-yellow-500/50",
+  "CARGADO MANUAL": "bg-blue-500/20 border-blue-500/50"
+};
 
 export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) {
   const { profile } = useAuth();
@@ -146,41 +153,58 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [products, setProducts] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
 
-  const [rowStatuses, setRowStatuses] = useState<Record<string, string>>(() => {
-    try { 
-      const saved = localStorage.getItem(ROW_STATUS_KEY);
-      return saved ? JSON.parse(saved) : {};
-    } catch { 
-      return {}; 
-    }
-  });
+  // Estado en memoria
+  const [rowStatuses, setRowStatuses] = useState<Record<string, OrderStatus>>({});
 
-  const [autoLoad, setAutoLoad] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem(AUTO_LOAD_KEY);
-      return saved === "true";
-    } catch {
-      return false;
-    }
-  });
-
-  const filterOnlyAvailable = true;
-  const filterOnlyCoverage = true;
-  const filterOnlyCargar = true;
+  const [autoLoad, setAutoLoad] = useState<boolean>(false);
+  const [statusFilter, setStatusFilter] = useState<OrderStatus | "TODOS">("TODOS");
   const [search, setSearch] = useState("");
 
   const autoLoadRef = useRef(autoLoad);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isAutoLoadingRef = useRef(false);
 
+  // Guardar autoLoad en ref
   useEffect(() => {
-    localStorage.setItem(ROW_STATUS_KEY, JSON.stringify(rowStatuses));
-  }, [rowStatuses]);
-
-  useEffect(() => {
-    localStorage.setItem(AUTO_LOAD_KEY, autoLoad.toString());
     autoLoadRef.current = autoLoad;
   }, [autoLoad]);
+
+  // Efecto para refrescar cuando la pestaña se activa
+  useEffect(() => {
+    if (!sheetUrl) return;
+    
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        console.log("👁️ Pestaña activada - Refrescando sheet...");
+        readSheet();
+      }
+    };
+    
+    const handleWindowFocus = () => {
+      console.log("🪟 Ventana enfocada - Refrescando sheet...");
+      readSheet();
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleWindowFocus);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleWindowFocus);
+    };
+  }, [sheetUrl, readSheet]);
+
+  // Efecto para refresco automático cada 30 segundos
+  useEffect(() => {
+    if (!sheetUrl) return;
+    
+    const interval = setInterval(() => {
+      console.log("⏰ Refresco automático cada 30 segundos");
+      readSheet();
+    }, 30000);
+    
+    return () => clearInterval(interval);
+  }, [sheetUrl, readSheet]);
 
   useEffect(() => {
     const loadProducts = async () => {
@@ -301,7 +325,27 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     (cityName: string) => {
       if (!cityName) return null;
       const q = cityName.toLowerCase().trim();
-      const match = clientPrices.find((cp) => cp.city?.toLowerCase().trim() === q);
+      
+      let match = clientPrices.find((cp) => cp.city?.toLowerCase().trim() === q);
+      if (match) return match.price_gs;
+      
+      const prefixes = [4, 3];
+      for (const len of prefixes) {
+        if (q.length >= len) {
+          const prefix = q.substring(0, len);
+          match = clientPrices.find((cp) => {
+            const cityClean = cp.city?.toLowerCase().trim();
+            return cityClean?.startsWith(prefix);
+          });
+          if (match) return match.price_gs;
+        }
+      }
+      
+      match = clientPrices.find((cp) => {
+        const cityClean = cp.city?.toLowerCase().trim();
+        return cityClean?.includes(q) || q.includes(cityClean);
+      });
+      
       return match ? match.price_gs : null;
     },
     [clientPrices],
@@ -311,7 +355,23 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     (cityName: string) => {
       if (!cityName) return false;
       const q = cityName.toLowerCase().trim();
-      return clientPrices.some((cp) => cp.city?.toLowerCase().trim() === q);
+      
+      if (clientPrices.some((cp) => cp.city?.toLowerCase().trim() === q)) return true;
+      
+      const prefixes = [4, 3];
+      for (const len of prefixes) {
+        if (q.length >= len) {
+          const prefix = q.substring(0, len);
+          if (clientPrices.some((cp) => cp.city?.toLowerCase().trim().startsWith(prefix))) {
+            return true;
+          }
+        }
+      }
+      
+      return clientPrices.some((cp) => {
+        const cityClean = cp.city?.toLowerCase().trim();
+        return cityClean?.includes(q) || q.includes(cityClean);
+      });
     },
     [clientPrices],
   );
@@ -324,7 +384,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     
     setLoading(true);
     try {
-      const resp = await fetch(`/api/read-sheet?url=${encodeURIComponent(sheetUrl)}&t=${Date.now()}`);
+      const resp = await fetch(`/api/read-sheet?url=${encodeURIComponent(sheetUrl)}&t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      });
       const json = await resp.json();
 
       if (json.error) {
@@ -341,7 +408,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     setLoading(false);
   }, [sheetUrl]);
 
-  const setRowStatus = useCallback((key: string, status: string) => {
+  const setRowStatus = useCallback((key: string, status: OrderStatus) => {
     setRowStatuses((prev) => ({ ...prev, [key]: status }));
   }, []);
 
@@ -402,7 +469,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     if (error) {
       toast.error("Error: " + error.message);
     } else {
-      setRowStatus(String(idx), "CARGADO");
+      setRowStatus(String(idx), "PEDIDO CARGADO");
       if (commission >= 0) {
         toast.success(`✅ Pedido ${orderId} cargado | 💰 Comisión: +${commission.toLocaleString("es-PY")} Gs`);
       } else {
@@ -428,6 +495,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     });
   }, [colKeys, onSheetConfirm]);
 
+  // Marcar como cargado manualmente
+  const handleMarkAsManual = useCallback((idx: number) => {
+    setRowStatus(String(idx), "CARGADO MANUAL");
+    toast.success("📝 Pedido marcado como cargado manualmente");
+  }, [setRowStatus]);
+
   const handleBulkLoad = useCallback(async () => {
     let count = 0;
     let errors = 0;
@@ -437,8 +510,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     let totalCommission = 0;
     
     for (let i = 0; i < sheetOrders.length; i++) {
-      const currentStatus = rowStatuses[String(i)] || "CARGAR";
-      if (currentStatus !== "CARGAR") continue;
+      const currentStatus = rowStatuses[String(i)] || "PENDIENTE";
+      if (currentStatus !== "PENDIENTE") continue;
       
       const order = sheetOrders[i];
       const productName = order[colKeys.product] || "";
@@ -494,7 +567,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       if (error) {
         errors++;
       } else {
-        setRowStatus(String(i), "CARGADO");
+        setRowStatus(String(i), "PEDIDO CARGADO");
         count++;
         totalCommission += commission;
       }
@@ -505,8 +578,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     toast.success(`✅ ${count} cargados | ❌ ${errors} errores | ⏭️ ${skippedNoProduct} sin producto | 🚫 ${skippedNoCoverage} sin cobertura | 💰 ${skippedNoAmount} sin monto | 💰 Comisión total: ${totalCommission.toLocaleString("es-PY")} Gs`);
   }, [sheetOrders, rowStatuses, colKeys, matchProduct, getCityPrice, myEmail, setRowStatus]);
 
-  // ========== FUNCIONES DE AUTO-CARGA CORREGIDAS ==========
-  
+  const handleFullRefresh = useCallback(() => {
+    setRowStatuses({});
+    readSheet();
+    toast.info("🔄 Datos refrescados - Todos los pedidos están como PENDIENTE");
+  }, [readSheet]);
+
   const autoLoadOrders = useCallback(async () => {
     if (isAutoLoadingRef.current) {
       console.log("⏸️ Auto-carga ya en ejecución, omitiendo...");
@@ -519,20 +596,18 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     let totalCommission = 0;
     
     try {
-      // Crear una copia de los índices pendientes
       const pendingIndices = sheetOrders
         .map((_, i) => i)
         .filter(i => {
-          const currentStatus = rowStatuses[String(i)] || "CARGAR";
-          return currentStatus === "CARGAR";
+          const currentStatus = rowStatuses[String(i)] || "PENDIENTE";
+          return currentStatus === "PENDIENTE";
         });
       
       console.log(`🤖 Auto-carga: ${pendingIndices.length} pedidos pendientes`);
       
       for (const i of pendingIndices) {
-        // Verificar estado nuevamente
-        const currentStatus = rowStatuses[String(i)] || "CARGAR";
-        if (currentStatus !== "CARGAR") continue;
+        const currentStatus = rowStatuses[String(i)] || "PENDIENTE";
+        if (currentStatus !== "PENDIENTE") continue;
         
         const order = sheetOrders[i];
         const productName = order[colKeys.product] || "";
@@ -577,7 +652,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         
         const { error } = await supabase.from("orders").insert(payload);
         if (!error) {
-          setRowStatus(String(i), "CARGADO");
+          setRowStatus(String(i), "PEDIDO CARGADO");
           count++;
           totalCommission += commission;
           console.log(`✅ Auto-cargado: ${orderId} (fila ${i + 1})`);
@@ -608,25 +683,20 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     
     if (!autoLoadRef.current) return;
     
-    // Pequeña pausa para que el estado se actualice
     await new Promise(resolve => setTimeout(resolve, 500));
     
     await autoLoadOrders();
     console.log("✅ Ciclo completado");
   }, [readSheet, autoLoadOrders]);
 
-  // Efecto para la auto-carga con intervalo
   useEffect(() => {
     if (autoLoad && sheetUrl) {
-      // Limpiar intervalo anterior
       if (intervalRef.current) clearInterval(intervalRef.current);
       
-      // Ejecutar primera carga inmediatamente
       setTimeout(() => {
         runAutoCycle();
       }, 2000);
       
-      // Configurar intervalo cada 60 segundos
       intervalRef.current = setInterval(() => {
         runAutoCycle();
       }, 60000);
@@ -657,21 +727,16 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return getAmountFromRow(order, colKeys.amount);
   };
 
+  // Filtrar por estado
   const filteredOrders = useMemo(() => {
     return sheetOrders
       .map((o, i) => ({ order: o, idx: i }))
-      .filter(({ order, idx }) => {
-        const currentStatus = rowStatuses[String(idx)] || "CARGAR";
-        if (currentStatus === "CARGADO") return false;
-        if (filterOnlyCargar && currentStatus !== "CARGAR") return false;
-        if (filterOnlyAvailable) {
-          const productName = order[colKeys.product] || "";
-          if (!matchProduct(productName)) return false;
-        }
-        if (filterOnlyCoverage) {
-          const city = order[colKeys.city] || "";
-          if (!hasCoverage(city)) return false;
-        }
+      .filter(({ idx }) => {
+        const currentStatus = rowStatuses[String(idx)] || "PENDIENTE";
+        if (statusFilter !== "TODOS" && currentStatus !== statusFilter) return false;
+        return true;
+      })
+      .filter(({ order }) => {
         if (search) {
           const q = search.toLowerCase();
           const vals = Object.values(order).join(" ").toLowerCase();
@@ -679,10 +744,19 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         }
         return true;
       });
-  }, [sheetOrders, rowStatuses, filterOnlyAvailable, filterOnlyCoverage, filterOnlyCargar, search, colKeys, matchProduct, hasCoverage]);
+  }, [sheetOrders, rowStatuses, statusFilter, search]);
 
-  const statusOpts = ["CARGAR", "A DROPEAR", "CANCELADO"];
-  const loadedCount = Object.values(rowStatuses).filter(s => s === "CARGADO").length;
+  // Estadísticas
+  const stats = useMemo(() => {
+    const pendientes = Object.values(rowStatuses).filter(s => s === "PENDIENTE").length;
+    const cargados = Object.values(rowStatuses).filter(s => s === "PEDIDO CARGADO").length;
+    const aDropear = Object.values(rowStatuses).filter(s => s === "A DROPEAR").length;
+    const manual = Object.values(rowStatuses).filter(s => s === "CARGADO MANUAL").length;
+    const total = sheetOrders.length;
+    const sinEstado = total - (pendientes + cargados + aDropear + manual);
+    
+    return { pendientes, cargados, aDropear, manual, total, sinEstado };
+  }, [rowStatuses, sheetOrders.length]);
 
   return (
     <div className="app-card">
@@ -701,6 +775,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           <button className="nav-btn active" onClick={handleBulkLoad} disabled={!sheetOrders.length}>
             🚀 Cargar todos
           </button>
+          <button className="nav-btn active" onClick={handleFullRefresh}>
+            🔄 Refrescar todo
+          </button>
           <button className={`nav-btn ${autoLoad ? "!bg-green-600 !text-white" : ""}`} onClick={toggleAutoLoad}>
             {autoLoad ? "🤖 Auto-carga ON" : "🤖 Auto-carga OFF"}
           </button>
@@ -715,23 +792,53 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             🤖 Auto-carga activa — Ciclo cada 60 segundos
           </div>
         )}
+        <div className="text-xs text-blue-400 mt-1">
+          🔄 Refresco automático al volver a la pestaña | Auto-refresco cada 30 segundos
+        </div>
+      </div>
+
+      {/* Tarjetas de estadísticas */}
+      <div className="grid grid-cols-5 gap-3 mb-4">
+        <div className="bg-gray-800/50 rounded-lg p-3 text-center cursor-pointer hover:bg-gray-700/50 transition" onClick={() => setStatusFilter("TODOS")}>
+          <div className="text-2xl font-bold">{stats.total}</div>
+          <div className="text-xs text-muted-foreground">Total</div>
+        </div>
+        <div className="bg-yellow-500/10 rounded-lg p-3 text-center cursor-pointer hover:bg-yellow-500/20 transition" onClick={() => setStatusFilter("PENDIENTE")}>
+          <div className="text-2xl font-bold text-yellow-400">{stats.pendientes + stats.sinEstado}</div>
+          <div className="text-xs text-muted-foreground">Pendientes</div>
+        </div>
+        <div className="bg-green-500/10 rounded-lg p-3 text-center cursor-pointer hover:bg-green-500/20 transition" onClick={() => setStatusFilter("PEDIDO CARGADO")}>
+          <div className="text-2xl font-bold text-green-400">{stats.cargados}</div>
+          <div className="text-xs text-muted-foreground">Cargados</div>
+        </div>
+        <div className="bg-yellow-500/10 rounded-lg p-3 text-center cursor-pointer hover:bg-yellow-500/20 transition" onClick={() => setStatusFilter("A DROPEAR")}>
+          <div className="text-2xl font-bold text-yellow-400">{stats.aDropear}</div>
+          <div className="text-xs text-muted-foreground">A Dropear</div>
+        </div>
+        <div className="bg-blue-500/10 rounded-lg p-3 text-center cursor-pointer hover:bg-blue-500/20 transition" onClick={() => setStatusFilter("CARGADO MANUAL")}>
+          <div className="text-2xl font-bold text-blue-400">{stats.manual}</div>
+          <div className="text-xs text-muted-foreground">Manual</div>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-4 mb-3">
-        <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-1 rounded">✓ Solo con producto</span>
-        <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-1 rounded">✓ Solo con cobertura</span>
-        <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-1 rounded">✓ Solo estado CARGAR</span>
         <input
           className="app-input !w-auto min-w-[240px] flex-1"
           placeholder="🔎 Buscar..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
         />
-      </div>
-
-      <div className="text-xs text-muted-foreground mb-2">
-        {filteredOrders.length} pendientes de {sheetOrders.length} filas totales
-        {loadedCount > 0 && ` (${loadedCount} ya cargados)`}
+        {(statusFilter !== "TODOS" || search) && (
+          <button 
+            className="text-xs text-muted-foreground hover:text-white"
+            onClick={() => {
+              setStatusFilter("TODOS");
+              setSearch("");
+            }}
+          >
+            Limpiar filtros ✕
+          </button>
+        )}
       </div>
 
       <div className="overflow-auto">
@@ -755,7 +862,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           </thead>
           <tbody>
             {filteredOrders.map(({ order, idx }) => {
-              const currentStatus = rowStatuses[String(idx)] || "CARGAR";
+              const currentStatus = rowStatuses[String(idx)] || "PENDIENTE";
               const productName = order[colKeys.product] || "";
               const matched = matchProduct(productName);
               const city = order[colKeys.city] || "";
@@ -768,10 +875,11 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               const qty = parseQuantity(order[colKeys.qty]);
               const commission = salePrice - (productCost + (deliveryPrice || 0));
 
-              const canLoad = currentStatus === "CARGAR" && matched && covered && salePrice > 0;
+              const canLoad = currentStatus === "PENDIENTE" && matched && covered && salePrice > 0;
+              const statusColorClass = STATUS_COLORS[currentStatus];
 
               return (
-                <tr key={idx} className={currentStatus !== "CARGAR" ? "opacity-60 line-through" : ""}>
+                <tr key={idx} className={`${statusColorClass} border-l-4`}>
                   <td className="text-xs">{idx + 1}</td>
                   <td className="text-xs">{order[colKeys.name] || "—"}</td>
                   <td className="text-xs font-mono">{extractedPhone || phoneRaw || "—"}</td>
@@ -791,25 +899,34 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                     <select
                       className="app-input !py-1 !px-2 !text-[11px] !w-full"
                       value={currentStatus}
-                      onChange={(e) => setRowStatus(String(idx), e.target.value)}
+                      onChange={(e) => setRowStatus(String(idx), e.target.value as OrderStatus)}
                     >
-                      {statusOpts.map((s) => (<option key={s} value={s}>{s}</option>))}
+                      {STATUS_OPTIONS.map((s) => (<option key={s} value={s}>{s}</option>))}
                     </select>
                   </td>
-                  <td className="min-w-[160px] flex gap-1">
+                  <td className="min-w-[180px] flex gap-1 flex-wrap">
                     {canLoad && (
                       <button
                         className="nav-btn active !py-1 !px-2 !text-[11px] whitespace-nowrap"
                         onClick={() => handleDirectSave(order, idx)}
-                        title="Cargar pedido"
+                        title="Cargar pedido automáticamente"
                       >
-                        💰 Cargar
+                        💰 Cargar Auto
                       </button>
                     )}
-                    {!canLoad && currentStatus === "CARGAR" && (
+                    {currentStatus === "PENDIENTE" && !canLoad && (
                       <span className="text-[10px] text-muted-foreground self-center">
                         {!matched ? "⚠️ Sin producto" : !covered ? "🚫 Sin cobertura" : !salePrice ? "💰 Sin monto" : ""}
                       </span>
+                    )}
+                    {currentStatus === "PENDIENTE" && (
+                      <button
+                        className="nav-btn !py-1 !px-2 !text-[11px] whitespace-nowrap bg-blue-600 hover:bg-blue-700"
+                        onClick={() => handleMarkAsManual(idx)}
+                        title="Marcar como cargado manualmente"
+                      >
+                        📝 Marcar Manual
+                      </button>
                     )}
                     {onSheetConfirm && (
                       <button
@@ -817,7 +934,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                         onClick={() => handleOpenForm(order, idx)}
                         title="Abrir formulario para editar"
                       >
-                        📝 Formulario
+                        📋 Editar
                       </button>
                     )}
                   </td>
@@ -826,7 +943,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             })}
             {filteredOrders.length === 0 && (
               <tr><td colSpan={13} className="text-center text-muted-foreground py-8">
-                {sheetOrders.length === 0 ? "Leé tu Sheet primero" : "🎉 Todos los pedidos han sido cargados"}
+                {sheetOrders.length === 0 ? "📡 Leé tu Sheet primero" : "🎉 No hay pedidos que coincidan con los filtros"}
               </td></tr>
             )}
           </tbody>
