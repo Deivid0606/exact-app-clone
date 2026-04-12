@@ -9,7 +9,6 @@ type SheetOrder = Record<string, string>;
 
 const ROW_STATUS_KEY = "shopify_row_statuses_v6";
 const AUTO_LOAD_KEY = "shopify_auto_load_enabled";
-const LAST_ORDER_KEY = "shopify_last_order_number";
 const ACTIVE_FILTER_KEY = "shopify_active_filter";
 
 type OrderStatus = "CARGAR" | "A DROPEAR" | "CARGADO" | "CARGADO_MANUAL";
@@ -45,15 +44,6 @@ const normalizeCityName = (city: string): string => {
     .replace(/[^a-z0-9]/g, "");
   
   return normalized;
-};
-
-const getNormalizedCityList = (cities: string[]): Map<string, string> => {
-  const map = new Map<string, string>();
-  for (const city of cities) {
-    const normalized = normalizeCityName(city);
-    map.set(normalized, city);
-  }
-  return map;
 };
 
 function parseQuantity(value: any): number {
@@ -144,10 +134,26 @@ const getAmountFromRow = (order: SheetOrder, amountColumn: string): number => {
   return 0;
 };
 
-const generateSequentialId = (): string => {
-  let lastNumber = parseInt(localStorage.getItem(LAST_ORDER_KEY) || '0', 10);
+// ========== NUEVA FUNCIÓN CORREGIDA - GENERA ID DESDE LA BASE DE DATOS ==========
+const generateSequentialId = async (): Promise<string> => {
+  // Obtener el último order_number de la base de datos
+  const { data, error } = await supabase
+    .from("orders")
+    .select("order_number")
+    .order("created_at", { ascending: false })
+    .limit(1);
+  
+  let lastNumber = 0;
+  
+  if (!error && data && data.length > 0) {
+    const lastOrderNumber = data[0].order_number;
+    const match = lastOrderNumber.match(/\d+/);
+    if (match) {
+      lastNumber = parseInt(match[0], 10);
+    }
+  }
+  
   const newNumber = lastNumber + 1;
-  localStorage.setItem(LAST_ORDER_KEY, newNumber.toString());
   const paddedNumber = newNumber.toString().padStart(3, '0');
   return `SHOPIFY${paddedNumber}`;
 };
@@ -303,7 +309,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       street2: find("calle 2", "calle2", "direccion 2", "address2"),
       city: find("ciudad", "city", "localidad", "distrito", "CIUDAD"),
       dept: find("departamento", "depto", "department", "state"),
-      // NUEVO: "PRODUCTO OK" como primera opción
       product: find("PRODUCTO OK", "producto", "product", "item", "titulo", "PRODUCTO"),
       qty: find("cantidad", "qty", "quantity", "unidades", "CANTIDAD"),
       amount: findAmount(),
@@ -312,17 +317,15 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     };
   }, [sheetHeaders]);
 
-  // ========== NUEVA FUNCIÓN DE MATCHING EXACTO ==========
+  // ========== MATCHING EXACTO DE PRODUCTO ==========
   const matchProduct = useCallback(
     (rawName: string) => {
       if (!rawName || rawName === "—" || rawName === "-") return null;
       
-      // Normalizar el nombre del sheet
       const normalizedSheetName = normalizeText(rawName);
       
       if (normalizedSheetName.length === 0) return null;
       
-      // Buscar coincidencia EXACTA después de normalizar
       const found = products.find((p) => {
         const normalizedSystemName = normalizeText(p.title || "");
         return normalizedSystemName === normalizedSheetName;
@@ -392,7 +395,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     setRowStatuses((prev) => ({ ...prev, [key]: status }));
   }, []);
 
-  // ========== FUNCIÓN LOADORDER CON obs = "" ==========
+  // ========== LOAD ORDER CON obs = "" Y await generateSequentialId ==========
   const loadOrder = useCallback(async (
     order: SheetOrder, 
     idx: number, 
@@ -423,7 +426,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const productCost = matched?.provider_price_gs || 0;
     const qty = parseQuantity(order[colKeys.qty]);
     const commission = salePrice - (productCost + deliveryPrice);
-    const orderId = generateSequentialId();
+    const orderId = await generateSequentialId(); // ✅ await
     
     const newStatus: OrderStatus = source === "auto" ? "CARGADO" : "CARGADO_MANUAL";
     
@@ -492,7 +495,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     });
   }, [colKeys, onSheetConfirm]);
 
-  // ========== BULK LOAD CON obs = "" ==========
+  // ========== BULK LOAD CON obs = "" Y await generateSequentialId ==========
   const handleBulkLoad = useCallback(async () => {
     let count = 0;
     let errors = 0;
@@ -529,7 +532,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       const productCost = matched?.provider_price_gs || 0;
       const qty = parseQuantity(order[colKeys.qty]);
       const commission = salePrice - (productCost + deliveryPrice);
-      const orderId = generateSequentialId();
+      const orderId = await generateSequentialId(); // ✅ await
       
       const payload = {
         order_number: orderId,
@@ -570,7 +573,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     toast.success(`✅ ${count} cargados | ❌ ${errors} errores | ⏭️ ${skippedNoProduct} sin producto | 🚫 ${skippedNoCoverage} sin cobertura | 💰 ${skippedNoAmount} sin monto | 💰 Comisión total: ${totalCommission.toLocaleString("es-PY")} Gs`);
   }, [sheetOrders, rowStatuses, colKeys, matchProduct, getCityPrice, myEmail, setRowStatus]);
 
-  // ========== AUTO LOAD ORDERS CON obs = "" ==========
+  // ========== AUTO LOAD ORDERS CON obs = "" Y await generateSequentialId ==========
   const autoLoadOrders = useCallback(async () => {
     if (isAutoLoadingRef.current) {
       console.log("⏸️ Auto-carga ya en ejecución, omitiendo...");
@@ -611,7 +614,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         const productCost = matched?.provider_price_gs || 0;
         const qty = parseQuantity(order[colKeys.qty]);
         const commission = salePrice - (productCost + deliveryPrice);
-        const orderId = generateSequentialId();
+        const orderId = await generateSequentialId(); // ✅ await
         
         const payload = {
           order_number: orderId,
