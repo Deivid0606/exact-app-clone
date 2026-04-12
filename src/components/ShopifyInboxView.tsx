@@ -8,11 +8,10 @@ const nf = (n: number) => new Intl.NumberFormat("es-PY").format(n);
 type SheetOrder = Record<string, string>;
 
 const ROW_STATUS_KEY = "shopify_row_statuses_v5";
-const SHEET_CACHE_KEY = "shopify_sheet_cache";
 const AUTO_LOAD_KEY = "shopify_auto_load_enabled";
 const LAST_ORDER_KEY = "shopify_last_order_number";
 
-// ========== FUNCIONES MEJORADAS ==========
+// ========== FUNCIONES CORREGIDAS ==========
 
 function extractPhoneNumber(value: any): string {
   if (!value) return "";
@@ -22,7 +21,6 @@ function extractPhoneNumber(value: any): string {
   return phone;
 }
 
-// Función para normalizar texto (sin acentos, minúsculas, sin caracteres especiales)
 const normalizeText = (text: string): string => {
   return text
     .toLowerCase()
@@ -31,21 +29,17 @@ const normalizeText = (text: string): string => {
     .replace(/[^a-z0-9]/g, "");
 };
 
-// Función MEJORADA para limpiar cantidad (toma el PRIMER número válido)
+// Función para limpiar cantidad - Maneja "1\n1" correctamente
 function parseQuantity(value: any): number {
   if (!value) return 1;
   
   let str = String(value).trim();
   
-  // Si tiene salto de línea, tomar solo la primera línea
   if (str.includes('\n')) {
     str = str.split('\n')[0].trim();
   }
   
-  // Si tiene comillas, removerlas
   str = str.replace(/["']/g, '');
-  
-  // Extraer el primer número encontrado (ignora cualquier texto)
   const numMatch = str.match(/\d+/);
   if (!numMatch) return 1;
   
@@ -53,50 +47,81 @@ function parseQuantity(value: any): number {
   return isNaN(num) ? 1 : num;
 }
 
-// Función MEJORADA para limpiar monto
+// Función para limpiar monto
 function parseMoney(v: string): number {
   if (!v) return 0;
   
   let cleanValue = String(v);
   
-  // Si tiene salto de línea, tomar la primera línea
   if (cleanValue.includes('\n')) {
     cleanValue = cleanValue.split('\n')[0].trim();
   }
   
-  // Remover comillas si existen
   cleanValue = cleanValue.replace(/["']/g, '');
-  
-  // Limpia el string: elimina Gs, espacios, etc.
-  let cleaned = cleanValue.replace(/[^\d.,\-]/g, "");
+  let cleaned = cleanValue.replace(/[^\d.,]/g, "");
   if (!cleaned) return 0;
   
-  // Reemplaza coma por punto para decimales, y elimina puntos de miles
   cleaned = cleaned.replace(/\./g, "").replace(",", ".");
   return Math.round(Number(cleaned) || 0);
 }
 
-// FUNCIÓN DE EMERGENCIA - Busca en TODAS las columnas cualquier número grande (precio)
+// Función CORREGIDA - Busca SOLO el número correcto (precio)
 const findAmountInRow = (row: SheetOrder): number => {
+  const excludeColumns = [
+    "telefono", "phone", "tel", "celular", "whatsapp", "cel", "movil",
+    "cantidad", "qty", "quantity", "cant", "unidades",
+    "fecha", "date", "tiempo", "hora",
+    "estado", "status", "condicion",
+    "codigo", "code", "id", "sku",
+    "nota", "note", "observacion", "comentario",
+    "referencia", "reference"
+  ];
+  
   for (const key in row) {
     const value = row[key];
     if (!value) continue;
     
-    const str = String(value);
-    // Busca números de 5 o 6 dígitos (precios en Gs)
-    const matches = str.match(/\d{5,6}/g);
-    if (matches && matches.length > 0) {
-      const num = parseInt(matches[0], 10);
-      if (num > 10000 && num < 1000000) { // Entre 10mil y 1 millón
-        console.log(`💰 Encontrado posible monto en columna "${key}": ${num}`);
-        return num;
+    const keyLower = key.toLowerCase();
+    if (excludeColumns.some(ex => keyLower.includes(ex))) {
+      continue;
+    }
+    
+    const str = String(value).trim();
+    const priceMatches = str.match(/\b\d{4,7}\b/g);
+    
+    if (priceMatches && priceMatches.length > 0) {
+      for (const match of priceMatches) {
+        const num = parseInt(match, 10);
+        if (num >= 10000 && num <= 5000000) {
+          return num;
+        }
       }
     }
   }
   return 0;
 };
 
-// Generar ID secuencial SHOPIFY001, SHOPIFY002, etc.
+// Función para obtener el monto de una fila
+const getAmountFromRow = (order: SheetOrder, amountColumn: string): number => {
+  if (amountColumn && order[amountColumn]) {
+    const parsed = parseMoney(order[amountColumn]);
+    if (parsed > 0) return parsed;
+  }
+  
+  for (const key in order) {
+    if (key === "TOTAL A PAGAR" || key === "total a pagar" || key === "Total a pagar") {
+      const parsed = parseMoney(order[key]);
+      if (parsed > 0) return parsed;
+    }
+  }
+  
+  const fallbackAmount = findAmountInRow(order);
+  if (fallbackAmount > 0) return fallbackAmount;
+  
+  return 0;
+};
+
+// Generar ID secuencial
 const generateSequentialId = (): string => {
   let lastNumber = parseInt(localStorage.getItem(LAST_ORDER_KEY) || '0', 10);
   const newNumber = lastNumber + 1;
@@ -144,7 +169,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   });
 
-  // FILTROS FIJOS - SIEMPRE ACTIVOS
   const filterOnlyAvailable = true;
   const filterOnlyCoverage = true;
   const filterOnlyCargar = true;
@@ -154,7 +178,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isAutoLoadingRef = useRef(false);
 
-  // Guardar estados en localStorage
   useEffect(() => {
     localStorage.setItem(ROW_STATUS_KEY, JSON.stringify(rowStatuses));
   }, [rowStatuses]);
@@ -192,7 +215,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   }, [autoLoad, sheetUrl]);
 
-  // 🔥 DETECCIÓN DE COLUMNAS - VERSIÓN MEJORADA 1000%
+  // Detección de columnas
   const colKeys = useMemo(() => {
     const h = sheetHeaders;
     console.log("📋 Headers del Sheet:", h);
@@ -200,81 +223,54 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const find = (...candidates: string[]) => {
       const normalizedCandidates = candidates.map(c => normalizeText(c));
       
-      // Búsqueda exacta
       for (let i = 0; i < h.length; i++) {
         const normalizedHeader = normalizeText(h[i]);
         for (const candidate of normalizedCandidates) {
           if (normalizedHeader === candidate) {
-            console.log(`✅ Coincidencia exacta: "${h[i]}"`);
             return h[i];
           }
         }
       }
       
-      // Búsqueda parcial
       for (let i = 0; i < h.length; i++) {
         const normalizedHeader = normalizeText(h[i]);
         for (const candidate of normalizedCandidates) {
           if (normalizedHeader.includes(candidate) || candidate.includes(normalizedHeader)) {
-            console.log(`✅ Coincidencia parcial: "${h[i]}"`);
             return h[i];
           }
         }
       }
-      
       return "";
     };
     
-    // 🔥 FUNCIÓN ESPECIAL PARA TOTAL A PAGAR
     const findAmount = () => {
-      console.log("🔍 Buscando columna de MONTO en headers:", h);
-      
-      // 1. Buscar exactamente "TOTAL A PAGAR" (sin normalizar)
       for (let i = 0; i < h.length; i++) {
         const original = h[i];
-        if (original === "TOTAL A PAGAR" || original === "total a pagar" || original === "Total a pagar") {
-          console.log(`✅ Encontrado "TOTAL A PAGAR" exacto: "${original}"`);
+        if (original === "TOTAL A PAGAR" || original === "total a pagar") {
           return original;
         }
       }
       
-      // 2. Buscar normalizando a "totalapagar"
       for (let i = 0; i < h.length; i++) {
         const normalized = normalizeText(h[i]);
         if (normalized === "totalapagar") {
-          console.log(`✅ Encontrado TOTAL A PAGAR normalizado: "${h[i]}"`);
           return h[i];
         }
       }
       
-      // 3. Buscar cualquier columna que contenga "total"
       for (let i = 0; i < h.length; i++) {
         const normalized = normalizeText(h[i]);
         if (normalized.includes("total")) {
-          console.log(`✅ Encontrado columna con 'total': "${h[i]}"`);
           return h[i];
         }
       }
       
-      // 4. Buscar por palabras clave comunes
-      const keywords = ["monto", "precio", "importe", "amount", "venta", "valor"];
-      for (const keyword of keywords) {
-        for (let i = 0; i < h.length; i++) {
-          const normalized = normalizeText(h[i]);
-          if (normalized === keyword || normalized.includes(keyword)) {
-            console.log(`✅ Encontrado por keyword "${keyword}": "${h[i]}"`);
-            return h[i];
-          }
-        }
-      }
-      
-      // 5. Búsqueda genérica como último recurso
-      return find("total", "monto", "precio", "importe", "amount", "venta");
+      return find("monto", "total", "precio", "importe", "amount", "venta");
     };
     
-    const result = {
-      name: find("nombre", "cliente", "customer", "name", "NOMBRE", "CLIENTE"),
-      phone: find("telefono", "phone", "tel", "celular", "whatsapp", "Teléfono", "TELEFONO"),
+    return {
+      name: find("nombre", "cliente", "customer", "name", "NOMBRE"),
+      phone: find("telefono", "phone", "tel", "celular", "whatsapp", "Teléfono"),
       street: find("calle", "direccion", "address", "street", "CALLE"),
       street2: find("calle 2", "calle2", "direccion 2", "address2"),
       city: find("ciudad", "city", "localidad", "distrito", "CIUDAD"),
@@ -285,10 +281,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       email: find("email", "correo", "mail"),
       date: find("fecha", "date"),
     };
-    
-    console.log("🔍 Columnas detectadas:", result);
-    console.log("💰 Columna MONTO detectada como:", result.amount);
-    return result;
   }, [sheetHeaders]);
 
   const matchProduct = useCallback(
@@ -365,7 +357,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     setRowStatuses((prev) => ({ ...prev, [key]: status }));
   };
 
-  // CARGA DIRECTA - con fallback para encontrar el monto
   const handleDirectSave = async (order: SheetOrder, idx: number) => {
     const productName = order[colKeys.product] || "";
     const matched = matchProduct(productName);
@@ -378,17 +369,15 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const deliveryPrice = getCityPrice(city);
     
     if (!deliveryPrice) {
-      toast.warning(`⚠️ Ciudad "${city}" sin cobertura de delivery. No se puede cargar el pedido.`);
+      toast.warning(`⚠️ Ciudad "${city}" sin cobertura de delivery.`);
       return;
     }
     
-    // Intentar obtener el monto de la columna detectada
-    let salePrice = parseMoney(order[colKeys.amount] || "0");
+    const salePrice = getAmountFromRow(order, colKeys.amount);
     
-    // Si no se encontró, usar el fallback que busca en toda la fila
     if (salePrice === 0) {
-      salePrice = findAmountInRow(order);
-      console.log("💰 Usando fallback para encontrar monto:", salePrice);
+      toast.warning(`⚠️ No se pudo detectar el monto en la fila ${idx + 1}`);
+      return;
     }
     
     const productCost = matched?.provider_price_gs || 0;
@@ -402,7 +391,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       customer_name: (order[colKeys.name] || "").trim(),
       phone: extractPhoneNumber(order[colKeys.phone] || ""),
       city: city,
-      street: [(order[colKeys.street] || "").trim(), (order[colKeys.street2] || "").trim()].filter(Boolean).join(" "),
+      street: (order[colKeys.street] || "").trim(),
       district: (order[colKeys.dept] || "").trim(),
       email: order[colKeys.email] || "",
       obs: `💰 Comisión: ${commission.toLocaleString("es-PY")} Gs | Venta: ${salePrice.toLocaleString("es-PY")} Gs | Costo: ${productCost.toLocaleString("es-PY")} Gs | Delivery: ${deliveryPrice.toLocaleString("es-PY")} Gs | Producto: ${matched.title}`,
@@ -437,16 +426,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const handleOpenForm = (order: SheetOrder, idx: number) => {
     if (!onSheetConfirm) return;
     
-    let salePrice = parseMoney(order[colKeys.amount] || "0");
-    if (salePrice === 0) {
-      salePrice = findAmountInRow(order);
-    }
+    const salePrice = getAmountFromRow(order, colKeys.amount);
     
     onSheetConfirm({
       customer: (order[colKeys.name] || "").trim(),
       phone: extractPhoneNumber(order[colKeys.phone] || ""),
       city: (order[colKeys.city] || "").trim(),
-      street: [(order[colKeys.street] || "").trim(), (order[colKeys.street2] || "").trim()].filter(Boolean).join(" "),
+      street: (order[colKeys.street] || "").trim(),
       district: (order[colKeys.dept] || "").trim(),
       productTitle: (order[colKeys.product] || "").trim(),
       totalGs: salePrice,
@@ -459,6 +445,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     let errors = 0;
     let skippedNoProduct = 0;
     let skippedNoCoverage = 0;
+    let skippedNoAmount = 0;
     let totalCommission = 0;
     
     for (let i = 0; i < sheetOrders.length; i++) {
@@ -480,9 +467,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         continue;
       }
       
-      let salePrice = parseMoney(order[colKeys.amount] || "0");
+      const salePrice = getAmountFromRow(order, colKeys.amount);
       if (salePrice === 0) {
-        salePrice = findAmountInRow(order);
+        skippedNoAmount++;
+        continue;
       }
       
       const productCost = matched?.provider_price_gs || 0;
@@ -496,7 +484,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         customer_name: (order[colKeys.name] || "").trim(),
         phone: extractPhoneNumber(order[colKeys.phone] || ""),
         city: city,
-        street: [(order[colKeys.street] || "").trim(), (order[colKeys.street2] || "").trim()].filter(Boolean).join(" "),
+        street: (order[colKeys.street] || "").trim(),
         district: (order[colKeys.dept] || "").trim(),
         email: order[colKeys.email] || "",
         obs: `💰 Comisión: ${commission.toLocaleString("es-PY")} Gs | Venta: ${salePrice.toLocaleString("es-PY")} Gs | Costo: ${productCost.toLocaleString("es-PY")} Gs | Delivery: ${deliveryPrice.toLocaleString("es-PY")} Gs | Producto: ${matched.title}`,
@@ -526,7 +514,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       if (count % 3 === 0) await new Promise(resolve => setTimeout(resolve, 100));
     }
     
-    toast.success(`✅ ${count} cargados | ❌ ${errors} errores | ⏭️ ${skippedNoProduct} sin producto | 🚫 ${skippedNoCoverage} sin cobertura | 💰 Comisión total: ${totalCommission.toLocaleString("es-PY")} Gs`);
+    toast.success(`✅ ${count} cargados | ❌ ${errors} errores | ⏭️ ${skippedNoProduct} sin producto | 🚫 ${skippedNoCoverage} sin cobertura | 💰 ${skippedNoAmount} sin monto | 💰 Comisión total: ${totalCommission.toLocaleString("es-PY")} Gs`);
   };
 
   const autoLoadOrders = async () => {
@@ -549,10 +537,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       const deliveryPrice = getCityPrice(city);
       if (!deliveryPrice) continue;
       
-      let salePrice = parseMoney(order[colKeys.amount] || "0");
-      if (salePrice === 0) {
-        salePrice = findAmountInRow(order);
-      }
+      const salePrice = getAmountFromRow(order, colKeys.amount);
+      if (salePrice === 0) continue;
       
       const productCost = matched?.provider_price_gs || 0;
       const qty = parseQuantity(order[colKeys.qty]);
@@ -565,7 +551,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         customer_name: (order[colKeys.name] || "").trim(),
         phone: extractPhoneNumber(order[colKeys.phone] || ""),
         city: city,
-        street: [(order[colKeys.street] || "").trim(), (order[colKeys.street2] || "").trim()].filter(Boolean).join(" "),
+        street: (order[colKeys.street] || "").trim(),
         district: (order[colKeys.dept] || "").trim(),
         email: order[colKeys.email] || "",
         obs: `💰 Comisión: ${commission.toLocaleString("es-PY")} Gs | Venta: ${salePrice.toLocaleString("es-PY")} Gs | Costo: ${productCost.toLocaleString("es-PY")} Gs | Delivery: ${deliveryPrice.toLocaleString("es-PY")} Gs | Producto: ${matched.title}`,
@@ -618,13 +604,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     };
   }, [autoLoad]);
 
-  // Obtener el monto para mostrar en la tabla (con fallback)
   const getDisplayAmount = (order: SheetOrder) => {
-    let amount = parseMoney(order[colKeys.amount] || "0");
-    if (amount === 0) {
-      amount = findAmountInRow(order);
-    }
-    return amount;
+    return getAmountFromRow(order, colKeys.amount);
   };
 
   const filteredOrders = useMemo(() => {
@@ -693,7 +674,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         )}
       </div>
 
-      {/* FILTROS FIJOS */}
       <div className="flex flex-wrap gap-4 mb-3">
         <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-1 rounded">✓ Solo con producto</span>
         <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-1 rounded">✓ Solo con cobertura</span>
