@@ -7,7 +7,6 @@ const nf = (n: number) => new Intl.NumberFormat("es-PY").format(n);
 
 type SheetOrder = Record<string, string>;
 
-const ROW_STATUS_KEY = "shopify_row_statuses_v6";
 const AUTO_LOAD_KEY = "shopify_auto_load_enabled";
 const ACTIVE_FILTER_KEY = "shopify_active_filter";
 
@@ -134,9 +133,8 @@ const getAmountFromRow = (order: SheetOrder, amountColumn: string): number => {
   return 0;
 };
 
-// ========== NUEVA FUNCIÓN CORREGIDA - GENERA ID DESDE LA BASE DE DATOS ==========
+// ========== GENERA ID DESDE LA BASE DE DATOS ==========
 const generateSequentialId = async (): Promise<string> => {
-  // Obtener el último order_number de la base de datos
   const { data, error } = await supabase
     .from("orders")
     .select("order_number")
@@ -175,18 +173,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [loading, setLoading] = useState(false);
   const [lastSync, setLastSync] = useState<Date | null>(null);
   const [initialLoadDone, setInitialLoadDone] = useState(false);
+  const [loadingStatuses, setLoadingStatuses] = useState(true);
 
   const [products, setProducts] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
 
-  const [rowStatuses, setRowStatuses] = useState<Record<string, OrderStatus>>(() => {
-    try { 
-      const saved = localStorage.getItem(ROW_STATUS_KEY);
-      return saved ? JSON.parse(saved) : {};
-    } catch { 
-      return {}; 
-    }
-  });
+  const [rowStatuses, setRowStatuses] = useState<Record<string, OrderStatus>>({});
 
   const [autoLoad, setAutoLoad] = useState<boolean>(() => {
     try {
@@ -214,11 +206,80 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isAutoLoadingRef = useRef(false);
 
-  // Guardar estados en localStorage
-  useEffect(() => {
-    localStorage.setItem(ROW_STATUS_KEY, JSON.stringify(rowStatuses));
-  }, [rowStatuses]);
+  // ========== FUNCIONES DE BASE DE DATOS PARA ESTADOS ==========
+  
+  // Cargar estados desde la base de datos
+  const loadStatusesFromDatabase = useCallback(async () => {
+    if (!myEmail || !sheetUrl) return;
+    
+    setLoadingStatuses(true);
+    try {
+      const { data, error } = await supabase
+        .from("sheet_row_statuses")
+        .select("row_index, status")
+        .eq("user_email", myEmail)
+        .eq("sheet_url", sheetUrl);
+      
+      if (error) {
+        console.error("Error cargando estados:", error);
+        return;
+      }
+      
+      const statusMap: Record<string, OrderStatus> = {};
+      data?.forEach(item => {
+        statusMap[String(item.row_index)] = item.status as OrderStatus;
+      });
+      
+      setRowStatuses(statusMap);
+      console.log(`📦 Estados cargados desde BD: ${Object.keys(statusMap).length} filas`);
+    } catch (err) {
+      console.error("Error en loadStatusesFromDatabase:", err);
+    } finally {
+      setLoadingStatuses(false);
+    }
+  }, [myEmail, sheetUrl]);
 
+  // Guardar estado en la base de datos
+  const saveStatusToDatabase = useCallback(async (rowIndex: number, status: OrderStatus, orderNumber?: string) => {
+    if (!myEmail || !sheetUrl) return false;
+    
+    try {
+      const { error } = await supabase
+        .from("sheet_row_statuses")
+        .upsert({
+          user_email: myEmail,
+          sheet_url: sheetUrl,
+          row_index: rowIndex,
+          status: status,
+          order_number: orderNumber || null,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'user_email,sheet_url,row_index'
+        });
+      
+      if (error) {
+        console.error("Error guardando estado:", error);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.error("Error en saveStatusToDatabase:", err);
+      return false;
+    }
+  }, [myEmail, sheetUrl]);
+
+  // Actualizar estado local y BD
+  const setRowStatus = useCallback(async (key: string, status: OrderStatus, orderNumber?: string) => {
+    const rowIndex = parseInt(key);
+    
+    // Actualizar UI inmediatamente
+    setRowStatuses((prev) => ({ ...prev, [key]: status }));
+    
+    // Guardar en BD
+    await saveStatusToDatabase(rowIndex, status, orderNumber);
+  }, [saveStatusToDatabase]);
+
+  // Guardar autoLoad en localStorage (sigue siendo local porque es preferencia de UI)
   useEffect(() => {
     localStorage.setItem(AUTO_LOAD_KEY, autoLoad.toString());
     autoLoadRef.current = autoLoad;
@@ -242,6 +303,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     loadPrices();
   }, []);
 
+  // Cargar estados desde BD cuando hay email y sheetUrl
+  useEffect(() => {
+    if (myEmail && sheetUrl) {
+      loadStatusesFromDatabase();
+    }
+  }, [myEmail, sheetUrl, loadStatusesFromDatabase]);
+
+  // Leer sheet solo una vez al inicio
   useEffect(() => {
     if (sheetUrl && !initialLoadDone) {
       readSheet();
@@ -249,7 +318,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   }, [sheetUrl]);
 
-  // ========== DETECCIÓN DE COLUMNAS CON "PRODUCTO OK" ==========
+  // ========== DETECCIÓN DE COLUMNAS ==========
   const colKeys = useMemo(() => {
     const h = sheetHeaders;
     console.log("📋 Headers del Sheet:", h);
@@ -317,7 +386,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     };
   }, [sheetHeaders]);
 
-  // ========== MATCHING EXACTO DE PRODUCTO ==========
+  // ========== MATCHING ==========
   const matchProduct = useCallback(
     (rawName: string) => {
       if (!rawName || rawName === "—" || rawName === "-") return null;
@@ -391,11 +460,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     setLoading(false);
   }, [sheetUrl]);
 
-  const setRowStatus = useCallback((key: string, status: OrderStatus) => {
-    setRowStatuses((prev) => ({ ...prev, [key]: status }));
-  }, []);
-
-  // ========== LOAD ORDER CON obs = "" Y await generateSequentialId ==========
+  // ========== LOAD ORDER ==========
   const loadOrder = useCallback(async (
     order: SheetOrder, 
     idx: number, 
@@ -426,7 +491,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const productCost = matched?.provider_price_gs || 0;
     const qty = parseQuantity(order[colKeys.qty]);
     const commission = salePrice - (productCost + deliveryPrice);
-    const orderId = await generateSequentialId(); // ✅ await
+    const orderId = await generateSequentialId();
     
     const newStatus: OrderStatus = source === "auto" ? "CARGADO" : "CARGADO_MANUAL";
     
@@ -439,7 +504,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       street: (order[colKeys.street] || "").trim(),
       district: (order[colKeys.dept] || "").trim(),
       email: order[colKeys.email] || "",
-      obs: "", // ✅ OBSERVACIÓN VACÍA
+      obs: "",
       items_json: [{ 
         sku: matched.sku || "",
         title: matched.title, 
@@ -460,7 +525,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       toast.error("Error: " + error.message);
       return false;
     } else {
-      setRowStatus(String(idx), newStatus);
+      await setRowStatus(String(idx), newStatus, orderId);
       if (commission >= 0) {
         toast.success(`✅ Pedido ${orderId} cargado (${source === "auto" ? "Automático" : "Manual"}) | 💰 Comisión: +${commission.toLocaleString("es-PY")} Gs`);
       } else {
@@ -495,7 +560,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     });
   }, [colKeys, onSheetConfirm]);
 
-  // ========== BULK LOAD CON obs = "" Y await generateSequentialId ==========
+  // ========== BULK LOAD ==========
   const handleBulkLoad = useCallback(async () => {
     let count = 0;
     let errors = 0;
@@ -532,7 +597,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       const productCost = matched?.provider_price_gs || 0;
       const qty = parseQuantity(order[colKeys.qty]);
       const commission = salePrice - (productCost + deliveryPrice);
-      const orderId = await generateSequentialId(); // ✅ await
+      const orderId = await generateSequentialId();
       
       const payload = {
         order_number: orderId,
@@ -543,7 +608,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         street: (order[colKeys.street] || "").trim(),
         district: (order[colKeys.dept] || "").trim(),
         email: order[colKeys.email] || "",
-        obs: "", // ✅ OBSERVACIÓN VACÍA
+        obs: "",
         items_json: [{ 
           sku: matched.sku || "",
           title: matched.title, 
@@ -562,7 +627,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       if (error) {
         errors++;
       } else {
-        setRowStatus(String(i), "CARGADO");
+        await setRowStatus(String(i), "CARGADO", orderId);
         count++;
         totalCommission += commission;
       }
@@ -573,7 +638,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     toast.success(`✅ ${count} cargados | ❌ ${errors} errores | ⏭️ ${skippedNoProduct} sin producto | 🚫 ${skippedNoCoverage} sin cobertura | 💰 ${skippedNoAmount} sin monto | 💰 Comisión total: ${totalCommission.toLocaleString("es-PY")} Gs`);
   }, [sheetOrders, rowStatuses, colKeys, matchProduct, getCityPrice, myEmail, setRowStatus]);
 
-  // ========== AUTO LOAD ORDERS CON obs = "" Y await generateSequentialId ==========
+  // ========== AUTO LOAD ORDERS ==========
   const autoLoadOrders = useCallback(async () => {
     if (isAutoLoadingRef.current) {
       console.log("⏸️ Auto-carga ya en ejecución, omitiendo...");
@@ -614,7 +679,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         const productCost = matched?.provider_price_gs || 0;
         const qty = parseQuantity(order[colKeys.qty]);
         const commission = salePrice - (productCost + deliveryPrice);
-        const orderId = await generateSequentialId(); // ✅ await
+        const orderId = await generateSequentialId();
         
         const payload = {
           order_number: orderId,
@@ -625,7 +690,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           street: (order[colKeys.street] || "").trim(),
           district: (order[colKeys.dept] || "").trim(),
           email: order[colKeys.email] || "",
-          obs: "", // ✅ OBSERVACIÓN VACÍA
+          obs: "",
           items_json: [{ 
             sku: matched.sku || "",
             title: matched.title, 
@@ -642,7 +707,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         
         const { error } = await supabase.from("orders").insert(payload);
         if (!error) {
-          setRowStatus(String(i), "CARGADO");
+          await setRowStatus(String(i), "CARGADO", orderId);
           count++;
           totalCommission += commission;
           console.log(`✅ Auto-cargado: ${orderId} (fila ${i + 1})`);
@@ -673,11 +738,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     
     if (!autoLoadRef.current) return;
     
+    // Recargar estados desde BD después de leer el sheet
+    await loadStatusesFromDatabase();
+    
     await new Promise(resolve => setTimeout(resolve, 500));
     
     await autoLoadOrders();
     console.log("✅ Ciclo completado");
-  }, [readSheet, autoLoadOrders]);
+  }, [readSheet, autoLoadOrders, loadStatusesFromDatabase]);
 
   // Efecto para la auto-carga con intervalo
   useEffect(() => {
@@ -793,6 +861,17 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       </span>
     );
   };
+
+  if (loadingStatuses) {
+    return (
+      <div className="app-card">
+        <div className="flex items-center justify-center py-8">
+          <div className="btn-spinner mr-2" />
+          <span>Cargando estados desde base de datos...</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="app-card">
