@@ -7,7 +7,9 @@ const nf = (n: number) => new Intl.NumberFormat("es-PY").format(n);
 
 type SheetOrder = Record<string, string>;
 
+const ROW_STATUS_KEY = "shopify_row_statuses_v5";
 const AUTO_LOAD_KEY = "shopify_auto_load_enabled";
+const LAST_ORDER_KEY = "shopify_last_order_number";
 
 // ========== FUNCIONES CORREGIDAS ==========
 
@@ -116,10 +118,11 @@ const getAmountFromRow = (order: SheetOrder, amountColumn: string): number => {
 };
 
 const generateSequentialId = (): string => {
-  // Usar timestamp + random en lugar de secuencia guardada en localStorage
-  const timestamp = Date.now().toString().slice(-6);
-  const random = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-  return `SHOPIFY${timestamp}${random}`;
+  let lastNumber = parseInt(localStorage.getItem(LAST_ORDER_KEY) || '0', 10);
+  const newNumber = lastNumber + 1;
+  localStorage.setItem(LAST_ORDER_KEY, newNumber.toString());
+  const paddedNumber = newNumber.toString().padStart(3, '0');
+  return `SHOPIFY${paddedNumber}`;
 };
 
 interface ShopifyInboxProps {
@@ -143,10 +146,23 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [products, setProducts] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
 
-  // Estado en memoria (sin localStorage)
-  const [rowStatuses, setRowStatuses] = useState<Record<string, string>>({});
+  const [rowStatuses, setRowStatuses] = useState<Record<string, string>>(() => {
+    try { 
+      const saved = localStorage.getItem(ROW_STATUS_KEY);
+      return saved ? JSON.parse(saved) : {};
+    } catch { 
+      return {}; 
+    }
+  });
 
-  const [autoLoad, setAutoLoad] = useState<boolean>(false);
+  const [autoLoad, setAutoLoad] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem(AUTO_LOAD_KEY);
+      return saved === "true";
+    } catch {
+      return false;
+    }
+  });
 
   const filterOnlyAvailable = true;
   const filterOnlyCoverage = true;
@@ -157,47 +173,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isAutoLoadingRef = useRef(false);
 
-  // Guardar autoLoad en ref (sin localStorage)
   useEffect(() => {
+    localStorage.setItem(ROW_STATUS_KEY, JSON.stringify(rowStatuses));
+  }, [rowStatuses]);
+
+  useEffect(() => {
+    localStorage.setItem(AUTO_LOAD_KEY, autoLoad.toString());
     autoLoadRef.current = autoLoad;
   }, [autoLoad]);
-
-  // Efecto para refrescar cuando la pestaña se activa
-  useEffect(() => {
-    if (!sheetUrl) return;
-    
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        console.log("👁️ Pestaña activada - Refrescando sheet...");
-        readSheet();
-      }
-    };
-    
-    const handleWindowFocus = () => {
-      console.log("🪟 Ventana enfocada - Refrescando sheet...");
-      readSheet();
-    };
-    
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('focus', handleWindowFocus);
-    
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('focus', handleWindowFocus);
-    };
-  }, [sheetUrl, readSheet]);
-
-  // Efecto para refresco automático cada 30 segundos
-  useEffect(() => {
-    if (!sheetUrl) return;
-    
-    const interval = setInterval(() => {
-      console.log("⏰ Refresco automático cada 30 segundos");
-      readSheet();
-    }, 30000);
-    
-    return () => clearInterval(interval);
-  }, [sheetUrl, readSheet]);
 
   useEffect(() => {
     const loadProducts = async () => {
@@ -314,65 +297,21 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     [products],
   );
 
-  // FUNCIÓN MEJORADA: getCityPrice con reconocimiento por primeras letras
   const getCityPrice = useCallback(
     (cityName: string) => {
       if (!cityName) return null;
       const q = cityName.toLowerCase().trim();
-      
-      // 1. Búsqueda exacta
-      let match = clientPrices.find((cp) => cp.city?.toLowerCase().trim() === q);
-      if (match) return match.price_gs;
-      
-      // 2. Búsqueda por primeras 3-4 letras
-      const prefixes = [4, 3];
-      for (const len of prefixes) {
-        if (q.length >= len) {
-          const prefix = q.substring(0, len);
-          match = clientPrices.find((cp) => {
-            const cityClean = cp.city?.toLowerCase().trim();
-            return cityClean?.startsWith(prefix);
-          });
-          if (match) return match.price_gs;
-        }
-      }
-      
-      // 3. Búsqueda por inclusión
-      match = clientPrices.find((cp) => {
-        const cityClean = cp.city?.toLowerCase().trim();
-        return cityClean?.includes(q) || q.includes(cityClean);
-      });
-      
+      const match = clientPrices.find((cp) => cp.city?.toLowerCase().trim() === q);
       return match ? match.price_gs : null;
     },
     [clientPrices],
   );
 
-  // FUNCIÓN MEJORADA: hasCoverage con reconocimiento por primeras letras
   const hasCoverage = useCallback(
     (cityName: string) => {
       if (!cityName) return false;
       const q = cityName.toLowerCase().trim();
-      
-      // Búsqueda exacta
-      if (clientPrices.some((cp) => cp.city?.toLowerCase().trim() === q)) return true;
-      
-      // Búsqueda por primeras 3-4 letras
-      const prefixes = [4, 3];
-      for (const len of prefixes) {
-        if (q.length >= len) {
-          const prefix = q.substring(0, len);
-          if (clientPrices.some((cp) => cp.city?.toLowerCase().trim().startsWith(prefix))) {
-            return true;
-          }
-        }
-      }
-      
-      // Búsqueda por inclusión
-      return clientPrices.some((cp) => {
-        const cityClean = cp.city?.toLowerCase().trim();
-        return cityClean?.includes(q) || q.includes(cityClean);
-      });
+      return clientPrices.some((cp) => cp.city?.toLowerCase().trim() === q);
     },
     [clientPrices],
   );
@@ -385,14 +324,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     
     setLoading(true);
     try {
-      const resp = await fetch(`/api/read-sheet?url=${encodeURIComponent(sheetUrl)}&t=${Date.now()}`, {
-        cache: 'no-store',
-        headers: {
-          'Cache-Control': 'no-cache, no-store, must-revalidate',
-          'Pragma': 'no-cache',
-          'Expires': '0'
-        }
-      });
+      const resp = await fetch(`/api/read-sheet?url=${encodeURIComponent(sheetUrl)}&t=${Date.now()}`);
       const json = await resp.json();
 
       if (json.error) {
@@ -573,14 +505,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     toast.success(`✅ ${count} cargados | ❌ ${errors} errores | ⏭️ ${skippedNoProduct} sin producto | 🚫 ${skippedNoCoverage} sin cobertura | 💰 ${skippedNoAmount} sin monto | 💰 Comisión total: ${totalCommission.toLocaleString("es-PY")} Gs`);
   }, [sheetOrders, rowStatuses, colKeys, matchProduct, getCityPrice, myEmail, setRowStatus]);
 
-  // Función para refrescar todo (resetear estados)
-  const handleFullRefresh = useCallback(() => {
-    setRowStatuses({}); // Resetear todos los estados
-    readSheet(); // Refrescar sheet
-    toast.info("🔄 Datos refrescados - Todos los pedidos están como CARGAR");
-  }, [readSheet]);
-
-  // Funciones de auto-carga
+  // ========== FUNCIONES DE AUTO-CARGA CORREGIDAS ==========
+  
   const autoLoadOrders = useCallback(async () => {
     if (isAutoLoadingRef.current) {
       console.log("⏸️ Auto-carga ya en ejecución, omitiendo...");
@@ -593,6 +519,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     let totalCommission = 0;
     
     try {
+      // Crear una copia de los índices pendientes
       const pendingIndices = sheetOrders
         .map((_, i) => i)
         .filter(i => {
@@ -603,6 +530,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       console.log(`🤖 Auto-carga: ${pendingIndices.length} pedidos pendientes`);
       
       for (const i of pendingIndices) {
+        // Verificar estado nuevamente
         const currentStatus = rowStatuses[String(i)] || "CARGAR";
         if (currentStatus !== "CARGAR") continue;
         
@@ -680,6 +608,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     
     if (!autoLoadRef.current) return;
     
+    // Pequeña pausa para que el estado se actualice
     await new Promise(resolve => setTimeout(resolve, 500));
     
     await autoLoadOrders();
@@ -689,12 +618,15 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   // Efecto para la auto-carga con intervalo
   useEffect(() => {
     if (autoLoad && sheetUrl) {
+      // Limpiar intervalo anterior
       if (intervalRef.current) clearInterval(intervalRef.current);
       
+      // Ejecutar primera carga inmediatamente
       setTimeout(() => {
         runAutoCycle();
       }, 2000);
       
+      // Configurar intervalo cada 60 segundos
       intervalRef.current = setInterval(() => {
         runAutoCycle();
       }, 60000);
@@ -769,9 +701,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           <button className="nav-btn active" onClick={handleBulkLoad} disabled={!sheetOrders.length}>
             🚀 Cargar todos
           </button>
-          <button className="nav-btn active" onClick={handleFullRefresh}>
-            🔄 Refrescar todo
-          </button>
           <button className={`nav-btn ${autoLoad ? "!bg-green-600 !text-white" : ""}`} onClick={toggleAutoLoad}>
             {autoLoad ? "🤖 Auto-carga ON" : "🤖 Auto-carga OFF"}
           </button>
@@ -786,9 +715,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             🤖 Auto-carga activa — Ciclo cada 60 segundos
           </div>
         )}
-        <div className="text-xs text-blue-400 mt-1">
-          🔄 Refresco automático al volver a la pestaña | Auto-refresco cada 30 segundos
-        </div>
       </div>
 
       <div className="flex flex-wrap gap-4 mb-3">
@@ -805,7 +731,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
       <div className="text-xs text-muted-foreground mb-2">
         {filteredOrders.length} pendientes de {sheetOrders.length} filas totales
-        {loadedCount > 0 && ` (${loadedCount} ya cargados en esta sesión)`}
+        {loadedCount > 0 && ` (${loadedCount} ya cargados)`}
       </div>
 
       <div className="overflow-auto">
