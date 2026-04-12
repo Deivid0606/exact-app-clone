@@ -29,7 +29,6 @@ const normalizeText = (text: string): string => {
     .replace(/[^a-z0-9]/g, "");
 };
 
-// Función para limpiar cantidad - Maneja "1\n1" correctamente
 function parseQuantity(value: any): number {
   if (!value) return 1;
   
@@ -47,7 +46,6 @@ function parseQuantity(value: any): number {
   return isNaN(num) ? 1 : num;
 }
 
-// Función para limpiar monto
 function parseMoney(v: string): number {
   if (!v) return 0;
   
@@ -65,7 +63,6 @@ function parseMoney(v: string): number {
   return Math.round(Number(cleaned) || 0);
 }
 
-// Función CORREGIDA - Busca SOLO el número correcto (precio)
 const findAmountInRow = (row: SheetOrder): number => {
   const excludeColumns = [
     "telefono", "phone", "tel", "celular", "whatsapp", "cel", "movil",
@@ -101,7 +98,6 @@ const findAmountInRow = (row: SheetOrder): number => {
   return 0;
 };
 
-// Función para obtener el monto de una fila
 const getAmountFromRow = (order: SheetOrder, amountColumn: string): number => {
   if (amountColumn && order[amountColumn]) {
     const parsed = parseMoney(order[amountColumn]);
@@ -121,7 +117,6 @@ const getAmountFromRow = (order: SheetOrder, amountColumn: string): number => {
   return 0;
 };
 
-// Generar ID secuencial
 const generateSequentialId = (): string => {
   let lastNumber = parseInt(localStorage.getItem(LAST_ORDER_KEY) || '0', 10);
   const newNumber = lastNumber + 1;
@@ -206,14 +201,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       setInitialLoadDone(true);
     }
   }, [sheetUrl]);
-
-  useEffect(() => {
-    if (autoLoad && sheetUrl) {
-      setTimeout(() => {
-        runAutoCycle();
-      }, 2000);
-    }
-  }, [autoLoad, sheetUrl]);
 
   // Detección de columnas
   const colKeys = useMemo(() => {
@@ -329,7 +316,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     [clientPrices],
   );
 
-  const readSheet = async () => {
+  const readSheet = useCallback(async () => {
     if (!sheetUrl) {
       toast.error("Configurá tu URL de Google Sheet en tu perfil");
       return;
@@ -346,18 +333,19 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         setSheetHeaders(json.headers || []);
         setSheetOrders(json.orders || []);
         setLastSync(new Date());
+        console.log("📊 Sheet actualizado:", json.orders?.length, "filas");
       }
     } catch (err: any) {
       toast.error("Error leyendo Sheet: " + (err.message || err));
     }
     setLoading(false);
-  };
+  }, [sheetUrl]);
 
-  const setRowStatus = (key: string, status: string) => {
+  const setRowStatus = useCallback((key: string, status: string) => {
     setRowStatuses((prev) => ({ ...prev, [key]: status }));
-  };
+  }, []);
 
-  const handleDirectSave = async (order: SheetOrder, idx: number) => {
+  const handleDirectSave = useCallback(async (order: SheetOrder, idx: number) => {
     const productName = order[colKeys.product] || "";
     const matched = matchProduct(productName);
     if (!matched) {
@@ -421,9 +409,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         toast.warning(`⚠️ Pedido ${orderId} cargado | 💰 Comisión NEGATIVA: ${commission.toLocaleString("es-PY")} Gs`);
       }
     }
-  };
+  }, [colKeys, matchProduct, getCityPrice, myEmail, setRowStatus]);
 
-  const handleOpenForm = (order: SheetOrder, idx: number) => {
+  const handleOpenForm = useCallback((order: SheetOrder, idx: number) => {
     if (!onSheetConfirm) return;
     
     const salePrice = getAmountFromRow(order, colKeys.amount);
@@ -438,9 +426,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       totalGs: salePrice,
       qty: parseQuantity(order[colKeys.qty]),
     });
-  };
+  }, [colKeys, onSheetConfirm]);
 
-  const handleBulkLoad = async () => {
+  const handleBulkLoad = useCallback(async () => {
     let count = 0;
     let errors = 0;
     let skippedNoProduct = 0;
@@ -515,94 +503,155 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
     
     toast.success(`✅ ${count} cargados | ❌ ${errors} errores | ⏭️ ${skippedNoProduct} sin producto | 🚫 ${skippedNoCoverage} sin cobertura | 💰 ${skippedNoAmount} sin monto | 💰 Comisión total: ${totalCommission.toLocaleString("es-PY")} Gs`);
-  };
+  }, [sheetOrders, rowStatuses, colKeys, matchProduct, getCityPrice, myEmail, setRowStatus]);
 
-  const autoLoadOrders = async () => {
-    if (isAutoLoadingRef.current) return;
+  // ========== FUNCIONES DE AUTO-CARGA CORREGIDAS ==========
+  
+  const autoLoadOrders = useCallback(async () => {
+    if (isAutoLoadingRef.current) {
+      console.log("⏸️ Auto-carga ya en ejecución, omitiendo...");
+      return;
+    }
+    
     isAutoLoadingRef.current = true;
     
     let count = 0;
     let totalCommission = 0;
     
-    for (let i = 0; i < sheetOrders.length; i++) {
-      const currentStatus = rowStatuses[String(i)] || "CARGAR";
-      if (currentStatus !== "CARGAR") continue;
+    try {
+      // Crear una copia de los índices pendientes
+      const pendingIndices = sheetOrders
+        .map((_, i) => i)
+        .filter(i => {
+          const currentStatus = rowStatuses[String(i)] || "CARGAR";
+          return currentStatus === "CARGAR";
+        });
       
-      const order = sheetOrders[i];
-      const productName = order[colKeys.product] || "";
-      const matched = matchProduct(productName);
-      if (!matched) continue;
+      console.log(`🤖 Auto-carga: ${pendingIndices.length} pedidos pendientes`);
       
-      const city = order[colKeys.city] || "";
-      const deliveryPrice = getCityPrice(city);
-      if (!deliveryPrice) continue;
-      
-      const salePrice = getAmountFromRow(order, colKeys.amount);
-      if (salePrice === 0) continue;
-      
-      const productCost = matched?.provider_price_gs || 0;
-      const qty = parseQuantity(order[colKeys.qty]);
-      const commission = salePrice - (productCost + deliveryPrice);
-      const orderId = generateSequentialId();
-      
-      const payload = {
-        order_number: orderId,
-        created_by: myEmail,
-        customer_name: (order[colKeys.name] || "").trim(),
-        phone: extractPhoneNumber(order[colKeys.phone] || ""),
-        city: city,
-        street: (order[colKeys.street] || "").trim(),
-        district: (order[colKeys.dept] || "").trim(),
-        email: order[colKeys.email] || "",
-        obs: `💰 Comisión: ${commission.toLocaleString("es-PY")} Gs | Venta: ${salePrice.toLocaleString("es-PY")} Gs | Costo: ${productCost.toLocaleString("es-PY")} Gs | Delivery: ${deliveryPrice.toLocaleString("es-PY")} Gs | Producto: ${matched.title}`,
-        items_json: [{ 
-          sku: matched.sku || "",
-          title: matched.title, 
-          qty: qty, 
-          sale_gs: salePrice,
-          provider_price_gs: productCost,
-          provider_email: matched.provider_email || "",
-        }],
-        total_gs: salePrice * qty,
-        delivery_gs: deliveryPrice,
-        commission_gs: commission,
-        provider_emails_list: matched.provider_email || "",
-      };
-      
-      const { error } = await supabase.from("orders").insert(payload);
-      if (!error) {
-        setRowStatus(String(i), "CARGADO");
-        count++;
-        totalCommission += commission;
-        await new Promise(resolve => setTimeout(resolve, 100));
+      for (const i of pendingIndices) {
+        // Verificar estado nuevamente
+        const currentStatus = rowStatuses[String(i)] || "CARGAR";
+        if (currentStatus !== "CARGAR") continue;
+        
+        const order = sheetOrders[i];
+        const productName = order[colKeys.product] || "";
+        const matched = matchProduct(productName);
+        if (!matched) continue;
+        
+        const city = order[colKeys.city] || "";
+        const deliveryPrice = getCityPrice(city);
+        if (!deliveryPrice) continue;
+        
+        const salePrice = getAmountFromRow(order, colKeys.amount);
+        if (salePrice === 0) continue;
+        
+        const productCost = matched?.provider_price_gs || 0;
+        const qty = parseQuantity(order[colKeys.qty]);
+        const commission = salePrice - (productCost + deliveryPrice);
+        const orderId = generateSequentialId();
+        
+        const payload = {
+          order_number: orderId,
+          created_by: myEmail,
+          customer_name: (order[colKeys.name] || "").trim(),
+          phone: extractPhoneNumber(order[colKeys.phone] || ""),
+          city: city,
+          street: (order[colKeys.street] || "").trim(),
+          district: (order[colKeys.dept] || "").trim(),
+          email: order[colKeys.email] || "",
+          obs: `💰 Comisión: ${commission.toLocaleString("es-PY")} Gs | Venta: ${salePrice.toLocaleString("es-PY")} Gs | Costo: ${productCost.toLocaleString("es-PY")} Gs | Delivery: ${deliveryPrice.toLocaleString("es-PY")} Gs | Producto: ${matched.title}`,
+          items_json: [{ 
+            sku: matched.sku || "",
+            title: matched.title, 
+            qty: qty, 
+            sale_gs: salePrice,
+            provider_price_gs: productCost,
+            provider_email: matched.provider_email || "",
+          }],
+          total_gs: salePrice * qty,
+          delivery_gs: deliveryPrice,
+          commission_gs: commission,
+          provider_emails_list: matched.provider_email || "",
+        };
+        
+        const { error } = await supabase.from("orders").insert(payload);
+        if (!error) {
+          setRowStatus(String(i), "CARGADO");
+          count++;
+          totalCommission += commission;
+          console.log(`✅ Auto-cargado: ${orderId} (fila ${i + 1})`);
+          await new Promise(resolve => setTimeout(resolve, 100));
+        } else {
+          console.error(`❌ Error fila ${i + 1}:`, error);
+        }
       }
+    } catch (err) {
+      console.error("Error en autoLoadOrders:", err);
+    } finally {
+      isAutoLoadingRef.current = false;
     }
     
-    isAutoLoadingRef.current = false;
     if (count > 0) {
       toast.success(`🤖 Auto: ${count} cargados | 💰 Comisión: ${totalCommission.toLocaleString("es-PY")} Gs`);
     }
-  };
+  }, [sheetOrders, rowStatuses, colKeys, matchProduct, getCityPrice, myEmail, setRowStatus]);
 
-  const runAutoCycle = async () => {
-    if (!autoLoadRef.current) return;
-    await readSheet();
-    if (!autoLoadRef.current) return;
-    await autoLoadOrders();
-  };
-
-  useEffect(() => {
-    if (autoLoad) {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      intervalRef.current = setInterval(runAutoCycle, 60000);
-    } else {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      intervalRef.current = null;
+  const runAutoCycle = useCallback(async () => {
+    if (!autoLoadRef.current) {
+      console.log("⏹️ Auto-carga desactivada");
+      return;
     }
-    return () => {
+    
+    console.log("🔄 Ciclo de auto-carga iniciado...");
+    await readSheet();
+    
+    if (!autoLoadRef.current) return;
+    
+    // Pequeña pausa para que el estado se actualice
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    await autoLoadOrders();
+    console.log("✅ Ciclo completado");
+  }, [readSheet, autoLoadOrders]);
+
+  // Efecto para la auto-carga con intervalo
+  useEffect(() => {
+    if (autoLoad && sheetUrl) {
+      // Limpiar intervalo anterior
       if (intervalRef.current) clearInterval(intervalRef.current);
+      
+      // Ejecutar primera carga inmediatamente
+      setTimeout(() => {
+        runAutoCycle();
+      }, 2000);
+      
+      // Configurar intervalo cada 60 segundos
+      intervalRef.current = setInterval(() => {
+        runAutoCycle();
+      }, 60000);
+      
+      console.log("🤖 Auto-carga activada - Ciclo cada 60 segundos");
+    } else {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    }
+    
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
     };
-  }, [autoLoad]);
+  }, [autoLoad, sheetUrl, runAutoCycle]);
+
+  const toggleAutoLoad = () => {
+    const newValue = !autoLoad;
+    setAutoLoad(newValue);
+    toast.info(newValue ? "🤖 Auto-carga activada" : "⏹️ Auto-carga desactivada");
+  };
 
   const getDisplayAmount = (order: SheetOrder) => {
     return getAmountFromRow(order, colKeys.amount);
@@ -634,12 +683,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
   const statusOpts = ["CARGAR", "A DROPEAR", "CANCELADO"];
   const loadedCount = Object.values(rowStatuses).filter(s => s === "CARGADO").length;
-
-  const toggleAutoLoad = () => {
-    const newValue = !autoLoad;
-    setAutoLoad(newValue);
-    toast.info(newValue ? "🤖 Auto-carga activada" : "⏹️ Auto-carga desactivada");
-  };
 
   return (
     <div className="app-card">
