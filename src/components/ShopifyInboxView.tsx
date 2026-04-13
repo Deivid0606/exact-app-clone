@@ -34,8 +34,10 @@ const normalizeText = (text: string): string => {
 const normalizeCityName = (city: string): string => {
   if (!city) return "";
   
+  // Limpiar sufijos como " - ALTO PARANÁ"
   let normalized = city.split("-")[0].trim();
   
+  // Normalizar: minúsculas, sin tildes, sin caracteres especiales
   normalized = normalized
     .toLowerCase()
     .normalize("NFD")
@@ -136,12 +138,10 @@ const getAmountFromRow = (order: SheetOrder, amountColumn: string): number => {
 // ========== GENERA ID SECUENCIAL CORTO ==========
 const generateSequentialId = async (): Promise<string> => {
   try {
-    // Llamar a la función SQL que genera el ID
     const { data, error } = await supabase.rpc('get_next_order_number');
     
     if (error) {
       console.error("Error generando ID:", error);
-      // Fallback: usar timestamp si hay error
       return `SHOPIFY${Date.now()}`;
     }
     
@@ -204,7 +204,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
   // ========== FUNCIONES DE BASE DE DATOS PARA ESTADOS ==========
   
-  // Cargar estados desde la base de datos
   const loadStatusesFromDatabase = useCallback(async () => {
     if (!myEmail || !sheetUrl) return;
     
@@ -235,7 +234,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   }, [myEmail, sheetUrl]);
 
-  // Guardar estado en la base de datos
   const saveStatusToDatabase = useCallback(async (rowIndex: number, status: OrderStatus, orderNumber?: string) => {
     if (!myEmail || !sheetUrl) return false;
     
@@ -264,18 +262,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   }, [myEmail, sheetUrl]);
 
-  // Actualizar estado local y BD
   const setRowStatus = useCallback(async (key: string, status: OrderStatus, orderNumber?: string) => {
     const rowIndex = parseInt(key);
     
-    // Actualizar UI inmediatamente
     setRowStatuses((prev) => ({ ...prev, [key]: status }));
     
-    // Guardar en BD
     await saveStatusToDatabase(rowIndex, status, orderNumber);
   }, [saveStatusToDatabase]);
 
-  // Guardar autoLoad en localStorage (sigue siendo local porque es preferencia de UI)
   useEffect(() => {
     localStorage.setItem(AUTO_LOAD_KEY, autoLoad.toString());
     autoLoadRef.current = autoLoad;
@@ -285,7 +279,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     localStorage.setItem(ACTIVE_FILTER_KEY, activeFilter);
   }, [activeFilter]);
 
-  // Cargar productos y precios
   useEffect(() => {
     const loadProducts = async () => {
       const { data } = await supabase.from("products").select("*");
@@ -299,14 +292,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     loadPrices();
   }, []);
 
-  // Cargar estados desde BD cuando hay email y sheetUrl
   useEffect(() => {
     if (myEmail && sheetUrl) {
       loadStatusesFromDatabase();
     }
   }, [myEmail, sheetUrl, loadStatusesFromDatabase]);
 
-  // Leer sheet solo una vez al inicio
   useEffect(() => {
     if (sheetUrl && !initialLoadDone) {
       readSheet();
@@ -535,9 +526,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     await loadOrder(order, idx, "auto");
   }, [loadOrder]);
 
-  // ✅ CORREGIDO: handleManualSave ahora SOLO cambia el estado, NO carga a la BD
   const handleManualSave = useCallback(async (order: SheetOrder, idx: number) => {
-    // Solo cambiar el estado a CARGADO_MANUAL, sin cargar a la base de datos
     await setRowStatus(String(idx), "CARGADO_MANUAL");
     toast.info(`✍️ Pedido marcado como "Cargado Manual" - Usa el botón "Formulario" para completar la carga`);
   }, [setRowStatus]);
@@ -737,7 +726,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     
     if (!autoLoadRef.current) return;
     
-    // Recargar estados desde BD después de leer el sheet
     await loadStatusesFromDatabase();
     
     await new Promise(resolve => setTimeout(resolve, 500));
@@ -746,7 +734,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     console.log("✅ Ciclo completado");
   }, [readSheet, autoLoadOrders, loadStatusesFromDatabase]);
 
-  // Efecto para la auto-carga con intervalo
   useEffect(() => {
     if (autoLoad && sheetUrl) {
       if (intervalRef.current) clearInterval(intervalRef.current);
