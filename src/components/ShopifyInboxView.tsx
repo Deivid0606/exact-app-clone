@@ -34,10 +34,8 @@ const normalizeText = (text: string): string => {
 const normalizeCityName = (city: string): string => {
   if (!city) return "";
   
-  // Limpiar sufijos como " - ALTO PARANÁ"
   let normalized = city.split("-")[0].trim();
   
-  // Normalizar: minúsculas, sin tildes, sin caracteres especiales
   normalized = normalized
     .toLowerCase()
     .normalize("NFD")
@@ -135,19 +133,55 @@ const getAmountFromRow = (order: SheetOrder, amountColumn: string): number => {
   return 0;
 };
 
-// ========== GENERA ID SECUENCIAL CORTO ==========
-const generateSequentialId = async (): Promise<string> => {
+// ========== GENERA ID PARA PEDIDOS NORMALES (A302, A303, etc.) ==========
+const generateNormalOrderId = async (): Promise<string> => {
   try {
     const { data, error } = await supabase.rpc('get_next_order_number');
     
     if (error) {
-      console.error("Error generando ID:", error);
-      return `SHOPIFY${Date.now()}`;
+      console.error("Error generando ID normal:", error);
+      return `A${Date.now()}`;
     }
     
     return data;
   } catch (err) {
-    console.error("Error en generateSequentialId:", err);
+    console.error("Error en generateNormalOrderId:", err);
+    return `A${Date.now()}`;
+  }
+};
+
+// ========== GENERA ID PARA SHOPIFY/SHOPIFY (SHOPIFY001, SHOPIFY002, etc.) ==========
+const generateShopifyOrderId = async (): Promise<string> => {
+  try {
+    // Intentar usar la función SQL específica para Shopify
+    const { data, error } = await supabase.rpc('get_next_shopify_order_number');
+    
+    if (!error && data) {
+      return data;
+    }
+    
+    // Fallback: calcular manualmente
+    const { data: orders, error: fetchError } = await supabase
+      .from('orders')
+      .select('order_number')
+      .ilike('order_number', 'SHOPIFY%');
+    
+    if (fetchError) throw fetchError;
+    
+    let maxNumber = 0;
+    orders?.forEach(order => {
+      const match = order.order_number.match(/SHOPIFY(\d+)/);
+      if (match) {
+        const num = parseInt(match[1], 10);
+        if (num > maxNumber) maxNumber = num;
+      }
+    });
+    
+    const nextNumber = maxNumber + 1;
+    const padded = String(nextNumber).padStart(3, '0');
+    return `SHOPIFY${padded}`;
+  } catch (err) {
+    console.error("Error en generateShopifyOrderId:", err);
     return `SHOPIFY${Date.now()}`;
   }
 };
@@ -447,7 +481,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     setLoading(false);
   }, [sheetUrl]);
 
-  // ========== LOAD ORDER ==========
+  // ========== LOAD ORDER (MODIFICADO: usa generateShopifyOrderId para Shopify) ==========
   const loadOrder = useCallback(async (
     order: SheetOrder, 
     idx: number, 
@@ -478,7 +512,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const productCost = matched?.provider_price_gs || 0;
     const qty = parseQuantity(order[colKeys.qty]);
     const commission = salePrice - (productCost + deliveryPrice);
-    const orderId = await generateSequentialId();
+    
+    // 🔥 CAMBIO IMPORTANTE: Usar ID de Shopify para pedidos de esta pestaña
+    const orderId = await generateShopifyOrderId();
     
     const newStatus: OrderStatus = source === "auto" ? "CARGADO" : "CARGADO_MANUAL";
     
@@ -548,7 +584,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     });
   }, [colKeys, onSheetConfirm]);
 
-  // ========== BULK LOAD ==========
+  // ========== BULK LOAD (MODIFICADO: usa generateShopifyOrderId) ==========
   const handleBulkLoad = useCallback(async () => {
     let count = 0;
     let errors = 0;
@@ -585,7 +621,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       const productCost = matched?.provider_price_gs || 0;
       const qty = parseQuantity(order[colKeys.qty]);
       const commission = salePrice - (productCost + deliveryPrice);
-      const orderId = await generateSequentialId();
+      
+      // 🔥 CAMBIO: Usar ID de Shopify
+      const orderId = await generateShopifyOrderId();
       
       const payload = {
         order_number: orderId,
@@ -626,7 +664,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     toast.success(`✅ ${count} cargados | ❌ ${errors} errores | ⏭️ ${skippedNoProduct} sin producto | 🚫 ${skippedNoCoverage} sin cobertura | 💰 ${skippedNoAmount} sin monto | 💰 Comisión total: ${totalCommission.toLocaleString("es-PY")} Gs`);
   }, [sheetOrders, rowStatuses, colKeys, matchProduct, getCityPrice, myEmail, setRowStatus]);
 
-  // ========== AUTO LOAD ORDERS ==========
+  // ========== AUTO LOAD ORDERS (MODIFICADO: usa generateShopifyOrderId) ==========
   const autoLoadOrders = useCallback(async () => {
     if (isAutoLoadingRef.current) {
       console.log("⏸️ Auto-carga ya en ejecución, omitiendo...");
@@ -667,7 +705,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         const productCost = matched?.provider_price_gs || 0;
         const qty = parseQuantity(order[colKeys.qty]);
         const commission = salePrice - (productCost + deliveryPrice);
-        const orderId = await generateSequentialId();
+        
+        // 🔥 CAMBIO: Usar ID de Shopify
+        const orderId = await generateShopifyOrderId();
         
         const payload = {
           order_number: orderId,
