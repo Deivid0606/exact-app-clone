@@ -53,6 +53,23 @@ const canAccessProduct = (product: any, profile: any) => {
   return false;
 };
 
+// ========== FUNCIÓN PARA GENERAR ID SECUENCIAL (A390, A391, etc.) ==========
+const generateNormalOrderId = async (): Promise<string> => {
+  try {
+    const { data, error } = await supabase.rpc('get_next_order_number');
+    
+    if (error) {
+      console.error("Error generando ID normal:", error);
+      return `A${Date.now()}`;
+    }
+    
+    return data; // Retorna "A390", "A391", etc.
+  } catch (err) {
+    console.error("Error en generateNormalOrderId:", err);
+    return `A${Date.now()}`;
+  }
+};
+
 export default function CreateOrderView({
   initialSku,
   onSkuConsumed,
@@ -272,11 +289,15 @@ export default function CreateOrderView({
     setSaving(true);
 
     try {
+      // 🔥 GENERAR ID SECUENCIAL (A390, A391, etc.)
+      const orderNumber = await generateNormalOrderId();
+      
       const providerEmails = [
         ...new Set(validItems.map((i) => catalogMap[i.sku]?.provider_email).filter(Boolean)),
       ];
 
       const payload = {
+        order_number: orderNumber, // ✅ AHORA SÍ, pasamos el ID correcto
         created_by: profile?.email || null,
         customer_name: customer,
         phone,
@@ -307,7 +328,7 @@ export default function CreateOrderView({
 
       if (insertError) throw insertError;
 
-      const generatedOrderNumber = insertedOrder?.order_number || insertedOrder?.id || 'SIN-NUMERO';
+      const generatedOrderNumber = insertedOrder?.order_number || orderNumber;
 
       const { error: newsError } = await supabase.from('news').insert({
         order_id: String(generatedOrderNumber),
