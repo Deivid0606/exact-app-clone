@@ -133,27 +133,23 @@ const getAmountFromRow = (order: SheetOrder, amountColumn: string): number => {
   return 0;
 };
 
-// ========== GENERA ID DESDE LA BASE DE DATOS ==========
+// ========== GENERA ID SECUENCIAL CORTO ==========
 const generateSequentialId = async (): Promise<string> => {
-  const { data, error } = await supabase
-    .from("orders")
-    .select("order_number")
-    .order("created_at", { ascending: false })
-    .limit(1);
-  
-  let lastNumber = 0;
-  
-  if (!error && data && data.length > 0) {
-    const lastOrderNumber = data[0].order_number;
-    const match = lastOrderNumber.match(/\d+/);
-    if (match) {
-      lastNumber = parseInt(match[0], 10);
+  try {
+    // Llamar a la función SQL que genera el ID
+    const { data, error } = await supabase.rpc('get_next_order_number');
+    
+    if (error) {
+      console.error("Error generando ID:", error);
+      // Fallback: usar timestamp si hay error
+      return `SHOPIFY${Date.now()}`;
     }
+    
+    return data;
+  } catch (err) {
+    console.error("Error en generateSequentialId:", err);
+    return `SHOPIFY${Date.now()}`;
   }
-  
-  const newNumber = lastNumber + 1;
-  const paddedNumber = newNumber.toString().padStart(3, '0');
-  return `SHOPIFY${paddedNumber}`;
 };
 
 interface ShopifyInboxProps {
@@ -539,9 +535,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     await loadOrder(order, idx, "auto");
   }, [loadOrder]);
 
+  // ✅ CORREGIDO: handleManualSave ahora SOLO cambia el estado, NO carga a la BD
   const handleManualSave = useCallback(async (order: SheetOrder, idx: number) => {
-    await loadOrder(order, idx, "manual");
-  }, [loadOrder]);
+    // Solo cambiar el estado a CARGADO_MANUAL, sin cargar a la base de datos
+    await setRowStatus(String(idx), "CARGADO_MANUAL");
+    toast.info(`✍️ Pedido marcado como "Cargado Manual" - Usa el botón "Formulario" para completar la carga`);
+  }, [setRowStatus]);
 
   const handleOpenForm = useCallback((order: SheetOrder, idx: number) => {
     if (!onSheetConfirm) return;
@@ -1059,24 +1058,24 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                       <button
                         className="nav-btn !py-1 !px-2 !text-[11px] whitespace-nowrap bg-emerald-600 hover:bg-emerald-700"
                         onClick={() => handleManualSave(order, idx)}
-                        title="Cargar pedido manualmente"
+                        title="Marcar como cargado manualmente (sin cargar a BD)"
                       >
-                        ✍️ Cargar (Manual)
+                        ✍️ Marcar Manual
+                      </button>
+                    )}
+                    {onSheetConfirm && !isLoaded && (
+                      <button
+                        className="nav-btn !py-1 !px-2 !text-[11px] whitespace-nowrap"
+                        onClick={() => handleOpenForm(order, idx)}
+                        title="Abrir formulario para editar y cargar"
+                      >
+                        📝 Formulario
                       </button>
                     )}
                     {!canLoadAuto && !canLoadManual && currentStatus === "CARGAR" && (
                       <span className="text-[10px] text-muted-foreground self-center">
                         {!matched ? "⚠️ Sin producto" : !covered ? "🚫 Sin cobertura" : !salePrice ? "💰 Sin monto" : ""}
                       </span>
-                    )}
-                    {onSheetConfirm && !isLoaded && (
-                      <button
-                        className="nav-btn !py-1 !px-2 !text-[11px] whitespace-nowrap"
-                        onClick={() => handleOpenForm(order, idx)}
-                        title="Abrir formulario para editar"
-                      >
-                        📝 Formulario
-                      </button>
                     )}
                     {isLoaded && (
                       <span className="text-[10px] text-green-400 self-center">
