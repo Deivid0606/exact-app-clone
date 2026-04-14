@@ -154,14 +154,62 @@ export default function CommissionRequestsView() {
     load();
   };
 
+  // ✅ FUNCIÓN MODIFICADA: Ahora también marca las órdenes como pagadas
   const approve = async (id: string) => {
     const note = prompt('Nota de aprobación (opcional):') || '';
-    const { error } = await supabase.from('commission_requests').update({
-      status: 'APROBADO', approved_at: new Date().toISOString(),
-      approved_by: myEmail, approval_note: note,
-    }).eq('id', id);
-    if (error) toast.error(error.message);
-    else { toast.success('Solicitud aprobada'); load(); }
+    
+    // 1. Obtener la solicitud para saber qué órdenes afecta
+    const { data: requestData, error: fetchError } = await supabase
+      .from('commission_requests')
+      .select('*')
+      .eq('id', id)
+      .single();
+    
+    if (fetchError || !requestData) {
+      toast.error('No se pudo obtener la solicitud');
+      return;
+    }
+    
+    // 2. Obtener los order_ids del meta_json
+    const metaJson = requestData.meta_json as any;
+    const orderIds = metaJson?.order_ids || [];
+    
+    // 3. Actualizar el estado de la solicitud
+    const { error: updateError } = await supabase
+      .from('commission_requests')
+      .update({
+        status: 'APROBADO',
+        approved_at: new Date().toISOString(),
+        approved_by: myEmail,
+        approval_note: note,
+      })
+      .eq('id', id);
+    
+    if (updateError) {
+      toast.error(updateError.message);
+      return;
+    }
+    
+    // 4. Marcar las órdenes como pagadas
+    if (orderIds.length > 0) {
+      const { error: ordersError } = await supabase
+        .from('orders')
+        .update({
+          commission_paid: true,
+          paid_at: new Date().toISOString(),
+        })
+        .in('id', orderIds);
+      
+      if (ordersError) {
+        toast.error(`Error al marcar órdenes: ${ordersError.message}`);
+      } else {
+        toast.success(`Solicitud aprobada y ${orderIds.length} comisión(es) marcada(s) como PAGADO`);
+      }
+    } else {
+      toast.success('Solicitud aprobada (sin órdenes asociadas)');
+    }
+    
+    load();
   };
 
   const reject = async (id: string) => {
