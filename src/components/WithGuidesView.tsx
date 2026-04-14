@@ -33,7 +33,7 @@ export default function WithGuidesView() {
 
   // Extract unique providers (solo para admins/despachantes)
   const allProviders = useMemo(() => {
-    if (role === 'PROVEEDOR') return []; // Proveedores no necesitan esta lista
+    if (role === 'PROVEEDOR') return [];
     const set = new Set<string>();
     orders.forEach(o => {
       (o.provider_emails_list || '').split(',').forEach((e: string) => {
@@ -145,6 +145,65 @@ export default function WithGuidesView() {
     const allText = selected.map(o => buildGuideText(o)).join('\n\n════════════════════\n\n');
     navigator.clipboard.writeText(allText);
     toast.success(`${selected.length} guías copiadas`);
+  };
+
+  // 🔥 NUEVA FUNCIÓN: Marcar múltiples pedidos como GUIA GENERADA
+  const bulkMarkAsGuiaGenerada = async () => {
+    const selected = getSelectedOrders();
+    
+    if (selected.length === 0) {
+      toast.error('Seleccioná pedidos primero');
+      return;
+    }
+
+    const toastId = toast.loading(`Actualizando ${selected.length} pedido${selected.length > 1 ? 's' : ''}...`);
+    
+    try {
+      // Actualizar todos los pedidos seleccionados
+      const updates = selected.map(order => 
+        supabase.from('orders').update({ 
+          status2: 'GUIA GENERADA', 
+          updated_at: new Date().toISOString() 
+        }).eq('id', order.id)
+      );
+      
+      const results = await Promise.all(updates);
+      const errors = results.filter(r => r.error);
+      
+      if (errors.length > 0) {
+        toast.error(`${errors.length} error${errors.length > 1 ? 'es' : ''} al actualizar`, { id: toastId });
+      } else {
+        toast.success(`${selected.length} pedido${selected.length > 1 ? 's' : ''} marcado${selected.length > 1 ? 's' : ''} como GUIA GENERADA`, { id: toastId });
+        
+        // Actualizar el estado local
+        setOrders(prev => prev.map(o => 
+          selectedIds.has(o.id) ? { ...o, status2: 'GUIA GENERADA' } : o
+        ));
+        
+        // Limpiar selección
+        setSelectedIds(new Set());
+      }
+    } catch (error) {
+      toast.error('Error al actualizar los pedidos', { id: toastId });
+    }
+  };
+
+  // 🔥 NUEVA FUNCIÓN: Seleccionar todos los pedidos pendientes
+  const selectAllPending = () => {
+    const allPendingIds = pendingGuides.map(o => o.id);
+    if (allPendingIds.length === 0) {
+      toast.error('No hay pedidos pendientes');
+      return;
+    }
+    setSelectedIds(new Set(allPendingIds));
+    toast.success(`${allPendingIds.length} pedido${allPendingIds.length > 1 ? 's' : ''} pendiente${allPendingIds.length > 1 ? 's' : ''} seleccionado${allPendingIds.length > 1 ? 's' : ''}`);
+  };
+
+  // 🔥 NUEVA FUNCIÓN: Limpiar selección
+  const clearSelection = () => {
+    if (selectedIds.size === 0) return;
+    setSelectedIds(new Set());
+    toast.success('Selección limpiada');
   };
 
   const downloadFile = (content: string, filename: string, mime: string) => {
@@ -266,13 +325,35 @@ export default function WithGuidesView() {
         <button className="nav-btn active" onClick={load}>Filtrar</button>
       </div>
 
+      {/* 🔥 NUEVA BARRA DE ACCIONES MASIVAS */}
       {selectedIds.size > 0 && (
-        <div className="flex flex-wrap gap-2 mb-3">
-          <button className="nav-btn" onClick={bulkCopyGuides}>📋 Copiar {selectedIds.size} guías</button>
+        <div className="flex flex-wrap gap-2 mb-3 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
+          <div className="text-sm font-bold text-green-400 mr-2 self-center">
+            ✅ {selectedIds.size} seleccionado{selectedIds.size > 1 ? 's' : ''}:
+          </div>
+          <button className="nav-btn" style={{ background: '#10b981', color: 'white' }} onClick={bulkMarkAsGuiaGenerada}>
+            🚀 Marcar como GUIA GENERADA
+          </button>
+          <button className="nav-btn" onClick={bulkCopyGuides}>📋 Copiar guías</button>
           <button className="nav-btn active" onClick={downloadTxt}>📥 Descargar TXT</button>
           <button className="nav-btn active" onClick={downloadPdf}>🖨️ Imprimir / PDF</button>
+          <button className="nav-btn" onClick={clearSelection} style={{ background: '#ef4444', color: 'white' }}>
+            ✖️ Limpiar selección
+          </button>
         </div>
       )}
+
+      {/* 🔥 BOTONES RÁPIDOS */}
+      <div className="flex flex-wrap gap-2 mb-3">
+        <button className="nav-btn" onClick={selectAllPending} style={{ background: '#3b82f6', color: 'white' }}>
+          ☑️ Seleccionar todos pendientes ({pendingGuides.length})
+        </button>
+        {selectedIds.size > 0 && selectedIds.size !== pendingGuides.length && (
+          <button className="nav-btn" onClick={selectAllPending}>
+            + Agregar resto pendientes ({pendingGuides.length - selectedIds.size})
+          </button>
+        )}
+      </div>
 
       <div className="overflow-auto">
         <table className="app-table min-w-[1200px]">
@@ -284,14 +365,14 @@ export default function WithGuidesView() {
               </th>
               <th>Fecha</th><th>ID</th><th>Ciudad</th><th>Cliente</th><th>Teléfono</th>
               <th>Vendedor</th><th>Proveedor</th><th>Estado 2</th><th>Guía</th>
-             </tr>
+            </tr>
           </thead>
           <tbody>
             {visibleOrders.map(o => (
               <tr key={o.id}>
                 <td className="text-center">
                   <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
-                 </td>
+                </td>
                 <td className="text-xs whitespace-nowrap">{new Date(o.created_at).toLocaleDateString('es-PY')}</td>
                 <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
                 <td className="text-xs">{o.city}</td>
@@ -315,9 +396,9 @@ export default function WithGuidesView() {
                     }} title="Copiar guía">📋</button>
                   </div>
                 </td>
-               </tr>
+              </tr>
             ))}
-            {visibleOrders.length === 0 && <tr><td colSpan={10} className="text-center text-muted-foreground py-8">Sin pedidos</td></tr>}
+            {visibleOrders.length === 0 && <tr><td colSpan={10} className="text-center text-muted-foreground py-8">Sin pedidos pendientes</td></tr>}
           </tbody>
         </table>
       </div>
