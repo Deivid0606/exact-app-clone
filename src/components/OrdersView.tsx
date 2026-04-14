@@ -1,4 +1,4 @@
- import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
@@ -195,11 +195,47 @@ export default function OrdersView() {
     setEditOrder(null);
   };
 
-  const deleteOrder = async (orderId: string) => {
+  // Función para CANCELAR (cambiar estado a CANCELADO)
+  const cancelOrder = async (orderId: string) => {
+    const order = orders.find(o => o.id === orderId);
+    const orderNum = order?.order_number || orderId.slice(0, 8);
     const { error } = await supabase.from('orders').update({ status: 'CANCELADO', updated_at: new Date().toISOString() }).eq('id', orderId);
     if (error) { toast.error(error.message); return; }
     toast.success('Pedido cancelado');
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'CANCELADO' } : o));
+    postNews(`Pedido ${orderNum} fue CANCELADO por ${myEmail}`, orderNum);
+  };
+
+  // Función para ELIMINAR PERMANENTEMENTE (solo ADMIN, DESPACHANTE, PROVEEDOR)
+  const deleteOrderPermanently = async (orderId: string) => {
+    // Verificar permisos nuevamente por seguridad
+    if (!['ADMIN', 'DESPACHANTE', 'PROVEEDOR'].includes(role)) {
+      toast.error('No tienes permiso para eliminar pedidos');
+      return;
+    }
+
+    const order = orders.find(o => o.id === orderId);
+    
+    // Para PROVEEDOR, verificar que tenga acceso al pedido
+    if (role === 'PROVEEDOR' && !isProviderAllowed(order, myEmail)) {
+      toast.error('No puedes eliminar pedidos de otros proveedores');
+      return;
+    }
+
+    const orderNum = order?.order_number || orderId.slice(0, 8);
+    
+    const { error } = await supabase.from('orders').delete().eq('id', orderId);
+    
+    if (error) { 
+      toast.error(error.message); 
+      return; 
+    }
+    
+    toast.success('Pedido ELIMINADO permanentemente');
+    setOrders(prev => prev.filter(o => o.id !== orderId));
+    
+    // Registrar en news
+    await postNews(`Pedido ${orderNum} fue ELIMINADO PERMANENTEMENTE por ${myEmail}`, orderNum);
   };
 
   const generateGuide = (o: any) => {
@@ -280,6 +316,7 @@ export default function OrdersView() {
   const canEditStatus2 = role === 'ADMIN' || role === 'DESPACHANTE' || role === 'PROVEEDOR';
   const canAssign = role === 'ADMIN' || role === 'PROVEEDOR';
   const canEdit = role === 'ADMIN' || role === 'DESPACHANTE' || role === 'PROVEEDOR';
+  const canDeletePermanently = ['ADMIN', 'DESPACHANTE', 'PROVEEDOR'].includes(role);
 
   return (
     <div className="app-card">
@@ -369,7 +406,7 @@ export default function OrdersView() {
                     )}
                   </td>
                   {role !== 'DELIVERY' && (
-                    <td>
+                    <tr>
                       {canEditStatus2 ? (
                         <select
                           className="app-input !py-1 !px-2 !text-[11px] !w-auto !min-w-[120px]"
@@ -384,7 +421,7 @@ export default function OrdersView() {
                     </td>
                   )}
                   {canAssign && (
-                    <td>
+                    <tr>
                       <select
                         className="app-input !py-1 !px-2 !text-[11px] !w-auto !min-w-[140px]"
                         value={o.assigned_delivery || ''}
@@ -406,8 +443,28 @@ export default function OrdersView() {
                   {canEdit && (
                     <td>
                       <div className="flex gap-1">
-                        <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={() => openEdit(o)}>Editar</button>
-                        <button className="nav-btn !px-2 !py-1 !text-[10px] !bg-destructive/20 hover:!bg-destructive/40" onClick={() => { if (confirm('¿Cancelar este pedido?')) deleteOrder(o.id); }}>Cancelar</button>
+                        <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={() => openEdit(o)}>✏️ Editar</button>
+                        <button 
+                          className="nav-btn !px-2 !py-1 !text-[10px] !bg-yellow-600/20 hover:!bg-yellow-600/40 text-yellow-700" 
+                          onClick={() => { 
+                            if (confirm('¿Cancelar este pedido? (Solo cambiará el estado a CANCELADO)')) 
+                              cancelOrder(o.id); 
+                          }}
+                        >
+                          ⛔ Cancelar
+                        </button>
+                        {/* Botón ELIMINAR - Solo para ADMIN, DESPACHANTE y PROVEEDOR */}
+                        {canDeletePermanently && (
+                          <button 
+                            className="nav-btn !px-2 !py-1 !text-[10px] !bg-red-600/20 hover:!bg-red-600/40 text-red-700"
+                            onClick={() => { 
+                              if (confirm('⚠️ ¿ELIMINAR PERMANENTEMENTE este pedido?\n\nEsta acción NO se puede deshacer y borrará todos los datos del pedido de la base de datos.')) 
+                                deleteOrderPermanently(o.id); 
+                            }}
+                          >
+                            🗑️ Eliminar
+                          </button>
+                        )}
                       </div>
                     </td>
                   )}
