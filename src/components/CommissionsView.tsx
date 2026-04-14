@@ -40,7 +40,7 @@ export default function CommissionsView() {
       query = query.eq('created_by', profile?.email);
     }
     
-    // 🔴 NUEVO: Filtrar por proveedor (solo ve sus propias comisiones)
+    // Filtrar por proveedor (solo ve sus propias comisiones)
     if (role === 'PROVEEDOR' && profile?.email) {
       query = query.ilike('provider_emails_list', `%${profile.email}%`);
     }
@@ -55,7 +55,6 @@ export default function CommissionsView() {
     if (filterStatus === 'PENDIENTE' && o.commission_paid) return false;
     if (filterStatus === 'PAGADO' && !o.commission_paid) return false;
     if (filterVendor && o.created_by?.toLowerCase() !== filterVendor.toLowerCase()) return false;
-    // Solo ADMIN puede filtrar por proveedor (los PROVEEDOR ya tienen sus datos filtrados desde la BD)
     if (role === 'ADMIN' && filterProvider && !(o.provider_emails_list || '').toLowerCase().includes(filterProvider.toLowerCase())) return false;
     if (search) {
       const q = search.toLowerCase();
@@ -102,8 +101,8 @@ export default function CommissionsView() {
         <label className="app-label !mt-0">Hasta</label>
         <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
         
-        {/* Filtro de vendedor: solo ADMIN lo ve */}
-        {role === 'ADMIN' && (
+        {/* Filtro de vendedor: ADMIN y PROVEEDOR lo ven */}
+        {(role === 'ADMIN' || role === 'PROVEEDOR') && (
           <select className="app-input !w-auto min-w-[200px]" value={filterVendor} onChange={e => setFilterVendor(e.target.value)}>
             <option value="">Todos los vendedores</option>
             {vendors.map(v => <option key={v.email} value={v.email}>{v.name || v.email}</option>)}
