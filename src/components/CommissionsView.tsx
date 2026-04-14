@@ -35,8 +35,14 @@ export default function CommissionsView() {
       .in('status', ['ENTREGADO', 'ENCOMIENDA ENTREGADA'])
       .order('created_at', { ascending: false });
 
+    // Filtrar por vendedor
     if (role === 'VENDEDOR') {
       query = query.eq('created_by', profile?.email);
+    }
+    
+    // 🔴 NUEVO: Filtrar por proveedor (solo ve sus propias comisiones)
+    if (role === 'PROVEEDOR' && profile?.email) {
+      query = query.ilike('provider_emails_list', `%${profile.email}%`);
     }
 
     const { data } = await query;
@@ -49,7 +55,8 @@ export default function CommissionsView() {
     if (filterStatus === 'PENDIENTE' && o.commission_paid) return false;
     if (filterStatus === 'PAGADO' && !o.commission_paid) return false;
     if (filterVendor && o.created_by?.toLowerCase() !== filterVendor.toLowerCase()) return false;
-    if (filterProvider && !(o.provider_emails_list || '').toLowerCase().includes(filterProvider.toLowerCase())) return false;
+    // Solo ADMIN puede filtrar por proveedor (los PROVEEDOR ya tienen sus datos filtrados desde la BD)
+    if (role === 'ADMIN' && filterProvider && !(o.provider_emails_list || '').toLowerCase().includes(filterProvider.toLowerCase())) return false;
     if (search) {
       const q = search.toLowerCase();
       return (o.customer_name || '').toLowerCase().includes(q) ||
@@ -94,23 +101,35 @@ export default function CommissionsView() {
         <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
         <label className="app-label !mt-0">Hasta</label>
         <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
-        {role !== 'VENDEDOR' && (
+        
+        {/* Filtro de vendedor: solo ADMIN lo ve */}
+        {role === 'ADMIN' && (
           <select className="app-input !w-auto min-w-[200px]" value={filterVendor} onChange={e => setFilterVendor(e.target.value)}>
             <option value="">Todos los vendedores</option>
             {vendors.map(v => <option key={v.email} value={v.email}>{v.name || v.email}</option>)}
           </select>
         )}
+        
+        {/* Filtro de proveedor: solo ADMIN lo ve */}
+        {role === 'ADMIN' && (
+          <select className="app-input !w-auto min-w-[200px]" value={filterProvider} onChange={e => setFilterProvider(e.target.value)}>
+            <option value="">Todos los proveedores</option>
+            {providers.map(p => <option key={p.email} value={p.email}>{p.name || p.email}</option>)}
+          </select>
+        )}
+        
         <select className="app-input !w-auto min-w-[160px]" value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
-          <option value="">Todos</option>
           <option value="PENDIENTE">Pendiente</option>
           <option value="PAGADO">Pagado</option>
+          {role === 'ADMIN' && <option value="">Todos</option>}
         </select>
+        
         <input className="app-input !w-auto min-w-[240px]" placeholder="🔎 Buscar por cliente, teléfono o ID"
           value={search} onChange={e => setSearch(e.target.value)} />
         <button className="nav-btn active" onClick={loadCommissions}>Aplicar</button>
       </div>
 
-      {(role === 'ADMIN' || role === 'PROVEEDOR') && (
+      {(role === 'ADMIN') && (
         <div className="mb-3">
           <button className="nav-btn active text-xs" onClick={markAllPaid}>Marcar todos como PAGADO (vista actual)</button>
         </div>
@@ -143,7 +162,7 @@ export default function CommissionsView() {
                 <td className="text-right text-xs">{nf(Number(o.commission_gs || 0))}</td>
                 <td><span className="badge-status badge-entregado">{o.status}</span></td>
                 <td>
-                  {(role === 'ADMIN' || role === 'PROVEEDOR') ? (
+                  {(role === 'ADMIN') ? (
                     <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.commission_paid ? 'PAGADO' : 'PENDIENTE'}
                       onChange={e => togglePaid(o.id, e.target.value === 'PAGADO')}>
                       <option value="PENDIENTE">PENDIENTE</option>
