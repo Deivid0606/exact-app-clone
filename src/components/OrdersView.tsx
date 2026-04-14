@@ -406,7 +406,7 @@ export default function OrdersView() {
                     )}
                   </td>
                   {role !== 'DELIVERY' && (
-                    <tr>
+                    <td>
                       {canEditStatus2 ? (
                         <select
                           className="app-input !py-1 !px-2 !text-[11px] !w-auto !min-w-[120px]"
@@ -421,7 +421,7 @@ export default function OrdersView() {
                     </td>
                   )}
                   {canAssign && (
-                    <tr>
+                    <td>
                       <select
                         className="app-input !py-1 !px-2 !text-[11px] !w-auto !min-w-[140px]"
                         value={o.assigned_delivery || ''}
@@ -453,7 +453,6 @@ export default function OrdersView() {
                         >
                           ⛔ Cancelar
                         </button>
-                        {/* Botón ELIMINAR - Solo para ADMIN, DESPACHANTE y PROVEEDOR */}
                         {canDeletePermanently && (
                           <button 
                             className="nav-btn !px-2 !py-1 !text-[10px] !bg-red-600/20 hover:!bg-red-600/40 text-red-700"
