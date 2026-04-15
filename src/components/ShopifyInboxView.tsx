@@ -421,7 +421,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       street2: find("calle 2", "calle2", "direccion 2", "address2"),
       city: find("ciudad", "city", "localidad", "distrito", "CIUDAD"),
       dept: find("departamento", "depto", "department", "state"),
-      product: productColumn, // ✅ SOLO usa la columna "PRODUCTO OK"
+      product: productColumn,
       qty: find("cantidad", "qty", "quantity", "unidades", "CANTIDAD"),
       amount: findAmount(),
       email: find("email", "correo", "mail"),
@@ -437,21 +437,95 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   }, [sheetHeaders, colKeys.product, sheetOrders]);
 
-  // ========== MATCHING ==========
+  // ========== MATCHING MEJORADO - ENCUENTRA "SUPER MINI GPS" ==========
   const matchProduct = useCallback(
     (rawName: string) => {
       if (!rawName || rawName === "—" || rawName === "-") return null;
       
-      const normalizedSheetName = normalizeText(rawName);
+      // Limpiar el nombre del producto
+      const cleanName = rawName.trim();
       
-      if (normalizedSheetName.length === 0) return null;
+      // 1. PRIMERO: Búsqueda EXACTA (sin normalizar, case-sensitive)
+      let found = products.find((p) => {
+        return p.title === cleanName;
+      });
       
-      const found = products.find((p) => {
+      if (found) {
+        console.log(`✅ Producto encontrado (exacto): "${cleanName}"`);
+        return found;
+      }
+      
+      // 2. SEGUNDO: Búsqueda case-insensitive (ignorando mayúsculas)
+      found = products.find((p) => {
+        return p.title?.toLowerCase() === cleanName.toLowerCase();
+      });
+      
+      if (found) {
+        console.log(`✅ Producto encontrado (case-insensitive): "${cleanName}" -> "${found.title}"`);
+        return found;
+      }
+      
+      // 3. TERCERO: Búsqueda con normalización (elimina acentos, espacios, etc.)
+      const normalizedSheetName = normalizeText(cleanName);
+      
+      found = products.find((p) => {
         const normalizedSystemName = normalizeText(p.title || "");
         return normalizedSystemName === normalizedSheetName;
       });
       
-      return found || null;
+      if (found) {
+        console.log(`✅ Producto encontrado (normalizado): "${cleanName}" -> "${found.title}"`);
+        return found;
+      }
+      
+      // 4. CUARTO: Búsqueda por inclusión (el nombre del sheet CONTIENE el nombre del producto)
+      found = products.find((p) => {
+        const sheetLower = cleanName.toLowerCase();
+        const productLower = p.title?.toLowerCase() || "";
+        return sheetLower.includes(productLower) || productLower.includes(sheetLower);
+      });
+      
+      if (found) {
+        console.log(`🔍 Producto encontrado por inclusión: "${cleanName}" -> "${found.title}"`);
+        return found;
+      }
+      
+      // 5. QUINTO: Búsqueda por palabras clave (divide en palabras)
+      const sheetWords = cleanName.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2);
+      
+      if (sheetWords.length > 0) {
+        let bestMatch = null;
+        let bestScore = 0;
+        
+        for (const product of products) {
+          const productLower = product.title?.toLowerCase() || "";
+          let score = 0;
+          
+          for (const word of sheetWords) {
+            if (productLower === word) {
+              score += 100; // Bonus grande para coincidencia exacta de palabra
+            } else if (productLower.includes(word)) {
+              score += word.length;
+            }
+          }
+          
+          if (score > bestScore && score > 0) {
+            bestScore = score;
+            bestMatch = product;
+          }
+        }
+        
+        if (bestMatch) {
+          console.log(`🔍 Producto encontrado por palabras clave: "${cleanName}" -> "${bestMatch.title}" (score: ${bestScore})`);
+          return bestMatch;
+        }
+      }
+      
+      // Debug: No encontrado
+      console.log(`❌ Producto NO encontrado: "${cleanName}"`);
+      console.log(`📋 Productos disponibles:`, products.map(p => `"${p.title}"`).join(", "));
+      
+      return null;
     },
     [products],
   );
