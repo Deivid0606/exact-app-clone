@@ -24,11 +24,12 @@ function extractPhoneNumber(value: any): string {
 }
 
 const normalizeText = (text: string): string => {
+  if (!text) return "";
   return text
     .toLowerCase()
+    .trim()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]/g, "");
+    .replace(/[\u0300-\u036f]/g, "");
 };
 
 const normalizeCityName = (city: string): string => {
@@ -153,14 +154,12 @@ const generateNormalOrderId = async (): Promise<string> => {
 // ========== GENERA ID PARA SHOPIFY/SHOPIFY (SHOPIFY001, SHOPIFY002, etc.) ==========
 const generateShopifyOrderId = async (): Promise<string> => {
   try {
-    // Intentar usar la función SQL específica para Shopify
     const { data, error } = await supabase.rpc('get_next_shopify_order_number');
     
     if (!error && data) {
       return data;
     }
     
-    // Fallback: calcular manualmente
     const { data: orders, error: fetchError } = await supabase
       .from('orders')
       .select('order_number')
@@ -407,7 +406,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     };
   }, [sheetHeaders]);
 
-  // ========== MATCHING ==========
+  // ========== MATCHING MEJORADO - LEE TODOS LOS PRODUCTOS ==========
   const matchProduct = useCallback(
     (rawName: string) => {
       if (!rawName || rawName === "—" || rawName === "-") return null;
@@ -416,10 +415,46 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       
       if (normalizedSheetName.length === 0) return null;
       
-      const found = products.find((p) => {
+      // Buscar coincidencia exacta primero
+      let found = products.find((p) => {
         const normalizedSystemName = normalizeText(p.title || "");
         return normalizedSystemName === normalizedSheetName;
       });
+      
+      if (found) return found;
+      
+      // Si no hay coincidencia exacta, buscar coincidencia parcial
+      // El nombre del sheet CONTIENE el nombre del producto
+      found = products.find((p) => {
+        const normalizedSystemName = normalizeText(p.title || "");
+        return normalizedSheetName.includes(normalizedSystemName) && normalizedSystemName.length > 3;
+      });
+      
+      if (found) return found;
+      
+      // El nombre del producto CONTIENE el nombre del sheet
+      found = products.find((p) => {
+        const normalizedSystemName = normalizeText(p.title || "");
+        return normalizedSystemName.includes(normalizedSheetName) && normalizedSheetName.length > 3;
+      });
+      
+      if (found) return found;
+      
+      // Buscar palabras clave (split por espacios)
+      const sheetWords = normalizedSheetName.split(' ').filter(w => w.length > 3);
+      if (sheetWords.length > 0) {
+        found = products.find((p) => {
+          const normalizedSystemName = normalizeText(p.title || "");
+          return sheetWords.some(word => 
+            normalizedSystemName.includes(word) || word.includes(normalizedSystemName)
+          );
+        });
+      }
+      
+      // Log para debugging (opcional, puedes comentar si molesta)
+      if (!found && rawName) {
+        console.log(`⚠️ Producto no encontrado: "${rawName}"`);
+      }
       
       return found || null;
     },
@@ -481,7 +516,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     setLoading(false);
   }, [sheetUrl]);
 
-  // ========== LOAD ORDER (MODIFICADO: usa generateShopifyOrderId para Shopify) ==========
+  // ========== LOAD ORDER ==========
   const loadOrder = useCallback(async (
     order: SheetOrder, 
     idx: number, 
@@ -490,7 +525,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const productName = order[colKeys.product] || "";
     const matched = matchProduct(productName);
     if (!matched) {
-      toast.error(`Producto no detectado: "${productName}"`);
+      toast.error(`❌ Producto no encontrado: "${productName}"`);
       return false;
     }
     
@@ -513,7 +548,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const qty = parseQuantity(order[colKeys.qty]);
     const commission = salePrice - (productCost + deliveryPrice);
     
-    // 🔥 CAMBIO IMPORTANTE: Usar ID de Shopify para pedidos de esta pestaña
     const orderId = await generateShopifyOrderId();
     
     const newStatus: OrderStatus = source === "auto" ? "CARGADO" : "CARGADO_MANUAL";
@@ -584,7 +618,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     });
   }, [colKeys, onSheetConfirm]);
 
-  // ========== BULK LOAD (MODIFICADO: usa generateShopifyOrderId) ==========
+  // ========== BULK LOAD ==========
   const handleBulkLoad = useCallback(async () => {
     let count = 0;
     let errors = 0;
@@ -622,7 +656,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       const qty = parseQuantity(order[colKeys.qty]);
       const commission = salePrice - (productCost + deliveryPrice);
       
-      // 🔥 CAMBIO: Usar ID de Shopify
       const orderId = await generateShopifyOrderId();
       
       const payload = {
@@ -664,7 +697,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     toast.success(`✅ ${count} cargados | ❌ ${errors} errores | ⏭️ ${skippedNoProduct} sin producto | 🚫 ${skippedNoCoverage} sin cobertura | 💰 ${skippedNoAmount} sin monto | 💰 Comisión total: ${totalCommission.toLocaleString("es-PY")} Gs`);
   }, [sheetOrders, rowStatuses, colKeys, matchProduct, getCityPrice, myEmail, setRowStatus]);
 
-  // ========== AUTO LOAD ORDERS (MODIFICADO: usa generateShopifyOrderId) ==========
+  // ========== AUTO LOAD ORDERS ==========
   const autoLoadOrders = useCallback(async () => {
     if (isAutoLoadingRef.current) {
       console.log("⏸️ Auto-carga ya en ejecución, omitiendo...");
@@ -706,7 +739,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         const qty = parseQuantity(order[colKeys.qty]);
         const commission = salePrice - (productCost + deliveryPrice);
         
-        // 🔥 CAMBIO: Usar ID de Shopify
         const orderId = await generateShopifyOrderId();
         
         const payload = {
