@@ -337,7 +337,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   }, [sheetUrl]);
 
-  // ========== DETECCIÓN DE COLUMNAS - CORREGIDO: SOLO "PRODUCTO OK" ==========
+  // ========== DETECCIÓN DE COLUMNAS ==========
   const colKeys = useMemo(() => {
     const h = sheetHeaders;
     console.log("📋 Headers del Sheet:", h);
@@ -404,15 +404,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       return find("monto", "total", "precio", "importe", "amount", "venta");
     };
     
-    // 🔥 IMPORTANTE: Buscar SOLO "PRODUCTO OK" - NADA MÁS
     let productColumn = findExact("PRODUCTO OK");
     
-    // Si no encuentra exacto, buscar con normalización pero SOLO para "PRODUCTO OK"
     if (!productColumn) {
       productColumn = find("PRODUCTO OK", "productook", "producto ok");
     }
     
-    console.log("🎯 Columna de producto detectada:", productColumn || "❌ NO ENCONTRADA - Buscando 'PRODUCTO OK'");
+    console.log("🎯 Columna de producto detectada:", productColumn || "❌ NO ENCONTRADA");
     
     return {
       name: find("nombre", "cliente", "customer", "name", "NOMBRE"),
@@ -437,75 +435,72 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   }, [sheetHeaders, colKeys.product, sheetOrders]);
 
-  // ========== MATCHING MEJORADO - ENCUENTRA "SUPER MINI GPS" ==========
+  // ========== FUNCIÓN SUPER INTELIGENTE PARA NORMALIZAR (IGNORA EMOJIS, MAYÚSCULAS, ACENTOS) ==========
+  const normalizeForComparison = (text: string): string => {
+    if (!text) return "";
+    
+    return text
+      .toLowerCase()                          // Minúsculas
+      .normalize("NFD")                       // Descompone caracteres acentuados
+      .replace(/[\u0300-\u036f]/g, "")       // Elimina acentos
+      .replace(/[^\w\s]/g, "")               // Elimina símbolos (excepto letras/números/espacios)
+      .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '') // Elimina emojis
+      .replace(/\s+/g, ' ')                  // Normaliza espacios
+      .trim();                                // Elimina espacios al inicio/final
+  };
+
+  // ========== MATCHING MEJORADO - ENCUENTRA CUALQUIER PRODUCTO IGNORANDO EMOJIS, MAYÚSCULAS, ETC ==========
   const matchProduct = useCallback(
     (rawName: string) => {
-      if (!rawName || rawName === "—" || rawName === "-") return null;
+      if (!rawName || rawName === "—" || rawName === "-") {
+        console.log(`❌ Nombre vacío o inválido: "${rawName}"`);
+        return null;
+      }
       
-      // Limpiar el nombre del producto
-      const cleanName = rawName.trim();
+      // Limpiar nombre del sheet (elimina emojis, acentos, mayúsculas, etc.)
+      const cleanSheetName = normalizeForComparison(rawName);
+      console.log(`🔍 Buscando: "${rawName}" → Normalizado: "${cleanSheetName}"`);
       
-      // 1. PRIMERO: Búsqueda EXACTA (sin normalizar, case-sensitive)
+      // 1. Búsqueda NORMALIZADA (ignora emojis, mayúsculas, acentos, símbolos)
       let found = products.find((p) => {
-        return p.title === cleanName;
+        const cleanProductName = normalizeForComparison(p.title || "");
+        return cleanProductName === cleanSheetName;
       });
       
       if (found) {
-        console.log(`✅ Producto encontrado (exacto): "${cleanName}"`);
+        console.log(`✅ Producto encontrado (normalizado): "${rawName}" → "${found.title}"`);
         return found;
       }
       
-      // 2. SEGUNDO: Búsqueda case-insensitive (ignorando mayúsculas)
+      // 2. Búsqueda por INCLUSIÓN (el sheet contiene el nombre del producto o viceversa)
       found = products.find((p) => {
-        return p.title?.toLowerCase() === cleanName.toLowerCase();
+        const cleanProductName = normalizeForComparison(p.title || "");
+        return cleanSheetName.includes(cleanProductName) || cleanProductName.includes(cleanSheetName);
       });
       
       if (found) {
-        console.log(`✅ Producto encontrado (case-insensitive): "${cleanName}" -> "${found.title}"`);
+        console.log(`🔍 Producto encontrado (inclusión): "${rawName}" → "${found.title}"`);
         return found;
       }
       
-      // 3. TERCERO: Búsqueda con normalización (elimina acentos, espacios, etc.)
-      const normalizedSheetName = normalizeText(cleanName);
-      
-      found = products.find((p) => {
-        const normalizedSystemName = normalizeText(p.title || "");
-        return normalizedSystemName === normalizedSheetName;
-      });
-      
-      if (found) {
-        console.log(`✅ Producto encontrado (normalizado): "${cleanName}" -> "${found.title}"`);
-        return found;
-      }
-      
-      // 4. CUARTO: Búsqueda por inclusión (el nombre del sheet CONTIENE el nombre del producto)
-      found = products.find((p) => {
-        const sheetLower = cleanName.toLowerCase();
-        const productLower = p.title?.toLowerCase() || "";
-        return sheetLower.includes(productLower) || productLower.includes(sheetLower);
-      });
-      
-      if (found) {
-        console.log(`🔍 Producto encontrado por inclusión: "${cleanName}" -> "${found.title}"`);
-        return found;
-      }
-      
-      // 5. QUINTO: Búsqueda por palabras clave (divide en palabras)
-      const sheetWords = cleanName.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 2);
+      // 3. Búsqueda por PALABRAS CLAVE (divide en palabras y busca coincidencias)
+      const sheetWords = cleanSheetName.split(' ').filter(w => w.length > 2);
       
       if (sheetWords.length > 0) {
         let bestMatch = null;
         let bestScore = 0;
         
         for (const product of products) {
-          const productLower = product.title?.toLowerCase() || "";
+          const cleanProductName = normalizeForComparison(product.title || "");
           let score = 0;
           
           for (const word of sheetWords) {
-            if (productLower === word) {
+            if (cleanProductName === word) {
               score += 100; // Bonus grande para coincidencia exacta de palabra
-            } else if (productLower.includes(word)) {
+            } else if (cleanProductName.includes(word)) {
               score += word.length;
+            } else if (word.includes(cleanProductName)) {
+              score += cleanProductName.length;
             }
           }
           
@@ -516,14 +511,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         }
         
         if (bestMatch) {
-          console.log(`🔍 Producto encontrado por palabras clave: "${cleanName}" -> "${bestMatch.title}" (score: ${bestScore})`);
+          console.log(`🔍 Producto encontrado (palabras clave): "${rawName}" → "${bestMatch.title}" (score: ${bestScore})`);
           return bestMatch;
         }
       }
       
       // Debug: No encontrado
-      console.log(`❌ Producto NO encontrado: "${cleanName}"`);
-      console.log(`📋 Productos disponibles:`, products.map(p => `"${p.title}"`).join(", "));
+      console.log(`❌ Producto NO encontrado: "${rawName}" (normalizado: "${cleanSheetName}")`);
+      console.log(`📋 Productos disponibles (normalizados):`, products.map(p => `"${normalizeForComparison(p.title)}"`).join(", "));
       
       return null;
     },
