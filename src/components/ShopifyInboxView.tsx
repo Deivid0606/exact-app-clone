@@ -341,7 +341,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   // ========== DETECCIÓN DE COLUMNAS ==========
   const colKeys = useMemo(() => {
     const h = sheetHeaders;
-    console.log("📋 Headers del Sheet:", h);
+    console.log("📋 Headers del Sheet (pestaña PRODUCTO OK):", h);
     
     const find = (...candidates: string[]) => {
       const normalizedCandidates = candidates.map(c => normalizeText(c));
@@ -398,7 +398,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       street2: find("calle 2", "calle2", "direccion 2", "address2"),
       city: find("ciudad", "city", "localidad", "distrito", "CIUDAD"),
       dept: find("departamento", "depto", "department", "state"),
-      product: find("PRODUCTO OK", "producto", "product", "item", "titulo", "PRODUCTO"),
+      product: find("producto", "product", "item", "titulo", "nombre producto"),
       qty: find("cantidad", "qty", "quantity", "unidades", "CANTIDAD"),
       amount: findAmount(),
       email: find("email", "correo", "mail"),
@@ -406,7 +406,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     };
   }, [sheetHeaders]);
 
-  // ========== MATCHING MEJORADO - LEE TODOS LOS PRODUCTOS ==========
+  // ========== MATCHING DE PRODUCTOS ==========
   const matchProduct = useCallback(
     (rawName: string) => {
       if (!rawName || rawName === "—" || rawName === "-") return null;
@@ -423,8 +423,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       
       if (found) return found;
       
-      // Si no hay coincidencia exacta, buscar coincidencia parcial
-      // El nombre del sheet CONTIENE el nombre del producto
+      // Buscar coincidencia parcial (el nombre del sheet contiene el nombre del producto)
       found = products.find((p) => {
         const normalizedSystemName = normalizeText(p.title || "");
         return normalizedSheetName.includes(normalizedSystemName) && normalizedSystemName.length > 3;
@@ -432,7 +431,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       
       if (found) return found;
       
-      // El nombre del producto CONTIENE el nombre del sheet
+      // Buscar coincidencia inversa (el nombre del producto contiene el nombre del sheet)
       found = products.find((p) => {
         const normalizedSystemName = normalizeText(p.title || "");
         return normalizedSystemName.includes(normalizedSheetName) && normalizedSheetName.length > 3;
@@ -440,7 +439,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       
       if (found) return found;
       
-      // Buscar palabras clave (split por espacios)
+      // Buscar por palabras clave
       const sheetWords = normalizedSheetName.split(' ').filter(w => w.length > 3);
       if (sheetWords.length > 0) {
         found = products.find((p) => {
@@ -451,9 +450,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         });
       }
       
-      // Log para debugging (opcional, puedes comentar si molesta)
       if (!found && rawName) {
-        console.log(`⚠️ Producto no encontrado: "${rawName}"`);
+        console.log(`⚠️ Producto no encontrado en la pestaña PRODUCTO OK: "${rawName}"`);
       }
       
       return found || null;
@@ -491,6 +489,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     [clientPrices],
   );
 
+  // ========== READ SHEET - SOLO LEE LA PESTAÑA "PRODUCTO OK" ==========
   const readSheet = useCallback(async () => {
     if (!sheetUrl) {
       toast.error("Configurá tu URL de Google Sheet en tu perfil");
@@ -499,19 +498,45 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     
     setLoading(true);
     try {
-      const resp = await fetch(`/api/read-sheet?url=${encodeURIComponent(sheetUrl)}&t=${Date.now()}`);
+      // 🔥 ESPECIFICAMOS LA PESTAÑA "PRODUCTO OK"
+      const sheetName = "PRODUCTO OK";
+      const encodedSheetName = encodeURIComponent(sheetName);
+      
+      // Construimos la URL con el parámetro sheet para seleccionar la pestaña correcta
+      const apiUrl = `/api/read-sheet?url=${encodeURIComponent(sheetUrl)}&sheet=${encodedSheetName}&t=${Date.now()}`;
+      
+      console.log(`📖 Leyendo SOLO la pestaña: "${sheetName}"`);
+      
+      const resp = await fetch(apiUrl);
       const json = await resp.json();
 
       if (json.error) {
-        toast.error(json.error);
+        toast.error(`Error leyendo pestaña "${sheetName}": ${json.error}`);
+        console.error("Error del API:", json.error);
       } else {
         setSheetHeaders(json.headers || []);
         setSheetOrders(json.orders || []);
         setLastSync(new Date());
-        console.log("📊 Sheet actualizado:", json.orders?.length, "filas");
+        console.log(`✅ Pestaña "${sheetName}" cargada correctamente:`, json.orders?.length, "filas");
+        console.log("📋 Headers encontrados en la pestaña PRODUCTO OK:", json.headers);
+        
+        // Verificar si se encontró la columna de productos
+        const productColumn = json.headers?.find((h: string) => 
+          normalizeText(h).includes("producto") || 
+          normalizeText(h).includes("product") ||
+          normalizeText(h).includes("item")
+        );
+        
+        if (productColumn) {
+          console.log(`✅ Columna de productos detectada: "${productColumn}"`);
+        } else {
+          console.warn(`⚠️ No se encontró columna de productos en la pestaña "${sheetName}"`);
+          toast.warning(`La pestaña "${sheetName}" no tiene una columna de productos visible`);
+        }
       }
     } catch (err: any) {
       toast.error("Error leyendo Sheet: " + (err.message || err));
+      console.error("Error en fetch:", err);
     }
     setLoading(false);
   }, [sheetUrl]);
@@ -525,7 +550,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const productName = order[colKeys.product] || "";
     const matched = matchProduct(productName);
     if (!matched) {
-      toast.error(`❌ Producto no encontrado: "${productName}"`);
+      toast.error(`❌ Producto no encontrado en la pestaña PRODUCTO OK: "${productName}"`);
       return false;
     }
     
@@ -717,7 +742,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           return currentStatus === "CARGAR";
         });
       
-      console.log(`🤖 Auto-carga: ${pendingIndices.length} pedidos pendientes`);
+      console.log(`🤖 Auto-carga: ${pendingIndices.length} pedidos pendientes desde pestaña PRODUCTO OK`);
       
       for (const i of pendingIndices) {
         const currentStatus = rowStatuses[String(i)] || "CARGAR";
@@ -770,7 +795,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           await setRowStatus(String(i), "CARGADO", orderId);
           count++;
           totalCommission += commission;
-          console.log(`✅ Auto-cargado: ${orderId} (fila ${i + 1})`);
+          console.log(`✅ Auto-cargado desde PRODUCTO OK: ${orderId} (fila ${i + 1})`);
           await new Promise(resolve => setTimeout(resolve, 100));
         } else {
           console.error(`❌ Error fila ${i + 1}:`, error);
@@ -783,7 +808,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
     
     if (count > 0) {
-      toast.success(`🤖 Auto: ${count} cargados | 💰 Comisión: ${totalCommission.toLocaleString("es-PY")} Gs`);
+      toast.success(`🤖 Auto: ${count} cargados desde PRODUCTO OK | 💰 Comisión: ${totalCommission.toLocaleString("es-PY")} Gs`);
     }
   }, [sheetOrders, rowStatuses, colKeys, matchProduct, getCityPrice, myEmail, setRowStatus]);
 
@@ -818,7 +843,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         runAutoCycle();
       }, 60000);
       
-      console.log("🤖 Auto-carga activada - Ciclo cada 60 segundos");
+      console.log("🤖 Auto-carga activada - Leyendo SOLO pestaña PRODUCTO OK - Ciclo cada 60 segundos");
     } else {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
@@ -837,7 +862,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const toggleAutoLoad = () => {
     const newValue = !autoLoad;
     setAutoLoad(newValue);
-    toast.info(newValue ? "🤖 Auto-carga activada" : "⏹️ Auto-carga desactivada");
+    toast.info(newValue ? "🤖 Auto-carga activada (solo pestaña PRODUCTO OK)" : "⏹️ Auto-carga desactivada");
   };
 
   const getDisplayAmount = (order: SheetOrder) => {
@@ -933,7 +958,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
   return (
     <div className="app-card">
-      <h3 className="text-lg font-extrabold mb-3">📦 Shopify Inbox — Lectura de Sheet</h3>
+      <h3 className="text-lg font-extrabold mb-3">📦 Shopify Inbox — Lectura de Sheet (Pestaña: PRODUCTO OK)</h3>
 
       <div className="app-card !p-4 mb-4">
         <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -943,13 +968,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         </div>
         <div className="flex flex-wrap gap-2">
           <button className="nav-btn active" onClick={() => readSheet()} disabled={loading}>
-            {loading ? <span className="flex items-center gap-2"><span className="btn-spinner" /> Leyendo...</span> : "📊 Leer Sheet"}
+            {loading ? <span className="flex items-center gap-2"><span className="btn-spinner" /> Leyendo pestaña PRODUCTO OK...</span> : "📊 Leer Pestaña PRODUCTO OK"}
           </button>
           <button className="nav-btn active" onClick={handleBulkLoad} disabled={!sheetOrders.length}>
             🚀 Cargar todos
           </button>
           <button className={`nav-btn ${autoLoad ? "!bg-green-600 !text-white" : ""}`} onClick={toggleAutoLoad}>
-            {autoLoad ? "🤖 Auto-carga ON" : "🤖 Auto-carga OFF"}
+            {autoLoad ? "🤖 Auto-carga ON (PRODUCTO OK)" : "🤖 Auto-carga OFF"}
           </button>
           {lastSync && (
             <span className="text-xs text-muted-foreground self-center">
@@ -959,7 +984,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         </div>
         {autoLoad && (
           <div className="text-xs text-green-400 mt-1">
-            🤖 Auto-carga activa — Ciclo cada 60 segundos
+            🤖 Auto-carga activa — Leyendo SOLO pestaña "PRODUCTO OK" — Ciclo cada 60 segundos
           </div>
         )}
       </div>
@@ -1029,7 +1054,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       </div>
 
       <div className="text-xs text-muted-foreground mb-2">
-        Mostrando {filteredOrders.length} de {sheetOrders.length} filas totales
+        Mostrando {filteredOrders.length} de {sheetOrders.length} filas totales (desde pestaña PRODUCTO OK)
       </div>
 
       <div className="overflow-auto">
@@ -1149,9 +1174,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               <tr>
                 <td colSpan={13} className="text-center text-muted-foreground py-8">
                   {sheetOrders.length === 0 
-                    ? "📊 Leé tu Sheet primero" 
+                    ? "📊 Leé la pestaña PRODUCTO OK primero" 
                     : activeFilter === "CARGAR" 
-                      ? "🎉 No hay pedidos pendientes" 
+                      ? "🎉 No hay pedidos pendientes en PRODUCTO OK" 
                       : activeFilter === "CARGADO" 
                         ? "📭 No hay pedidos cargados automáticamente"
                         : activeFilter === "CARGADO_MANUAL"
