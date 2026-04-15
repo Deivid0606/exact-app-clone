@@ -337,18 +337,17 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   }, [sheetUrl]);
 
-  // ========== DETECCIÓN DE COLUMNAS MEJORADA - SOLO "PRODUCTO OK" ==========
+  // ========== DETECCIÓN DE COLUMNAS ==========
   const colKeys = useMemo(() => {
     const h = sheetHeaders;
     console.log("📋 Headers del Sheet:", h);
     
-    // Función de búsqueda EXACTA (case-sensitive para "PRODUCTO OK")
+    // Función de búsqueda EXACTA (sin normalización)
     const findExact = (...candidates: string[]) => {
       for (let i = 0; i < h.length; i++) {
         const originalHeader = h[i];
         for (const candidate of candidates) {
           if (originalHeader === candidate) {
-            console.log(`✅ Encontrado exactamente: "${candidate}" en columna "${originalHeader}"`);
             return h[i];
           }
         }
@@ -356,8 +355,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       return "";
     };
     
-    // Función de búsqueda normalizada (solo para otras columnas)
-    const findNormalized = (...candidates: string[]) => {
+    // Función de búsqueda normalizada (para el resto de columnas)
+    const find = (...candidates: string[]) => {
       const normalizedCandidates = candidates.map(c => normalizeText(c));
       
       for (let i = 0; i < h.length; i++) {
@@ -402,92 +401,55 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         }
       }
       
-      return findNormalized("monto", "total", "precio", "importe", "amount", "venta");
+      return find("monto", "total", "precio", "importe", "amount", "venta");
     };
     
-    // ========== DETECCIÓN DE PRODUCTO: SOLO "PRODUCTO OK" ==========
-    let productColumn = "";
+    let productColumn = findExact("PRODUCTO OK");
     
-    // 1. Buscar EXACTAMENTE "PRODUCTO OK" (con mayúsculas y espacio)
-    productColumn = findExact("PRODUCTO OK");
-    
-    // 2. Si no lo encuentra, buscar "producto ok" en minúsculas
     if (!productColumn) {
-      productColumn = findExact("producto ok");
+      productColumn = find("PRODUCTO OK", "productook", "producto ok");
     }
     
-    // 3. Si aún no, buscar versión normalizada (fallback)
-    if (!productColumn) {
-      const normalizedMatch = findNormalized("PRODUCTO OK", "productook", "producto ok");
-      if (normalizedMatch) {
-        console.warn(`⚠️ Usando variante normalizada de producto: "${normalizedMatch}"`);
-        productColumn = normalizedMatch;
-      }
-    }
-    
-    // 4. Verificar si existe "ASI PRODUCTO" pero IGNORARLA completamente
-    const asiProductoColumn = findExact("ASI PRODUCTO", "asi producto");
-    if (asiProductoColumn) {
-      console.log(`🚫 IMPORTANTE: Se encontró columna "ASI PRODUCTO" pero será IGNORADA. Solo se usa "PRODUCTO OK"`);
-    }
-    
-    // Validación final
-    if (!productColumn) {
-      console.error("❌ CRÍTICO: No se encontró la columna 'PRODUCTO OK' en el Sheet");
-      console.log("📋 Columnas disponibles:", h);
-    } else {
-      console.log(`🎯✅ Columna de producto CORRECTA: "${productColumn}" (usando SOLO esta, ignorando "ASI PRODUCTO")`);
-    }
+    console.log("🎯 Columna de producto detectada:", productColumn || "❌ NO ENCONTRADA");
     
     return {
-      name: findNormalized("nombre", "cliente", "customer", "name", "NOMBRE"),
-      phone: findNormalized("telefono", "phone", "tel", "celular", "whatsapp", "Teléfono"),
-      street: findNormalized("calle", "direccion", "address", "street", "CALLE"),
-      street2: findNormalized("calle 2", "calle2", "direccion 2", "address2"),
-      city: findNormalized("ciudad", "city", "localidad", "distrito", "CIUDAD"),
-      dept: findNormalized("departamento", "depto", "department", "state"),
-      product: productColumn, // ← SOLO "PRODUCTO OK", NUNCA "ASI PRODUCTO"
-      qty: findNormalized("cantidad", "qty", "quantity", "unidades", "CANTIDAD"),
+      name: find("nombre", "cliente", "customer", "name", "NOMBRE"),
+      phone: find("telefono", "phone", "tel", "celular", "whatsapp", "Teléfono"),
+      street: find("calle", "direccion", "address", "street", "CALLE"),
+      street2: find("calle 2", "calle2", "direccion 2", "address2"),
+      city: find("ciudad", "city", "localidad", "distrito", "CIUDAD"),
+      dept: find("departamento", "depto", "department", "state"),
+      product: productColumn,
+      qty: find("cantidad", "qty", "quantity", "unidades", "CANTIDAD"),
       amount: findAmount(),
-      email: findNormalized("email", "correo", "mail"),
-      date: findNormalized("fecha", "date"),
+      email: find("email", "correo", "mail"),
+      date: find("fecha", "date"),
     };
   }, [sheetHeaders]);
 
   // Debug: Mostrar qué columna se está usando para producto
   useEffect(() => {
-    if (sheetHeaders.length > 0) {
-      if (colKeys.product) {
-        console.log(`✅✅✅ USANDO columna de producto: "${colKeys.product}"`);
-        console.log(`📝 Ejemplo de valor: ${sheetOrders[0]?.[colKeys.product] || "sin datos"}`);
-        
-        // Verificar si existe "ASI PRODUCTO" pero no se está usando
-        const hasAsiProducto = sheetHeaders.some(h => h === "ASI PRODUCTO" || h === "asi producto");
-        if (hasAsiProducto) {
-          console.log(`⚠️ NOTA: El Sheet tiene columna "ASI PRODUCTO" pero NO se está usando. Solo se usa "${colKeys.product}"`);
-        }
-      } else {
-        console.error(`❌❌❌ NO se encontró la columna "PRODUCTO OK" en el Sheet`);
-        console.log(`📋 Columnas disponibles: ${sheetHeaders.join(", ")}`);
-      }
+    if (sheetHeaders.length > 0 && colKeys.product) {
+      console.log(`✅ Usando columna de producto: "${colKeys.product}"`);
+      console.log(`📝 Valor de ejemplo: ${sheetOrders[0]?.[colKeys.product] || "sin datos"}`);
     }
   }, [sheetHeaders, colKeys.product, sheetOrders]);
 
-  // ========== FUNCIÓN SUPER INTELIGENTE PARA NORMALIZAR ==========
+  // ========== FUNCIÓN SUPER INTELIGENTE PARA NORMALIZAR (IGNORA EMOJIS, MAYÚSCULAS, ACENTOS) ==========
   const normalizeForComparison = (text: string): string => {
     if (!text) return "";
     
     return text
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^\w\s]/g, "")
-      .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
-      .replace(/\s+/g, ' ')
-      .trim();
+      .toLowerCase()                          // Minúsculas
+      .normalize("NFD")                       // Descompone caracteres acentuados
+      .replace(/[\u0300-\u036f]/g, "")       // Elimina acentos
+      .replace(/[^\w\s]/g, "")               // Elimina símbolos (excepto letras/números/espacios)
+      .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '') // Elimina emojis
+      .replace(/\s+/g, ' ')                  // Normaliza espacios
+      .trim();                                // Elimina espacios al inicio/final
   };
 
-  // ========== MATCHING MEJORADO - SOLO USA LA COLUMNA CORRECTA ==========
+  // ========== MATCHING MEJORADO - ENCUENTRA CUALQUIER PRODUCTO IGNORANDO EMOJIS, MAYÚSCULAS, ETC ==========
   const matchProduct = useCallback(
     (rawName: string) => {
       if (!rawName || rawName === "—" || rawName === "-") {
@@ -495,10 +457,11 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         return null;
       }
       
+      // Limpiar nombre del sheet (elimina emojis, acentos, mayúsculas, etc.)
       const cleanSheetName = normalizeForComparison(rawName);
-      console.log(`🔍 Buscando producto: "${rawName}" → Normalizado: "${cleanSheetName}"`);
+      console.log(`🔍 Buscando: "${rawName}" → Normalizado: "${cleanSheetName}"`);
       
-      // 1. Búsqueda NORMALIZADA
+      // 1. Búsqueda NORMALIZADA (ignora emojis, mayúsculas, acentos, símbolos)
       let found = products.find((p) => {
         const cleanProductName = normalizeForComparison(p.title || "");
         return cleanProductName === cleanSheetName;
@@ -509,7 +472,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         return found;
       }
       
-      // 2. Búsqueda por INCLUSIÓN
+      // 2. Búsqueda por INCLUSIÓN (el sheet contiene el nombre del producto o viceversa)
       found = products.find((p) => {
         const cleanProductName = normalizeForComparison(p.title || "");
         return cleanSheetName.includes(cleanProductName) || cleanProductName.includes(cleanSheetName);
@@ -520,7 +483,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         return found;
       }
       
-      // 3. Búsqueda por PALABRAS CLAVE
+      // 3. Búsqueda por PALABRAS CLAVE (divide en palabras y busca coincidencias)
       const sheetWords = cleanSheetName.split(' ').filter(w => w.length > 2);
       
       if (sheetWords.length > 0) {
@@ -533,7 +496,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           
           for (const word of sheetWords) {
             if (cleanProductName === word) {
-              score += 100;
+              score += 100; // Bonus grande para coincidencia exacta de palabra
             } else if (cleanProductName.includes(word)) {
               score += word.length;
             } else if (word.includes(cleanProductName)) {
@@ -548,12 +511,15 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         }
         
         if (bestMatch) {
-          console.log(`🔍 Producto encontrado (palabras clave): "${rawName}" → "${bestMatch.title}"`);
+          console.log(`🔍 Producto encontrado (palabras clave): "${rawName}" → "${bestMatch.title}" (score: ${bestScore})`);
           return bestMatch;
         }
       }
       
-      console.log(`❌ Producto NO encontrado: "${rawName}"`);
+      // Debug: No encontrado
+      console.log(`❌ Producto NO encontrado: "${rawName}" (normalizado: "${cleanSheetName}")`);
+      console.log(`📋 Productos disponibles (normalizados):`, products.map(p => `"${normalizeForComparison(p.title)}"`).join(", "));
+      
       return null;
     },
     [products],
@@ -607,13 +573,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         setSheetOrders(json.orders || []);
         setLastSync(new Date());
         console.log("📊 Sheet actualizado:", json.orders?.length, "filas");
-        
-        // Validar que existe la columna PRODUCTO OK
-        const hasProductOk = (json.headers || []).some(h => h === "PRODUCTO OK");
-        if (!hasProductOk) {
-          console.warn("⚠️ ADVERTENCIA: No se encontró la columna 'PRODUCTO OK'");
-          toast.warning("No se encontró la columna 'PRODUCTO OK' en el Sheet. Por favor, verifica los nombres de las columnas.");
-        }
       }
     } catch (err: any) {
       toast.error("Error leyendo Sheet: " + (err.message || err));
@@ -627,13 +586,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     idx: number, 
     source: "auto" | "manual" = "auto"
   ) => {
-    // Verificar que la columna de producto existe
+    const productName = order[colKeys.product] || "";
+    
     if (!colKeys.product) {
       toast.error(`❌ No se encontró la columna "PRODUCTO OK" en el Sheet`);
       return false;
     }
-    
-    const productName = order[colKeys.product] || "";
     
     if (!productName) {
       toast.error(`❌ Fila ${idx + 1}: No hay valor en la columna "${colKeys.product}"`);
@@ -1101,11 +1059,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         {!colKeys.product && sheetHeaders.length > 0 && (
           <div className="text-xs text-red-400 mt-2 bg-red-500/10 p-2 rounded">
             ⚠️ ADVERTENCIA: No se encontró la columna "PRODUCTO OK" en el Sheet. Las columnas disponibles son: {sheetHeaders.join(", ")}
-          </div>
-        )}
-        {colKeys.product && sheetHeaders.some(h => h === "ASI PRODUCTO" || h === "asi producto") && (
-          <div className="text-xs text-green-400 mt-2 bg-green-500/10 p-2 rounded">
-            ✅ Usando columna "{colKeys.product}" correctamente. La columna "ASI PRODUCTO" está siendo IGNORADA como debe ser.
           </div>
         )}
       </div>
