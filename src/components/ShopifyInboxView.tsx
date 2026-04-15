@@ -153,14 +153,12 @@ const generateNormalOrderId = async (): Promise<string> => {
 // ========== GENERA ID PARA SHOPIFY/SHOPIFY (SHOPIFY001, SHOPIFY002, etc.) ==========
 const generateShopifyOrderId = async (): Promise<string> => {
   try {
-    // Intentar usar la función SQL específica para Shopify
     const { data, error } = await supabase.rpc('get_next_shopify_order_number');
     
     if (!error && data) {
       return data;
     }
     
-    // Fallback: calcular manualmente
     const { data: orders, error: fetchError } = await supabase
       .from('orders')
       .select('order_number')
@@ -339,11 +337,25 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   }, [sheetUrl]);
 
-  // ========== DETECCIÓN DE COLUMNAS ==========
+  // ========== DETECCIÓN DE COLUMNAS - CORREGIDO: SOLO "PRODUCTO OK" ==========
   const colKeys = useMemo(() => {
     const h = sheetHeaders;
     console.log("📋 Headers del Sheet:", h);
     
+    // Función de búsqueda EXACTA (sin normalización)
+    const findExact = (...candidates: string[]) => {
+      for (let i = 0; i < h.length; i++) {
+        const originalHeader = h[i];
+        for (const candidate of candidates) {
+          if (originalHeader === candidate) {
+            return h[i];
+          }
+        }
+      }
+      return "";
+    };
+    
+    // Función de búsqueda normalizada (para el resto de columnas)
     const find = (...candidates: string[]) => {
       const normalizedCandidates = candidates.map(c => normalizeText(c));
       
@@ -392,6 +404,16 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       return find("monto", "total", "precio", "importe", "amount", "venta");
     };
     
+    // 🔥 IMPORTANTE: Buscar SOLO "PRODUCTO OK" - NADA MÁS
+    let productColumn = findExact("PRODUCTO OK");
+    
+    // Si no encuentra exacto, buscar con normalización pero SOLO para "PRODUCTO OK"
+    if (!productColumn) {
+      productColumn = find("PRODUCTO OK", "productook", "producto ok");
+    }
+    
+    console.log("🎯 Columna de producto detectada:", productColumn || "❌ NO ENCONTRADA - Buscando 'PRODUCTO OK'");
+    
     return {
       name: find("nombre", "cliente", "customer", "name", "NOMBRE"),
       phone: find("telefono", "phone", "tel", "celular", "whatsapp", "Teléfono"),
@@ -399,13 +421,21 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       street2: find("calle 2", "calle2", "direccion 2", "address2"),
       city: find("ciudad", "city", "localidad", "distrito", "CIUDAD"),
       dept: find("departamento", "depto", "department", "state"),
-      product: find("PRODUCTO OK", "producto", "product", "item", "titulo", "PRODUCTO"),
+      product: productColumn, // ✅ SOLO usa la columna "PRODUCTO OK"
       qty: find("cantidad", "qty", "quantity", "unidades", "CANTIDAD"),
       amount: findAmount(),
       email: find("email", "correo", "mail"),
       date: find("fecha", "date"),
     };
   }, [sheetHeaders]);
+
+  // Debug: Mostrar qué columna se está usando para producto
+  useEffect(() => {
+    if (sheetHeaders.length > 0 && colKeys.product) {
+      console.log(`✅ Usando columna de producto: "${colKeys.product}"`);
+      console.log(`📝 Valor de ejemplo: ${sheetOrders[0]?.[colKeys.product] || "sin datos"}`);
+    }
+  }, [sheetHeaders, colKeys.product, sheetOrders]);
 
   // ========== MATCHING ==========
   const matchProduct = useCallback(
@@ -481,16 +511,27 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     setLoading(false);
   }, [sheetUrl]);
 
-  // ========== LOAD ORDER (MODIFICADO: usa generateShopifyOrderId para Shopify) ==========
+  // ========== LOAD ORDER ==========
   const loadOrder = useCallback(async (
     order: SheetOrder, 
     idx: number, 
     source: "auto" | "manual" = "auto"
   ) => {
     const productName = order[colKeys.product] || "";
+    
+    if (!colKeys.product) {
+      toast.error(`❌ No se encontró la columna "PRODUCTO OK" en el Sheet`);
+      return false;
+    }
+    
+    if (!productName) {
+      toast.error(`❌ Fila ${idx + 1}: No hay valor en la columna "${colKeys.product}"`);
+      return false;
+    }
+    
     const matched = matchProduct(productName);
     if (!matched) {
-      toast.error(`Producto no detectado: "${productName}"`);
+      toast.error(`❌ Producto no detectado: "${productName}"`);
       return false;
     }
     
@@ -513,7 +554,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const qty = parseQuantity(order[colKeys.qty]);
     const commission = salePrice - (productCost + deliveryPrice);
     
-    // 🔥 CAMBIO IMPORTANTE: Usar ID de Shopify para pedidos de esta pestaña
     const orderId = await generateShopifyOrderId();
     
     const newStatus: OrderStatus = source === "auto" ? "CARGADO" : "CARGADO_MANUAL";
@@ -584,8 +624,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     });
   }, [colKeys, onSheetConfirm]);
 
-  // ========== BULK LOAD (MODIFICADO: usa generateShopifyOrderId) ==========
+  // ========== BULK LOAD ==========
   const handleBulkLoad = useCallback(async () => {
+    if (!colKeys.product) {
+      toast.error(`❌ No se encontró la columna "PRODUCTO OK" en el Sheet. No se puede continuar.`);
+      return;
+    }
+    
     let count = 0;
     let errors = 0;
     let skippedNoProduct = 0;
@@ -599,6 +644,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       
       const order = sheetOrders[i];
       const productName = order[colKeys.product] || "";
+      
+      if (!productName) {
+        skippedNoProduct++;
+        continue;
+      }
+      
       const matched = matchProduct(productName);
       if (!matched) {
         skippedNoProduct++;
@@ -622,7 +673,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       const qty = parseQuantity(order[colKeys.qty]);
       const commission = salePrice - (productCost + deliveryPrice);
       
-      // 🔥 CAMBIO: Usar ID de Shopify
       const orderId = await generateShopifyOrderId();
       
       const payload = {
@@ -664,10 +714,15 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     toast.success(`✅ ${count} cargados | ❌ ${errors} errores | ⏭️ ${skippedNoProduct} sin producto | 🚫 ${skippedNoCoverage} sin cobertura | 💰 ${skippedNoAmount} sin monto | 💰 Comisión total: ${totalCommission.toLocaleString("es-PY")} Gs`);
   }, [sheetOrders, rowStatuses, colKeys, matchProduct, getCityPrice, myEmail, setRowStatus]);
 
-  // ========== AUTO LOAD ORDERS (MODIFICADO: usa generateShopifyOrderId) ==========
+  // ========== AUTO LOAD ORDERS ==========
   const autoLoadOrders = useCallback(async () => {
     if (isAutoLoadingRef.current) {
       console.log("⏸️ Auto-carga ya en ejecución, omitiendo...");
+      return;
+    }
+    
+    if (!colKeys.product) {
+      console.log("⚠️ Auto-carga detenida: No se encontró la columna 'PRODUCTO OK'");
       return;
     }
     
@@ -692,6 +747,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         
         const order = sheetOrders[i];
         const productName = order[colKeys.product] || "";
+        
+        if (!productName) continue;
+        
         const matched = matchProduct(productName);
         if (!matched) continue;
         
@@ -706,7 +764,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         const qty = parseQuantity(order[colKeys.qty]);
         const commission = salePrice - (productCost + deliveryPrice);
         
-        // 🔥 CAMBIO: Usar ID de Shopify
         const orderId = await generateShopifyOrderId();
         
         const payload = {
@@ -930,6 +987,11 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             🤖 Auto-carga activa — Ciclo cada 60 segundos
           </div>
         )}
+        {!colKeys.product && sheetHeaders.length > 0 && (
+          <div className="text-xs text-red-400 mt-2 bg-red-500/10 p-2 rounded">
+            ⚠️ ADVERTENCIA: No se encontró la columna "PRODUCTO OK" en el Sheet. Las columnas disponibles son: {sheetHeaders.join(", ")}
+          </div>
+        )}
       </div>
 
       {/* Filtros principales */}
@@ -1034,8 +1096,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               const qty = parseQuantity(order[colKeys.qty]);
               const commission = salePrice - (productCost + (deliveryPrice || 0));
 
-              const canLoadAuto = currentStatus === "CARGAR" && matched && covered && salePrice > 0;
-              const canLoadManual = currentStatus === "CARGAR" && matched && covered && salePrice > 0;
+              const canLoadAuto = currentStatus === "CARGAR" && matched && covered && salePrice > 0 && colKeys.product;
+              const canLoadManual = currentStatus === "CARGAR" && matched && covered && salePrice > 0 && colKeys.product;
               const isLoaded = currentStatus === "CARGADO" || currentStatus === "CARGADO_MANUAL";
 
               return (
@@ -1101,7 +1163,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                     )}
                     {!canLoadAuto && !canLoadManual && currentStatus === "CARGAR" && (
                       <span className="text-[10px] text-muted-foreground self-center">
-                        {!matched ? "⚠️ Sin producto" : !covered ? "🚫 Sin cobertura" : !salePrice ? "💰 Sin monto" : ""}
+                        {!colKeys.product ? "❌ Sin columna PRODUCTO OK" : !matched ? "⚠️ Sin producto" : !covered ? "🚫 Sin cobertura" : !salePrice ? "💰 Sin monto" : ""}
                       </span>
                     )}
                     {isLoaded && (
