@@ -226,6 +226,11 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   });
 
+  // NUEVOS ESTADOS PARA BÚSQUEDA MEJORADA
+  const [searchType, setSearchType] = useState<"all" | "product">("product");
+  const [productSearch, setProductSearch] = useState("");
+  const [productSuggestions, setProductSuggestions] = useState<string[]>([]);
+
   const filterOnlyAvailable = true;
   const filterOnlyCoverage = true;
   const [search, setSearch] = useState("");
@@ -337,6 +342,20 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   }, [sheetUrl]);
 
+  // ========== AUTOCOMPLETADO DE PRODUCTOS ==========
+  useEffect(() => {
+    if (productSearch.length > 2 && searchType === "product") {
+      const searchLower = productSearch.toLowerCase();
+      const suggestions = products
+        .filter(p => p.title && p.title.toLowerCase().includes(searchLower))
+        .map(p => p.title)
+        .slice(0, 5);
+      setProductSuggestions(suggestions);
+    } else {
+      setProductSuggestions([]);
+    }
+  }, [productSearch, products, searchType]);
+
   // ========== DETECCIÓN DE COLUMNAS ==========
   const colKeys = useMemo(() => {
     const h = sheetHeaders;
@@ -407,7 +426,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     let productColumn = findExact("PRODUCTO OK");
     
     if (!productColumn) {
-      productColumn = find("PRODUCTO OK", "productook", "producto ok");
+      productColumn = find("PRODUCTO OK", "productook", "producto ok", "PRODUCTO");
     }
     
     console.log("🎯 Columna de producto detectada:", productColumn || "❌ NO ENCONTRADA");
@@ -426,6 +445,28 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       date: find("fecha", "date"),
     };
   }, [sheetHeaders]);
+
+  // ========== FUNCIÓN DE BÚSQUEDA ESPECÍFICA PARA PRODUCTO ==========
+  const filterByProduct = useCallback((order: SheetOrder, searchTerm: string) => {
+    if (!searchTerm.trim()) return true;
+    
+    const searchLower = searchTerm.toLowerCase().trim();
+    
+    // Buscar en la columna PRODUCTO OK
+    const productOkValue = order[colKeys.product] || "";
+    if (productOkValue.toLowerCase().includes(searchLower)) return true;
+    
+    // También buscar en otras columnas que podrían contener "PRODUCTO"
+    for (const key in order) {
+      const keyLower = key.toLowerCase();
+      if (keyLower.includes("producto") || keyLower === "product") {
+        const value = String(order[key] || "").toLowerCase();
+        if (value.includes(searchLower)) return true;
+      }
+    }
+    
+    return false;
+  }, [colKeys.product]);
 
   // Debug: Mostrar qué columna se está usando para producto
   useEffect(() => {
@@ -938,7 +979,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return getAmountFromRow(order, colKeys.amount);
   };
 
-  // Filtrado de órdenes
+  // Filtrado de órdenes MEJORADO
   const filteredOrders = useMemo(() => {
     return sheetOrders
       .map((o, i) => ({ order: o, idx: i }))
@@ -959,14 +1000,21 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           if (!hasCoverage(city)) return false;
         }
         
-        if (search) {
+        // NUEVA BÚSQUEDA ESPECÍFICA DE PRODUCTO
+        if (searchType === "product" && productSearch) {
+          return filterByProduct(order, productSearch);
+        }
+        
+        // Búsqueda general (todos los campos)
+        if (searchType === "all" && search) {
           const q = search.toLowerCase();
           const vals = Object.values(order).join(" ").toLowerCase();
           if (!vals.includes(q)) return false;
         }
+        
         return true;
       });
-  }, [sheetOrders, rowStatuses, activeFilter, search, colKeys, matchProduct, hasCoverage, filterOnlyAvailable, filterOnlyCoverage]);
+  }, [sheetOrders, rowStatuses, activeFilter, search, productSearch, searchType, colKeys, matchProduct, hasCoverage, filterOnlyAvailable, filterOnlyCoverage, filterByProduct]);
 
   const counts = useMemo(() => {
     const cargar = Object.values(rowStatuses).filter(s => s === "CARGAR").length;
@@ -1117,18 +1165,87 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         </button>
       </div>
 
-      {/* Barra de búsqueda */}
-      <div className="mb-3">
-        <input
-          className="app-input w-full"
-          placeholder="🔎 Buscar en todos los campos..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+      {/* BARRA DE BÚSQUEDA MEJORADA */}
+      <div className="space-y-2 mb-3">
+        <div className="flex gap-2 items-center">
+          <button
+            onClick={() => setSearchType("product")}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+              searchType === "product"
+                ? "bg-blue-500 text-white shadow-md"
+                : "bg-muted hover:bg-muted/80 text-muted-foreground"
+            }`}
+          >
+            🏷️ Buscar en PRODUCTO
+          </button>
+          <button
+            onClick={() => setSearchType("all")}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+              searchType === "all"
+                ? "bg-primary text-primary-foreground shadow-md"
+                : "bg-muted hover:bg-muted/80 text-muted-foreground"
+            }`}
+          >
+            🔍 Buscar en todo
+          </button>
+          
+          {/* Indicador de columna de producto */}
+          {colKeys.product && (
+            <div className="ml-auto text-xs text-muted-foreground">
+              📌 Columna: <span className="font-mono text-blue-400">{colKeys.product}</span>
+            </div>
+          )}
+        </div>
+        
+        {searchType === "product" ? (
+          <div className="relative">
+            <input
+              className="app-input w-full pl-8"
+              placeholder={`🔎 Buscar en columna "${colKeys.product || 'PRODUCTO OK'}"...`}
+              value={productSearch}
+              onChange={(e) => setProductSearch(e.target.value)}
+            />
+            {productSearch && (
+              <button
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                onClick={() => setProductSearch("")}
+              >
+                ✕
+              </button>
+            )}
+            
+            {/* Sugerencias de autocompletado */}
+            {productSuggestions.length > 0 && (
+              <div className="absolute z-10 mt-1 w-full bg-background border border-border rounded-lg shadow-lg">
+                {productSuggestions.map((suggestion, i) => (
+                  <button
+                    key={i}
+                    className="w-full text-left px-3 py-2 hover:bg-muted text-sm transition-colors"
+                    onClick={() => setProductSearch(suggestion)}
+                  >
+                    {suggestion}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <input
+            className="app-input w-full"
+            placeholder="🔎 Buscar en todos los campos (cliente, teléfono, ciudad, etc.)..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        )}
       </div>
 
       <div className="text-xs text-muted-foreground mb-2">
         Mostrando {filteredOrders.length} de {sheetOrders.length} filas totales
+        {searchType === "product" && productSearch && (
+          <span className="ml-2 text-blue-400">
+            🔍 Buscando producto: "{productSearch}"
+          </span>
+        )}
       </div>
 
       <div className="overflow-auto">
@@ -1181,6 +1298,11 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                   </td>
                   <td className="text-xs truncate max-w-[180px]" title={productName}>
                     {productName || "—"}
+                    {matched && searchType === "product" && productSearch && (
+                      <div className="text-[10px] text-green-400 mt-0.5">
+                        ✅ Match: {matched.title}
+                      </div>
+                    )}
                   </td>
                   <td className="text-xs">{qty}</td>
                   <td className="text-right text-xs font-bold text-green-400">{salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}</td>
@@ -1249,15 +1371,17 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                 <td colSpan={13} className="text-center text-muted-foreground py-8">
                   {sheetOrders.length === 0 
                     ? "📊 Leé tu Sheet primero" 
-                    : activeFilter === "CARGAR" 
-                      ? "🎉 No hay pedidos pendientes" 
-                      : activeFilter === "CARGADO" 
-                        ? "📭 No hay pedidos cargados automáticamente"
-                        : activeFilter === "CARGADO_MANUAL"
-                          ? "📭 No hay pedidos cargados manualmente"
-                          : activeFilter === "A DROPEAR"
-                            ? "📭 No hay pedidos marcados para dropear"
-                            : "🎉 No hay pedidos para mostrar"}
+                    : searchType === "product" && productSearch
+                      ? `🔍 No se encontraron productos con "${productSearch}"`
+                      : activeFilter === "CARGAR" 
+                        ? "🎉 No hay pedidos pendientes" 
+                        : activeFilter === "CARGADO" 
+                          ? "📭 No hay pedidos cargados automáticamente"
+                          : activeFilter === "CARGADO_MANUAL"
+                            ? "📭 No hay pedidos cargados manualmente"
+                            : activeFilter === "A DROPEAR"
+                              ? "📭 No hay pedidos marcados para dropear"
+                              : "🎉 No hay pedidos para mostrar"}
                 </td>
               </tr>
             )}
