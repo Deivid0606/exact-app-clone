@@ -37,9 +37,7 @@ const canAccessProduct = (product: any, profile: any) => {
 
   if (!role || !userEmail) return false;
 
-  if (role === 'admin') {
-    return true;
-  }
+  if (role === 'admin') return true;
 
   if (role === 'provider') {
     return providerEmail === userEmail;
@@ -53,19 +51,18 @@ const canAccessProduct = (product: any, profile: any) => {
   return false;
 };
 
-// ========== FUNCIÓN PARA GENERAR ID SECUENCIAL (A390, A391, etc.) ==========
 const generateNormalOrderId = async (): Promise<string> => {
   try {
     const { data, error } = await supabase.rpc('get_next_order_number');
-    
+
     if (error) {
-      console.error("Error generando ID normal:", error);
+      console.error('Error generando ID normal:', error);
       return `A${Date.now()}`;
     }
-    
-    return data; // Retorna "A390", "A391", etc.
+
+    return data;
   } catch (err) {
-    console.error("Error en generateNormalOrderId:", err);
+    console.error('Error en generateNormalOrderId:', err);
     return `A${Date.now()}`;
   }
 };
@@ -78,7 +75,18 @@ export default function CreateOrderView({
 }: {
   initialSku?: string | null;
   onSkuConsumed?: () => void;
-  sheetPrefill?: { customer?: string; phone?: string; city?: string; street?: string; district?: string; email?: string; productTitle?: string; totalGs?: number; qty?: number; obs?: string } | null;
+  sheetPrefill?: {
+    customer?: string;
+    phone?: string;
+    city?: string;
+    street?: string;
+    district?: string;
+    email?: string;
+    productTitle?: string;
+    totalGs?: number;
+    qty?: number;
+    obs?: string;
+  } | null;
   onPrefillConsumed?: () => void;
 }) {
   const { profile } = useAuth();
@@ -134,7 +142,6 @@ export default function CreateOrderView({
 
         setClientPrices(pricesData || []);
 
-        // Auto-fill from Sheet prefill data
         if (sheetPrefill) {
           if (sheetPrefill.customer) setCustomer(sheetPrefill.customer);
           if (sheetPrefill.phone) setPhone(sheetPrefill.phone);
@@ -143,18 +150,26 @@ export default function CreateOrderView({
           if (sheetPrefill.email) setEmail(sheetPrefill.email);
           if (sheetPrefill.obs) setObs(sheetPrefill.obs);
 
-          // Try to match city from client_prices (normalize: lowercase, no accents, split separators)
-          const normCity = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+          const normCity = (s: string) =>
+            s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+
           const sheetCityNorm = normCity(sheetPrefill.city || '');
+
           const findCity = (prices: any[]) => {
             const exact = prices.find((c: any) => normCity(c.city || '') === sheetCityNorm);
             if (exact) return exact;
+
             const partial = prices.find((c: any) => {
               const pc = normCity(c.city || '');
               return sheetCityNorm.includes(pc) || pc.includes(sheetCityNorm);
             });
             if (partial) return partial;
-            const parts = sheetCityNorm.split(/[\-–—,\/|]+/).map(s => s.trim()).filter(Boolean);
+
+            const parts = sheetCityNorm
+              .split(/[\-–—,\/|]+/)
+              .map((s) => s.trim())
+              .filter(Boolean);
+
             for (const part of parts) {
               const m = prices.find((c: any) => {
                 const pc = normCity(c.city || '');
@@ -162,8 +177,10 @@ export default function CreateOrderView({
               });
               if (m) return m;
             }
+
             return null;
           };
+
           const cityMatch = findCity(pricesData || []);
           if (cityMatch) {
             setCity(cityMatch.city);
@@ -171,33 +188,53 @@ export default function CreateOrderView({
             setCity(sheetPrefill.city);
           }
 
-          // Try to match product by title
           if (sheetPrefill.productTitle) {
             const titleLower = sheetPrefill.productTitle.toLowerCase().trim();
-            // Remove emojis for comparison
-            const cleanTitle = titleLower.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '').trim();
-            
-            const exactMatch = visibleProducts.find((p: any) =>
-              p.title?.toLowerCase().trim() === titleLower ||
-              p.title?.toLowerCase().trim() === cleanTitle
+            const cleanTitle = titleLower
+              .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '')
+              .trim();
+
+            const exactMatch = visibleProducts.find(
+              (p: any) =>
+                p.title?.toLowerCase().trim() === titleLower ||
+                p.title?.toLowerCase().trim() === cleanTitle
             );
-            
+
             if (exactMatch && exactMatch.sku) {
-              setItems([{ sku: exactMatch.sku, sale_gs: sheetPrefill.totalGs || 0, qty: sheetPrefill.qty || 1 }]);
+              setItems([
+                {
+                  sku: exactMatch.sku,
+                  sale_gs: sheetPrefill.totalGs || 0,
+                  qty: sheetPrefill.qty || 1,
+                },
+              ]);
               toast.success(`🎯 Producto detectado: ${exactMatch.title}`);
             } else {
-              // Try partial match
               const partialMatch = visibleProducts.find((p: any) => {
                 const pTitle = p.title?.toLowerCase().trim() || '';
                 return pTitle.includes(cleanTitle) || cleanTitle.includes(pTitle);
               });
+
               if (partialMatch && partialMatch.sku) {
-                setItems([{ sku: partialMatch.sku, sale_gs: sheetPrefill.totalGs || 0, qty: sheetPrefill.qty || 1 }]);
+                setItems([
+                  {
+                    sku: partialMatch.sku,
+                    sale_gs: sheetPrefill.totalGs || 0,
+                    qty: sheetPrefill.qty || 1,
+                  },
+                ]);
                 toast.success(`🎯 Producto detectado (parcial): ${partialMatch.title}`);
               } else {
-                // No match - set empty item so user can choose
-                setItems([{ sku: '', sale_gs: sheetPrefill.totalGs || 0, qty: sheetPrefill.qty || 1 }]);
-                toast.info(`⚠️ Producto "${sheetPrefill.productTitle}" no encontrado en catálogo. Elegilo manualmente.`);
+                setItems([
+                  {
+                    sku: '',
+                    sale_gs: sheetPrefill.totalGs || 0,
+                    qty: sheetPrefill.qty || 1,
+                  },
+                ]);
+                toast.info(
+                  `⚠️ Producto "${sheetPrefill.productTitle}" no encontrado en catálogo. Elegilo manualmente.`
+                );
               }
             }
           }
@@ -289,15 +326,14 @@ export default function CreateOrderView({
     setSaving(true);
 
     try {
-      // 🔥 GENERAR ID SECUENCIAL (A390, A391, etc.)
       const orderNumber = await generateNormalOrderId();
-      
+
       const providerEmails = [
         ...new Set(validItems.map((i) => catalogMap[i.sku]?.provider_email).filter(Boolean)),
       ];
 
       const payload = {
-        order_number: orderNumber, // ✅ AHORA SÍ, pasamos el ID correcto
+        order_number: orderNumber,
         created_by: profile?.email || null,
         customer_name: customer,
         phone,
@@ -352,28 +388,28 @@ export default function CreateOrderView({
   };
 
   return (
-    <div className="app-card">
+    <div className="app-card w-full min-w-0 overflow-x-hidden">
       <h3 className="text-lg font-extrabold mb-3">Cargar pedido</h3>
 
-      <div className="flex flex-wrap gap-4">
-        <div className="flex-1 min-w-[320px]">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="md:col-span-1 w-full min-w-0">
           <label className="app-label">Cliente</label>
           <input
-            className="app-input"
+            className="app-input w-full min-w-0 text-base"
             value={customer}
             onChange={(e) => setCustomer(e.target.value)}
           />
 
           <label className="app-label">Teléfono</label>
           <input
-            className="app-input"
+            className="app-input w-full min-w-0 text-base"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
           />
 
           <label className="app-label">Ciudad</label>
           <select
-            className="app-input"
+            className="app-input w-full min-w-0 text-base"
             value={city}
             onChange={(e) => setCity(e.target.value)}
           >
@@ -386,26 +422,28 @@ export default function CreateOrderView({
           </select>
 
           {deliveryPrice > 0 && (
-            <div className="chip mt-1">Delivery cobrado: {nf(Number(deliveryPrice))} Gs</div>
+            <div className="chip mt-1 break-words">
+              Delivery cobrado: {nf(Number(deliveryPrice))} Gs
+            </div>
           )}
 
           <label className="app-label">Calle</label>
           <input
-            className="app-input"
+            className="app-input w-full min-w-0 text-base"
             value={street}
             onChange={(e) => setStreet(e.target.value)}
           />
 
           <label className="app-label">Barrio</label>
           <input
-            className="app-input"
+            className="app-input w-full min-w-0 text-base"
             value={district}
             onChange={(e) => setDistrict(e.target.value)}
           />
 
           <label className="app-label">Email</label>
           <input
-            className="app-input"
+            className="app-input w-full min-w-0 text-base"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="Opcional"
@@ -413,94 +451,132 @@ export default function CreateOrderView({
 
           <label className="app-label">Observación</label>
           <textarea
-            className="app-input"
-            rows={2}
+            className="app-input w-full min-w-0 text-base"
+            rows={3}
             value={obs}
             onChange={(e) => setObs(e.target.value)}
           />
         </div>
 
-        <div className="flex-[2] min-w-[420px]">
-          <label className="app-label !mt-0">Items</label>
+        <div className="md:col-span-2 w-full min-w-0">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
+            <label className="app-label !mt-0">Items</label>
+            <span className="chip text-[10px] w-fit">Catálogo: {products.length} productos</span>
+          </div>
 
           {items.map((item, idx) => (
-            <div key={idx} className="flex flex-wrap items-center gap-2 mb-2">
-              <select
-                className="app-input !w-auto flex-[2]"
-                value={item.sku}
-                onChange={(e) => updateItem(idx, 'sku', e.target.value)}
-              >
-                <option value="">
-                  {loadingProducts ? 'Cargando productos…' : 'Seleccionar producto…'}
-                </option>
-                {products.map((p) => (
-                  <option key={p.id} value={p.sku} disabled={(p.stock || 0) <= 0}>
-                    {p.title} — {p.sku} (Prov {nf(Number(p.provider_price_gs || 0))}){' '}
-                    {p.provider_email ? `[${p.provider_email}]` : ''}
-                  </option>
-                ))}
-              </select>
+            <div
+              key={idx}
+              className="border border-border rounded-xl p-3 mb-3 w-full min-w-0"
+            >
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-start">
+                <div className="md:col-span-5 w-full min-w-0">
+                  <label className="app-label !mt-0">Producto</label>
+                  <select
+                    className="app-input w-full min-w-0 text-base"
+                    value={item.sku}
+                    onChange={(e) => updateItem(idx, 'sku', e.target.value)}
+                  >
+                    <option value="">
+                      {loadingProducts ? 'Cargando productos…' : 'Seleccionar producto…'}
+                    </option>
+                    {products.map((p) => (
+                      <option key={p.id} value={p.sku} disabled={(p.stock || 0) <= 0}>
+                        {p.title} — {p.sku} (Prov {nf(Number(p.provider_price_gs || 0))}){' '}
+                        {p.provider_email ? `[${p.provider_email}]` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-              <span className="chip text-[10px]">
-                Prov: {nf(Number(catalogMap[item.sku]?.provider_price_gs || 0))}
-              </span>
+                <div className="md:col-span-2 w-full min-w-0">
+                  <label className="app-label !mt-0">Proveedor</label>
+                  <div className="chip text-[10px] break-words w-full">
+                    Prov: {nf(Number(catalogMap[item.sku]?.provider_price_gs || 0))}
+                  </div>
+                </div>
 
-              <input
-                className="app-input !w-auto flex-1"
-                type="number"
-                placeholder="Venta TOTAL (Gs)"
-                value={item.sale_gs || ''}
-                onChange={(e) => updateItem(idx, 'sale_gs', Number(e.target.value))}
-              />
+                <div className="md:col-span-3 w-full min-w-0">
+                  <label className="app-label !mt-0">Venta TOTAL (Gs)</label>
+                  <input
+                    className="app-input w-full min-w-0 text-base"
+                    type="number"
+                    placeholder="Venta TOTAL (Gs)"
+                    value={item.sale_gs || ''}
+                    onChange={(e) => updateItem(idx, 'sale_gs', Number(e.target.value))}
+                  />
+                </div>
 
-              <input
-                className="app-input !w-[80px]"
-                type="number"
-                placeholder="Cant."
-                value={item.qty}
-                onChange={(e) => updateItem(idx, 'qty', Number(e.target.value))}
-              />
+                <div className="md:col-span-1 w-full min-w-0">
+                  <label className="app-label !mt-0">Cant.</label>
+                  <input
+                    className="app-input w-full min-w-0 text-base"
+                    type="number"
+                    placeholder="Cant."
+                    value={item.qty}
+                    onChange={(e) => updateItem(idx, 'qty', Number(e.target.value))}
+                  />
+                </div>
 
-              <span className="chip text-[10px]">
-                Prov×Cant: {nf(Number(catalogMap[item.sku]?.provider_price_gs || 0) * item.qty)}
-              </span>
+                <div className="md:col-span-1 w-full min-w-0">
+                  <label className="app-label !mt-0 opacity-0 hidden md:block">Acción</label>
+                  <button
+                    className="nav-btn text-xs w-full"
+                    onClick={() => removeItem(idx)}
+                  >
+                    Quitar
+                  </button>
+                </div>
+              </div>
 
-              <button className="nav-btn text-xs" onClick={() => removeItem(idx)}>
-                Quitar
-              </button>
+              <div className="mt-2">
+                <span className="chip text-[10px] break-words">
+                  Prov×Cant: {nf(Number(catalogMap[item.sku]?.provider_price_gs || 0) * item.qty)}
+                </span>
+              </div>
             </div>
           ))}
 
-          <button className="nav-btn active text-xs mt-2" onClick={addItem}>
+          <button className="nav-btn active text-xs mt-2 w-full sm:w-auto" onClick={addItem}>
             + Agregar ítem
           </button>
 
-          <span className="chip ml-2 text-[10px]">Catálogo: {products.length} productos</span>
-
-          <div className="flex gap-3 mt-4">
-            <div className="flex-1">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+            <div className="w-full min-w-0">
               <label className="app-label">Total (Gs)</label>
-              <input className="app-input bg-secondary" readOnly value={nf(totalVenta)} />
+              <input
+                className="app-input bg-secondary w-full min-w-0"
+                readOnly
+                value={nf(totalVenta)}
+              />
             </div>
 
-            <div className="flex-1">
+            <div className="w-full min-w-0">
               <label className="app-label">Delivery cobrado (Gs)</label>
               <input
-                className="app-input bg-secondary"
+                className="app-input bg-secondary w-full min-w-0"
                 readOnly
                 value={nf(Number(deliveryPrice))}
               />
             </div>
 
-            <div className="flex-1">
+            <div className="w-full min-w-0">
               <label className="app-label">Comisión estimada (Gs)</label>
-              <input className="app-input bg-secondary" readOnly value={nf(commission)} />
+              <input
+                className="app-input bg-secondary w-full min-w-0"
+                readOnly
+                value={nf(commission)}
+              />
             </div>
           </div>
 
-          <button className="nav-btn active mt-4" onClick={saveOrder} disabled={saving || loadingProducts}>
+          <button
+            className="nav-btn active mt-4 w-full"
+            onClick={saveOrder}
+            disabled={saving || loadingProducts}
+          >
             {saving ? (
-              <span className="flex items-center gap-2">
+              <span className="flex items-center justify-center gap-2">
                 <span className="btn-spinner" /> Guardando...
               </span>
             ) : (
