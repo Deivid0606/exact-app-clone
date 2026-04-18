@@ -60,63 +60,45 @@ export default function AuthView({ onSuccess }: AuthViewProps) {
 
   return (
     <div className="relative min-h-screen">
+      {/* Fondo animado de estrellas */}
       <AnimatedStars />
       
+      {/* Contenido del login */}
       <div className="fixed inset-0 flex items-center justify-center p-4 z-50">
-        <div className="w-full max-w-[400px]">
-          {/* Logo */}
-          <div className="text-center mb-8">
-            <div className="flex justify-center mb-4">
-              <div className="w-16 h-16 rounded-2xl bg-white/10 backdrop-blur-sm flex items-center justify-center">
-                <img
-                  src="https://cdn.shopify.com/s/files/1/0885/3012/5095/files/Captura_de_pantalla_2026-01-12_023843.jpg?v=1768196352"
-                  alt="DCANP GROUP Logo"
-                  className="w-12 h-12 rounded-xl object-cover"
-                />
-              </div>
+        <div className="w-full max-w-[380px]">
+          {/* Logo y título */}
+          <div className="text-center mb-6">
+            <div className="flex justify-center mb-3">
+              <img
+                src="https://cdn.shopify.com/s/files/1/0885/3012/5095/files/Captura_de_pantalla_2026-01-12_023843.jpg?v=1768196352"
+                alt="DCANP GROUP Logo"
+                className="w-14 h-14 rounded-xl object-cover"
+              />
             </div>
-            <h1 className="text-2xl font-bold text-white mb-1">DCANP Group</h1>
-            <p className="text-white/50 text-sm">
-              {mode === 'login' ? 'Accede a tu cuenta' : 'Crea tu cuenta'}
-            </p>
+            <h1 className="text-xl font-bold text-white">DCANP Group</h1>
           </div>
 
-          {/* Hero Text */}
-          <div className="text-center mb-8">
-            <p className="text-white/40 text-xs uppercase tracking-[0.2em] mb-2">🇵🇾 Paraguay</p>
-            <h2 className="text-3xl font-bold text-white mb-3 leading-tight">
-              Tu negocio online<br />
-              <span className="bg-gradient-to-r from-white to-white/70 bg-clip-text text-transparent">
-                empieza aquí
-              </span>
-            </h2>
-            <div className="w-12 h-px bg-white/20 mx-auto my-4"></div>
-            <p className="text-white/40 text-sm leading-relaxed">
-              La red de dropshipping más grande de Paraguay. Sin stock, sin riesgos.
-            </p>
-          </div>
-
-          {/* Form Card */}
-          <div className="bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10 p-6">
+          {/* CUADRO DE LOGIN EN NEGRO */}
+          <div className="bg-black/90 backdrop-blur-sm rounded-2xl p-6 border border-white/10 shadow-2xl">
             {mode === 'login' ? (
               <>
                 <div className="space-y-4">
                   <div>
-                    <label className="text-white/60 text-sm block mb-2">Correo electrónico</label>
+                    <label className="text-white/60 text-sm block mb-1.5">Correo electrónico</label>
                     <input
                       type="email"
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/30 focus:outline-none focus:border-white/30 transition-colors"
-                      placeholder="tu@email.com"
+                      className="w-full bg-black/50 border border-white/20 rounded-xl px-4 py-2.5 text-white placeholder:text-white/30 focus:outline-none focus:border-white/50 transition-colors"
+                      placeholder="deividaguilar06@gmail.com"
                       value={loginEmail}
                       onChange={e => setLoginEmail(e.target.value)}
                     />
                   </div>
                   <div>
-                    <label className="text-white/60 text-sm block mb-2">Contraseña</label>
+                    <label className="text-white/60 text-sm block mb-1.5">Contraseña</label>
                     <input
                       type="password"
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/30 focus:outline-none focus:border-white/30 transition-colors"
-                      placeholder="••••••••"
+                      className="w-full bg-black/50 border border-white/20 rounded-xl px-4 py-2.5 text-white placeholder:text-white/30 focus:outline-none focus:border-white/50 transition-colors"
+                      placeholder="**************"
                       value={loginPass}
                       onChange={e => setLoginPass(e.target.value)}
                       onKeyDown={e => e.key === 'Enter' && handleLogin()}
@@ -127,24 +109,24 @@ export default function AuthView({ onSuccess }: AuthViewProps) {
                 <button
                   onClick={handleLogin}
                   disabled={loading}
-                  className="w-full mt-6 bg-white text-black font-semibold rounded-xl py-3 hover:bg-white/90 transition-all disabled:opacity-50"
+                  className="w-full mt-5 bg-white text-black font-semibold rounded-xl py-2.5 hover:bg-white/90 transition-all disabled:opacity-50"
                 >
                   {loading ? 'Ingresando...' : 'Iniciar sesión'}
                 </button>
 
-                <div className="relative my-6">
+                <div className="relative my-5">
                   <div className="absolute inset-0 flex items-center">
                     <div className="w-full border-t border-white/10"></div>
                   </div>
                   <div className="relative flex justify-center text-xs">
-                    <span className="px-3 bg-transparent text-white/40">O continuar con</span>
+                    <span className="px-3 bg-black text-white/40">O continuar con</span>
                   </div>
                 </div>
 
                 <button
                   onClick={handleGoogleSignIn}
                   disabled={loading}
-                  className="w-full flex items-center justify-center gap-3 bg-white/5 border border-white/10 rounded-xl py-3 hover:bg-white/10 transition-colors"
+                  className="w-full flex items-center justify-center gap-3 bg-white/5 border border-white/20 rounded-xl py-2.5 hover:bg-white/10 transition-colors"
                 >
                   <svg className="w-5 h-5" viewBox="0 0 24 24">
                     <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/>
@@ -155,57 +137,57 @@ export default function AuthView({ onSuccess }: AuthViewProps) {
                   <span className="text-white">Google</span>
                 </button>
 
-                <p className="text-center text-white/40 text-sm mt-6">
+                <p className="text-center text-white/40 text-sm mt-5">
                   ¿No tienes cuenta?{' '}
                   <button onClick={() => setMode('register')} className="text-white hover:underline">
-                    Regístrate
+                    Registrate
                   </button>
                 </p>
               </>
             ) : (
               <>
-                <div className="space-y-4">
+                <div className="space-y-3">
                   <div>
-                    <label className="text-white/60 text-sm block mb-2">Nombre completo</label>
+                    <label className="text-white/60 text-sm block mb-1.5">Nombre</label>
                     <input
                       type="text"
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/30 focus:outline-none focus:border-white/30 transition-colors"
+                      className="w-full bg-black/50 border border-white/20 rounded-xl px-4 py-2.5 text-white placeholder:text-white/30 focus:outline-none focus:border-white/50 transition-colors"
                       placeholder="Tu nombre"
                       value={regName}
                       onChange={e => setRegName(e.target.value)}
                     />
                   </div>
                   <div>
-                    <label className="text-white/60 text-sm block mb-2">Correo electrónico</label>
+                    <label className="text-white/60 text-sm block mb-1.5">Correo electrónico</label>
                     <input
                       type="email"
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/30 focus:outline-none focus:border-white/30 transition-colors"
+                      className="w-full bg-black/50 border border-white/20 rounded-xl px-4 py-2.5 text-white placeholder:text-white/30 focus:outline-none focus:border-white/50 transition-colors"
                       placeholder="tu@email.com"
                       value={regEmail}
                       onChange={e => setRegEmail(e.target.value)}
                     />
                   </div>
                   <div>
-                    <label className="text-white/60 text-sm block mb-2">Contraseña</label>
+                    <label className="text-white/60 text-sm block mb-1.5">Contraseña</label>
                     <input
                       type="password"
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white placeholder:text-white/30 focus:outline-none focus:border-white/30 transition-colors"
+                      className="w-full bg-black/50 border border-white/20 rounded-xl px-4 py-2.5 text-white placeholder:text-white/30 focus:outline-none focus:border-white/50 transition-colors"
                       placeholder="••••••••"
                       value={regPass}
                       onChange={e => setRegPass(e.target.value)}
                     />
                   </div>
                   <div>
-                    <label className="text-white/60 text-sm block mb-2">Rol</label>
+                    <label className="text-white/60 text-sm block mb-1.5">Rol</label>
                     <select
-                      className="w-full bg-white/5 border border-white/10 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-white/30 transition-colors"
+                      className="w-full bg-black/50 border border-white/20 rounded-xl px-4 py-2.5 text-white focus:outline-none focus:border-white/50 transition-colors"
                       value={regRole}
                       onChange={e => setRegRole(e.target.value)}
                     >
-                      <option value="VENDEDOR" className="bg-black">VENDEDOR</option>
-                      <option value="DELIVERY" className="bg-black">DELIVERY</option>
-                      <option value="DESPACHANTE" className="bg-black">DESPACHANTE</option>
-                      <option value="PROVEEDOR" className="bg-black">PROVEEDOR</option>
+                      <option value="VENDEDOR">VENDEDOR</option>
+                      <option value="DELIVERY">DELIVERY</option>
+                      <option value="DESPACHANTE">DESPACHANTE</option>
+                      <option value="PROVEEDOR">PROVEEDOR</option>
                     </select>
                   </div>
                 </div>
@@ -213,24 +195,24 @@ export default function AuthView({ onSuccess }: AuthViewProps) {
                 <button
                   onClick={handleRegister}
                   disabled={loading}
-                  className="w-full mt-6 bg-white text-black font-semibold rounded-xl py-3 hover:bg-white/90 transition-all disabled:opacity-50"
+                  className="w-full mt-5 bg-white text-black font-semibold rounded-xl py-2.5 hover:bg-white/90 transition-all disabled:opacity-50"
                 >
                   {loading ? 'Creando cuenta...' : 'Crear cuenta'}
                 </button>
 
-                <div className="relative my-6">
+                <div className="relative my-5">
                   <div className="absolute inset-0 flex items-center">
                     <div className="w-full border-t border-white/10"></div>
                   </div>
                   <div className="relative flex justify-center text-xs">
-                    <span className="px-3 bg-transparent text-white/40">O continuar con</span>
+                    <span className="px-3 bg-black text-white/40">O continuar con</span>
                   </div>
                 </div>
 
                 <button
                   onClick={handleGoogleSignIn}
                   disabled={loading}
-                  className="w-full flex items-center justify-center gap-3 bg-white/5 border border-white/10 rounded-xl py-3 hover:bg-white/10 transition-colors"
+                  className="w-full flex items-center justify-center gap-3 bg-white/5 border border-white/20 rounded-xl py-2.5 hover:bg-white/10 transition-colors"
                 >
                   <svg className="w-5 h-5" viewBox="0 0 24 24">
                     <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/>
@@ -241,7 +223,7 @@ export default function AuthView({ onSuccess }: AuthViewProps) {
                   <span className="text-white">Google</span>
                 </button>
 
-                <p className="text-center text-white/40 text-sm mt-6">
+                <p className="text-center text-white/40 text-sm mt-5">
                   ¿Ya tienes cuenta?{' '}
                   <button onClick={() => setMode('login')} className="text-white hover:underline">
                     Iniciar sesión
@@ -251,8 +233,8 @@ export default function AuthView({ onSuccess }: AuthViewProps) {
             )}
           </div>
 
-          <p className="text-center text-white/30 text-xs mt-6">
-            Plataforma de gestión DCANP Group
+          <p className="text-center text-white/30 text-[11px] mt-5">
+            Plataforma de gestión de DCANP Group
           </p>
         </div>
       </div>
