@@ -34,27 +34,17 @@ const canAccessProduct = (product: any, profile: any) => {
   const providerEmail = normalizeEmail(product?.provider_email);
   const privateEmails = parsePrivateEmails(product?.private_to_emails);
   const isPrivate = isPrivateProduct(product);
-  const isFavorite = product?.is_favorite === true;
 
   if (!role || !userEmail) return false;
 
-  // Admin ve todo
   if (role === 'admin') return true;
 
-  // Proveedor ve solo sus productos
   if (role === 'provider') {
     return providerEmail === userEmail;
   }
 
-  // Vendedor, despachante, delivery
   if (['seller', 'despachante', 'delivery'].includes(role)) {
-    // ⭐ Los favoritos son visibles para todos
-    if (isFavorite) return true;
-    
-    // Productos no privados son visibles
     if (!isPrivate) return true;
-    
-    // Productos privados solo para emails autorizados
     return privateEmails.includes(userEmail);
   }
 
@@ -103,6 +93,7 @@ export default function CreateOrderView({
 
   const [products, setProducts] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
+  const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
   const [customer, setCustomer] = useState('');
   const [phone, setPhone] = useState('');
   const [city, setCity] = useState('');
@@ -116,6 +107,27 @@ export default function CreateOrderView({
   const [saving, setSaving] = useState(false);
   const [loadingProducts, setLoadingProducts] = useState(false);
 
+  // Cargar favoritos del usuario actual
+  const loadUserFavorites = async () => {
+    if (!profile?.email) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('user_favorites')
+        .select('product_id')
+        .eq('user_email', profile.email);
+
+      if (error) throw error;
+
+      const favoriteSet = new Set(data?.map(f => f.product_id) || []);
+      setUserFavorites(favoriteSet);
+      return favoriteSet;
+    } catch (error) {
+      console.error('Error cargando favoritos:', error);
+      return new Set<string>();
+    }
+  };
+
   useEffect(() => {
     const loadData = async () => {
       if (!profile?.email || !profile?.role) return;
@@ -123,6 +135,9 @@ export default function CreateOrderView({
       setLoadingProducts(true);
 
       try {
+        // Cargar favoritos del usuario
+        const favoritesSet = await loadUserFavorites();
+
         const { data: productsData, error: productsError } = await supabase
           .from('products')
           .select('*')
@@ -133,11 +148,11 @@ export default function CreateOrderView({
         const allProducts = productsData || [];
         const visibleProducts = allProducts.filter((p: any) => canAccessProduct(p, profile));
 
-        // 🔥 FILTRO: Solo productos PRIVADOS o FAVORITOS
+        // 🔥 FILTRO: Productos PRIVADOS O que están en favoritos del usuario
         const filteredProducts = visibleProducts.filter((p: any) => {
           const isPrivate = p.is_private === true;
-          const isFavorite = p.is_favorite === true;
-          return isPrivate || isFavorite;
+          const isUserFavorite = favoritesSet.has(p.id);
+          return isPrivate || isUserFavorite;
         });
 
         setProducts(filteredProducts);
@@ -500,7 +515,7 @@ export default function CreateOrderView({
                     {products.map((p) => (
                       <option key={p.id} value={p.sku}>
                         {p.title} — {p.sku} 
-                        {p.is_favorite ? ' ⭐' : ''}
+                        {userFavorites.has(p.id) ? ' ⭐' : ''}
                         {p.is_private ? ' 🔒' : ''}
                         (Stock: {p.stock || 0}) 
                         (Prov {nf(Number(p.provider_price_gs || 0))})
