@@ -322,29 +322,33 @@ export default function OrdersView() {
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Pedidos</h3>
 
-      {/* Filtros */}
-      <div className="flex flex-wrap items-center gap-2 mb-3">
-        <label className="app-label !mt-0">Desde</label>
-        <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-        <label className="app-label !mt-0">Hasta</label>
-        <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
-        <select className="app-input !w-auto" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+      {/* Filtros - Responsive */}
+      <div className="flex flex-col sm:flex-row flex-wrap items-center gap-2 mb-3">
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <label className="app-label !mt-0">Desde</label>
+          <input type="date" className="app-input flex-1 sm:!w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+        </div>
+        <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <label className="app-label !mt-0">Hasta</label>
+          <input type="date" className="app-input flex-1 sm:!w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+        </div>
+        <select className="app-input w-full sm:!w-auto" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
           <option value="">Todos los estados</option>
           {STATUS1_ALL.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
-        <input className="app-input !w-auto min-w-[250px] flex-1" placeholder="🔎 Buscar por cliente, teléfono, ID o ciudad"
+        <input className="app-input w-full sm:!w-auto sm:min-w-[250px] sm:flex-1" placeholder="🔎 Buscar por cliente, teléfono, ID o ciudad"
           value={search} onChange={e => setSearch(e.target.value)} />
-        <button className="nav-btn active" onClick={loadOrders} disabled={loading}>Filtrar</button>
+        <button className="nav-btn active w-full sm:w-auto" onClick={loadOrders} disabled={loading}>Filtrar</button>
         {selectedIds.size > 0 && (
-          <button className="nav-btn" onClick={bulkGenerateGuides}>📋 Copiar {selectedIds.size} guías</button>
+          <button className="nav-btn w-full sm:w-auto" onClick={bulkGenerateGuides}>📋 Copiar {selectedIds.size} guías</button>
         )}
       </div>
 
       <div className="text-xs text-muted-foreground mb-2">{filtered.length} pedidos</div>
 
-      {/* Tabla */}
-      <div className="overflow-auto">
-        <table className="app-table min-w-[1400px]">
+      {/* Vista Desktop/Tablet - Tabla */}
+      <div className="hidden md:block overflow-x-auto">
+        <table className="app-table min-w-[1000px]">
           <thead>
             <tr>
               <th className="!w-[40px] text-center">
@@ -474,12 +478,144 @@ export default function OrdersView() {
         </table>
       </div>
 
+      {/* Vista Celular - Tarjetas */}
+      <div className="md:hidden space-y-3">
+        {filtered.length === 0 && (
+          <div className="text-center text-muted-foreground py-8">Sin pedidos</div>
+        )}
+        {filtered.map(o => {
+          const feeStored = Number(o.delivery_fee_gs || 0);
+          const commVal = role === 'DELIVERY' ? feeStored : Number(o.commission_gs || 0);
+          const dateShown = (role === 'DELIVERY' && o.assigned_at)
+            ? new Date(o.assigned_at).toLocaleString('es-PY')
+            : new Date(o.created_at).toLocaleString('es-PY');
+
+          return (
+            <div key={o.id} className="bg-card border border-border rounded-lg p-4 shadow-sm">
+              <div className="flex justify-between items-start mb-3">
+                <div>
+                  <div className="font-bold text-sm">{o.order_number || o.id.slice(0, 8)}</div>
+                  <div className="text-xs text-muted-foreground">{dateShown}</div>
+                </div>
+                <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
+              </div>
+              
+              <div className="space-y-2 text-sm">
+                <div className="grid grid-cols-2 gap-1">
+                  <span className="font-medium">Cliente:</span>
+                  <span className="text-right">{o.customer_name}</span>
+                  
+                  <span className="font-medium">Ciudad:</span>
+                  <span className="text-right">{o.city}</span>
+                  
+                  <span className="font-medium">Vendedor:</span>
+                  <span className="text-right">{o.created_by}</span>
+                  
+                  {role !== 'DESPACHANTE' && (
+                    <>
+                      <span className="font-medium">Delivery:</span>
+                      <span className="text-right">{o.assigned_delivery || '—'}</span>
+                    </>
+                  )}
+                  
+                  <span className="font-medium">Total:</span>
+                  <span className="text-right font-bold">Gs {nf(Number(o.total_gs || 0))}</span>
+                  
+                  <span className="font-medium">{role === 'DELIVERY' ? 'Tarifa:' : 'Comisión:'}</span>
+                  <span className="text-right">Gs {nf(commVal)}</span>
+                </div>
+                
+                <div className="pt-2">
+                  <span className="font-medium block mb-1">Estado 1:</span>
+                  {canEditStatus1 ? (
+                    <select
+                      className="app-input !py-2 !px-2 !text-sm w-full"
+                      value={o.status || 'PENDIENTE'}
+                      onChange={e => handleStatus1Change(o.id, e.target.value)}
+                    >
+                      {(role === 'DELIVERY' ? STATUS1_DELIVERY : STATUS1_ALL).map(s => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className={`inline-block badge-status ${statusClass(o.status || '')}`}>{o.status || 'PENDIENTE'}</span>
+                  )}
+                </div>
+                
+                {role !== 'DELIVERY' && (
+                  <div>
+                    <span className="font-medium block mb-1">Estado 2:</span>
+                    {canEditStatus2 ? (
+                      <select
+                        className="app-input !py-2 !px-2 !text-sm w-full"
+                        value={o.status2 || '--'}
+                        onChange={e => handleStatus2Change(o.id, e.target.value)}
+                      >
+                        {STATUS2_ALL.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    ) : (
+                      <span className="text-sm text-muted-foreground">{o.status2 || '—'}</span>
+                    )}
+                  </div>
+                )}
+                
+                {canAssign && (
+                  <div>
+                    <span className="font-medium block mb-1">Asignar Delivery:</span>
+                    <select
+                      className="app-input !py-2 !px-2 !text-sm w-full"
+                      value={o.assigned_delivery || ''}
+                      onChange={e => handleAssignDelivery(o.id, e.target.value)}
+                    >
+                      <option value="">-- Sin asignar --</option>
+                      {deliveries.map(d => (
+                        <option key={d.email} value={d.email}>{d.name || d.email}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                
+                <div className="flex gap-2 pt-2">
+                  <button className="nav-btn flex-1 !py-2 !text-sm" onClick={() => generateGuide(o)}>
+                    📄 Ver Guía
+                  </button>
+                  <button className="nav-btn flex-1 !py-2 !text-sm" onClick={() => { generateGuide(o); setTimeout(copyGuide, 100); }}>
+                    📋 Copiar
+                  </button>
+                  {canEdit && (
+                    <>
+                      <button className="nav-btn flex-1 !py-2 !text-sm" onClick={() => openEdit(o)}>
+                        ✏️ Editar
+                      </button>
+                      <button 
+                        className="nav-btn !py-2 !text-sm !bg-yellow-600/20 text-yellow-700"
+                        onClick={() => confirm('¿Cancelar?') && cancelOrder(o.id)}
+                      >
+                        ⛔
+                      </button>
+                    </>
+                  )}
+                </div>
+                {canDeletePermanently && canEdit && (
+                  <button 
+                    className="nav-btn w-full !py-2 !text-sm !bg-red-600/20 text-red-700 mt-1"
+                    onClick={() => confirm('⚠️ ¿ELIMINAR PERMANENTEMENTE?') && deleteOrderPermanently(o.id)}
+                  >
+                    🗑️ Eliminar Permanentemente
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
       {/* Modal Editar Pedido */}
       {editOrder && (
-        <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-4" onClick={() => setEditOrder(null)}>
-          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-lg space-y-3" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-2 sm:p-4" onClick={() => setEditOrder(null)}>
+          <div className="bg-card border border-border rounded-2xl p-4 sm:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto space-y-3" onClick={e => e.stopPropagation()}>
             <h4 className="text-lg font-extrabold">Editar Pedido</h4>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
                 <label className="app-label">Cliente *</label>
                 <input className="app-input" value={editOrder.customer_name} onChange={e => setEditOrder({ ...editOrder, customer_name: e.target.value })} />
@@ -511,7 +647,7 @@ export default function OrdersView() {
                 <label className="app-label">Barrio</label>
                 <input className="app-input" value={editOrder.district} onChange={e => setEditOrder({ ...editOrder, district: e.target.value })} />
               </div>
-              <div className="col-span-2">
+              <div className="col-span-1 sm:col-span-2">
                 <label className="app-label">Email</label>
                 <input className="app-input" value={editOrder.email} onChange={e => setEditOrder({ ...editOrder, email: e.target.value })} />
               </div>
@@ -530,10 +666,10 @@ export default function OrdersView() {
 
       {/* Modal Guía */}
       {guideText && createPortal(
-        <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-4" onClick={() => setGuideText('')}>
-          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-xl shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-2 sm:p-4" onClick={() => setGuideText('')}>
+          <div className="bg-card border border-border rounded-2xl p-4 sm:p-6 w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
             <h4 className="text-lg font-extrabold mb-3">Guía — {guideOrderId}</h4>
-            <pre className="text-sm whitespace-pre-wrap bg-background p-5 rounded-xl border border-border max-h-[70vh] overflow-auto leading-relaxed">{guideText}</pre>
+            <pre className="text-xs sm:text-sm whitespace-pre-wrap bg-background p-3 sm:p-5 rounded-xl border border-border max-h-[60vh] overflow-auto leading-relaxed">{guideText}</pre>
             <div className="flex gap-2 justify-end mt-4">
               <button className="nav-btn" onClick={() => setGuideText('')}>Cerrar</button>
               <button className="nav-btn active" onClick={copyGuide}>Copiar</button>
