@@ -5,7 +5,7 @@
   color: hsl(var(--foreground));
 }
 
-/* Estrellas animadas - Versión exacta */
+/* Estrellas animadas */
 .star0 {
   height: 1px;
   width: 1px;
