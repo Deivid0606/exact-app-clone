@@ -34,17 +34,27 @@ const canAccessProduct = (product: any, profile: any) => {
   const providerEmail = normalizeEmail(product?.provider_email);
   const privateEmails = parsePrivateEmails(product?.private_to_emails);
   const isPrivate = isPrivateProduct(product);
+  const isFavorite = product?.is_favorite === true;
 
   if (!role || !userEmail) return false;
 
+  // Admin ve todo
   if (role === 'admin') return true;
 
+  // Proveedor ve solo sus productos
   if (role === 'provider') {
     return providerEmail === userEmail;
   }
 
+  // Vendedor, despachante, delivery
   if (['seller', 'despachante', 'delivery'].includes(role)) {
+    // ⭐ Los favoritos son visibles para todos
+    if (isFavorite) return true;
+    
+    // Productos no privados son visibles
     if (!isPrivate) return true;
+    
+    // Productos privados solo para emails autorizados
     return privateEmails.includes(userEmail);
   }
 
