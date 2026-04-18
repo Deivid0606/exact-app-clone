@@ -64,38 +64,31 @@ export default function AuthView({ onSuccess }: AuthViewProps) {
       
       <div className="fixed inset-0 flex items-center justify-center p-4 z-50">
         <div className="w-full max-w-[400px]">
-          {/* Logo con fondo para mejor visibilidad */}
-          <div className="text-center mb-5">
-            <div className="flex justify-center mb-3">
-              <div className="bg-white rounded-2xl p-2 shadow-lg">
-                <img
-                  src="https://cdn.shopify.com/s/files/1/0885/3012/5095/files/Captura_de_pantalla_2026-01-12_023843.jpg?v=1768196352"
-                  alt="DCANP GROUP Logo"
-                  className="w-20 h-20 rounded-xl object-cover"
-                />
-              </div>
+          {/* Logo - SIN fondo blanco */}
+          <div className="text-center mb-4">
+            <div className="flex justify-center mb-2">
+              <img
+                src="https://cdn.shopify.com/s/files/1/0885/3012/5095/files/Captura_de_pantalla_2026-01-12_023843.jpg?v=1768196352"
+                alt="DCANP GROUP Logo"
+                className="w-20 h-20 rounded-2xl object-cover"
+              />
             </div>
             <h1 className="text-2xl font-bold text-white">DCANP Group</h1>
-            <p className="text-white/50 text-xs mt-1">Plataforma de gestión</p>
+            <p className="text-white/50 text-xs mt-0.5">Plataforma de gestión</p>
           </div>
 
-          {/* Frase promocional con mejor contraste */}
-          <div className="text-center mb-6">
-            <div className="inline-block bg-white/10 backdrop-blur-sm rounded-full px-4 py-1 mb-3">
-              <p className="text-orange-400 text-[11px] font-bold tracking-wider flex items-center justify-center gap-1">
-                <span>🇵🇾</span> TU NEGOCIO ONLINE
-              </p>
-            </div>
-            <h2 className="text-2xl font-black text-white mb-2">
-              EMPIEZA AQUÍ
+          {/* Frase "TU NEGOCIO ONLINE" más grande - Sin EMPIEZA AQUÍ */}
+          <div className="text-center mb-5">
+            <h2 className="text-3xl font-black text-white mb-2 tracking-tight">
+              🇵🇾 TU NEGOCIO ONLINE
             </h2>
-            <div className="w-12 h-0.5 bg-orange-400 mx-auto mb-3"></div>
-            <p className="text-white/70 text-xs leading-relaxed max-w-[280px] mx-auto">
+            <div className="w-12 h-0.5 bg-white/30 mx-auto mb-3"></div>
+            <p className="text-white/60 text-xs leading-relaxed max-w-[280px] mx-auto">
               Unite a la red de dropshipping más grande de Paraguay
             </p>
           </div>
 
-          {/* CUADRO DE LOGIN - Mejor contraste */}
+          {/* CUADRO DE LOGIN EN NEGRO */}
           <div className="bg-black/80 backdrop-blur-md rounded-2xl p-6 border border-white/15 shadow-2xl">
             {mode === 'login' ? (
               <>
@@ -115,7 +108,7 @@ export default function AuthView({ onSuccess }: AuthViewProps) {
                     <input
                       type="password"
                       className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-400 transition-all"
-                      placeholder="••••••••••••••"
+                      placeholder="**********"
                       value={loginPass}
                       onChange={e => setLoginPass(e.target.value)}
                       onKeyDown={e => e.key === 'Enter' && handleLogin()}
@@ -189,7 +182,7 @@ export default function AuthView({ onSuccess }: AuthViewProps) {
                     <input
                       type="password"
                       className="w-full bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder:text-white/40 focus:outline-none focus:border-orange-400 focus:ring-1 focus:ring-orange-400 transition-all"
-                      placeholder="••••••••"
+                      placeholder="**********"
                       value={regPass}
                       onChange={e => setRegPass(e.target.value)}
                     />
