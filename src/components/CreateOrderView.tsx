@@ -93,6 +93,7 @@ export default function CreateOrderView({
 
   const [products, setProducts] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
+  const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
   const [customer, setCustomer] = useState('');
   const [phone, setPhone] = useState('');
   const [city, setCity] = useState('');
@@ -106,6 +107,28 @@ export default function CreateOrderView({
   const [saving, setSaving] = useState(false);
   const [loadingProducts, setLoadingProducts] = useState(false);
 
+  // Cargar favoritos del vendedor desde user_favorites
+  const loadUserFavorites = async () => {
+    if (!profile?.email) return new Set<string>();
+
+    try {
+      const { data, error } = await supabase
+        .from('user_favorites')
+        .select('product_id')
+        .eq('user_email', profile.email);
+
+      if (error) throw error;
+
+      const favoriteSet = new Set(data?.map(f => f.product_id) || []);
+      setUserFavorites(favoriteSet);
+      console.log(`⭐ Favoritos cargados para ${profile.email}:`, favoriteSet.size);
+      return favoriteSet;
+    } catch (error) {
+      console.error('Error cargando favoritos:', error);
+      return new Set<string>();
+    }
+  };
+
   useEffect(() => {
     const loadData = async () => {
       if (!profile?.email || !profile?.role) return;
@@ -113,6 +136,9 @@ export default function CreateOrderView({
       setLoadingProducts(true);
 
       try {
+        // Cargar favoritos del vendedor
+        const favoritesSet = await loadUserFavorites();
+
         const { data: productsData, error: productsError } = await supabase
           .from('products')
           .select('*')
@@ -123,18 +149,18 @@ export default function CreateOrderView({
         const allProducts = productsData || [];
         const visibleProducts = allProducts.filter((p: any) => canAccessProduct(p, profile));
 
-        // 🔥 FILTRO: Solo productos PRIVADOS o FAVORITOS (usando is_favorite de la tabla)
+        // 🔥 FILTRO: Productos PRIVADOS O que el vendedor marcó como favorito
         const filteredProducts = visibleProducts.filter((p: any) => {
           const isPrivate = p.is_private === true;
-          const isFavorite = p.is_favorite === true;
-          return isPrivate || isFavorite;
+          const isUserFavorite = favoritesSet.has(p.id);
+          return isPrivate || isUserFavorite;
         });
 
         console.log('📊 Productos totales:', allProducts.length);
         console.log('📦 Productos visibles:', visibleProducts.length);
-        console.log('⭐ Productos favoritos:', visibleProducts.filter(p => p.is_favorite === true).length);
+        console.log('⭐ Favoritos del vendedor:', favoritesSet.size);
         console.log('🔒 Productos privados:', visibleProducts.filter(p => p.is_private === true).length);
-        console.log('✅ Productos filtrados (favoritos + privados):', filteredProducts.length);
+        console.log('✅ Productos filtrados (privados + sus favoritos):', filteredProducts.length);
 
         setProducts(filteredProducts);
 
@@ -496,7 +522,7 @@ export default function CreateOrderView({
                     {products.map((p) => (
                       <option key={p.id} value={p.sku}>
                         {p.title} — {p.sku} 
-                        {p.is_favorite ? ' ⭐' : ''}
+                        {userFavorites.has(p.id) ? ' ⭐' : ''}
                         {p.is_private ? ' 🔒' : ''}
                         (Stock: {p.stock || 0}) 
                         (Prov {nf(Number(p.provider_price_gs || 0))})
