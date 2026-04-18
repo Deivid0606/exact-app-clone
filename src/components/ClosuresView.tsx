@@ -233,11 +233,12 @@ export default function ClosuresView() {
   const deliveryName = deliveries.find(d => d.email === filterDelivery)?.name || filterDelivery || 'Todos los repartidores';
   const allRendered = noRendidos.length === 0 && delivered.length > 0;
   
-  // PERMISOS: ADMIN, PROVEEDOR y DELIVERY pueden editar estados
-  const canEdit = role === 'ADMIN' || role === 'PROVEEDOR' || role === 'DELIVERY';
-  
-  // Solo ADMIN y PROVEEDOR pueden ver el Control de Rendición y marcar como PAGADO
-  const canManageRendicion = role === 'ADMIN' || role === 'PROVEEDOR';
+  // PERMISOS:
+  // DELIVERY: solo puede editar Estado 1
+  // ADMIN y PROVEEDOR: pueden editar todo
+  const canEditFull = role === 'ADMIN' || role === 'PROVEEDOR';  // Puede editar fecha, ciudad, estado retiro, estado2
+  const canEditStatus1 = role === 'ADMIN' || role === 'PROVEEDOR' || role === 'DELIVERY';  // Puede editar Estado 1
+  const canManageRendicion = role === 'ADMIN' || role === 'PROVEEDOR';  // Puede ver Control de Rendición y marcar PAGADO
 
   return (
     <div className="app-card">
@@ -245,14 +246,14 @@ export default function ClosuresView() {
 
       {role === 'DELIVERY' && (
         <div className="mb-3">
-          <span className="badge-status badge-entregado">✏️ Modo edición para DELIVERY</span>
-          <p className="text-xs text-muted-foreground mt-1">Podés actualizar estados de tus pedidos.</p>
+          <span className="badge-status badge-entregado">✏️ DELIVERY: solo podés editar Estado 1</span>
+          <p className="text-xs text-muted-foreground mt-1">Podés actualizar el estado de tus pedidos (PENDIENTE → EN RUTA → ENTREGADO).</p>
         </div>
       )}
 
       {(role === 'PROVEEDOR' || role === 'ADMIN') && (
         <div className="mb-3">
-          <span className="badge-status badge-entregado">✏️ Modo edición para PROVEEDOR/ADMIN</span>
+          <span className="badge-status badge-entregado">✏️ PROVEEDOR/ADMIN: edición completa</span>
           <p className="text-xs text-muted-foreground mt-1">Podés actualizar estados, fechas, ciudades y gestionar rendiciones.</p>
         </div>
       )}
@@ -388,7 +389,8 @@ export default function ClosuresView() {
               return (
                 <tr key={o.id} className={isSettled ? 'opacity-60' : ''}>
                   <td>
-                    {canEdit ? (
+                    {/* Fecha: solo ADMIN y PROVEEDOR pueden editar */}
+                    {canEditFull ? (
                       <input type="date" className="app-input !py-1 !px-2 !text-xs !w-[130px]"
                         value={assignedDate}
                         onChange={e => updateAssignedAt(o.id, e.target.value)} />
@@ -398,7 +400,8 @@ export default function ClosuresView() {
                   </td>
                   <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
                   <td>
-                    {canEdit ? (
+                    {/* Ciudad: solo ADMIN y PROVEEDOR pueden editar */}
+                    {canEditFull ? (
                       <select className="app-input !py-1 !px-2 !text-xs !w-auto !min-w-[120px]"
                         value={o.city || ''}
                         onChange={e => updateCity(o.id, e.target.value)}>
@@ -415,7 +418,8 @@ export default function ClosuresView() {
                   <td className="text-right text-xs">{nf(fee)}</td>
                   <td className="text-right text-xs">{nf(net)}</td>
                   <td>
-                    {canEdit ? (
+                    {/* Estado 1: DELIVERY, ADMIN y PROVEEDOR pueden editar */}
+                    {canEditStatus1 ? (
                       <select 
                         className="app-input !w-auto !py-1 !px-2 text-xs"
                         value={o.status || 'PENDIENTE'}
@@ -428,7 +432,8 @@ export default function ClosuresView() {
                     )}
                   </td>
                   <td>
-                    {canEdit ? (
+                    {/* Estado de retiro: solo ADMIN y PROVEEDOR pueden editar */}
+                    {canEditFull ? (
                       <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.estado_retiro || ''}
                         onChange={e => updateRetiro(o.id, e.target.value)}>
                         {retiroOpts.map(s => <option key={s} value={s}>{s || '—'}</option>)}
@@ -436,7 +441,8 @@ export default function ClosuresView() {
                     ) : <span className="text-xs">{o.estado_retiro || '—'}</span>}
                   </td>
                   <td>
-                    {canEdit ? (
+                    {/* Estado 2: solo ADMIN y PROVEEDOR pueden editar */}
+                    {canEditFull ? (
                       <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.status2 || '--'}
                         onChange={e => updateStatus2(o.id, e.target.value)}>
                         {state2Opts.map(s => <option key={s} value={s}>{s}</option>)}
