@@ -23,8 +23,7 @@ export default function ClosuresView() {
   });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
 
-  // Nuevos estados para pedidos por fecha
-  const [pedidosAgrupadosPorFecha, setPedidosAgrupadosPorFecha] = useState<any[]>([]);
+  // Total de pedidos asignados
   const [totalPedidosAsignados, setTotalPedidosAsignados] = useState(0);
 
   useEffect(() => {
@@ -32,35 +31,6 @@ export default function ClosuresView() {
     supabase.from('delivery_fees').select('*').then(({ data }) => setFees(data || []));
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
   }, []);
-
-  // Función para agrupar pedidos por fecha
-  const agruparPedidosPorFecha = (pedidos: any[]) => {
-    const grouped = pedidos.reduce((acc: any, pedido: any) => {
-      const fecha = pedido.assigned_at ? new Date(pedido.assigned_at).toISOString().slice(0, 10) : 'Sin fecha';
-      if (!acc[fecha]) {
-        acc[fecha] = {
-          fecha: fecha,
-          totalAsignados: 0,
-          entregados: 0,
-          pendientes: 0,
-          montoTotal: 0,
-        };
-      }
-      
-      acc[fecha].totalAsignados++;
-      acc[fecha].montoTotal += Number(pedido.total_gs || 0);
-      
-      if (pedido.status === 'ENTREGADO' || pedido.status === 'ENCOMIENDA ENTREGADA') {
-        acc[fecha].entregados++;
-      } else {
-        acc[fecha].pendientes++;
-      }
-      
-      return acc;
-    }, {});
-    
-    return Object.values(grouped).sort((a: any, b: any) => b.fecha.localeCompare(a.fecha));
-  };
 
   const loadClosures = async () => {
     let query = supabase.from('orders').select('*')
@@ -73,13 +43,9 @@ export default function ClosuresView() {
 
     const { data } = await query;
     setOrders(data || []);
-
-    // Calcular KPIs de pedidos por fecha
-    if (data) {
-      const agrupados = agruparPedidosPorFecha(data);
-      setPedidosAgrupadosPorFecha(agrupados);
-      setTotalPedidosAsignados(data.length);
-    }
+    
+    // Calcular total de pedidos asignados
+    setTotalPedidosAsignados(data?.length || 0);
 
     // Check if rendición already paid
     if (filterDelivery) {
@@ -266,7 +232,12 @@ export default function ClosuresView() {
   
   const deliveryName = deliveries.find(d => d.email === filterDelivery)?.name || filterDelivery || 'Todos los repartidores';
   const allRendered = noRendidos.length === 0 && delivered.length > 0;
-  const canEdit = role !== 'DELIVERY';
+  
+  // PERMISOS: ADMIN, PROVEEDOR y DELIVERY pueden editar estados
+  const canEdit = role === 'ADMIN' || role === 'PROVEEDOR' || role === 'DELIVERY';
+  
+  // Solo ADMIN y PROVEEDOR pueden ver el Control de Rendición y marcar como PAGADO
+  const canManageRendicion = role === 'ADMIN' || role === 'PROVEEDOR';
 
   return (
     <div className="app-card">
@@ -274,8 +245,15 @@ export default function ClosuresView() {
 
       {role === 'DELIVERY' && (
         <div className="mb-3">
-          <span className="badge-status badge-pendiente">👁️ Vista solo lectura para DELIVERY</span>
-          <p className="text-xs text-muted-foreground mt-1">Acá podés ver tu cierre, cuánto debés rendir y el detalle de tus pedidos.</p>
+          <span className="badge-status badge-entregado">✏️ Modo edición para DELIVERY</span>
+          <p className="text-xs text-muted-foreground mt-1">Podés actualizar estados de tus pedidos.</p>
+        </div>
+      )}
+
+      {(role === 'PROVEEDOR' || role === 'ADMIN') && (
+        <div className="mb-3">
+          <span className="badge-status badge-entregado">✏️ Modo edición para PROVEEDOR/ADMIN</span>
+          <p className="text-xs text-muted-foreground mt-1">Podés actualizar estados, fechas, ciudades y gestionar rendiciones.</p>
         </div>
       )}
 
@@ -301,48 +279,19 @@ export default function ClosuresView() {
         <button className="nav-btn active" onClick={loadClosures}>Aplicar</button>
       </div>
 
-      {/* NUEVO KPI - Pedidos Asignados por Fecha */}
-      {filterDelivery && pedidosAgrupadosPorFecha.length > 0 && (
-        <div className="app-card !p-4 mb-4">
-          <h4 className="font-extrabold mb-3">📦 Pedidos Asignados por Fecha</h4>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="kpi-card">
-              <div className="text-xs text-muted-foreground mb-1">Total Asignados</div>
-              <div className="text-[22px] font-extrabold">{totalPedidosAsignados}</div>
-              <div className="text-xs text-muted-foreground">en el período</div>
-            </div>
-            <div className="md:col-span-3">
-              <div className="overflow-auto">
-                <table className="app-table w-full">
-                  <thead>
-                    <tr>
-                      <th>Fecha</th>
-                      <th>Asignados</th>
-                      <th>Entregados</th>
-                      <th>Pendientes</th>
-                      <th className="text-right">Monto Total</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pedidosAgrupadosPorFecha.map((grupo) => (
-                      <tr key={grupo.fecha}>
-                        <td className="text-xs">{new Date(grupo.fecha).toLocaleDateString('es-PY')}</td>
-                        <td className="text-xs font-bold">{grupo.totalAsignados}</td>
-                        <td className="text-xs" style={{ color: '#4ade80' }}>{grupo.entregados}</td>
-                        <td className="text-xs" style={{ color: '#eab308' }}>{grupo.pendientes}</td>
-                        <td className="text-right text-xs font-bold">{nf(grupo.montoTotal)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+      {/* NUEVO KPI - Total de Pedidos Asignados */}
+      {filterDelivery && (
+        <div className="grid-kpi mb-4">
+          <div className="kpi-card">
+            <div className="text-xs text-muted-foreground mb-1">📦 Pedidos Asignados</div>
+            <div className="text-[22px] font-extrabold">{totalPedidosAsignados}</div>
+            <div className="text-xs text-muted-foreground">en el período</div>
           </div>
         </div>
       )}
 
-      {/* Control de Rendición card */}
-      {role !== 'DELIVERY' && delivered.length > 0 && (
+      {/* Control de Rendición card - solo para ADMIN y PROVEEDOR */}
+      {canManageRendicion && delivered.length > 0 && (
         <div className="app-card !p-4 mb-4 border-l-4 border-l-[hsl(var(--primary))]">
           <h4 className="font-extrabold mb-3">📋 Control de Rendición</h4>
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mb-3">
@@ -427,7 +376,7 @@ export default function ClosuresView() {
               <th className="text-right">Total (Gs)</th><th className="text-right">Tarifa (Gs)</th>
               <th className="text-right">Neto (Gs)</th><th>Estado 1</th>
               <th>Estado de retiro</th><th>Estado 2 (cierre)</th>
-              {role !== 'DELIVERY' && <th></th>}
+              {canManageRendicion && <th></th>}
             </tr>
           </thead>
           <tbody>
@@ -494,7 +443,7 @@ export default function ClosuresView() {
                       </select>
                     ) : <span className="text-xs">{o.status2 || '—'}</span>}
                   </td>
-                  {role !== 'DELIVERY' && (
+                  {canManageRendicion && (
                     <td>
                       <div className="flex items-center gap-1">
                         {!isSettled && (o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA') && (
@@ -514,7 +463,7 @@ export default function ClosuresView() {
                 </tr>
               );
             })}
-            {orders.length === 0 && <tr><td colSpan={role !== 'DELIVERY' ? 11 : 10} className="text-center text-muted-foreground py-8">Sin resultados</td></tr>}
+            {orders.length === 0 && <tr><td colSpan={canManageRendicion ? 11 : 10} className="text-center text-muted-foreground py-8">Sin resultados</td></tr>}
           </tbody>
         </table>
       </div>
