@@ -23,11 +23,45 @@ export default function ClosuresView() {
   });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
 
+  // Nuevos estados para pedidos por fecha
+  const [pedidosPorFecha, setPedidosPorFecha] = useState<{ fecha: string; cantidad: number }[]>([]);
+  const [pedidosAgrupadosPorFecha, setPedidosAgrupadosPorFecha] = useState<any[]>([]);
+  const [totalPedidosAsignados, setTotalPedidosAsignados] = useState(0);
+
   useEffect(() => {
     supabase.from('profiles').select('email, name').then(({ data }) => setDeliveries(data || []));
     supabase.from('delivery_fees').select('*').then(({ data }) => setFees(data || []));
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
   }, []);
+
+  // Función para agrupar pedidos por fecha
+  const agruparPedidosPorFecha = (pedidos: any[]) => {
+    const grouped = pedidos.reduce((acc: any, pedido: any) => {
+      const fecha = pedido.assigned_at ? new Date(pedido.assigned_at).toISOString().slice(0, 10) : 'Sin fecha';
+      if (!acc[fecha]) {
+        acc[fecha] = {
+          fecha: fecha,
+          totalAsignados: 0,
+          entregados: 0,
+          pendientes: 0,
+          montoTotal: 0,
+        };
+      }
+      
+      acc[fecha].totalAsignados++;
+      acc[fecha].montoTotal += Number(pedido.total_gs || 0);
+      
+      if (pedido.status === 'ENTREGADO' || pedido.status === 'ENCOMIENDA ENTREGADA') {
+        acc[fecha].entregados++;
+      } else {
+        acc[fecha].pendientes++;
+      }
+      
+      return acc;
+    }, {});
+    
+    return Object.values(grouped).sort((a: any, b: any) => b.fecha.localeCompare(a.fecha));
+  };
 
   const loadClosures = async () => {
     let query = supabase.from('orders').select('*')
@@ -40,6 +74,20 @@ export default function ClosuresView() {
 
     const { data } = await query;
     setOrders(data || []);
+
+    // Calcular KPIs de pedidos por fecha
+    if (data) {
+      const agrupados = agruparPedidosPorFecha(data);
+      setPedidosAgrupadosPorFecha(agrupados);
+      setTotalPedidosAsignados(data.length);
+      
+      // Resumen para KPI pequeño (últimas 3 fechas)
+      const resumen = agrupados.slice(0, 3).map(g => ({
+        fecha: new Date(g.fecha).toLocaleDateString('es-PY'),
+        cantidad: g.totalAsignados
+      }));
+      setPedidosPorFecha(resumen);
+    }
 
     // Check if rendición already paid
     if (filterDelivery) {
@@ -94,14 +142,34 @@ export default function ClosuresView() {
     }, 0);
   }, [delivered]);
 
+  // FUNCIONES DE ACTUALIZACIÓN DE ESTADOS
+  const updateStatus1 = async (orderId: string, status: string) => {
+    const { error } = await supabase.from('orders').update({ 
+      status,
+      updated_at: new Date().toISOString()
+    }).eq('id', orderId);
+    if (error) toast.error(error.message);
+    else { 
+      toast.success('Estado 1 actualizado'); 
+      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
+      loadClosures(); // Recargar para actualizar KPIs
+    }
+  };
+
   const updateStatus2 = async (orderId: string, status2: string) => {
-    const { error } = await supabase.from('orders').update({ status2 }).eq('id', orderId);
+    const { error } = await supabase.from('orders').update({ 
+      status2,
+      updated_at: new Date().toISOString()
+    }).eq('id', orderId);
     if (error) toast.error(error.message);
     else { toast.success('Estado 2 actualizado'); setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status2 } : o)); }
   };
 
   const updateRetiro = async (orderId: string, estado: string) => {
-    const { error } = await supabase.from('orders').update({ estado_retiro: estado }).eq('id', orderId);
+    const { error } = await supabase.from('orders').update({ 
+      estado_retiro: estado,
+      updated_at: new Date().toISOString()
+    }).eq('id', orderId);
     if (error) toast.error(error.message);
     else { toast.success('Estado de retiro actualizado'); setOrders(prev => prev.map(o => o.id === orderId ? { ...o, estado_retiro: estado } : o)); }
   };
@@ -119,7 +187,6 @@ export default function ClosuresView() {
     else { toast.success('Ciudad actualizada'); setOrders(prev => prev.map(o => o.id === orderId ? { ...o, city } : o)); }
   };
 
-  // Mark single order as RENDIDO
   const markSingleRendido = async (orderId: string) => {
     const { error } = await supabase.from('orders').update({
       delivery_settled: true,
@@ -137,7 +204,6 @@ export default function ClosuresView() {
     });
   };
 
-  // Mark rendición as PAGADO
   const markRendicionPagada = async () => {
     const deliveryEmail = filterDelivery;
     if (!deliveryEmail) { toast.error('Seleccioná un delivery primero'); return; }
@@ -181,7 +247,6 @@ export default function ClosuresView() {
     if (!rendicionPagada) return;
     if (!confirm('¿Desmarcar esta rendición como pagada?')) return;
 
-    // Revert orders
     for (const o of delivered) {
       await supabase.from('orders').update({
         delivery_settled: false,
@@ -191,7 +256,6 @@ export default function ClosuresView() {
       }).eq('id', o.id);
     }
 
-    // Delete rendicion record
     await supabase.from('rendiciones_pagadas').delete().eq('id', rendicionPagada.id);
 
     await supabase.from('news').insert({
@@ -204,10 +268,16 @@ export default function ClosuresView() {
     loadClosures();
   };
 
+  // Opciones para los selects
+  const status1Opts = ['PENDIENTE', 'EN RUTA', 'ENTREGADO', 'ENCOMIENDA ENTREGADA', 'CANCELADO'];
   const state2Opts = ['--', 'GUIA GENERADA', 'FUERA DE COBERTURA', 'CANCELADO', 'REPETIDO', 'RENDIDO'];
   const retiroOpts = ['', 'PENDIENTE', 'REALIZADO', 'CANCELADO'];
+  
   const deliveryName = deliveries.find(d => d.email === filterDelivery)?.name || filterDelivery || 'Todos los repartidores';
   const allRendered = noRendidos.length === 0 && delivered.length > 0;
+  
+  // Permisos para editar
+  const canEdit = role !== 'DELIVERY';
 
   return (
     <div className="app-card">
@@ -241,6 +311,43 @@ export default function ClosuresView() {
         </select>
         <button className="nav-btn active" onClick={loadClosures}>Aplicar</button>
       </div>
+
+      {/* NUEVO KPI - Pedidos Asignados por Fecha */}
+      {filterDelivery && (
+        <div className="app-card !p-4 mb-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-l-4 border-purple-500">
+          <h4 className="font-extrabold mb-3 flex items-center gap-2">📦 Pedidos Asignados por Fecha</h4>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="bg-white rounded-xl p-4 shadow-sm">
+              <div className="text-xs text-muted-foreground mb-1">Total Asignados</div>
+              <div className="text-3xl font-extrabold text-purple-600">{totalPedidosAsignados}</div>
+              <div className="text-xs text-muted-foreground mt-1">en el período seleccionado</div>
+            </div>
+            <div className="bg-white rounded-xl p-4 shadow-sm md:col-span-3">
+              <div className="text-xs text-muted-foreground mb-2">Desglose por fecha:</div>
+              <div className="space-y-2">
+                {pedidosAgrupadosPorFecha.slice(0, 5).map((grupo) => (
+                  <div key={grupo.fecha} className="flex items-center gap-2">
+                    <span className="text-xs w-28 font-medium">{new Date(grupo.fecha).toLocaleDateString('es-PY')}</span>
+                    <div className="flex-1 h-7 bg-gray-100 rounded-full overflow-hidden">
+                      <div 
+                        className="h-full bg-gradient-to-r from-purple-500 to-indigo-500 text-white text-xs flex items-center justify-end px-2"
+                        style={{ width: `${(grupo.totalAsignados / totalPedidosAsignados) * 100}%` }}
+                      >
+                        {grupo.totalAsignados > 0 && grupo.totalAsignados}
+                      </div>
+                    </div>
+                    <div className="flex gap-3 text-xs">
+                      <span className="text-green-600">✓ {grupo.entregados}</span>
+                      <span className="text-orange-600">⏳ {grupo.pendientes}</span>
+                      <span className="font-bold">₲{nf(grupo.montoTotal)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Control de Rendición card */}
       {role !== 'DELIVERY' && delivered.length > 0 && (
@@ -303,7 +410,6 @@ export default function ClosuresView() {
                 className="relative group inline-flex items-center gap-2 px-6 py-3 rounded-xl font-extrabold text-sm text-white shadow-lg transition-all duration-200 hover:scale-[1.03] active:scale-[0.97] disabled:opacity-40 disabled:hover:scale-100"
                 style={{ background: 'linear-gradient(135deg, #16a34a, #059669)' }}
               >
-                <span className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-200" style={{ background: 'linear-gradient(135deg, #059669, #16a34a)' }} />
                 <span className="relative flex items-center gap-2">✅ MARCAR COMO PAGADO</span>
               </button>
             </div>
@@ -323,7 +429,7 @@ export default function ClosuresView() {
       </div>
 
       <div className="overflow-auto">
-        <table className="app-table min-w-[1400px]">
+        <table className="app-table min-w-[1500px]">
           <thead>
             <tr>
               <th>Asignado</th><th>ID</th><th>Ciudad</th><th>Cliente</th>
@@ -342,7 +448,7 @@ export default function ClosuresView() {
               return (
                 <tr key={o.id} className={isSettled ? 'opacity-60' : ''}>
                   <td>
-                    {role !== 'DELIVERY' ? (
+                    {canEdit ? (
                       <input type="date" className="app-input !py-1 !px-2 !text-xs !w-[130px]"
                         value={assignedDate}
                         onChange={e => updateAssignedAt(o.id, e.target.value)} />
@@ -352,7 +458,7 @@ export default function ClosuresView() {
                   </td>
                   <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
                   <td>
-                    {role !== 'DELIVERY' ? (
+                    {canEdit ? (
                       <select className="app-input !py-1 !px-2 !text-xs !w-auto !min-w-[120px]"
                         value={o.city || ''}
                         onChange={e => updateCity(o.id, e.target.value)}>
@@ -368,9 +474,24 @@ export default function ClosuresView() {
                   <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
                   <td className="text-right text-xs">{nf(fee)}</td>
                   <td className="text-right text-xs">{nf(net)}</td>
-                  <td><span className={`badge-status ${o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA' ? 'badge-entregado' : o.status === 'CANCELADO' ? 'badge-cancelado' : 'badge-pendiente'}`}>{o.status}</span></td>
                   <td>
-                    {role !== 'DELIVERY' ? (
+                    {canEdit ? (
+                      <select 
+                        className="app-input !w-auto !py-1 !px-2 text-xs font-medium"
+                        value={o.status || 'PENDIENTE'}
+                        onChange={e => updateStatus1(o.id, e.target.value)}
+                        style={{ 
+                          backgroundColor: o.status === 'ENTREGADO' ? '#dcfce7' : o.status === 'ENCOMIENDA ENTREGADA' ? '#dcfce7' : o.status === 'CANCELADO' ? '#fee2e2' : '#fef3c7'
+                        }}
+                      >
+                        {status1Opts.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    ) : (
+                      <span className={`badge-status ${o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA' ? 'badge-entregado' : o.status === 'CANCELADO' ? 'badge-cancelado' : 'badge-pendiente'}`}>{o.status}</span>
+                    )}
+                  </td>
+                  <td>
+                    {canEdit ? (
                       <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.estado_retiro || ''}
                         onChange={e => updateRetiro(o.id, e.target.value)}>
                         {retiroOpts.map(s => <option key={s} value={s}>{s || '—'}</option>)}
@@ -378,7 +499,7 @@ export default function ClosuresView() {
                     ) : <span className="text-xs">{o.estado_retiro || '—'}</span>}
                   </td>
                   <td>
-                    {role !== 'DELIVERY' ? (
+                    {canEdit ? (
                       <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.status2 || '--'}
                         onChange={e => updateStatus2(o.id, e.target.value)}>
                         {state2Opts.map(s => <option key={s} value={s}>{s}</option>)}
