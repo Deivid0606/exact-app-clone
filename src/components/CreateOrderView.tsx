@@ -123,10 +123,13 @@ export default function CreateOrderView({
         const allProducts = productsData || [];
         const visibleProducts = allProducts.filter((p: any) => canAccessProduct(p, profile));
 
-        setProducts(visibleProducts);
+        // 🔥 FILTRO: Solo mostrar productos con stock > 0
+        const filteredProducts = visibleProducts.filter((p: any) => (p.stock || 0) > 0);
+
+        setProducts(filteredProducts);
 
         if (initialSku) {
-          const found = visibleProducts.find((p: any) => p.sku === initialSku);
+          const found = filteredProducts.find((p: any) => p.sku === initialSku);
           if (found) {
             setItems([{ sku: initialSku, sale_gs: 0, qty: 1 }]);
           }
@@ -194,7 +197,7 @@ export default function CreateOrderView({
               .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '')
               .trim();
 
-            const exactMatch = visibleProducts.find(
+            const exactMatch = filteredProducts.find(
               (p: any) =>
                 p.title?.toLowerCase().trim() === titleLower ||
                 p.title?.toLowerCase().trim() === cleanTitle
@@ -210,7 +213,7 @@ export default function CreateOrderView({
               ]);
               toast.success(`🎯 Producto detectado: ${exactMatch.title}`);
             } else {
-              const partialMatch = visibleProducts.find((p: any) => {
+              const partialMatch = filteredProducts.find((p: any) => {
                 const pTitle = p.title?.toLowerCase().trim() || '';
                 return pTitle.includes(cleanTitle) || cleanTitle.includes(pTitle);
               });
@@ -481,8 +484,8 @@ export default function CreateOrderView({
                       {loadingProducts ? 'Cargando productos…' : 'Seleccionar producto…'}
                     </option>
                     {products.map((p) => (
-                      <option key={p.id} value={p.sku} disabled={(p.stock || 0) <= 0}>
-                        {p.title} — {p.sku} (Prov {nf(Number(p.provider_price_gs || 0))}){' '}
+                      <option key={p.id} value={p.sku}>
+                        {p.title} — {p.sku} (Stock: {p.stock || 0}) (Prov {nf(Number(p.provider_price_gs || 0))}){' '}
                         {p.provider_email ? `[${p.provider_email}]` : ''}
                       </option>
                     ))}
