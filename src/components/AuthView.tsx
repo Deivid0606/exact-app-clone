@@ -67,15 +67,25 @@ export default function AuthView({ onSuccess }: AuthViewProps) {
       <div className="fixed inset-0 flex items-center justify-center p-4 z-50">
         <div className="w-full max-w-[420px]">
           {/* Logo & Welcome */}
-          <div className="flex flex-col items-center mb-8">
+          <div className="flex flex-col items-center mb-6">
             <img
               src="https://cdn.shopify.com/s/files/1/0885/3012/5095/files/Captura_de_pantalla_2026-01-12_023843.jpg?v=1768196352"
               alt="DCANP GROUP Logo"
-              className="w-16 h-16 rounded-2xl object-cover mb-4"
+              className="w-16 h-16 rounded-2xl object-cover mb-3"
             />
             <h1 className="text-2xl font-extrabold text-white">DCANP Group</h1>
             <p className="text-muted-foreground text-sm mt-1">
               {mode === 'login' ? 'Iniciar sesión en tu cuenta' : 'Crear una cuenta nueva'}
+            </p>
+          </div>
+
+          {/* Texto promocional */}
+          <div className="text-center mb-6 px-4">
+            <p className="text-white text-xl font-bold mb-2">
+              🇵🇾 Despegá tu negocio sin límites
+            </p>
+            <p className="text-white/80 text-sm leading-relaxed">
+              Unite a la red de dropshipping más grande de Paraguay. Sin stock, sin riesgos, solo ganancias. Miles de revendedores ya están facturando desde casa.
             </p>
           </div>
 
