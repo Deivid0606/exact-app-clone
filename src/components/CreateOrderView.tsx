@@ -107,9 +107,9 @@ export default function CreateOrderView({
   const [saving, setSaving] = useState(false);
   const [loadingProducts, setLoadingProducts] = useState(false);
 
-  // Cargar favoritos del usuario actual
+  // Cargar favoritos del usuario actual desde user_favorites
   const loadUserFavorites = async () => {
-    if (!profile?.email) return;
+    if (!profile?.email) return new Set<string>();
 
     try {
       const { data, error } = await supabase
@@ -154,6 +154,11 @@ export default function CreateOrderView({
           const isUserFavorite = favoritesSet.has(p.id);
           return isPrivate || isUserFavorite;
         });
+
+        console.log('📊 Favoritos del usuario:', favoritesSet.size);
+        console.log('📦 Productos filtrados:', filteredProducts.length);
+        console.log('🔒 Privados:', filteredProducts.filter(p => p.is_private === true).length);
+        console.log('⭐ Favoritos:', filteredProducts.filter(p => favoritesSet.has(p.id)).length);
 
         setProducts(filteredProducts);
 
