@@ -570,19 +570,21 @@ export default function CreateOrderView({
             </div>
           </div>
 
-          <button
-            className="nav-btn active mt-4 w-full"
-            onClick={saveOrder}
-            disabled={saving || loadingProducts}
-          >
-            {saving ? (
-              <span className="flex items-center justify-center gap-2">
-                <span className="btn-spinner" /> Guardando...
-              </span>
-            ) : (
-              'Guardar pedido'
-            )}
-          </button>
+          <div className="mt-4 flex">
+            <button
+              className="nav-btn active w-full md:w-auto md:min-w-[220px]"
+              onClick={saveOrder}
+              disabled={saving || loadingProducts}
+            >
+              {saving ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="btn-spinner" /> Guardando...
+                </span>
+              ) : (
+                'Guardar pedido'
+              )}
+            </button>
+          </div>
         </div>
       </div>
     </div>
