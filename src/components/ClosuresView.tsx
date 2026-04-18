@@ -24,7 +24,6 @@ export default function ClosuresView() {
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
 
   // Nuevos estados para pedidos por fecha
-  const [pedidosPorFecha, setPedidosPorFecha] = useState<{ fecha: string; cantidad: number }[]>([]);
   const [pedidosAgrupadosPorFecha, setPedidosAgrupadosPorFecha] = useState<any[]>([]);
   const [totalPedidosAsignados, setTotalPedidosAsignados] = useState(0);
 
@@ -80,13 +79,6 @@ export default function ClosuresView() {
       const agrupados = agruparPedidosPorFecha(data);
       setPedidosAgrupadosPorFecha(agrupados);
       setTotalPedidosAsignados(data.length);
-      
-      // Resumen para KPI pequeño (últimas 3 fechas)
-      const resumen = agrupados.slice(0, 3).map(g => ({
-        fecha: new Date(g.fecha).toLocaleDateString('es-PY'),
-        cantidad: g.totalAsignados
-      }));
-      setPedidosPorFecha(resumen);
     }
 
     // Check if rendición already paid
@@ -152,7 +144,7 @@ export default function ClosuresView() {
     else { 
       toast.success('Estado 1 actualizado'); 
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
-      loadClosures(); // Recargar para actualizar KPIs
+      loadClosures();
     }
   };
 
@@ -268,15 +260,12 @@ export default function ClosuresView() {
     loadClosures();
   };
 
-  // Opciones para los selects
   const status1Opts = ['PENDIENTE', 'EN RUTA', 'ENTREGADO', 'ENCOMIENDA ENTREGADA', 'CANCELADO'];
   const state2Opts = ['--', 'GUIA GENERADA', 'FUERA DE COBERTURA', 'CANCELADO', 'REPETIDO', 'RENDIDO'];
   const retiroOpts = ['', 'PENDIENTE', 'REALIZADO', 'CANCELADO'];
   
   const deliveryName = deliveries.find(d => d.email === filterDelivery)?.name || filterDelivery || 'Todos los repartidores';
   const allRendered = noRendidos.length === 0 && delivered.length > 0;
-  
-  // Permisos para editar
   const canEdit = role !== 'DELIVERY';
 
   return (
@@ -313,36 +302,39 @@ export default function ClosuresView() {
       </div>
 
       {/* NUEVO KPI - Pedidos Asignados por Fecha */}
-      {filterDelivery && (
-        <div className="app-card !p-4 mb-4 bg-gradient-to-r from-purple-50 to-indigo-50 border-l-4 border-purple-500">
-          <h4 className="font-extrabold mb-3 flex items-center gap-2">📦 Pedidos Asignados por Fecha</h4>
+      {filterDelivery && pedidosAgrupadosPorFecha.length > 0 && (
+        <div className="app-card !p-4 mb-4">
+          <h4 className="font-extrabold mb-3">📦 Pedidos Asignados por Fecha</h4>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <div className="bg-white rounded-xl p-4 shadow-sm">
+            <div className="kpi-card">
               <div className="text-xs text-muted-foreground mb-1">Total Asignados</div>
-              <div className="text-3xl font-extrabold text-purple-600">{totalPedidosAsignados}</div>
-              <div className="text-xs text-muted-foreground mt-1">en el período seleccionado</div>
+              <div className="text-[22px] font-extrabold">{totalPedidosAsignados}</div>
+              <div className="text-xs text-muted-foreground">en el período</div>
             </div>
-            <div className="bg-white rounded-xl p-4 shadow-sm md:col-span-3">
-              <div className="text-xs text-muted-foreground mb-2">Desglose por fecha:</div>
-              <div className="space-y-2">
-                {pedidosAgrupadosPorFecha.slice(0, 5).map((grupo) => (
-                  <div key={grupo.fecha} className="flex items-center gap-2">
-                    <span className="text-xs w-28 font-medium">{new Date(grupo.fecha).toLocaleDateString('es-PY')}</span>
-                    <div className="flex-1 h-7 bg-gray-100 rounded-full overflow-hidden">
-                      <div 
-                        className="h-full bg-gradient-to-r from-purple-500 to-indigo-500 text-white text-xs flex items-center justify-end px-2"
-                        style={{ width: `${(grupo.totalAsignados / totalPedidosAsignados) * 100}%` }}
-                      >
-                        {grupo.totalAsignados > 0 && grupo.totalAsignados}
-                      </div>
-                    </div>
-                    <div className="flex gap-3 text-xs">
-                      <span className="text-green-600">✓ {grupo.entregados}</span>
-                      <span className="text-orange-600">⏳ {grupo.pendientes}</span>
-                      <span className="font-bold">₲{nf(grupo.montoTotal)}</span>
-                    </div>
-                  </div>
-                ))}
+            <div className="md:col-span-3">
+              <div className="overflow-auto">
+                <table className="app-table w-full">
+                  <thead>
+                    <tr>
+                      <th>Fecha</th>
+                      <th>Asignados</th>
+                      <th>Entregados</th>
+                      <th>Pendientes</th>
+                      <th className="text-right">Monto Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pedidosAgrupadosPorFecha.map((grupo) => (
+                      <tr key={grupo.fecha}>
+                        <td className="text-xs">{new Date(grupo.fecha).toLocaleDateString('es-PY')}</td>
+                        <td className="text-xs font-bold">{grupo.totalAsignados}</td>
+                        <td className="text-xs" style={{ color: '#4ade80' }}>{grupo.entregados}</td>
+                        <td className="text-xs" style={{ color: '#eab308' }}>{grupo.pendientes}</td>
+                        <td className="text-right text-xs font-bold">{nf(grupo.montoTotal)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>
@@ -352,7 +344,7 @@ export default function ClosuresView() {
       {/* Control de Rendición card */}
       {role !== 'DELIVERY' && delivered.length > 0 && (
         <div className="app-card !p-4 mb-4 border-l-4 border-l-[hsl(var(--primary))]">
-          <h4 className="font-extrabold mb-3 flex items-center gap-2">📋 Control de Rendición</h4>
+          <h4 className="font-extrabold mb-3">📋 Control de Rendición</h4>
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mb-3">
             <div className="flex items-center gap-2">
               <span className="chip text-[11px]">Delivery:</span>
@@ -407,10 +399,9 @@ export default function ClosuresView() {
               <button
                 onClick={markRendicionPagada}
                 disabled={!filterDelivery || totalAPagar <= 0}
-                className="relative group inline-flex items-center gap-2 px-6 py-3 rounded-xl font-extrabold text-sm text-white shadow-lg transition-all duration-200 hover:scale-[1.03] active:scale-[0.97] disabled:opacity-40 disabled:hover:scale-100"
-                style={{ background: 'linear-gradient(135deg, #16a34a, #059669)' }}
+                className="nav-btn active"
               >
-                <span className="relative flex items-center gap-2">✅ MARCAR COMO PAGADO</span>
+                ✅ MARCAR COMO PAGADO
               </button>
             </div>
           )}
@@ -477,12 +468,9 @@ export default function ClosuresView() {
                   <td>
                     {canEdit ? (
                       <select 
-                        className="app-input !w-auto !py-1 !px-2 text-xs font-medium"
+                        className="app-input !w-auto !py-1 !px-2 text-xs"
                         value={o.status || 'PENDIENTE'}
                         onChange={e => updateStatus1(o.id, e.target.value)}
-                        style={{ 
-                          backgroundColor: o.status === 'ENTREGADO' ? '#dcfce7' : o.status === 'ENCOMIENDA ENTREGADA' ? '#dcfce7' : o.status === 'CANCELADO' ? '#fee2e2' : '#fef3c7'
-                        }}
                       >
                         {status1Opts.map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
@@ -512,8 +500,7 @@ export default function ClosuresView() {
                         {!isSettled && (o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA') && (
                           <button
                             onClick={() => markSingleRendido(o.id)}
-                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold text-white transition-all hover:scale-105 active:scale-95"
-                            style={{ background: 'linear-gradient(135deg, #16a34a, #059669)' }}
+                            className="nav-btn active !py-1 !px-2 text-[11px]"
                           >
                             RENDIDO
                           </button>
