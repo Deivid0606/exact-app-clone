@@ -66,23 +66,37 @@ export default function AuthView({ onSuccess }: AuthViewProps) {
       {/* Contenido del login */}
       <div className="fixed inset-0 flex items-center justify-center p-4 z-50">
         <div className="w-full max-w-[380px]">
-          {/* Logo y título */}
-          <div className="text-center mb-6">
-            <div className="flex justify-center mb-3">
+          {/* Logo más grande */}
+          <div className="text-center mb-4">
+            <div className="flex justify-center mb-2">
               <img
                 src="https://cdn.shopify.com/s/files/1/0885/3012/5095/files/Captura_de_pantalla_2026-01-12_023843.jpg?v=1768196352"
                 alt="DCANP GROUP Logo"
-                className="w-14 h-14 rounded-xl object-cover"
+                className="w-24 h-24 rounded-2xl object-cover"
               />
             </div>
             <h1 className="text-xl font-bold text-white">DCANP Group</h1>
           </div>
 
+          {/* Frase promocional */}
+          <div className="text-center mb-5">
+            <p className="text-white/50 text-[10px] font-semibold tracking-wider mb-1 flex items-center justify-center gap-1">
+              <span>🇵🇾</span> TU NEGOCIO ONLINE
+            </p>
+            <p className="text-white text-xl font-black mb-1 tracking-tight">
+              EMPIEZA AQUÍ
+            </p>
+            <div className="w-10 h-px bg-white/30 mx-auto mb-2"></div>
+            <p className="text-white/40 text-[10px] leading-relaxed">
+              Unite a la red de dropshipping más grande de Paraguay
+            </p>
+          </div>
+
           {/* CUADRO DE LOGIN EN NEGRO */}
-          <div className="bg-black/90 backdrop-blur-sm rounded-2xl p-6 border border-white/10 shadow-2xl">
+          <div className="bg-black/90 backdrop-blur-sm rounded-2xl p-5 border border-white/10 shadow-2xl">
             {mode === 'login' ? (
               <>
-                <div className="space-y-4">
+                <div className="space-y-3">
                   <div>
                     <label className="text-white/60 text-sm block mb-1.5">Correo electrónico</label>
                     <input
@@ -233,7 +247,7 @@ export default function AuthView({ onSuccess }: AuthViewProps) {
             )}
           </div>
 
-          <p className="text-center text-white/30 text-[11px] mt-5">
+          <p className="text-center text-white/30 text-[10px] mt-4">
             Plataforma de gestión de DCANP Group
           </p>
         </div>
