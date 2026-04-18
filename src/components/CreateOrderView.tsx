@@ -123,8 +123,12 @@ export default function CreateOrderView({
         const allProducts = productsData || [];
         const visibleProducts = allProducts.filter((p: any) => canAccessProduct(p, profile));
 
-        // 🔥 FILTRO: Solo mostrar productos con stock > 0
-        const filteredProducts = visibleProducts.filter((p: any) => (p.stock || 0) > 0);
+        // 🔥 FILTRO: Solo productos PRIVADOS o FAVORITOS
+        const filteredProducts = visibleProducts.filter((p: any) => {
+          const isPrivate = p.is_private === true;
+          const isFavorite = p.is_favorite === true;
+          return isPrivate || isFavorite;
+        });
 
         setProducts(filteredProducts);
 
@@ -485,8 +489,12 @@ export default function CreateOrderView({
                     </option>
                     {products.map((p) => (
                       <option key={p.id} value={p.sku}>
-                        {p.title} — {p.sku} (Stock: {p.stock || 0}) (Prov {nf(Number(p.provider_price_gs || 0))}){' '}
-                        {p.provider_email ? `[${p.provider_email}]` : ''}
+                        {p.title} — {p.sku} 
+                        {p.is_favorite ? ' ⭐' : ''}
+                        {p.is_private ? ' 🔒' : ''}
+                        (Stock: {p.stock || 0}) 
+                        (Prov {nf(Number(p.provider_price_gs || 0))})
+                        {p.provider_email ? ` [${p.provider_email}]` : ''}
                       </option>
                     ))}
                   </select>
