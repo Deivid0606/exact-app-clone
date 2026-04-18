@@ -80,21 +80,14 @@ const canUserSeeProduct = (p: Product, role: string, myEmail: string) => {
 
   if (!userEmail || !role) return false;
 
-  // ADMIN
   if (role === 'admin') return true;
 
-  // PROVEEDOR dueño
   if (role === 'provider') {
     return providerEmail === userEmail;
   }
 
-  // VENDEDOR / DESPACHANTE / DELIVERY
   if (['seller', 'despachante', 'delivery'].includes(role)) {
-
-    // públicos
     if (!isPrivate) return true;
-
-    // privados SOLO si está asignado
     return privateEmails.includes(userEmail);
   }
 
@@ -114,11 +107,74 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<Tab>('general');
-  const [favorites, setFavorites] = useState<string[]>([]);
+  const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
   const [editProduct, setEditProduct] = useState<(Product & { isNew?: boolean }) | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [imgIndex, setImgIndex] = useState<Record<string, number>>({});
   const [viewingImage, setViewingImage] = useState<{ url: string; title: string } | null>(null);
+
+  // Cargar favoritos desde Supabase
+  const loadFavorites = useCallback(async () => {
+    if (!myEmail) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('user_favorites')
+        .select('product_id')
+        .eq('user_email', myEmail);
+
+      if (error) throw error;
+
+      setUserFavorites(new Set(data?.map(f => f.product_id) || []));
+    } catch (error) {
+      console.error('Error cargando favoritos:', error);
+    }
+  }, [myEmail]);
+
+  // Guardar/eliminar favorito en Supabase
+  const toggleFavorite = async (productId: string) => {
+    if (!myEmail) {
+      toast.error('Debes iniciar sesión');
+      return;
+    }
+
+    const isFavorite = userFavorites.has(productId);
+
+    try {
+      if (isFavorite) {
+        const { error } = await supabase
+          .from('user_favorites')
+          .delete()
+          .eq('user_email', myEmail)
+          .eq('product_id', productId);
+
+        if (error) throw error;
+
+        setUserFavorites(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(productId);
+          return newSet;
+        });
+
+        toast.success('❌ Eliminado de tus favoritos');
+      } else {
+        const { error } = await supabase
+          .from('user_favorites')
+          .insert({
+            user_email: myEmail,
+            product_id: productId
+          });
+
+        if (error) throw error;
+
+        setUserFavorites(prev => new Set([...prev, productId]));
+        toast.success('⭐ Agregado a tus favoritos');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      toast.error('No se pudo actualizar favorito');
+    }
+  };
 
   const load = useCallback(async () => {
     if (!role || !myEmail) {
@@ -158,31 +214,9 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
   }, [role, myEmail]);
 
   useEffect(() => {
-    if (!myEmail) {
-      setFavorites([]);
-      return;
-    }
-
-    try {
-      setFavorites(JSON.parse(localStorage.getItem(`favorites_${myEmail}`) || '[]'));
-    } catch {
-      setFavorites([]);
-    }
-  }, [myEmail]);
-
-  useEffect(() => {
     load();
-  }, [load]);
-
-  useEffect(() => {
-    if (myEmail) {
-      localStorage.setItem(`favorites_${myEmail}`, JSON.stringify(favorites));
-    }
-  }, [favorites, myEmail]);
-
-  const toggleFavorite = (sku: string) => {
-    setFavorites((prev) => (prev.includes(sku) ? prev.filter((s) => s !== sku) : [...prev, sku]));
-  };
+    loadFavorites();
+  }, [load, loadFavorites]);
 
   const profileMap = useMemo(() => {
     const m: Record<string, { name: string; logo: string; phone: string }> = {};
@@ -200,7 +234,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
     let list = [...products];
 
     if (tab === 'favoritos') {
-      list = list.filter((p) => p.sku && favorites.includes(p.sku));
+      list = list.filter((p) => userFavorites.has(p.id));
     }
 
     if (tab === 'privados') {
@@ -235,7 +269,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
     }
 
     return list;
-  }, [products, tab, search, favorites, role, myEmail]);
+  }, [products, tab, search, userFavorites, role, myEmail]);
 
   const grouped = useMemo(() => {
     const map = new Map<
@@ -416,7 +450,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
             {group.items.map((p) => {
               const images = getImages(p);
               const mainImg = images[imgIndex[p.id] || 0] || '';
-              const isFav = p.sku ? favorites.includes(p.sku) : false;
+              const isFav = userFavorites.has(p.id);
               const gainUnit = Number(p.provider_price_gs || 0) - Number(p.real_cost_gs || 0);
               const isExpanded = expandedId === p.id;
 
@@ -439,17 +473,15 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                       </div>
                     )}
 
-                    {p.sku && (
-                      <button
-                        className="absolute top-2 right-2 z-20 w-8 h-8 rounded-full bg-background/80 flex items-center justify-center text-lg border border-border hover:scale-110 transition-transform"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          toggleFavorite(p.sku!);
-                        }}
-                      >
-                        {isFav ? '★' : '☆'}
-                      </button>
-                    )}
+                    <button
+                      className="absolute top-2 right-2 z-20 w-8 h-8 rounded-full bg-background/80 flex items-center justify-center text-lg border border-border hover:scale-110 transition-transform"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleFavorite(p.id);
+                      }}
+                    >
+                      {isFav ? '★' : '☆'}
+                    </button>
                   </div>
 
                   {images.length > 1 && (
