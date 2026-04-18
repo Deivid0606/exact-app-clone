@@ -11,6 +11,7 @@
   width: 1px;
   opacity: 1;
   position: absolute;
+  background-color: white;
 }
 
 .star1 {
@@ -19,6 +20,7 @@
   border-radius: 50%;
   opacity: 1;
   position: absolute;
+  background-color: white;
 }
 
 .star2 {
@@ -27,6 +29,7 @@
   border-radius: 50%;
   opacity: 1;
   position: absolute;
+  background-color: white;
 }
 
 .star3 {
@@ -35,4 +38,10 @@
   border-radius: 50%;
   opacity: 1;
   position: absolute;
+  background-color: white;
+}
+
+/* Asegurar que las estrellas sean visibles */
+div[id="universe"] div {
+  pointer-events: none;
 }
