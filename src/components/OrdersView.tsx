@@ -75,7 +75,7 @@ export default function OrdersView() {
         .gte('created_at', dateFrom + 'T00:00:00')
         .lte('created_at', dateTo + 'T23:59:59')
         .order('created_at', { ascending: false })
-        .limit(500),
+        .range(0, 9999), // ✅ Hasta 10,000 pedidos
       supabase.from('profiles').select('email, name, user_id').then(async (profilesRes) => {
         const profiles = profilesRes.data || [];
         const { data: roles } = await supabase.from('user_roles').select('user_id, role').eq('role', 'DELIVERY');
@@ -89,7 +89,10 @@ export default function OrdersView() {
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
   };
 
-  useEffect(() => { loadOrders(); }, []);
+  // ✅ Ahora se actualiza cuando cambian las fechas
+  useEffect(() => { 
+    loadOrders(); 
+  }, [dateFrom, dateTo]);
 
   // Filtrado principal con reglas de negocio
   const filtered = useMemo(() => {
@@ -208,7 +211,6 @@ export default function OrdersView() {
 
   // Función para ELIMINAR PERMANENTEMENTE (solo ADMIN, DESPACHANTE, PROVEEDOR)
   const deleteOrderPermanently = async (orderId: string) => {
-    // Verificar permisos nuevamente por seguridad
     if (!['ADMIN', 'DESPACHANTE', 'PROVEEDOR'].includes(role)) {
       toast.error('No tienes permiso para eliminar pedidos');
       return;
@@ -216,7 +218,6 @@ export default function OrdersView() {
 
     const order = orders.find(o => o.id === orderId);
     
-    // Para PROVEEDOR, verificar que tenga acceso al pedido
     if (role === 'PROVEEDOR' && !isProviderAllowed(order, myEmail)) {
       toast.error('No puedes eliminar pedidos de otros proveedores');
       return;
@@ -233,8 +234,6 @@ export default function OrdersView() {
     
     toast.success('Pedido ELIMINADO permanentemente');
     setOrders(prev => prev.filter(o => o.id !== orderId));
-    
-    // Registrar en news
     await postNews(`Pedido ${orderNum} fue ELIMINADO PERMANENTEMENTE por ${myEmail}`, orderNum);
   };
 
