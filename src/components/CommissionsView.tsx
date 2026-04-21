@@ -35,12 +35,10 @@ export default function CommissionsView() {
       .in('status', ['ENTREGADO', 'ENCOMIENDA ENTREGADA'])
       .order('created_at', { ascending: false });
 
-    // Filtrar por vendedor
     if (role === 'VENDEDOR') {
       query = query.eq('created_by', profile?.email);
     }
     
-    // Filtrar por proveedor (solo ve sus propias comisiones)
     if (role === 'PROVEEDOR' && profile?.email) {
       query = query.ilike('provider_emails_list', `%${profile.email}%`);
     }
@@ -65,10 +63,14 @@ export default function CommissionsView() {
     return true;
   });
 
+  // ✅ CORREGIDO: KPIs según la lógica correcta
   const kpis = {
     count: filtered.length,
-    sum: filtered.reduce((s, o) => s + Number(o.commission_gs || 0), 0),
-    available: filtered.filter(o => !o.commission_paid && o.status2 === 'RENDIDO').reduce((s, o) => s + Number(o.commission_gs || 0), 0),
+    // Suma comisión neta = TOTAL de comisiones de TODOS los pedidos entregados
+    sumaComisionNeta: filtered.reduce((s, o) => s + Number(o.commission_gs || 0), 0),
+    // Saldo disponible = SOLO pedidos con status2 = 'RENDIDO' y que NO estén pagados
+    saldoDisponible: filtered.filter(o => o.status2 === 'RENDIDO' && !o.commission_paid)
+      .reduce((s, o) => s + Number(o.commission_gs || 0), 0),
   };
 
   const togglePaid = async (orderId: string, paid: boolean) => {
@@ -101,7 +103,6 @@ export default function CommissionsView() {
         <label className="app-label !mt-0">Hasta</label>
         <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
         
-        {/* Filtro de vendedor: ADMIN y PROVEEDOR lo ven */}
         {(role === 'ADMIN' || role === 'PROVEEDOR') && (
           <select className="app-input !w-auto min-w-[200px]" value={filterVendor} onChange={e => setFilterVendor(e.target.value)}>
             <option value="">Todos los vendedores</option>
@@ -109,7 +110,6 @@ export default function CommissionsView() {
           </select>
         )}
         
-        {/* Filtro de proveedor: solo ADMIN lo ve */}
         {role === 'ADMIN' && (
           <select className="app-input !w-auto min-w-[200px]" value={filterProvider} onChange={e => setFilterProvider(e.target.value)}>
             <option value="">Todos los proveedores</option>
@@ -135,9 +135,20 @@ export default function CommissionsView() {
       )}
 
       <div className="grid-kpi mb-4">
-        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Pedidos filtrados</div><div className="text-[22px] font-extrabold">{kpis.count}</div></div>
-        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Suma comisión neta (Gs)</div><div className="text-[22px] font-extrabold">{nf(kpis.sum)}</div></div>
-        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Saldo disponible (Gs)</div><div className="text-[22px] font-extrabold">{nf(kpis.available)}</div></div>
+        <div className="kpi-card">
+          <div className="text-xs text-muted-foreground mb-1">Pedidos filtrados</div>
+          <div className="text-[22px] font-extrabold">{kpis.count}</div>
+        </div>
+        <div className="kpi-card">
+          <div className="text-xs text-muted-foreground mb-1">Suma comisión neta (Gs)</div>
+          <div className="text-[22px] font-extrabold">{nf(kpis.sumaComisionNeta)}</div>
+          <div className="text-[10px] text-muted-foreground">Total de todos los pedidos entregados</div>
+        </div>
+        <div className="kpi-card">
+          <div className="text-xs text-muted-foreground mb-1">Saldo disponible (Gs)</div>
+          <div className="text-[22px] font-extrabold">{nf(kpis.saldoDisponible)}</div>
+          <div className="text-[10px] text-muted-foreground">Solo pedidos en estado RENDIDO</div>
+        </div>
       </div>
 
       <div className="overflow-auto">
@@ -145,7 +156,7 @@ export default function CommissionsView() {
           <thead>
             <tr>
               <th>Fecha</th><th>ID</th><th>Ciudad</th><th>Cliente</th><th>Vendedor</th><th>Delivery</th>
-              <th className="text-right">Total (Gs)</th><th className="text-right">Comisión (Gs)</th><th>Estado 1</th><th>Pago</th>
+              <th className="text-right">Total (Gs)</th><th className="text-right">Comisión (Gs)</th><th>Estado 1</th><th>Status2</th><th>Pago</th>
             </tr>
           </thead>
           <tbody>
@@ -161,6 +172,11 @@ export default function CommissionsView() {
                 <td className="text-right text-xs">{nf(Number(o.commission_gs || 0))}</td>
                 <td><span className="badge-status badge-entregado">{o.status}</span></td>
                 <td>
+                  <span className={`badge-status ${o.status2 === 'RENDIDO' ? 'badge-entregado' : 'badge-pendiente'}`}>
+                    {o.status2 || 'PENDIENTE'}
+                  </span>
+                </td>
+                <td>
                   {(role === 'ADMIN') ? (
                     <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.commission_paid ? 'PAGADO' : 'PENDIENTE'}
                       onChange={e => togglePaid(o.id, e.target.value === 'PAGADO')}>
@@ -175,7 +191,7 @@ export default function CommissionsView() {
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && <tr><td colSpan={10} className="text-center text-muted-foreground py-8">Sin resultados</td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={11} className="text-center text-muted-foreground py-8">Sin resultados</td></tr>}
           </tbody>
         </table>
       </div>
