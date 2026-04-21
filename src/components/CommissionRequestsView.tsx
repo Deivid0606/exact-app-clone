@@ -154,7 +154,7 @@ export default function CommissionRequestsView() {
     load();
   };
 
-  // ✅ FUNCIÓN MODIFICADA: Ahora también marca las órdenes como pagadas
+  // ✅ FUNCIÓN CORREGIDA: Aprueba la solicitud y marca las órdenes como pagadas
   const approve = async (id: string) => {
     const note = prompt('Nota de aprobación (opcional):') || '';
     
