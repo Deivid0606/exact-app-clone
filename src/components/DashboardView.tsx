@@ -28,6 +28,26 @@ interface OrderRow {
   delivered_at: string | null;
 }
 
+// Helper para verificar si el proveedor tiene acceso al pedido (misma función que en OrdersView)
+function isProviderAllowed(order: any, userEmail: string): boolean {
+  const providerList = order.provider_emails_list;
+  if (!providerList) return false;
+
+  let emails: string[] = [];
+  if (Array.isArray(providerList)) {
+    emails = providerList;
+  } else if (typeof providerList === 'string') {
+    try {
+      const parsed = JSON.parse(providerList);
+      if (Array.isArray(parsed)) emails = parsed;
+      else emails = providerList.split(',').map(s => s.trim());
+    } catch {
+      emails = providerList.split(',').map(s => s.trim());
+    }
+  }
+  return emails.some(email => email.toLowerCase() === userEmail.toLowerCase());
+}
+
 export default function DashboardView() {
   const { profile } = useAuth();
   const role = profile?.role || '';
@@ -61,7 +81,8 @@ export default function DashboardView() {
     setLoading(false);
   };
 
-  useEffect(() => { loadDashboard(); }, []);
+  // ✅ AHORA se actualiza cuando cambian las fechas
+  useEffect(() => { loadDashboard(); }, [dateFrom, dateTo]);
 
   // Build cost map by SKU
   const costMap = useMemo(() => {
@@ -70,31 +91,29 @@ export default function DashboardView() {
     return m;
   }, [products]);
 
-  // Provider email map by SKU
+  // Provider email map by SKU (solo se usa para cálculos de ganancia, NO para filtrar)
   const skuProviderMap = useMemo(() => {
     const m: Record<string, string> = {};
     products.forEach(p => { if (p.sku && p.provider_email) m[p.sku.trim()] = p.provider_email.toLowerCase().trim(); });
     return m;
   }, [products]);
 
-  // Filter orders by role
+  // ✅ Filter orders by role - MISMA LÓGICA que OrdersView
   const filteredOrders = useMemo(() => {
     return orders.filter(o => {
+      // VENDEDOR: mismo filtro que OrdersView
       if (role === 'VENDEDOR' && (o.created_by || '').toLowerCase() !== email.toLowerCase()) return false;
+      
+      // DELIVERY: mismo filtro que OrdersView
       if (role === 'DELIVERY' && (o.assigned_delivery || '').toLowerCase() !== email.toLowerCase()) return false;
-      if (role === 'PROVEEDOR') {
-        try {
-          const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
-          const hasMyProduct = items.some((it: any) => {
-            const sku = String(it.sku || '').trim();
-            return (skuProviderMap[sku] || '') === email.toLowerCase();
-          });
-          if (!hasMyProduct) return false;
-        } catch { return false; }
-      }
+      
+      // PROVEEDOR: usa provider_emails_list (mismo que OrdersView)
+      if (role === 'PROVEEDOR' && !isProviderAllowed(o, email)) return false;
+      
+      // ADMIN y DESPACHANTE ven todos
       return true;
     });
-  }, [orders, role, email, skuProviderMap]);
+  }, [orders, role, email]);
 
   // KPIs
   const kpis = useMemo(() => {
