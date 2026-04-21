@@ -63,12 +63,13 @@ export default function CommissionsView() {
     return true;
   });
 
-  // ✅ CORREGIDO: KPIs según la lógica correcta
+  // ✅ KPIs CORREGIDOS según la lógica correcta
+  // Suma comisión neta = TOTAL de pedidos ENTREGADOS que NO han sido pagados
+  // Saldo disponible = pedidos RENDIDOS que NO han sido pagados
   const kpis = {
     count: filtered.length,
-    // Suma comisión neta = TOTAL de comisiones de TODOS los pedidos entregados
-    sumaComisionNeta: filtered.reduce((s, o) => s + Number(o.commission_gs || 0), 0),
-    // Saldo disponible = SOLO pedidos con status2 = 'RENDIDO' y que NO estén pagados
+    sumaComisionNeta: filtered.filter(o => !o.commission_paid)
+      .reduce((s, o) => s + Number(o.commission_gs || 0), 0),
     saldoDisponible: filtered.filter(o => o.status2 === 'RENDIDO' && !o.commission_paid)
       .reduce((s, o) => s + Number(o.commission_gs || 0), 0),
   };
@@ -142,7 +143,7 @@ export default function CommissionsView() {
         <div className="kpi-card">
           <div className="text-xs text-muted-foreground mb-1">Suma comisión neta (Gs)</div>
           <div className="text-[22px] font-extrabold">{nf(kpis.sumaComisionNeta)}</div>
-          <div className="text-[10px] text-muted-foreground">Total de todos los pedidos entregados</div>
+          <div className="text-[10px] text-muted-foreground">Total de entregados no pagados</div>
         </div>
         <div className="kpi-card">
           <div className="text-xs text-muted-foreground mb-1">Saldo disponible (Gs)</div>
