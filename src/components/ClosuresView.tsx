@@ -102,6 +102,14 @@ export default function ClosuresView() {
 
   // FUNCIONES DE ACTUALIZACIÓN DE ESTADOS
   const updateStatus1 = async (orderId: string, status: string) => {
+    // VALIDACIÓN: Solo ADMIN y PROVEEDOR pueden cambiar a DEVUELTO A DEPÓSITO
+    if (status === 'DEVUELTO A DEPÓSITO') {
+      if (role !== 'ADMIN' && role !== 'PROVEEDOR') {
+        toast.error('No tienes permiso para cambiar a DEVUELTO A DEPÓSITO. Solo Administradores y Proveedores pueden hacerlo.');
+        return;
+      }
+    }
+
     const { error } = await supabase.from('orders').update({ 
       status,
       updated_at: new Date().toISOString()
@@ -226,7 +234,8 @@ export default function ClosuresView() {
     loadClosures();
   };
 
-  const status1Opts = ['PENDIENTE', 'EN RUTA', 'ENTREGADO', 'ENCOMIENDA ENTREGADA', 'CANCELADO'];
+  // OPCIONES DE ESTADO 1 CON LOS NUEVOS ESTADOS AGREGADOS
+  const status1Opts = ['PENDIENTE', 'EN RUTA', 'ENTREGADO', 'ENCOMIENDA ENTREGADA', 'CANCELADO', 'DEVUELTO A DEPÓSITO', 'REAGENDADO'];
   const state2Opts = ['--', 'GUIA GENERADA', 'FUERA DE COBERTURA', 'CANCELADO', 'REPETIDO', 'RENDIDO'];
   const retiroOpts = ['', 'PENDIENTE', 'REALIZADO', 'CANCELADO'];
   
@@ -234,7 +243,7 @@ export default function ClosuresView() {
   const allRendered = noRendidos.length === 0 && delivered.length > 0;
   
   // PERMISOS:
-  // DELIVERY: solo puede editar Estado 1
+  // DELIVERY: solo puede editar Estado 1 (pero no puede cambiar a DEVUELTO A DEPÓSITO)
   // ADMIN y PROVEEDOR: pueden editar todo
   const canEditFull = role === 'ADMIN' || role === 'PROVEEDOR';  // Puede editar fecha, ciudad, estado retiro, estado2
   const canEditStatus1 = role === 'ADMIN' || role === 'PROVEEDOR' || role === 'DELIVERY';  // Puede editar Estado 1
@@ -247,14 +256,14 @@ export default function ClosuresView() {
       {role === 'DELIVERY' && (
         <div className="mb-3">
           <span className="badge-status badge-entregado">✏️ DELIVERY: solo podés editar Estado 1</span>
-          <p className="text-xs text-muted-foreground mt-1">Podés actualizar el estado de tus pedidos (PENDIENTE → EN RUTA → ENTREGADO).</p>
+          <p className="text-xs text-muted-foreground mt-1">Podés actualizar el estado de tus pedidos (PENDIENTE → EN RUTA → ENTREGADO). No podés cambiar a DEVUELTO A DEPÓSITO.</p>
         </div>
       )}
 
       {(role === 'PROVEEDOR' || role === 'ADMIN') && (
         <div className="mb-3">
           <span className="badge-status badge-entregado">✏️ PROVEEDOR/ADMIN: edición completa</span>
-          <p className="text-xs text-muted-foreground mt-1">Podés actualizar estados, fechas, ciudades y gestionar rendiciones.</p>
+          <p className="text-xs text-muted-foreground mt-1">Podés actualizar estados (incluyendo DEVUELTO A DEPÓSITO y REAGENDADO), fechas, ciudades y gestionar rendiciones.</p>
         </div>
       )}
 
@@ -276,6 +285,8 @@ export default function ClosuresView() {
           <option value="EN RUTA">EN RUTA</option>
           <option value="PENDIENTE">PENDIENTE</option>
           <option value="CANCELADO">CANCELADO</option>
+          <option value="DEVUELTO A DEPÓSITO">DEVUELTO A DEPÓSITO</option>
+          <option value="REAGENDADO">REAGENDADO</option>
         </select>
         <button className="nav-btn active" onClick={loadClosures}>Aplicar</button>
       </div>
@@ -386,6 +397,16 @@ export default function ClosuresView() {
               const net = Number(o.total_gs || 0) - fee;
               const isSettled = o.delivery_settled;
               const assignedDate = o.assigned_at ? new Date(o.assigned_at).toISOString().slice(0, 10) : '';
+              
+              // Determinar estilo del badge para los nuevos estados
+              const getStatusBadgeClass = (status: string) => {
+                if (status === 'ENTREGADO' || status === 'ENCOMIENDA ENTREGADA') return 'badge-entregado';
+                if (status === 'CANCELADO') return 'badge-cancelado';
+                if (status === 'DEVUELTO A DEPÓSITO') return 'badge-warning'; // Puedes definir esta clase en tu CSS
+                if (status === 'REAGENDADO') return 'badge-info'; // Puedes definir esta clase en tu CSS
+                return 'badge-pendiente';
+              };
+              
               return (
                 <tr key={o.id} className={isSettled ? 'opacity-60' : ''}>
                   <td>
@@ -428,7 +449,7 @@ export default function ClosuresView() {
                         {status1Opts.map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
                     ) : (
-                      <span className={`badge-status ${o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA' ? 'badge-entregado' : o.status === 'CANCELADO' ? 'badge-cancelado' : 'badge-pendiente'}`}>{o.status}</span>
+                      <span className={`badge-status ${getStatusBadgeClass(o.status)}`}>{o.status}</span>
                     )}
                   </td>
                   <td>
