@@ -160,8 +160,8 @@ export default function CommissionsView() {
   const totalSolicitado = providerBalances.reduce((s, b) => s + b.yaSolicitado, 0);
   const totalDisponible = providerBalances.reduce((s, b) => s + b.disponible, 0);
   
-  // Suma comisión neta = Total entregado - Total ya solicitado (pendiente + aprobado)
-  const sumaComisionNeta = totalEntregado - totalSolicitado;
+  // Suma comisión neta = Total de comisiones de los pedidos ENTREGADOS filtrados
+  const sumaComisionNeta = totalEntregado;
   const saldoDisponible = totalDisponible;
 
   const togglePaid = async (orderId: string, paid: boolean) => {
@@ -235,7 +235,7 @@ export default function CommissionsView() {
         <div className="kpi-card">
           <div className="text-xs text-muted-foreground mb-1">Suma comisión neta (Gs)</div>
           <div className="text-[22px] font-extrabold">{nf(sumaComisionNeta)}</div>
-          <div className="text-[10px] text-muted-foreground">Total entregados - Solicitado</div>
+          <div className="text-[10px] text-muted-foreground">Total comisiones entregadas</div>
         </div>
         <div className="kpi-card">
           <div className="text-xs text-muted-foreground mb-1">Saldo disponible (Gs)</div>
@@ -257,7 +257,7 @@ export default function CommissionsView() {
                   <th className="text-right">Rendido disponible (Gs)</th>
                   <th className="text-right">Ya solicitado (Gs)</th>
                   <th className="text-right">Disponible para solicitar (Gs)</th>
-                </tr>
+                 </tr>
               </thead>
               <tbody>
                 {providerBalances.map(b => {
@@ -326,7 +326,7 @@ export default function CommissionsView() {
                     </span>
                   )}
                 </td>
-               </tr>
+              </tr>
             ))}
             {filtered.length === 0 && (
               <tr><td colSpan={11} className="text-center text-muted-foreground py-8">Sin resultados</td></tr>
