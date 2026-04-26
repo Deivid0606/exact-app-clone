@@ -74,7 +74,7 @@ export default function CommissionsView() {
     return true;
   });
 
-  // ✅ Calcular balances por PROVEEDOR (para VENDEDOR)
+  // ✅ Calcular balances por PROVEEDOR (para VENDEDOR) - SOLO comisiones POSITIVAS
   const providerBalances = useMemo(() => {
     if (role !== 'VENDEDOR') return [];
 
@@ -89,13 +89,14 @@ export default function CommissionsView() {
     // Agrupar por proveedor
     const map: Record<string, {
       provider: string;
-      totalComision: number;      // Total de todos los pedidos entregados
-      rendido: number;            // Total de pedidos con status2 = 'RENDIDO' y no pagados
+      totalComision: number;      // Total de comisiones POSITIVAS de pedidos entregados
+      rendido: number;            // Total de comisiones POSITIVAS con status2 = 'RENDIDO' y no pagadas
       orderIds: string[];
     }> = {};
 
     filtered.forEach(o => {
       const commission = Number(o.commission_gs || 0);
+      // ⚠️ SOLO comisiones POSITIVAS entran al desglose de cobro
       if (commission <= 0) return;
 
       const isRendido = o.status2 === 'RENDIDO' && !o.commission_paid;
@@ -155,12 +156,15 @@ export default function CommissionsView() {
     })).filter(b => b.totalComision > 0);
   }, [filtered, products, commissionRequests, myEmail, role]);
 
-  // ✅ KPIs generales
-  const totalEntregado = filtered.reduce((s, o) => s + Number(o.commission_gs || 0), 0);
+  // ✅ KPIs generales - SOLO sumar comisiones POSITIVAS
+  const totalEntregado = filtered.reduce((s, o) => {
+    const commission = Number(o.commission_gs || 0);
+    return s + (commission > 0 ? commission : 0);
+  }, 0);
   const totalSolicitado = providerBalances.reduce((s, b) => s + b.yaSolicitado, 0);
   const totalDisponible = providerBalances.reduce((s, b) => s + b.disponible, 0);
   
-  // Suma comisión neta = Total de comisiones de los pedidos ENTREGADOS filtrados
+  // Suma comisión neta = Total de comisiones POSITIVAS de los pedidos ENTREGADOS filtrados
   const sumaComisionNeta = totalEntregado;
   const saldoDisponible = totalDisponible;
 
@@ -257,7 +261,7 @@ export default function CommissionsView() {
                   <th className="text-right">Rendido disponible (Gs)</th>
                   <th className="text-right">Ya solicitado (Gs)</th>
                   <th className="text-right">Disponible para solicitar (Gs)</th>
-                 </tr>
+                </tr>
               </thead>
               <tbody>
                 {providerBalances.map(b => {
@@ -306,7 +310,15 @@ export default function CommissionsView() {
                 <td className="text-xs">{o.created_by}</td>
                 <td className="text-xs">{o.assigned_delivery || '—'}</td>
                 <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
-                <td className="text-right text-xs">{nf(Number(o.commission_gs || 0))}</td>
+                <td className="text-right text-xs">
+                  {(() => {
+                    const com = Number(o.commission_gs || 0);
+                    if (com < 0) {
+                      return <span className="text-red-500 font-bold">⚠️ {nf(com)}</span>;
+                    }
+                    return nf(com);
+                  })()}
+                </td>
                 <td><span className="badge-status badge-entregado">{o.status}</span></td>
                 <td>
                   <span className={`badge-status ${o.status2 === 'RENDIDO' ? 'badge-entregado' : 'badge-pendiente'}`}>
