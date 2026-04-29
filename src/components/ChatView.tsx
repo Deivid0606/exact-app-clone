@@ -1015,24 +1015,26 @@ export default function ChatView() {
 
     if (type === 'image') {
       return (
-        <a
-          href={message.attachment_url}
-          target="_blank"
-          rel="noreferrer"
-          className="chat-attachment chat-attachment-image"
-        >
-          <img
-            src={message.attachment_url}
-            alt={message.attachment_name || 'Imagen enviada'}
-            className="chat-image-preview"
-          />
-        </a>
+        <div className="chat-attachment">
+          <a
+            href={message.attachment_url}
+            target="_blank"
+            rel="noreferrer"
+            className="chat-attachment-image-link"
+          >
+            <img
+              src={message.attachment_url}
+              alt={message.attachment_name || 'Imagen enviada'}
+              className="chat-image-preview"
+            />
+          </a>
+        </div>
       );
     }
 
     if (type === 'audio') {
       return (
-        <div className="chat-attachment chat-attachment-audio">
+        <div className="chat-attachment">
           <audio controls src={message.attachment_url}>
             Tu navegador no puede reproducir este audio.
           </audio>
@@ -1041,28 +1043,43 @@ export default function ChatView() {
     }
 
     return (
-      <a
-        href={message.attachment_url}
-        target="_blank"
-        rel="noreferrer"
-        className="chat-attachment chat-attachment-file"
-      >
-        📎 {message.attachment_name || 'Archivo adjunto'}
-      </a>
+      <div className="chat-attachment">
+        <a
+          href={message.attachment_url}
+          target="_blank"
+          rel="noreferrer"
+          className="chat-attachment-file"
+        >
+          📎 {message.attachment_name || 'Archivo adjunto'}
+        </a>
+      </div>
     );
   };
 
+  // Función corregida para renderizar mensajes - soporta ambos tipos de mensajes
   const renderMessage = (message: ChatMessage) => {
-    const senderEmail = message.from_email;
-    const senderRole = message.from_role;
+    // Determinar quién es el remitente según el tipo de canal
+    let senderEmail = '';
+    let senderRole = '';
+    
+    if (isPublicChannel) {
+      // Para canales públicos (general, fotos_productos)
+      senderEmail = message.sender_email || '';
+      senderRole = message.sender_role || '';
+    } else {
+      // Para DM y canales con selector
+      senderEmail = message.from_email || '';
+      senderRole = message.from_role || '';
+    }
+    
     const mine = senderEmail?.toLowerCase() === myEmail.toLowerCase();
-    const senderName = contactMap[senderEmail?.toLowerCase() || '']?.name || senderEmail;
-
+    const senderName = contactMap[senderEmail?.toLowerCase() || '']?.name || senderEmail || 'Usuario';
+    
     return (
       <div key={message.id} className={`chat-message-row ${mine ? 'mine' : 'theirs'}`}>
         <div className="chat-message-bubble">
           <div className="chat-message-meta">
-            {senderRole && <span className="chat-role">{senderRole}</span>}
+            {senderRole && <span className="chat-role-badge">{senderRole}</span>}
             <strong>{senderName}</strong>
             {mine && (
               <button
@@ -1081,8 +1098,7 @@ export default function ChatView() {
 
           <div className="chat-message-footer">
             <span>{formatDateTime(message.created_at)}</span>
-
-            {mine && (
+            {mine && (isDMChannel || tab === 'dm') && (
               <span className="chat-read-state">
                 {message.read_at ? '✓✓ Leído' : '✓ Enviado'}
               </span>
