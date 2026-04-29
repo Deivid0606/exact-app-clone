@@ -49,6 +49,7 @@ type ChatMessage = {
   channel_key?: string | null;
   created_at: string;
   read_at?: string | null;
+  deleted_for?: string[] | null;
 };
 
 type Thread = {
@@ -132,6 +133,7 @@ export default function ChatView() {
   const [unreadByChannel, setUnreadByChannel] = useState<Record<string, number>>({});
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [recording, setRecording] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
 
   const msgRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -167,15 +169,48 @@ export default function ChatView() {
     if (!peer) return true;
     
     const peerRole = peer.role;
+    const myRoleUpper = myRole?.toUpperCase();
     
     // VENDEDOR solo puede escribir a PROVEEDOR
-    if (myRole === 'VENDEDOR') {
+    if (myRoleUpper === 'VENDEDOR') {
       return peerRole === 'PROVEEDOR';
     }
     
-    // ADMIN, PROVEEDOR y DESPACHANTE pueden escribir a todos
-    if (myRole === 'ADMIN' || myRole === 'PROVEEDOR' || myRole === 'DESPACHANTE') {
+    // PROVEEDOR puede escribir a VENDEDOR (y a otros)
+    if (myRoleUpper === 'PROVEEDOR') {
       return true;
+    }
+    
+    // ADMIN y DESPACHANTE pueden escribir a todos
+    if (myRoleUpper === 'ADMIN' || myRoleUpper === 'DESPACHANTE') {
+      return true;
+    }
+    
+    return true;
+  };
+
+  // Función para verificar si puede VER un chat (solo los participantes)
+  const canViewChat = (peerEmail: string): boolean => {
+    if (!myEmail || !peerEmail) return false;
+    
+    const myRoleUpper = myRole?.toUpperCase();
+    
+    // ADMIN y DESPACHANTE pueden ver todos los chats
+    if (myRoleUpper === 'ADMIN' || myRoleUpper === 'DESPACHANTE') {
+      return true;
+    }
+    
+    const peer = contacts.find(c => c.email.toLowerCase() === peerEmail.toLowerCase());
+    const peerRole = peer?.role;
+    
+    // VENDEDOR solo puede ver chats con PROVEEDOR
+    if (myRoleUpper === 'VENDEDOR') {
+      return peerRole === 'PROVEEDOR';
+    }
+    
+    // PROVEEDOR puede ver chats con VENDEDOR
+    if (myRoleUpper === 'PROVEEDOR') {
+      return peerRole === 'VENDEDOR' || peerRole === 'PROVEEDOR' || peerRole === 'ADMIN' || peerRole === 'DESPACHANTE';
     }
     
     return true;
@@ -185,13 +220,15 @@ export default function ChatView() {
   const filteredContacts = useMemo(() => {
     if (!myRole) return [];
     
+    const myRoleUpper = myRole.toUpperCase();
+    
     // ADMIN, PROVEEDOR y DESPACHANTE ven todos
-    if (myRole === 'ADMIN' || myRole === 'PROVEEDOR' || myRole === 'DESPACHANTE') {
+    if (myRoleUpper === 'ADMIN' || myRoleUpper === 'PROVEEDOR' || myRoleUpper === 'DESPACHANTE') {
       return contacts.filter((contact) => contact.email !== myEmail);
     }
     
     // VENDEDOR solo ve PROVEEDOR
-    if (myRole === 'VENDEDOR') {
+    if (myRoleUpper === 'VENDEDOR') {
       return contacts.filter(
         (contact) => contact.email !== myEmail && contact.role === 'PROVEEDOR'
       );
@@ -200,11 +237,25 @@ export default function ChatView() {
     return contacts.filter((contact) => contact.email !== myEmail);
   }, [contacts, myEmail, myRole]);
 
-  const messages = tab === 'dm' ? dmMessages : channelMessages;
+  // Filtrar hilos de conversación que el usuario puede ver
+  const visibleThreads = useMemo(() => {
+    return threads.filter(thread => canViewChat(thread.peer));
+  }, [threads, myEmail]);
+
+  // Filtrar mensajes eliminados para el usuario actual
+  const filterDeletedMessages = (messages: ChatMessage[]): ChatMessage[] => {
+    if (!myEmail) return messages;
+    return messages.filter(msg => !msg.deleted_for?.includes(myEmail));
+  };
+
+  const messages = useMemo(() => {
+    const rawMessages = tab === 'dm' ? dmMessages : channelMessages;
+    return filterDeletedMessages(rawMessages);
+  }, [tab, dmMessages, channelMessages, myEmail]);
 
   const channelPreviewMessages = useMemo(() => {
-    return channelMessages.slice(-6).reverse();
-  }, [channelMessages]);
+    return filterDeletedMessages(channelMessages.slice(-6)).reverse();
+  }, [channelMessages, myEmail]);
 
   const threadKey = (a: string, b: string) => {
     const x = a.toLowerCase();
@@ -300,7 +351,7 @@ export default function ChatView() {
 
         let query = (supabase as any)
           .from('chat_messages')
-          .select('id, sender_email, created_at')
+          .select('id, sender_email, created_at, deleted_for')
           .eq('channel_key', channel.channel_key)
           .neq('sender_email', myEmail);
 
@@ -311,7 +362,8 @@ export default function ChatView() {
         const { data, error } = await query;
 
         if (!error) {
-          next[channel.channel_key] = data?.length || 0;
+          const notDeletedForMe = data?.filter(msg => !msg.deleted_for?.includes(myEmail)) || [];
+          next[channel.channel_key] = notDeletedForMe.length || 0;
         }
       }),
     );
@@ -334,9 +386,12 @@ export default function ChatView() {
       return;
     }
 
+    // Filtrar mensajes eliminados para este usuario
+    const notDeletedForMe = data?.filter(msg => !msg.deleted_for?.includes(myEmail)) || [];
+
     const map = new Map<string, Thread>();
 
-    (data || []).forEach((message: ChatMessage) => {
+    notDeletedForMe.forEach((message: ChatMessage) => {
       const peer =
         message.from_email?.toLowerCase() === myEmail.toLowerCase()
           ? message.to_email
@@ -347,7 +402,10 @@ export default function ChatView() {
       const key = threadKey(myEmail, peer);
 
       if (!map.has(key)) {
-        const unread = (data || []).filter(
+        // Verificar si el usuario puede ver este hilo
+        if (!canViewChat(peer)) return;
+
+        const unread = notDeletedForMe.filter(
           (item: ChatMessage) =>
             item.thread_key === key &&
             item.to_email?.toLowerCase() === myEmail.toLowerCase() &&
@@ -370,6 +428,13 @@ export default function ChatView() {
 
   const loadDmMessages = async (peer: string) => {
     if (!myEmail || !peer) return;
+
+    // Verificar que el usuario puede ver este chat
+    if (!canViewChat(peer)) {
+      toast.error('No tenés permiso para ver esta conversación');
+      setSelectedPeer('');
+      return;
+    }
 
     const key = threadKey(myEmail, peer);
 
@@ -443,6 +508,49 @@ export default function ChatView() {
     }
   };
 
+  const deleteMessage = async (messageId: string) => {
+    if (!myEmail) return;
+
+    const table = tab === 'dm' ? 'chat_dm_messages' : 'chat_messages';
+    
+    const { data: currentMessage } = await (supabase as any)
+      .from(table)
+      .select('deleted_for')
+      .eq('id', messageId)
+      .single();
+
+    const currentDeletedFor = currentMessage?.deleted_for || [];
+    
+    if (currentDeletedFor.includes(myEmail)) {
+      setShowDeleteConfirm(null);
+      return;
+    }
+
+    const newDeletedFor = [...currentDeletedFor, myEmail];
+
+    const { error } = await (supabase as any)
+      .from(table)
+      .update({ deleted_for: newDeletedFor })
+      .eq('id', messageId);
+
+    if (error) {
+      console.error(error);
+      toast.error('No se pudo eliminar el mensaje');
+      return;
+    }
+
+    toast.success('Mensaje eliminado (solo para vos)');
+    setShowDeleteConfirm(null);
+
+    if (tab === 'dm') {
+      if (selectedPeer) loadDmMessages(selectedPeer);
+      loadThreads();
+    } else {
+      loadChannelMessages(tab);
+      loadUnreadCounts();
+    }
+  };
+
   const sendChannelMessage = async (attachment?: Attachment) => {
     if (tab === 'dm') return;
     if (!text.trim() && !attachment) return;
@@ -457,6 +565,7 @@ export default function ChatView() {
       attachment_type: attachment?.type || null,
       attachment_mime: attachment?.mime || null,
       channel_key: tab,
+      deleted_for: [],
     });
 
     if (error) {
@@ -495,6 +604,7 @@ export default function ChatView() {
       attachment_type: attachment?.type || null,
       attachment_mime: attachment?.mime || null,
       read_at: null,
+      deleted_for: [],
     });
 
     if (error) {
@@ -724,6 +834,15 @@ export default function ChatView() {
           <div className="chat-message-meta">
             {senderRole && <span className="chat-role">{senderRole}</span>}
             <strong>{senderName}</strong>
+            {mine && (
+              <button
+                onClick={() => setShowDeleteConfirm(message.id)}
+                className="chat-delete-btn"
+                title="Eliminar mensaje (solo para vos)"
+              >
+                🗑️
+              </button>
+            )}
           </div>
 
           {message.message_text && <p className="chat-message-text">{message.message_text}</p>}
@@ -740,6 +859,23 @@ export default function ChatView() {
             )}
           </div>
         </div>
+
+        {showDeleteConfirm === message.id && (
+          <div className="chat-delete-modal-overlay">
+            <div className="chat-delete-modal">
+              <p>¿Eliminar este mensaje?</p>
+              <p className="chat-delete-modal-note">Se eliminará solo para vos. Los demás seguirán viéndolo.</p>
+              <div className="chat-delete-modal-buttons">
+                <button onClick={() => deleteMessage(message.id)} className="chat-delete-confirm">
+                  Eliminar
+                </button>
+                <button onClick={() => setShowDeleteConfirm(null)} className="chat-delete-cancel">
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -893,7 +1029,6 @@ export default function ChatView() {
 
       <div className="chat-layout">
         <aside className="chat-sidebar">
-          {/* Selector de destinatario - Siempre visible en todas las pestañas */}
           <div className="chat-dm-selector">
             <label className="chat-label">Escribir a</label>
             <select
@@ -921,7 +1056,7 @@ export default function ChatView() {
               </div>
 
               <div className="chat-thread-list">
-                {threads.map((thread) => (
+                {visibleThreads.map((thread) => (
                   <button
                     key={thread.key}
                     type="button"
@@ -942,7 +1077,7 @@ export default function ChatView() {
                   </button>
                 ))}
 
-                {threads.length === 0 && (
+                {visibleThreads.length === 0 && (
                   <p className="chat-empty-small">Sin conversaciones aún</p>
                 )}
               </div>
