@@ -41,6 +41,7 @@ export default function ClosuresView() {
         .maybeSingle();
       
       if (data) {
+        console.log('Rol detectado:', data.role);
         setUserRole(data.role);
       }
     };
@@ -55,12 +56,12 @@ export default function ClosuresView() {
       { email: 'importadoraaliado@gmail.com', name: '📦 IMPORTS ALIADEX' },
       { email: 'nkshop@gmail.com', name: '🛍️ PROVEEDOR NKSHOP' }
     ];
+    console.log('Proveedores cargados:', mainSuppliers);
     setSuppliers(mainSuppliers);
   };
 
   // Cargar deliveries desde user_roles
   const loadDeliveries = async () => {
-    // Obtener usuarios con rol DELIVERY
     const { data: roleData } = await supabase
       .from('user_roles')
       .select('user_id')
@@ -90,7 +91,6 @@ export default function ClosuresView() {
       .lte('assigned_at', dateTo + 'T23:59:59')
       .order('assigned_at', { ascending: false });
 
-    // FILTROS SEGÚN ROL DESDE user_roles
     if (userRole === 'PROVEEDOR') {
       query = query.eq('supplier_email', myEmail);
     } else if (userRole === 'DELIVERY') {
@@ -109,7 +109,6 @@ export default function ClosuresView() {
     setOrders(data || []);
     setTotalPedidosAsignados(data?.length || 0);
 
-    // Check rendición pagada
     let deliveryToCheck = '';
     if (userRole === 'DELIVERY') {
       deliveryToCheck = myEmail;
@@ -300,9 +299,14 @@ export default function ClosuresView() {
           </select>
         )}
 
-        {/* FILTRO POR PROVEEDOR - para ADMIN y DELIVERY */}
-        {(userRole === 'ADMIN' || userRole === 'DELIVERY') && (
-          <select className="app-input !w-auto min-w-[280px]" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
+        {/* FILTRO POR PROVEEDOR - VISIBLE PARA DELIVERY Y ADMIN */}
+        {(userRole === 'ADMIN' || userRole === 'DELIVERY') && suppliers.length > 0 && (
+          <select 
+            className="app-input !w-auto min-w-[280px]" 
+            value={filterSupplier} 
+            onChange={e => setFilterSupplier(e.target.value)}
+            style={{ borderColor: '#4ade80', backgroundColor: '#f0fdf4' }}
+          >
             <option value="">📋 Todos los proveedores</option>
             {suppliers.map(s => (
               <option key={s.email} value={s.email}>
@@ -324,6 +328,13 @@ export default function ClosuresView() {
         </select>
         <button className="nav-btn active" onClick={loadClosures}>Aplicar</button>
       </div>
+
+      {/* Debug: mostrar rol actual */}
+      {userRole && (
+        <div className="text-xs text-gray-400 mb-2">
+          Rol detectado: {userRole} | Proveedores disponibles: {suppliers.length}
+        </div>
+      )}
 
       {/* Total de Pedidos Asignados */}
       {(filterDelivery || userRole === 'DELIVERY' || userRole === 'PROVEEDOR') && (
