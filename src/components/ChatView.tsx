@@ -76,6 +76,17 @@ const FALLBACK_CHANNELS: ChatChannel[] = [
 
 const EMOJIS = ['😀', '😂', '😍', '👍', '🙏', '🔥', '📦', '✅', '⚠️', '💰', '🚚', '🧾'];
 
+// Canales públicos (todos ven, no requieren destinatario)
+const PUBLIC_CHANNELS: ChatTab[] = ['general', 'fotos_productos'];
+
+// Canales que son DM encubiertos (requieren destinatario)
+const DM_CHANNELS: ChatTab[] = [
+  'consulta_comisiones',
+  'comprobantes_transferencias',
+  'reclamos_garantias',
+  'consultas_estados'
+];
+
 function getAttachmentType(file: File): Attachment['type'] {
   if (file.type.startsWith('image/')) return 'image';
   if (file.type.startsWith('audio/')) return 'audio';
@@ -106,9 +117,6 @@ function formatDateTime(value?: string | null) {
   if (!value) return '';
   return new Date(value).toLocaleString('es-PY');
 }
-
-// Canales que NO deben tener selector de destinatario (son públicos)
-const PUBLIC_CHANNELS: ChatTab[] = ['general', 'fotos_productos'];
 
 export default function ChatView() {
   const { profile } = useAuth();
@@ -146,8 +154,8 @@ export default function ChatView() {
   const typingTimeoutRef = useRef<number | null>(null);
   const typingChannelRef = useRef<any>(null);
 
-  // Verificar si el canal actual es público (sin selector de destinatario)
   const isPublicChannel = PUBLIC_CHANNELS.includes(tab);
+  const isDMChannel = DM_CHANNELS.includes(tab);
 
   const activeChannel = useMemo(() => {
     if (tab === 'dm') return null;
@@ -191,11 +199,12 @@ export default function ChatView() {
     return true;
   };
 
-  const canViewChat = (peerEmail: string): boolean => {
+  const canViewChat = (peerEmail: string, topicChannel?: string): boolean => {
     if (!myEmail || !peerEmail) return false;
     
     const myRoleUpper = myRole?.toUpperCase();
     
+    // ADMIN y DESPACHANTE pueden ver todos los chats
     if (myRoleUpper === 'ADMIN' || myRoleUpper === 'DESPACHANTE') {
       return true;
     }
@@ -203,10 +212,13 @@ export default function ChatView() {
     const peer = contacts.find(c => c.email.toLowerCase() === peerEmail.toLowerCase());
     const peerRole = peer?.role;
     
+    // VENDEDOR solo puede ver chats donde él es participante
     if (myRoleUpper === 'VENDEDOR') {
+      // Solo puede ver si él es el emisor o receptor
       return peerRole === 'PROVEEDOR';
     }
     
+    // PROVEEDOR puede ver chats con VENDEDOR
     if (myRoleUpper === 'PROVEEDOR') {
       return peerRole === 'VENDEDOR' || peerRole === 'PROVEEDOR' || peerRole === 'ADMIN' || peerRole === 'DESPACHANTE';
     }
@@ -316,21 +328,27 @@ export default function ChatView() {
   };
 
   const loadChannelMessages = async (channelKey: ChannelKey) => {
-    const { data, error } = await (supabase as any)
-      .from('chat_messages')
-      .select('*')
-      .eq('channel_key', channelKey)
-      .order('created_at', { ascending: true })
-      .limit(250);
+    // Para canales públicos, cargar desde chat_messages
+    if (PUBLIC_CHANNELS.includes(channelKey)) {
+      const { data, error } = await (supabase as any)
+        .from('chat_messages')
+        .select('*')
+        .eq('channel_key', channelKey)
+        .order('created_at', { ascending: true })
+        .limit(250);
 
-    if (error) {
-      console.error(error);
-      toast.error('No se pudieron cargar los mensajes del canal');
-      return;
+      if (error) {
+        console.error(error);
+        toast.error('No se pudieron cargar los mensajes del canal');
+        return;
+      }
+
+      setChannelMessages(data || []);
+      scrollBottom();
+    } else {
+      // Para otros canales, es DM encubierto, cargar desde chat_dm_messages
+      setChannelMessages([]);
     }
-
-    setChannelMessages(data || []);
-    scrollBottom();
   };
 
   const loadUnreadCounts = async () => {
@@ -338,8 +356,9 @@ export default function ChatView() {
 
     const next: Record<string, number> = {};
 
+    // Solo para canales públicos
     await Promise.all(
-      channels.map(async (channel) => {
+      channels.filter(ch => PUBLIC_CHANNELS.includes(ch.channel_key)).map(async (channel) => {
         const lastSeen = localStorage.getItem(getLastSeenKey(channel.channel_key));
 
         let query = (supabase as any)
@@ -417,7 +436,7 @@ export default function ChatView() {
     setThreads(Array.from(map.values()));
   };
 
-  const loadDmMessages = async (peer: string) => {
+  const loadDmMessages = async (peer: string, topicChannel?: string) => {
     if (!myEmail || !peer) return;
 
     if (!canViewChat(peer)) {
@@ -500,7 +519,7 @@ export default function ChatView() {
   const deleteMessage = async (messageId: string) => {
     if (!myEmail) return;
 
-    const table = tab === 'dm' ? 'chat_dm_messages' : 'chat_messages';
+    const table = tab === 'dm' || isDMChannel ? 'chat_dm_messages' : 'chat_messages';
     
     const { data: currentMessage } = await (supabase as any)
       .from(table)
@@ -531,7 +550,7 @@ export default function ChatView() {
     toast.success('Mensaje eliminado (solo para vos)');
     setShowDeleteConfirm(null);
 
-    if (tab === 'dm') {
+    if (tab === 'dm' || isDMChannel) {
       if (selectedPeer) loadDmMessages(selectedPeer);
       loadThreads();
     } else {
@@ -541,36 +560,80 @@ export default function ChatView() {
   };
 
   const sendChannelMessage = async (attachment?: Attachment) => {
-    if (tab === 'dm') return;
     if (!text.trim() && !attachment) return;
     if (!myEmail) return;
 
-    const messageData: any = {
-      sender_email: myEmail,
-      sender_role: myRole,
-      message_text: text.trim() || (attachment ? `📎 ${attachment.name}` : ''),
-      attachment_url: attachment?.url || null,
-      attachment_name: attachment?.name || null,
-      attachment_type: attachment?.type || null,
-      attachment_mime: attachment?.mime || null,
-      channel_key: tab,
-    };
+    // Canal público - todos ven
+    if (isPublicChannel) {
+      const messageData: any = {
+        sender_email: myEmail,
+        sender_role: myRole,
+        message_text: text.trim() || (attachment ? `📎 ${attachment.name}` : ''),
+        attachment_url: attachment?.url || null,
+        attachment_name: attachment?.name || null,
+        attachment_type: attachment?.type || null,
+        attachment_mime: attachment?.mime || null,
+        channel_key: tab,
+      };
 
-    const { error } = await (supabase as any)
-      .from('chat_messages')
-      .insert(messageData);
+      const { error } = await (supabase as any)
+        .from('chat_messages')
+        .insert(messageData);
 
-    if (error) {
-      console.error('Error detallado:', error);
-      toast.error(`No se pudo enviar: ${error.message || 'Error desconocido'}`);
-      return;
+      if (error) {
+        console.error('Error detallado:', error);
+        toast.error(`No se pudo enviar: ${error.message || 'Error desconocido'}`);
+        return;
+      }
+
+      setText('');
+      setShowEmojis(false);
+      markChannelSeenLocal(tab);
+      await loadChannelMessages(tab);
+      await loadUnreadCounts();
+    } 
+    // Canal con selector - enviar como DM al destinatario seleccionado
+    else if (isDMChannel) {
+      if (!selectedPeer) {
+        toast.error('Debes seleccionar un destinatario');
+        return;
+      }
+
+      if (!canSendToPeer(selectedPeer)) {
+        toast.error('No tenés permiso para escribirle a este destinatario');
+        return;
+      }
+
+      const key = threadKey(myEmail, selectedPeer);
+
+      const messageData: any = {
+        thread_key: key,
+        from_email: myEmail,
+        to_email: selectedPeer,
+        from_role: myRole,
+        message_text: text.trim() || (attachment ? `📎 ${attachment.name}` : ''),
+        attachment_url: attachment?.url || null,
+        attachment_name: attachment?.name || null,
+        attachment_type: attachment?.type || null,
+        attachment_mime: attachment?.mime || null,
+        read_at: null,
+      };
+
+      const { error } = await (supabase as any)
+        .from('chat_dm_messages')
+        .insert(messageData);
+
+      if (error) {
+        console.error('Error detallado:', error);
+        toast.error(`No se pudo enviar: ${error.message || 'Error desconocido'}`);
+        return;
+      }
+
+      setText('');
+      setShowEmojis(false);
+      await loadDmMessages(selectedPeer);
+      await loadThreads();
     }
-
-    setText('');
-    setShowEmojis(false);
-    markChannelSeenLocal(tab);
-    await loadChannelMessages(tab);
-    await loadUnreadCounts();
   };
 
   const sendDm = async (attachment?: Attachment) => {
@@ -817,8 +880,8 @@ export default function ChatView() {
   };
 
   const renderMessage = (message: ChatMessage) => {
-    const senderEmail = tab === 'dm' ? message.from_email : message.sender_email;
-    const senderRole = tab === 'dm' ? message.from_role : message.sender_role;
+    const senderEmail = tab === 'dm' || isDMChannel ? message.from_email : message.sender_email;
+    const senderRole = tab === 'dm' || isDMChannel ? message.from_role : message.sender_role;
     const mine = senderEmail?.toLowerCase() === myEmail.toLowerCase();
     const senderName = contactMap[senderEmail?.toLowerCase() || '']?.name || senderEmail;
 
@@ -846,7 +909,7 @@ export default function ChatView() {
           <div className="chat-message-footer">
             <span>{formatDateTime(message.created_at)}</span>
 
-            {tab === 'dm' && mine && (
+            {(tab === 'dm' || isDMChannel) && mine && (
               <span className="chat-read-state">
                 {message.read_at ? '✓✓ Leído' : '✓ Enviado'}
               </span>
@@ -887,9 +950,11 @@ export default function ChatView() {
 
     if (tab === 'dm') {
       if (selectedPeer) loadDmMessages(selectedPeer);
-    } else {
+    } else if (isPublicChannel) {
       loadChannelMessages(tab);
       markChannelSeenLocal(tab);
+    } else if (isDMChannel && selectedPeer) {
+      loadDmMessages(selectedPeer);
     }
   }, [myEmail, tab, selectedPeer, channels.length]);
 
@@ -906,11 +971,10 @@ export default function ChatView() {
           table: 'chat_messages',
         },
         () => {
-          if (tab !== 'dm') {
+          if (isPublicChannel) {
             loadChannelMessages(tab);
+            loadUnreadCounts();
           }
-
-          loadUnreadCounts();
         },
       )
       .on(
@@ -923,7 +987,7 @@ export default function ChatView() {
         () => {
           loadThreads();
 
-          if (selectedPeer) {
+          if (selectedPeer && (tab === 'dm' || isDMChannel)) {
             loadDmMessages(selectedPeer);
           }
         },
@@ -933,7 +997,7 @@ export default function ChatView() {
     return () => {
       supabase.removeChannel(realtimeChannel);
     };
-  }, [myEmail, tab, selectedPeer]);
+  }, [myEmail, tab, selectedPeer, isPublicChannel, isDMChannel]);
 
   useEffect(() => {
     if (!myEmail) return;
@@ -979,6 +1043,23 @@ export default function ChatView() {
     };
   }, [myEmail, tab, selectedPeer]);
 
+  // Renderizar mensajes según el tipo de tab
+  const renderMessagesList = () => {
+    if (isPublicChannel) {
+      return messages.map(renderMessage);
+    } else if (isDMChannel && selectedPeer) {
+      return dmMessages.map(renderMessage);
+    } else if (tab === 'dm') {
+      return messages.map(renderMessage);
+    } else {
+      return (
+        <div className="chat-empty">
+          Selecciona un destinatario para empezar a conversar
+        </div>
+      );
+    }
+  };
+
   return (
     <div className="chat-view">
       <div className="chat-header">
@@ -990,7 +1071,12 @@ export default function ChatView() {
           <button
             key={channel.channel_key}
             type="button"
-            onClick={() => setTab(channel.channel_key)}
+            onClick={() => {
+              setTab(channel.channel_key);
+              if (DM_CHANNELS.includes(channel.channel_key)) {
+                setSelectedPeer('');
+              }
+            }}
             className={`chat-tab ${tab === channel.channel_key ? 'active' : ''}`}
           >
             <span className="chat-tab-avatar">
@@ -1003,7 +1089,7 @@ export default function ChatView() {
 
             <span className="chat-tab-title">{channel.title}</span>
 
-            {!!unreadByChannel[channel.channel_key] && (
+            {PUBLIC_CHANNELS.includes(channel.channel_key) && !!unreadByChannel[channel.channel_key] && (
               <span className="chat-unread-badge">
                 {unreadByChannel[channel.channel_key]}
               </span>
@@ -1023,7 +1109,7 @@ export default function ChatView() {
 
       <div className="chat-layout">
         <aside className="chat-sidebar">
-          {/* Selector de destinatario - SOLO en canales que NO son públicos (general y fotos_productos NO tienen) */}
+          {/* Selector de destinatario - SOLO en canales que requieren destinatario */}
           {!isPublicChannel && tab !== 'dm' && (
             <div className="chat-dm-selector">
               <label className="chat-label">Escribir a</label>
@@ -1096,7 +1182,7 @@ export default function ChatView() {
                 )}
               </div>
             </>
-          ) : (
+          ) : isPublicChannel ? (
             <>
               <div className="chat-sidebar-header">
                 <strong>Pestaña</strong>
@@ -1170,6 +1256,55 @@ export default function ChatView() {
                 )}
               </div>
             </>
+          ) : (
+            // Canales con selector (DM encubierto) - mostrar info del destinatario seleccionado
+            <>
+              <div className="chat-sidebar-header">
+                <strong>{activeChannel?.title}</strong>
+                <button type="button" onClick={() => loadThreads()}>
+                  ↻
+                </button>
+              </div>
+
+              <div className="chat-channel-profile">
+                <div className="chat-channel-logo">
+                  {activeChannel?.logo_url ? (
+                    <img src={activeChannel.logo_url} alt={activeChannel.title} />
+                  ) : (
+                    <span>💬</span>
+                  )}
+
+                  {canEditChannelLogo && (
+                    <button
+                      type="button"
+                      className="chat-logo-edit"
+                      onClick={() => logoInputRef.current?.click()}
+                      title="Cambiar logo de esta pestaña"
+                      disabled={uploading}
+                    >
+                      📷
+                    </button>
+                  )}
+                </div>
+
+                <div>
+                  <span className="chat-current-label">Conversación con</span>
+                  <strong>
+                    {selectedPeer
+                      ? contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer
+                      : 'Seleccione un destinatario'}
+                  </strong>
+                </div>
+              </div>
+
+              <input
+                ref={logoInputRef}
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={handleLogoUpload}
+              />
+            </>
           )}
         </aside>
 
@@ -1193,24 +1328,62 @@ export default function ChatView() {
                   )}
                 </div>
               </>
-            ) : (
+            ) : isPublicChannel ? (
               <div className="chat-current-title">
                 <span className="chat-current-label">Mensajes de</span>
                 <strong>{activeChannel?.title}</strong>
+              </div>
+            ) : (
+              <div className="chat-current-title">
+                <span className="chat-current-label">
+                  {activeChannel?.title} - Conversación con
+                </span>
+                <strong>
+                  {selectedPeer
+                    ? contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer
+                    : 'Seleccione un destinatario'}
+                </strong>
+                {selectedPeer && contactMap[selectedPeer.toLowerCase()]?.role && (
+                  <span className="chat-role">
+                    {contactMap[selectedPeer.toLowerCase()].role}
+                  </span>
+                )}
               </div>
             )}
           </div>
 
           <div ref={msgRef} className="chat-messages">
-            {messages.length === 0 && (
+            {isPublicChannel && messages.length === 0 && (
               <div className="chat-empty">
-                {tab === 'dm'
-                  ? 'Elegí un destinatario para empezar.'
-                  : 'Sin mensajes aún. ¡Escribí el primero!'}
+                Sin mensajes aún. ¡Escribí el primero!
               </div>
             )}
 
-            {messages.map(renderMessage)}
+            {isDMChannel && !selectedPeer && (
+              <div className="chat-empty">
+                Selecciona un destinatario para empezar a conversar
+              </div>
+            )}
+
+            {isDMChannel && selectedPeer && dmMessages.length === 0 && (
+              <div className="chat-empty">
+                Sin mensajes aún con {contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer}
+              </div>
+            )}
+
+            {tab === 'dm' && !selectedPeer && (
+              <div className="chat-empty">
+                Selecciona un destinatario o una conversación existente
+              </div>
+            )}
+
+            {tab === 'dm' && selectedPeer && dmMessages.length === 0 && (
+              <div className="chat-empty">
+                Sin mensajes aún con {contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer}
+              </div>
+            )}
+
+            {renderMessagesList()}
 
             {typingUsers.length > 0 && (
               <div className="chat-typing">
@@ -1269,7 +1442,13 @@ export default function ChatView() {
 
             <input
               value={text}
-              placeholder="Escribí tu mensaje..."
+              placeholder={
+                isPublicChannel 
+                  ? "Escribí tu mensaje público..." 
+                  : (!selectedPeer && (isDMChannel || tab === 'dm')
+                      ? "Selecciona un destinatario primero"
+                      : "Escribí tu mensaje...")
+              }
               onChange={(event) => trackTyping(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
@@ -1277,13 +1456,19 @@ export default function ChatView() {
                   send();
                 }
               }}
+              disabled={(isDMChannel || tab === 'dm') && !selectedPeer}
               className="chat-input"
             />
 
             <button
               type="button"
               onClick={send}
-              disabled={uploading || recording || !text.trim()}
+              disabled={
+                uploading || 
+                recording || 
+                !text.trim() || 
+                ((isDMChannel || tab === 'dm') && !selectedPeer)
+              }
               className="chat-send-button"
             >
               Enviar
