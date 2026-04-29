@@ -8,13 +8,11 @@ const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 export default function ClosuresView() {
   const { profile } = useAuth();
   const myEmail = profile?.email || '';
+  const myRole = profile?.role || '';
   
-  // ========== DETECCIÓN DE ROL ==========
-  const isSupplier = myEmail === 'skylinestore06@gmail.com' || 
-                     myEmail === 'importadoraaliado@gmail.com' || 
-                     myEmail === 'nkshop@gmail.com';
-  
-  const isAdmin = myEmail === 'aleimportss@gmail.com';
+  // ========== DETECCIÓN DE ROL (usando role de la BD) ==========
+  const isSupplier = myRole === 'PROVEEDOR';
+  const isAdmin = myRole === 'ADMIN';
   
   const [orders, setOrders] = useState<any[]>([]);
   const [deliveries, setDeliveries] = useState<any[]>([]);
@@ -55,13 +53,19 @@ export default function ClosuresView() {
     }
   };
 
-  const loadSuppliers = () => {
-    const supplierList = [
-      { email: 'skylinestore06@gmail.com', name: 'PROVEEDOR SKYLINE' },
-      { email: 'importadoraaliado@gmail.com', name: 'IMPORTS ALIADEX' },
-      { email: 'nkshop@gmail.com', name: 'PROVEEDOR NKSHOP' }
-    ];
-    setSuppliers(supplierList);
+  const loadSuppliers = async () => {
+    // Cargar proveedores desde la tabla profiles
+    const { data } = await supabase
+      .from('profiles')
+      .select('email, name, company_name')
+      .eq('role', 'PROVEEDOR');
+    
+    if (data && data.length > 0) {
+      setSuppliers(data.map(s => ({ 
+        email: s.email, 
+        name: s.company_name || s.name || s.email 
+      })));
+    }
   };
 
   useEffect(() => {
@@ -79,32 +83,10 @@ export default function ClosuresView() {
       .lte('assigned_at', dateTo + 'T23:59:59')
       .order('assigned_at', { ascending: false });
 
+    // ✅ FILTRO CORREGIDO PARA PROVEEDOR - Usa provider_email directamente
     if (isSupplier) {
-      // Obtener IDs de productos de este proveedor
-      const { data: myProducts } = await supabase
-        .from('products')
-        .select('id')
-        .eq('supplier_email', myEmail);
-      
-      const productIds = myProducts?.map(p => p.id) || [];
-      
-      if (productIds.length > 0) {
-        // Obtener order_ids que contengan productos de este proveedor
-        const { data: orderItems } = await supabase
-          .from('order_items')
-          .select('order_id')
-          .in('product_id', productIds);
-        
-        const orderIds = [...new Set(orderItems?.map(oi => oi.order_id) || [])];
-        
-        if (orderIds.length > 0) {
-          query = query.in('id', orderIds);
-        } else {
-          query = query.in('id', []); // No hay pedidos con productos de este proveedor
-        }
-      } else {
-        query = query.in('id', []); // No hay productos de este proveedor
-      }
+      // Filtrar por provider_email (el email del proveedor)
+      query = query.eq('provider_email', myEmail);
       
       if (filterDelivery) {
         query = query.eq('assigned_delivery', filterDelivery);
@@ -112,14 +94,14 @@ export default function ClosuresView() {
     } else if (isDelivery) {
       query = query.eq('assigned_delivery', myEmail);
       if (filterSupplier) {
-        query = query.eq('supplier_email', filterSupplier);
+        query = query.eq('provider_email', filterSupplier);
       }
     } else if (isAdmin) {
       if (filterDelivery) query = query.eq('assigned_delivery', filterDelivery);
-      if (filterSupplier) query = query.eq('supplier_email', filterSupplier);
+      if (filterSupplier) query = query.eq('provider_email', filterSupplier);
     }
 
-    // ✅ FILTRO DE ESTADO: Solo aplicar si hay un valor seleccionado (no vacío)
+    // ✅ FILTRO DE ESTADO
     if (filterType && filterType !== '') {
       query = query.eq('status', filterType);
     }
@@ -515,7 +497,7 @@ export default function ClosuresView() {
                   <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
                   <td className="text-xs">{o.city || '—'}</td>
                   <td className="text-xs">{o.customer_name}</td>
-                  <td className="text-xs">{o.supplier_email || '—'}</td>
+                  <td className="text-xs">{o.provider_email || '—'}</td>
                   <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
                   <td className="text-right text-xs">{nf(fee)}</td>
                   <td className="text-right text-xs">{nf(net)}</td>
