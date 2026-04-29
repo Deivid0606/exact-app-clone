@@ -182,7 +182,6 @@ export default function ChatView() {
   const canSendToPeer = (peerEmail: string): boolean => {
     if (!myEmail || !peerEmail) return false;
     
-    // ADMIN y DESPACHANTE pueden escribir a TODOS
     if (isAdminOrDespachante) return true;
     
     const peer = contacts.find(c => c.email.toLowerCase() === peerEmail.toLowerCase());
@@ -205,7 +204,6 @@ export default function ChatView() {
   const canViewChat = (peerEmail: string): boolean => {
     if (!myEmail || !peerEmail) return false;
     
-    // ADMIN y DESPACHANTE pueden ver TODOS los chats
     if (isAdminOrDespachante) return true;
     
     const peer = contacts.find(c => c.email.toLowerCase() === peerEmail.toLowerCase());
@@ -226,7 +224,6 @@ export default function ChatView() {
   const filteredContacts = useMemo(() => {
     if (!myRole) return [];
     
-    // ADMIN y DESPACHANTE ven TODOS los contactos
     if (isAdminOrDespachante) {
       return contacts.filter((contact) => contact.email !== myEmail);
     }
@@ -358,7 +355,6 @@ export default function ChatView() {
       .select('*')
       .eq('topic_channel', channelTab);
 
-    // Si NO es ADMIN ni DESPACHANTE, filtrar por sus mensajes
     if (!isAdminOrDespachante) {
       query = query.or(`from_email.eq.${myEmail},to_email.eq.${myEmail}`);
     }
@@ -594,7 +590,6 @@ export default function ChatView() {
     setDmMessages(data || []);
     scrollBottom();
 
-    // Marcar como leídos (solo si soy el receptor y no soy ADMIN/DESPACHANTE)
     if (!isAdminOrDespachante) {
       const unreadMessages = data?.filter(
         (msg: ChatMessage) => msg.to_email === myEmail && !msg.read_at
@@ -733,9 +728,10 @@ export default function ChatView() {
         channel_key: tab,
       };
 
-      const { error } = await (supabase as any)
+      const { error, data } = await (supabase as any)
         .from('chat_messages')
-        .insert(messageData);
+        .insert(messageData)
+        .select();
 
       if (error) {
         console.error('Error detallado:', error);
@@ -743,9 +739,15 @@ export default function ChatView() {
         return;
       }
 
+      if (data && data[0]) {
+        const newMessage = data[0] as ChatMessage;
+        setChannelMessages((prev) => [...prev, newMessage]);
+        scrollBottom();
+      }
+
       setText('');
       setShowEmojis(false);
-      await loadChannelMessages(tab);
+      markChannelSeenLocal(tab);
       await loadUnreadCounts();
     } 
     else if (isDMChannel) {
@@ -775,9 +777,10 @@ export default function ChatView() {
         read_at: null,
       };
 
-      const { error } = await (supabase as any)
+      const { error, data } = await (supabase as any)
         .from('chat_dm_messages')
-        .insert(messageData);
+        .insert(messageData)
+        .select();
 
       if (error) {
         console.error('Error detallado:', error);
@@ -785,10 +788,15 @@ export default function ChatView() {
         return;
       }
 
+      if (data && data[0]) {
+        const newMessage = data[0] as ChatMessage;
+        setDmMessages((prev) => [...prev, newMessage]);
+        scrollBottom();
+      }
+
       toast.success(`Mensaje enviado a ${contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer} en ${activeChannel?.title}`);
       setText('');
       setShowEmojis(false);
-      await loadDmMessages(selectedPeer, tab);
       await loadChannelThreads(tab);
     }
   };
@@ -818,9 +826,10 @@ export default function ChatView() {
       read_at: null,
     };
 
-    const { error } = await (supabase as any)
+    const { error, data } = await (supabase as any)
       .from('chat_dm_messages')
-      .insert(messageData);
+      .insert(messageData)
+      .select();
 
     if (error) {
       console.error('Error detallado:', error);
@@ -828,10 +837,15 @@ export default function ChatView() {
       return;
     }
 
+    if (data && data[0]) {
+      const newMessage = data[0] as ChatMessage;
+      setDmMessages((prev) => [...prev, newMessage]);
+      scrollBottom();
+    }
+
     toast.success(`Mensaje enviado a ${contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer}`);
     setText('');
     setShowEmojis(false);
-    await loadDmMessages(selectedPeer);
     await loadDMThreads();
   };
 
@@ -1148,11 +1162,16 @@ export default function ChatView() {
           table: 'chat_messages',
         },
         (payload) => {
-          if (isPublicChannel && payload.new.channel_key === tab) {
-            setChannelMessages((prev) => [...prev, payload.new as ChatMessage]);
+          const newMessage = payload.new as ChatMessage;
+          if (isPublicChannel && newMessage.channel_key === tab) {
+            setChannelMessages((prev) => {
+              const exists = prev.some(msg => msg.id === newMessage.id);
+              if (exists) return prev;
+              return [...prev, newMessage];
+            });
             scrollBottom();
             
-            if (payload.new.sender_email !== myEmail) {
+            if (newMessage.sender_email !== myEmail) {
               loadUnreadCounts();
             }
           }
@@ -1172,7 +1191,6 @@ export default function ChatView() {
             const msgTopic = newMessage.topic_channel || 'dm';
             
             if (tab === msgTopic || (tab === 'dm' && msgTopic === 'dm')) {
-              // Verificar si la conversación actual es la que se está viendo
               let shouldUpdate = false;
               
               if (isAdminOrDespachante && selectedPeer) {
@@ -1187,7 +1205,11 @@ export default function ChatView() {
               }
               
               if (shouldUpdate) {
-                setDmMessages((prev) => [...prev, newMessage]);
+                setDmMessages((prev) => {
+                  const exists = prev.some(msg => msg.id === newMessage.id);
+                  if (exists) return prev;
+                  return [...prev, newMessage];
+                });
                 scrollBottom();
               }
               
@@ -1517,6 +1539,12 @@ export default function ChatView() {
           <div ref={msgRef} className="chat-messages">
             {isPublicChannel && messages.length === 0 && (
               <div className="chat-empty">✨ Sin mensajes aún. ¡Escribí el primero!</div>
+            )}
+
+            {isPublicChannel && messages.length > 0 && (
+              <div className="chat-messages-list">
+                {messages.map(renderMessage)}
+              </div>
             )}
 
             {isDMChannel && !selectedPeer && (
