@@ -41,6 +41,7 @@ type ChatMessage = {
   from_role?: string | null;
   to_email?: string | null;
   thread_key?: string | null;
+  topic_channel?: string | null;
   message_text: string | null;
   attachment_url: string | null;
   attachment_name: string | null;
@@ -141,6 +142,9 @@ export default function ChatView() {
   const [selectedPeer, setSelectedPeer] = useState('');
   const [dmMessages, setDmMessages] = useState<ChatMessage[]>([]);
   const [threads, setThreads] = useState<Thread[]>([]);
+  
+  // Conversaciones filtradas por el canal actual (pestaña)
+  const [channelThreads, setChannelThreads] = useState<Thread[]>([]);
 
   const [unreadByChannel, setUnreadByChannel] = useState<Record<string, number>>({});
   const [unreadByThread, setUnreadByThread] = useState<Record<string, number>>({});
@@ -242,10 +246,6 @@ export default function ChatView() {
     return contacts.filter((contact) => contact.email !== myEmail);
   }, [contacts, myEmail, myRole]);
 
-  const visibleThreads = useMemo(() => {
-    return threads.filter(thread => canViewChat(thread.peer));
-  }, [threads, myEmail]);
-
   const filterDeletedMessages = (messages: ChatMessage[]): ChatMessage[] => {
     if (!myEmail) return messages;
     return messages.filter(msg => !msg.deleted_for?.includes(myEmail));
@@ -271,7 +271,8 @@ export default function ChatView() {
   };
 
   const getLastSeenKey = (channelKey: string) => `chat_last_seen_${myEmail}_${channelKey}`;
-  const getLastSeenThreadKey = (threadKey: string) => `chat_last_seen_thread_${myEmail}_${threadKey}`;
+  const getLastSeenThreadKey = (threadKeyValue: string, topicChannel: string) => 
+    `chat_last_seen_thread_${myEmail}_${topicChannel}_${threadKeyValue}`;
 
   const markChannelSeenLocal = (channelKey: string) => {
     if (!myEmail) return;
@@ -279,10 +280,10 @@ export default function ChatView() {
     setUnreadByChannel((prev) => ({ ...prev, [channelKey]: 0 }));
   };
 
-  const markThreadSeenLocal = (threadKeyValue: string) => {
+  const markThreadSeenLocal = (threadKeyValue: string, topicChannel: string) => {
     if (!myEmail) return;
-    localStorage.setItem(getLastSeenThreadKey(threadKeyValue), new Date().toISOString());
-    setUnreadByThread((prev) => ({ ...prev, [threadKeyValue]: 0 }));
+    localStorage.setItem(getLastSeenThreadKey(threadKeyValue, topicChannel), new Date().toISOString());
+    setUnreadByThread((prev) => ({ ...prev, `${topicChannel}_${threadKeyValue}`: 0 }));
   };
 
   const loadChannels = async () => {
@@ -349,12 +350,75 @@ export default function ChatView() {
     }
   };
 
+  // Cargar conversaciones para un canal DM específico (por pestaña)
+  const loadChannelThreads = async (channelTab: ChatTab) => {
+    if (!myEmail) return;
+    if (!DM_CHANNELS.includes(channelTab)) return;
+
+    const { data, error } = await (supabase as any)
+      .from('chat_dm_messages')
+      .select('*')
+      .eq('topic_channel', channelTab)
+      .or(`from_email.eq.${myEmail},to_email.eq.${myEmail}`)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    const notDeletedForMe = data?.filter((msg: ChatMessage) => !msg.deleted_for?.includes(myEmail)) || [];
+    
+    // Agrupar por thread (conversación con cada persona)
+    const threadsMap = new Map<string, Thread>();
+
+    notDeletedForMe.forEach((message: ChatMessage) => {
+      const peer = message.from_email?.toLowerCase() === myEmail.toLowerCase()
+        ? message.to_email
+        : message.from_email;
+
+      if (!peer) return;
+      if (!canViewChat(peer)) return;
+
+      const key = threadKey(myEmail, peer);
+
+      if (!threadsMap.has(key)) {
+        const lastSeen = localStorage.getItem(getLastSeenThreadKey(key, channelTab));
+        let unread = 0;
+        
+        const unreadMessages = notDeletedForMe.filter(
+          (item: ChatMessage) =>
+            item.thread_key === key &&
+            item.to_email?.toLowerCase() === myEmail.toLowerCase()
+        );
+        
+        if (lastSeen) {
+          unread = unreadMessages.filter(item => item.created_at > lastSeen).length;
+        } else {
+          unread = unreadMessages.length;
+        }
+
+        threadsMap.set(key, {
+          key,
+          peer,
+          peerName: contactMap[peer.toLowerCase()]?.name || peer,
+          lastMsg: message.message_text || message.attachment_name || 'Adjunto',
+          lastTime: message.created_at,
+          unread,
+          topicChannel: channelTab,
+        });
+      }
+    });
+
+    setChannelThreads(Array.from(threadsMap.values()));
+  };
+
   const loadUnreadCounts = async () => {
     if (!myEmail) return;
 
-    // Unread para canales públicos
     const nextChannel: Record<string, number> = {};
 
+    // Para canales públicos
     await Promise.all(
       channels.filter(ch => PUBLIC_CHANNELS.includes(ch.channel_key)).map(async (channel) => {
         const lastSeen = localStorage.getItem(getLastSeenKey(channel.channel_key));
@@ -381,7 +445,8 @@ export default function ChatView() {
     setUnreadByChannel(nextChannel);
   };
 
-  const loadThreads = async () => {
+  // Cargar hilos de DM (para la pestaña de Mensajes Directos)
+  const loadDMThreads = async () => {
     if (!myEmail) return;
 
     const { data, error } = await (supabase as any)
@@ -413,18 +478,20 @@ export default function ChatView() {
       if (!map.has(key)) {
         if (!canViewChat(peer)) return;
 
-        const lastSeen = localStorage.getItem(getLastSeenThreadKey(key));
-        let queryUnread = notDeletedForMe.filter(
+        const lastSeen = localStorage.getItem(getLastSeenThreadKey(key, 'dm'));
+        let unread = 0;
+        
+        const unreadMessages = notDeletedForMe.filter(
           (item: ChatMessage) =>
             item.thread_key === key &&
             item.to_email?.toLowerCase() === myEmail.toLowerCase()
         );
-
+        
         if (lastSeen) {
-          queryUnread = queryUnread.filter(item => item.created_at > lastSeen);
+          unread = unreadMessages.filter(item => item.created_at > lastSeen).length;
+        } else {
+          unread = unreadMessages.length;
         }
-
-        const unread = queryUnread.length;
 
         map.set(key, {
           key,
@@ -433,6 +500,7 @@ export default function ChatView() {
           lastMsg: message.message_text || message.attachment_name || 'Adjunto',
           lastTime: message.created_at,
           unread,
+          topicChannel: message.topic_channel || 'dm',
         });
       }
     });
@@ -440,7 +508,7 @@ export default function ChatView() {
     setThreads(Array.from(map.values()));
   };
 
-  const loadDmMessages = async (peer: string) => {
+  const loadDmMessages = async (peer: string, topicChannel?: string) => {
     if (!myEmail || !peer) return;
 
     if (!canViewChat(peer)) {
@@ -450,11 +518,18 @@ export default function ChatView() {
     }
 
     const key = threadKey(myEmail, peer);
+    const channel = topicChannel || (isDMChannel ? tab : 'dm');
 
-    const { data, error } = await (supabase as any)
+    let query = (supabase as any)
       .from('chat_dm_messages')
       .select('*')
-      .eq('thread_key', key)
+      .eq('thread_key', key);
+
+    if (channel !== 'dm') {
+      query = query.eq('topic_channel', channel);
+    }
+
+    const { data, error } = await query
       .order('created_at', { ascending: true })
       .limit(250);
 
@@ -467,7 +542,7 @@ export default function ChatView() {
     setDmMessages(data || []);
     scrollBottom();
 
-    // Marcar como leídos los mensajes donde el usuario actual es el receptor
+    // Marcar como leídos
     await (supabase as any)
       .from('chat_dm_messages')
       .update({ read_at: new Date().toISOString() })
@@ -475,8 +550,13 @@ export default function ChatView() {
       .eq('to_email', myEmail)
       .is('read_at', null);
 
-    markThreadSeenLocal(key);
-    loadThreads();
+    if (channel !== 'dm') {
+      markThreadSeenLocal(key, channel);
+      loadChannelThreads(tab);
+    } else {
+      markThreadSeenLocal(key, 'dm');
+      loadDMThreads();
+    }
   };
 
   const selectPeer = (peer: string, topicChannel?: string) => {
@@ -485,7 +565,7 @@ export default function ChatView() {
       return;
     }
     setSelectedPeer(peer);
-    if (peer) loadDmMessages(peer);
+    if (peer) loadDmMessages(peer, topicChannel);
   };
 
   const handleFileUpload = async (file: File): Promise<Attachment | null> => {
@@ -525,7 +605,7 @@ export default function ChatView() {
   const deleteMessage = async (messageId: string) => {
     if (!myEmail) return;
 
-    const table = tab === 'dm' || isDMChannel ? 'chat_dm_messages' : 'chat_messages';
+    const table = 'chat_dm_messages';
     
     const { data: currentMessage } = await (supabase as any)
       .from(table)
@@ -556,12 +636,14 @@ export default function ChatView() {
     toast.success('Mensaje eliminado (solo para vos)');
     setShowDeleteConfirm(null);
 
-    if (tab === 'dm' || isDMChannel) {
-      if (selectedPeer) loadDmMessages(selectedPeer);
-      loadThreads();
-    } else {
-      loadChannelMessages(tab);
-      loadUnreadCounts();
+    if (selectedPeer) {
+      if (isDMChannel) {
+        loadDmMessages(selectedPeer, tab);
+        loadChannelThreads(tab);
+      } else if (tab === 'dm') {
+        loadDmMessages(selectedPeer);
+        loadDMThreads();
+      }
     }
   };
 
@@ -594,7 +676,6 @@ export default function ChatView() {
 
       setText('');
       setShowEmojis(false);
-      markChannelSeenLocal(tab);
       await loadChannelMessages(tab);
       await loadUnreadCounts();
     } 
@@ -617,6 +698,7 @@ export default function ChatView() {
         from_email: myEmail,
         to_email: selectedPeer,
         from_role: myRole,
+        topic_channel: tab, // Guardamos la pestaña donde se envió
         message_text: text.trim() || (attachment ? `📎 ${attachment.name}` : ''),
         attachment_url: attachment?.url || null,
         attachment_name: attachment?.name || null,
@@ -635,11 +717,11 @@ export default function ChatView() {
         return;
       }
 
-      toast.success(`Mensaje enviado a ${contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer}`);
+      toast.success(`Mensaje enviado a ${contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer} en ${activeChannel?.title}`);
       setText('');
       setShowEmojis(false);
-      await loadDmMessages(selectedPeer);
-      await loadThreads();
+      await loadDmMessages(selectedPeer, tab);
+      await loadChannelThreads(tab);
     }
   };
 
@@ -659,6 +741,7 @@ export default function ChatView() {
       from_email: myEmail,
       to_email: selectedPeer,
       from_role: myRole,
+      topic_channel: 'dm',
       message_text: text.trim() || (attachment ? `📎 ${attachment.name}` : ''),
       attachment_url: attachment?.url || null,
       attachment_name: attachment?.name || null,
@@ -681,7 +764,7 @@ export default function ChatView() {
     setText('');
     setShowEmojis(false);
     await loadDmMessages(selectedPeer);
-    await loadThreads();
+    await loadDMThreads();
   };
 
   const send = () => {
@@ -888,8 +971,8 @@ export default function ChatView() {
   };
 
   const renderMessage = (message: ChatMessage) => {
-    const senderEmail = tab === 'dm' || isDMChannel ? message.from_email : message.sender_email;
-    const senderRole = tab === 'dm' || isDMChannel ? message.from_role : message.sender_role;
+    const senderEmail = message.from_email;
+    const senderRole = message.from_role;
     const mine = senderEmail?.toLowerCase() === myEmail.toLowerCase();
     const senderName = contactMap[senderEmail?.toLowerCase() || '']?.name || senderEmail;
 
@@ -917,7 +1000,7 @@ export default function ChatView() {
           <div className="chat-message-footer">
             <span>{formatDateTime(message.created_at)}</span>
 
-            {(tab === 'dm' || isDMChannel) && mine && (
+            {mine && (
               <span className="chat-read-state">
                 {message.read_at ? '✓✓ Leído' : '✓ Enviado'}
               </span>
@@ -945,31 +1028,37 @@ export default function ChatView() {
     );
   };
 
+  // Efecto inicial
   useEffect(() => {
     loadChannels();
     loadContacts();
   }, []);
 
+  // Efecto para cargar datos según la pestaña
   useEffect(() => {
     if (!myEmail) return;
 
-    loadThreads();
-    loadUnreadCounts();
-
     if (tab === 'dm') {
-      if (selectedPeer) loadDmMessages(selectedPeer);
+      loadDMThreads();
+      if (selectedPeer) {
+        loadDmMessages(selectedPeer);
+      }
     } else if (isPublicChannel) {
       loadChannelMessages(tab);
       markChannelSeenLocal(tab);
-    } else if (isDMChannel && selectedPeer) {
-      loadDmMessages(selectedPeer);
+      loadUnreadCounts();
+    } else if (isDMChannel) {
+      loadChannelThreads(tab);
+      if (selectedPeer) {
+        loadDmMessages(selectedPeer, tab);
+      }
     }
   }, [myEmail, tab, selectedPeer, channels.length]);
 
+  // Suscripción en tiempo real
   useEffect(() => {
     if (!myEmail) return;
 
-    // Suscripción en tiempo real para chat_messages (canales públicos)
     const channelSubscription = supabase
       .channel('chat-realtime')
       .on(
@@ -984,7 +1073,6 @@ export default function ChatView() {
             setChannelMessages((prev) => [...prev, payload.new as ChatMessage]);
             scrollBottom();
             
-            // Si no es mi mensaje, actualizar contador de no leídos
             if (payload.new.sender_email !== myEmail) {
               loadUnreadCounts();
             }
@@ -1003,17 +1091,16 @@ export default function ChatView() {
           
           // Si el mensaje es para mí o de mí
           if (newMessage.to_email === myEmail || newMessage.from_email === myEmail) {
-            // Actualizar hilos
-            loadThreads();
+            const msgTopic = newMessage.topic_channel || 'dm';
             
-            // Si estoy en la conversación correcta, mostrar el mensaje
-            if (selectedPeer) {
-              const key = threadKey(myEmail, selectedPeer);
-              if (newMessage.thread_key === key) {
+            // Si estoy en la pestaña correcta
+            if (tab === msgTopic || (tab === 'dm' && msgTopic === 'dm')) {
+              // Si estoy viendo la conversación con esa persona
+              if (selectedPeer && (newMessage.from_email === selectedPeer || newMessage.to_email === selectedPeer)) {
                 setDmMessages((prev) => [...prev, newMessage]);
                 scrollBottom();
                 
-                // Marcar como leído si soy el receptor y estoy viendo la conversación
+                // Marcar como leído si soy el receptor
                 if (newMessage.to_email === myEmail) {
                   setTimeout(async () => {
                     await (supabase as any)
@@ -1023,10 +1110,14 @@ export default function ChatView() {
                   }, 500);
                 }
               }
+              
+              // Actualizar lista de conversaciones
+              if (msgTopic !== 'dm') {
+                loadChannelThreads(tab);
+              } else {
+                loadDMThreads();
+              }
             }
-            
-            // Refrescar contadores de no leídos
-            loadThreads();
           }
         },
       )
@@ -1037,13 +1128,13 @@ export default function ChatView() {
     };
   }, [myEmail, tab, selectedPeer, isPublicChannel]);
 
+  // Typing presence
   useEffect(() => {
     if (!myEmail) return;
 
-    const typingChannelName =
-      tab === 'dm' && selectedPeer
-        ? `typing-dm-${threadKey(myEmail, selectedPeer)}`
-        : `typing-channel-${tab}`;
+    const typingChannelName = isDMChannel && selectedPeer
+      ? `typing-${tab}-${threadKey(myEmail, selectedPeer)}`
+      : `typing-${tab}`;
 
     const typingChannel = supabase.channel(typingChannelName, {
       config: {
@@ -1079,20 +1170,7 @@ export default function ChatView() {
       setTypingUsers([]);
       supabase.removeChannel(typingChannel);
     };
-  }, [myEmail, tab, selectedPeer]);
-
-  // Renderizar mensajes según el tipo de tab
-  const renderMessagesList = () => {
-    if (isPublicChannel) {
-      return messages.map(renderMessage);
-    } else if (isDMChannel && selectedPeer) {
-      return dmMessages.map(renderMessage);
-    } else if (tab === 'dm') {
-      return messages.map(renderMessage);
-    } else {
-      return null;
-    }
-  };
+  }, [myEmail, tab, selectedPeer, isDMChannel]);
 
   return (
     <div className="chat-view">
@@ -1131,7 +1209,10 @@ export default function ChatView() {
 
         <button
           type="button"
-          onClick={() => setTab('dm')}
+          onClick={() => {
+            setTab('dm');
+            setSelectedPeer('');
+          }}
           className={`chat-tab ${tab === 'dm' ? 'active' : ''}`}
         >
           <span className="chat-tab-avatar">📩</span>
@@ -1141,13 +1222,13 @@ export default function ChatView() {
 
       <div className="chat-layout">
         <aside className="chat-sidebar">
-          {/* Selector de destinatario - SOLO en canales que requieren destinatario */}
+          {/* Selector de destinatario - SOLO visible en canales que requieren destinatario */}
           {!isPublicChannel && tab !== 'dm' && (
             <div className="chat-dm-selector">
-              <label className="chat-label">Escribir a</label>
+              <label className="chat-label">✏️ Escribir a</label>
               <select
                 value={selectedPeer}
-                onChange={(event) => selectPeer(event.target.value)}
+                onChange={(event) => selectPeer(event.target.value, tab)}
                 className="chat-select"
               >
                 <option value="">-- Elegir destinatario --</option>
@@ -1161,13 +1242,13 @@ export default function ChatView() {
             </div>
           )}
 
-          {tab === 'dm' ? (
+          {tab === 'dm' && (
             <>
               <div className="chat-dm-selector">
-                <label className="chat-label">Escribir a</label>
+                <label className="chat-label">✏️ Escribir a</label>
                 <select
                   value={selectedPeer}
-                  onChange={(event) => selectPeer(event.target.value)}
+                  onChange={(event) => selectPeer(event.target.value, 'dm')}
                   className="chat-select"
                 >
                   <option value="">-- Elegir destinatario --</option>
@@ -1181,27 +1262,26 @@ export default function ChatView() {
               </div>
 
               <div className="chat-sidebar-header">
-                <strong>Conversaciones</strong>
-                <button type="button" onClick={loadThreads}>
+                <strong>📋 Conversaciones</strong>
+                <button type="button" onClick={loadDMThreads} title="Actualizar">
                   ↻
                 </button>
               </div>
 
               <div className="chat-thread-list">
-                {visibleThreads.map((thread) => (
+                {threads.map((thread) => (
                   <button
                     key={thread.key}
                     type="button"
-                    onClick={() => selectPeer(thread.peer)}
+                    onClick={() => selectPeer(thread.peer, 'dm')}
                     className={`chat-thread ${selectedPeer === thread.peer ? 'active' : ''}`}
                   >
                     <div className="chat-thread-top">
                       <strong>{thread.peerName}</strong>
                       <span>{formatTime(thread.lastTime)}</span>
                     </div>
-
                     <div className="chat-thread-bottom">
-                      <span>{thread.lastMsg}</span>
+                      <span className="chat-thread-message">{thread.lastMsg}</span>
                       {!!thread.unread && (
                         <span className="chat-unread-badge">{thread.unread}</span>
                       )}
@@ -1209,15 +1289,59 @@ export default function ChatView() {
                   </button>
                 ))}
 
-                {visibleThreads.length === 0 && (
+                {threads.length === 0 && (
                   <p className="chat-empty-small">Sin conversaciones aún</p>
                 )}
               </div>
             </>
-          ) : isPublicChannel ? (
+          )}
+
+          {isDMChannel && (
             <>
               <div className="chat-sidebar-header">
-                <strong>Información</strong>
+                <strong>📋 Conversaciones en {activeChannel?.title}</strong>
+                <button type="button" onClick={() => loadChannelThreads(tab)} title="Actualizar">
+                  ↻
+                </button>
+              </div>
+
+              <div className="chat-thread-list">
+                {channelThreads.map((thread) => (
+                  <button
+                    key={thread.key}
+                    type="button"
+                    onClick={() => {
+                      setSelectedPeer(thread.peer);
+                      loadDmMessages(thread.peer, tab);
+                    }}
+                    className={`chat-thread ${selectedPeer === thread.peer ? 'active' : ''}`}
+                  >
+                    <div className="chat-thread-top">
+                      <strong>{thread.peerName}</strong>
+                      <span>{formatTime(thread.lastTime)}</span>
+                    </div>
+                    <div className="chat-thread-bottom">
+                      <span className="chat-thread-message">{thread.lastMsg}</span>
+                      {!!thread.unread && (
+                        <span className="chat-unread-badge">{thread.unread}</span>
+                      )}
+                    </div>
+                  </button>
+                ))}
+
+                {channelThreads.length === 0 && selectedPeer === '' && (
+                  <p className="chat-empty-small">
+                    Selecciona un destinatario arriba para comenzar
+                  </p>
+                )}
+              </div>
+            </>
+          )}
+
+          {isPublicChannel && (
+            <>
+              <div className="chat-sidebar-header">
+                <strong>ℹ️ Información</strong>
               </div>
 
               <div className="chat-channel-profile">
@@ -1246,57 +1370,8 @@ export default function ChatView() {
                   <strong>{activeChannel?.title}</strong>
                   <p className="chat-channel-description">
                     {activeChannel?.channel_key === 'general' 
-                      ? 'Todos los usuarios pueden ver y escribir aquí' 
-                      : 'Todos los usuarios pueden ver y compartir fotos de productos aquí'}
-                  </p>
-                </div>
-              </div>
-
-              <input
-                ref={logoInputRef}
-                type="file"
-                accept="image/*"
-                hidden
-                onChange={handleLogoUpload}
-              />
-            </>
-          ) : (
-            // Canales con selector (DM encubierto)
-            <>
-              <div className="chat-sidebar-header">
-                <strong>{activeChannel?.title}</strong>
-              </div>
-
-              <div className="chat-channel-profile">
-                <div className="chat-channel-logo">
-                  {activeChannel?.logo_url ? (
-                    <img src={activeChannel.logo_url} alt={activeChannel.title} />
-                  ) : (
-                    <span>💬</span>
-                  )}
-
-                  {canEditChannelLogo && (
-                    <button
-                      type="button"
-                      className="chat-logo-edit"
-                      onClick={() => logoInputRef.current?.click()}
-                      title="Cambiar logo de esta pestaña"
-                      disabled={uploading}
-                    >
-                      📷
-                    </button>
-                  )}
-                </div>
-
-                <div>
-                  <span className="chat-current-label">Conversación con</span>
-                  <strong>
-                    {selectedPeer
-                      ? contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer
-                      : 'Seleccione un destinatario'}
-                  </strong>
-                  <p className="chat-channel-description">
-                    Las conversaciones son privadas entre tú y el destinatario
+                      ? '💬 Todos los usuarios pueden ver y escribir aquí' 
+                      : '📸 Todos los usuarios pueden ver y compartir fotos de productos aquí'}
                   </p>
                 </div>
               </div>
@@ -1316,39 +1391,33 @@ export default function ChatView() {
           <div className="chat-current-header">
             {tab === 'dm' ? (
               <>
-                <span className="chat-current-label">Chat con</span>
-
+                <span className="chat-current-label">💬 Chat con</span>
                 <div className="chat-current-title">
                   <strong>
                     {selectedPeer
                       ? contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer
                       : 'Seleccione un destinatario'}
                   </strong>
-
                   {selectedPeer && contactMap[selectedPeer.toLowerCase()]?.role && (
-                    <span className="chat-role">
-                      {contactMap[selectedPeer.toLowerCase()].role}
-                    </span>
+                    <span className="chat-role">{contactMap[selectedPeer.toLowerCase()].role}</span>
                   )}
                 </div>
               </>
             ) : isPublicChannel ? (
               <div className="chat-current-title">
-                <span className="chat-current-label">Canal</span>
+                <span className="chat-current-label">📢 Chat público</span>
                 <strong>{activeChannel?.title}</strong>
               </div>
             ) : (
               <div className="chat-current-title">
-                <span className="chat-current-label">{activeChannel?.title} - Conversación con</span>
+                <span className="chat-current-label">📌 {activeChannel?.title} - Conversación con</span>
                 <strong>
                   {selectedPeer
                     ? contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer
                     : 'Seleccione un destinatario'}
                 </strong>
                 {selectedPeer && contactMap[selectedPeer.toLowerCase()]?.role && (
-                  <span className="chat-role">
-                    {contactMap[selectedPeer.toLowerCase()].role}
-                  </span>
+                  <span className="chat-role">{contactMap[selectedPeer.toLowerCase()].role}</span>
                 )}
               </div>
             )}
@@ -1356,36 +1425,34 @@ export default function ChatView() {
 
           <div ref={msgRef} className="chat-messages">
             {isPublicChannel && messages.length === 0 && (
-              <div className="chat-empty">
-                Sin mensajes aún. ¡Escribí el primero!
-              </div>
+              <div className="chat-empty">✨ Sin mensajes aún. ¡Escribí el primero!</div>
             )}
 
             {isDMChannel && !selectedPeer && (
               <div className="chat-empty">
-                Selecciona un destinatario para empezar a conversar
+                👋 Selecciona un destinatario arriba para comenzar a conversar
               </div>
             )}
 
             {isDMChannel && selectedPeer && dmMessages.length === 0 && (
               <div className="chat-empty">
-                Sin mensajes aún con {contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer}
+                💬 Sin mensajes aún con {contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer}
               </div>
             )}
 
             {tab === 'dm' && !selectedPeer && (
               <div className="chat-empty">
-                Selecciona un destinatario o una conversación existente
+                👋 Selecciona un destinatario o una conversación existente
               </div>
             )}
 
             {tab === 'dm' && selectedPeer && dmMessages.length === 0 && (
               <div className="chat-empty">
-                Sin mensajes aún con {contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer}
+                💬 Sin mensajes aún con {contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer}
               </div>
             )}
 
-            {renderMessagesList()}
+            {(tab === 'dm' ? dmMessages : messages).map(renderMessage)}
 
             {typingUsers.length > 0 && (
               <div className="chat-typing">
@@ -1446,10 +1513,10 @@ export default function ChatView() {
               value={text}
               placeholder={
                 isPublicChannel 
-                  ? "Escribí tu mensaje público..." 
+                  ? "✏️ Escribí tu mensaje público..." 
                   : (!selectedPeer && (isDMChannel || tab === 'dm')
-                      ? "Selecciona un destinatario primero"
-                      : "Escribí tu mensaje...")
+                      ? "🔒 Selecciona un destinatario primero"
+                      : "✏️ Escribí tu mensaje...")
               }
               onChange={(event) => trackTyping(event.target.value)}
               onKeyDown={(event) => {
