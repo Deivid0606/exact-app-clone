@@ -10,14 +10,38 @@ export default function ClosuresView() {
   const myEmail = profile?.email || '';
   const myUserId = profile?.id || '';
   
-  const [userRole, setUserRole] = useState<string>('');
+  // ========== DETECCIÓN DE ROL POR EMAIL (porque en profiles todos son "seller") ==========
+  const supplierEmails = [
+    'skylinestore06@gmail.com',
+    'importadoraaliado@gmail.com',
+    'nkshop@gmail.com'
+  ];
+  
+  const deliveryEmails = [
+    'aleimportss@gmail.com',
+    'pablo-godoy09importaliado@gmail.com',
+    'chirstianimporaliado04@gmail.com',
+    'santiagonandedeliveryimportaliado@gmail.com',
+    'nayder-skyline@gmail.com',
+    'roberto.skyline.@gmail.com',
+    'entregasnelson@gmail.com',
+    'juanserviannk@gmail.com'
+  ];
+  
+  const adminEmails = ['aleimportss@gmail.com'];
+  
+  const isSupplier = supplierEmails.includes(myEmail);
+  const isDelivery = deliveryEmails.includes(myEmail);
+  const isAdmin = adminEmails.includes(myEmail);
+  
   const [orders, setOrders] = useState<any[]>([]);
   const [deliveries, setDeliveries] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [fees, setFees] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
   
-  const [filterDelivery, setFilterDelivery] = useState('');
+  // Filtros
+  const [filterDelivery, setFilterDelivery] = useState(isDelivery ? myEmail : '');
   const [filterSupplier, setFilterSupplier] = useState('');
   const [filterType, setFilterType] = useState('ENTREGADO');
   const [rendicionNote, setRendicionNote] = useState('');
@@ -29,26 +53,6 @@ export default function ClosuresView() {
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [totalPedidosAsignados, setTotalPedidosAsignados] = useState(0);
 
-  // Cargar el rol del usuario desde user_roles
-  useEffect(() => {
-    const loadUserRole = async () => {
-      if (!myUserId) return;
-      
-      const { data } = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', myUserId)
-        .maybeSingle();
-      
-      if (data) {
-        console.log('Rol detectado:', data.role);
-        setUserRole(data.role);
-      }
-    };
-    
-    loadUserRole();
-  }, [myUserId]);
-
   // Cargar los 3 proveedores del sistema
   const loadSuppliers = () => {
     const mainSuppliers = [
@@ -56,26 +60,16 @@ export default function ClosuresView() {
       { email: 'importadoraaliado@gmail.com', name: '📦 IMPORTS ALIADEX' },
       { email: 'nkshop@gmail.com', name: '🛍️ PROVEEDOR NKSHOP' }
     ];
-    console.log('Proveedores cargados:', mainSuppliers);
     setSuppliers(mainSuppliers);
   };
 
-  // Cargar deliveries desde user_roles
+  // Cargar deliveries desde profiles
   const loadDeliveries = async () => {
-    const { data: roleData } = await supabase
-      .from('user_roles')
-      .select('user_id')
-      .eq('role', 'DELIVERY');
-    
-    if (roleData && roleData.length > 0) {
-      const userIds = roleData.map(r => r.user_id);
-      const { data: profilesData } = await supabase
-        .from('profiles')
-        .select('email, name')
-        .in('id', userIds);
-      
-      setDeliveries(profilesData || []);
-    }
+    const { data } = await supabase
+      .from('profiles')
+      .select('email, name')
+      .in('email', deliveryEmails);
+    setDeliveries(data || []);
   };
 
   useEffect(() => {
@@ -91,14 +85,23 @@ export default function ClosuresView() {
       .lte('assigned_at', dateTo + 'T23:59:59')
       .order('assigned_at', { ascending: false });
 
-    if (userRole === 'PROVEEDOR') {
+    // ========== FILTROS SEGÚN EL ROL ==========
+    if (isSupplier) {
+      // PROVEEDOR: solo ve sus propios pedidos
       query = query.eq('supplier_email', myEmail);
-    } else if (userRole === 'DELIVERY') {
+      // El proveedor PUEDE filtrar por delivery (qué repartidor llevó sus pedidos)
+      if (filterDelivery) {
+        query = query.eq('assigned_delivery', filterDelivery);
+      }
+    } else if (isDelivery) {
+      // DELIVERY: ve sus pedidos asignados
       query = query.eq('assigned_delivery', myEmail);
+      // El delivery PUEDE filtrar por proveedor
       if (filterSupplier) {
         query = query.eq('supplier_email', filterSupplier);
       }
-    } else if (userRole === 'ADMIN') {
+    } else if (isAdmin) {
+      // ADMIN: ve todo y puede filtrar por delivery y proveedor
       if (filterDelivery) query = query.eq('assigned_delivery', filterDelivery);
       if (filterSupplier) query = query.eq('supplier_email', filterSupplier);
     }
@@ -109,10 +112,13 @@ export default function ClosuresView() {
     setOrders(data || []);
     setTotalPedidosAsignados(data?.length || 0);
 
+    // Check rendición pagada
     let deliveryToCheck = '';
-    if (userRole === 'DELIVERY') {
+    if (isDelivery) {
       deliveryToCheck = myEmail;
-    } else if (userRole === 'ADMIN' && filterDelivery) {
+    } else if (isAdmin && filterDelivery) {
+      deliveryToCheck = filterDelivery;
+    } else if (isSupplier && filterDelivery) {
       deliveryToCheck = filterDelivery;
     }
     
@@ -129,7 +135,7 @@ export default function ClosuresView() {
     }
   };
 
-  useEffect(() => { loadClosures(); }, [filterSupplier, filterDelivery, filterType, dateFrom, dateTo, userRole]);
+  useEffect(() => { loadClosures(); }, [filterSupplier, filterDelivery, filterType, dateFrom, dateTo]);
 
   const getFee = (deliveryEmail: string, city: string) => {
     const f = fees.find(f => f.delivery_email?.toLowerCase() === deliveryEmail?.toLowerCase() && f.city?.toLowerCase() === city?.toLowerCase());
@@ -168,23 +174,35 @@ export default function ClosuresView() {
   }, [delivered]);
 
   const updateStatus1 = async (orderId: string, status: string) => {
-    if (status === 'DEVUELTO A DEPÓSITO' && userRole === 'DELIVERY') {
+    if (status === 'DEVUELTO A DEPÓSITO' && isDelivery) {
       toast.error('Los repartidores no pueden cambiar a DEVUELTO A DEPÓSITO');
       return;
     }
-    const { error } = await supabase.from('orders').update({ status, updated_at: new Date().toISOString() }).eq('id', orderId);
+    const { error } = await supabase.from('orders').update({ 
+      status,
+      updated_at: new Date().toISOString()
+    }).eq('id', orderId);
     if (error) toast.error(error.message);
-    else { toast.success('Estado actualizado'); loadClosures(); }
+    else { 
+      toast.success('Estado actualizado'); 
+      loadClosures();
+    }
   };
 
   const updateStatus2 = async (orderId: string, status2: string) => {
-    const { error } = await supabase.from('orders').update({ status2, updated_at: new Date().toISOString() }).eq('id', orderId);
+    const { error } = await supabase.from('orders').update({ 
+      status2,
+      updated_at: new Date().toISOString()
+    }).eq('id', orderId);
     if (error) toast.error(error.message);
     else { toast.success('Estado 2 actualizado'); loadClosures(); }
   };
 
   const updateRetiro = async (orderId: string, estado: string) => {
-    const { error } = await supabase.from('orders').update({ estado_retiro: estado, updated_at: new Date().toISOString() }).eq('id', orderId);
+    const { error } = await supabase.from('orders').update({ 
+      estado_retiro: estado,
+      updated_at: new Date().toISOString()
+    }).eq('id', orderId);
     if (error) toast.error(error.message);
     else { toast.success('Estado de retiro actualizado'); loadClosures(); }
   };
@@ -204,7 +222,9 @@ export default function ClosuresView() {
 
   const markSingleRendido = async (orderId: string) => {
     const { error } = await supabase.from('orders').update({
-      delivery_settled: true, status2: 'RENDIDO', updated_at: new Date().toISOString(),
+      delivery_settled: true,
+      status2: 'RENDIDO',
+      updated_at: new Date().toISOString(),
     }).eq('id', orderId);
     if (error) { toast.error(error.message); return; }
     toast.success('Marcado como RENDIDO');
@@ -212,21 +232,33 @@ export default function ClosuresView() {
   };
 
   const markRendicionPagada = async () => {
-    let deliveryEmail = userRole === 'DELIVERY' ? myEmail : filterDelivery;
+    let deliveryEmail = '';
+    if (isDelivery) {
+      deliveryEmail = myEmail;
+    } else if (isAdmin || isSupplier) {
+      deliveryEmail = filterDelivery;
+    }
+    
     if (!deliveryEmail) { toast.error('Seleccioná un delivery primero'); return; }
     if (totalAPagar <= 0) { toast.error('No hay monto para rendir'); return; }
     if (!confirm(`¿Marcar rendición de ${deliveryEmail} por Gs ${nf(totalAPagar)} como PAGADA?`)) return;
 
     for (const o of delivered) {
       await supabase.from('orders').update({
-        delivery_settled: true, delivery_paid_at: new Date().toISOString(), status2: 'RENDIDO',
+        delivery_settled: true,
+        delivery_paid_at: new Date().toISOString(),
+        status2: 'RENDIDO',
       }).eq('id', o.id);
     }
 
     const { error } = await supabase.from('rendiciones_pagadas').insert({
-      delivery_email: deliveryEmail, fecha_rendicion: new Date().toISOString().slice(0, 10),
-      monto_total: totalAPagar, nota: rendicionNote || `Rendición ${dateFrom} a ${dateTo} — ${delivered.length} pedidos`,
-      marcado_por: myEmail, marcado_en: new Date().toISOString(), pagado_en: new Date().toISOString(),
+      delivery_email: deliveryEmail,
+      fecha_rendicion: new Date().toISOString().slice(0, 10),
+      monto_total: totalAPagar,
+      nota: rendicionNote || `Rendición ${dateFrom} a ${dateTo} — ${delivered.length} pedidos`,
+      marcado_por: myEmail,
+      marcado_en: new Date().toISOString(),
+      pagado_en: new Date().toISOString(),
     });
 
     if (error) { toast.error(error.message); return; }
@@ -238,11 +270,15 @@ export default function ClosuresView() {
   const desmarcarPagado = async () => {
     if (!rendicionPagada) return;
     if (!confirm('¿Desmarcar esta rendición como pagada?')) return;
+
     for (const o of delivered) {
       await supabase.from('orders').update({
-        delivery_settled: false, delivery_paid_at: null, status2: '--',
+        delivery_settled: false,
+        delivery_paid_at: null,
+        status2: '--',
       }).eq('id', o.id);
     }
+
     await supabase.from('rendiciones_pagadas').delete().eq('id', rendicionPagada.id);
     toast.success('Rendición desmarcada');
     loadClosures();
@@ -253,60 +289,56 @@ export default function ClosuresView() {
   const retiroOpts = ['', 'PENDIENTE', 'REALIZADO', 'CANCELADO'];
   
   let deliveryName = '';
-  if (userRole === 'DELIVERY') {
+  if (isDelivery) {
     deliveryName = profile?.name || myEmail;
-  } else if (userRole === 'ADMIN' && filterDelivery) {
+  } else if ((isAdmin || isSupplier) && filterDelivery) {
     const found = deliveries.find(d => d.email === filterDelivery);
     deliveryName = found?.name || filterDelivery;
   }
   
   const allRendered = noRendidos.length === 0 && delivered.length > 0;
   
-  const canEditFull = userRole === 'ADMIN' || userRole === 'PROVEEDOR';
-  const canEditStatus1 = userRole === 'ADMIN' || userRole === 'PROVEEDOR' || userRole === 'DELIVERY';
-  const canManageRendicion = userRole === 'ADMIN';
-  const canViewRendicion = userRole === 'ADMIN' || userRole === 'DELIVERY';
+  const canEditFull = isAdmin || isSupplier;
+  const canEditStatus1 = isAdmin || isSupplier || isDelivery;
+  const canManageRendicion = isAdmin || isSupplier;
+  const canViewRendicion = isAdmin || isSupplier || isDelivery;
 
   return (
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Cierres</h3>
 
-      {userRole === 'DELIVERY' && (
+      {isDelivery && (
         <div className="mb-3">
           <span className="badge-status badge-entregado">✏️ DELIVERY: solo podés editar Estado 1</span>
           <p className="text-xs text-muted-foreground mt-1">Podés actualizar el estado de tus pedidos. No podés cambiar a DEVUELTO A DEPÓSITO.</p>
         </div>
       )}
 
-      {(userRole === 'PROVEEDOR' || userRole === 'ADMIN') && (
+      {(isSupplier || isAdmin) && (
         <div className="mb-3">
           <span className="badge-status badge-entregado">✏️ PROVEEDOR/ADMIN: edición completa</span>
           <p className="text-xs text-muted-foreground mt-1">Podés actualizar estados, fechas, ciudades y gestionar rendiciones.</p>
         </div>
       )}
 
-      {/* Filtros */}
+      {/* ========== FILTROS ========== */}
       <div className="flex flex-wrap gap-2 mb-3">
         <label className="app-label !mt-0">Desde</label>
         <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
         <label className="app-label !mt-0">Hasta</label>
         <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
         
-        {userRole === 'ADMIN' && (
+        {/* FILTRO POR DELIVERY - visible para PROVEEDOR y ADMIN */}
+        {(isSupplier || isAdmin) && (
           <select className="app-input !w-auto min-w-[280px]" value={filterDelivery} onChange={e => setFilterDelivery(e.target.value)}>
-            <option value="">Todos los repartidores</option>
+            <option value="">📋 Todos los repartidores</option>
             {deliveries.map(d => <option key={d.email} value={d.email}>{d.name || d.email}</option>)}
           </select>
         )}
 
-        {/* FILTRO POR PROVEEDOR - VISIBLE PARA DELIVERY Y ADMIN */}
-        {(userRole === 'ADMIN' || userRole === 'DELIVERY') && suppliers.length > 0 && (
-          <select 
-            className="app-input !w-auto min-w-[280px]" 
-            value={filterSupplier} 
-            onChange={e => setFilterSupplier(e.target.value)}
-            style={{ borderColor: '#4ade80', backgroundColor: '#f0fdf4' }}
-          >
+        {/* FILTRO POR PROVEEDOR - visible para DELIVERY y ADMIN */}
+        {(isDelivery || isAdmin) && (
+          <select className="app-input !w-auto min-w-[280px]" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
             <option value="">📋 Todos los proveedores</option>
             {suppliers.map(s => (
               <option key={s.email} value={s.email}>
@@ -329,15 +361,8 @@ export default function ClosuresView() {
         <button className="nav-btn active" onClick={loadClosures}>Aplicar</button>
       </div>
 
-      {/* Debug: mostrar rol actual */}
-      {userRole && (
-        <div className="text-xs text-gray-400 mb-2">
-          Rol detectado: {userRole} | Proveedores disponibles: {suppliers.length}
-        </div>
-      )}
-
       {/* Total de Pedidos Asignados */}
-      {(filterDelivery || userRole === 'DELIVERY' || userRole === 'PROVEEDOR') && (
+      {(filterDelivery || isDelivery || isSupplier) && (
         <div className="grid-kpi mb-4">
           <div className="kpi-card">
             <div className="text-xs text-muted-foreground mb-1">📦 Pedidos Asignados</div>
@@ -354,7 +379,7 @@ export default function ClosuresView() {
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mb-3">
             <div className="flex items-center gap-2">
               <span className="chip text-[11px]">Delivery:</span>
-              <span className="text-sm font-bold">{deliveryName}</span>
+              <span className="text-sm font-bold">{deliveryName || (isDelivery ? profile?.name : 'Seleccionar')}</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="chip text-[11px]">Fecha:</span>
@@ -389,7 +414,7 @@ export default function ClosuresView() {
                     <span className="font-bold text-foreground">Nota:</span> {rendicionPagada.nota}
                   </div>
                 )}
-                {userRole === 'ADMIN' && (
+                {canManageRendicion && (
                   <button
                     onClick={desmarcarPagado}
                     className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold border border-destructive/30 text-destructive hover:bg-destructive/10 transition-all"
@@ -406,7 +431,7 @@ export default function ClosuresView() {
                   value={rendicionNote} onChange={e => setRendicionNote(e.target.value)} />
                 <button
                   onClick={markRendicionPagada}
-                  disabled={!filterDelivery && userRole === 'ADMIN' || totalAPagar <= 0}
+                  disabled={(!filterDelivery && !isDelivery) || totalAPagar <= 0}
                   className="nav-btn active"
                 >
                   ✅ MARCAR COMO PAGADO
@@ -434,11 +459,14 @@ export default function ClosuresView() {
         <table className="app-table min-w-[1500px]">
           <thead>
             <tr>
-              <th>Asignado</th><th>ID</th><th>Ciudad</th><th>Cliente</th><th>Proveedor</th>
+              <th>Asignado</th><th>ID</th><th>Ciudad</th><th>Cliente</th>
+              <th>Proveedor</th>
               <th className="text-right">Total (Gs)</th><th className="text-right">Tarifa (Gs)</th>
-              <th className="text-right">Neto (Gs)</th><th>Estado 1</th>
-              <th>Estado de retiro</th><th>Estado 2 (cierre)</th>
-              {(userRole === 'ADMIN' || userRole === 'PROVEEDOR') && <th></th>}
+              <th className="text-right">Neto (Gs)</th>
+              <th>Estado 1</th>
+              <th>Estado de retiro</th>
+              <th>Estado 2 (cierre)</th>
+              {canManageRendicion && <th></th>}
             </tr>
           </thead>
           <tbody>
@@ -468,19 +496,7 @@ export default function ClosuresView() {
                     )}
                   </td>
                   <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
-                  <td>
-                    {canEditFull ? (
-                      <select className="app-input !py-1 !px-2 !text-xs !w-auto !min-w-[120px]"
-                        value={o.city || ''}
-                        onChange={e => updateCity(o.id, e.target.value)}>
-                        <option value="">—</option>
-                        {clientPrices.map(c => <option key={c.id} value={c.city}>{c.city}</option>)}
-                        {o.city && !clientPrices.find(c => c.city === o.city) && <option value={o.city}>{o.city}</option>}
-                      </select>
-                    ) : (
-                      <span className="text-xs">{o.city}</span>
-                    )}
-                  </td>
+                  <td className="text-xs">{o.city || '—'}</td>
                   <td className="text-xs">{o.customer_name}</td>
                   <td className="text-xs">{o.supplier_email || '—'}</td>
                   <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
@@ -515,7 +531,7 @@ export default function ClosuresView() {
                       </select>
                     ) : <span className="text-xs">{o.status2 || '—'}</span>}
                   </td>
-                  {(userRole === 'ADMIN' || userRole === 'PROVEEDOR') && (
+                  {canManageRendicion && (
                     <td>
                       <div className="flex items-center gap-1">
                         {!isSettled && (o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA') && (
@@ -535,7 +551,13 @@ export default function ClosuresView() {
                 </tr>
               );
             })}
-            {orders.length === 0 && <tr><td colSpan={(userRole === 'ADMIN' || userRole === 'PROVEEDOR') ? 12 : 11} className="text-center text-muted-foreground py-8">Sin resultados</td></tr>}
+            {orders.length === 0 && (
+              <tr>
+                <td colSpan={canManageRendicion ? 12 : 11} className="text-center text-muted-foreground py-8">
+                  Sin resultados
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
