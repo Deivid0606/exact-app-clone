@@ -25,32 +25,8 @@ interface EditOrder {
   email: string;
   obs: string;
   assigned_at: string;
-  provider_email?: string; // Agregado
+  provider_email?: string; // NUEVO: campo para el email del proveedor
 }
-
-// Función para obtener color consistente por proveedor
-const getProviderColor = (providerName: string): string => {
-  if (!providerName) return '#ffffff';
-  
-  const colorMap: { [key: string]: string } = {
-    'PROVEEDOR A': '#FFE5E5',
-    'PROVEEDOR B': '#E5FFE5',
-    'PROVEEDOR C': '#E5E5FF',
-    'PROVEEDOR D': '#FFFFE5',
-    'PROVEEDOR E': '#FFE5FF',
-    'PROVEEDOR F': '#E5FFFF',
-  };
-  
-  const normalized = providerName.toUpperCase();
-  if (colorMap[normalized]) return colorMap[normalized];
-  
-  let hash = 0;
-  for (let i = 0; i < providerName.length; i++) {
-    hash = providerName.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const hue = Math.abs(hash % 360);
-  return `hsl(${hue}, 70%, 90%)`;
-};
 
 // Helper para verificar si el proveedor tiene acceso al pedido
 function isProviderAllowed(order: any, userEmail: string): boolean {
@@ -79,7 +55,7 @@ export default function OrdersView() {
 
   const [orders, setOrders] = useState<any[]>([]);
   const [deliveries, setDeliveries] = useState<any[]>([]);
-  const [providers, setProviders] = useState<any[]>([]); // Nuevo: lista de proveedores
+  const [providers, setProviders] = useState<any[]>([]); // NUEVO: lista de proveedores
   const [clientPrices, setClientPrices] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -108,7 +84,7 @@ export default function OrdersView() {
         const deliveryUserIds = new Set((roles || []).map(r => r.user_id));
         return profiles.filter(p => deliveryUserIds.has(p.user_id));
       }),
-      supabase.from('profiles').select('email, name, company_name').eq('role', 'PROVEEDOR')
+      supabase.from('profiles').select('email, name, company_name').eq('role', 'PROVEEDOR') // NUEVO: cargar proveedores
     ]);
     setOrders(ordersRes.data || []);
     setDeliveries(deliveriesRes);
@@ -132,7 +108,7 @@ export default function OrdersView() {
 
       if (q) {
         const idNum = String(o.order_number || o.id || '').replace(/^[a-z]+/i, '');
-        const hay = [o.customer_name, o.phone, o.order_number, o.id, idNum, o.city, o.created_by, o.assigned_delivery].map(norm).join(' ');
+        const hay = [o.customer_name, o.phone, o.order_number, o.id, idNum, o.city, o.created_by, o.assigned_delivery, o.provider_email].map(norm).join(' ');
         if (!hay.includes(q)) return false;
       }
       return true;
@@ -190,7 +166,7 @@ export default function OrdersView() {
     if (deliveryEmail) postNews(`${myEmail} asignó pedido ${orderNum} a ${deliveryEmail}`, orderNum);
   };
 
-  // NUEVA FUNCIÓN: Asignar proveedor
+  // NUEVA FUNCIÓN: Asignar/Editar proveedor
   const handleAssignProvider = async (orderId: string, providerEmail: string) => {
     const order = orders.find(o => o.id === orderId);
     const orderNum = order?.order_number || orderId.slice(0, 8);
@@ -311,6 +287,7 @@ export default function OrdersView() {
         `━━━━━━━━━━━━━━━━━━`,
         `Vendedor: ${o.created_by || ''}`,
         `Delivery: ${o.assigned_delivery || 'Sin asignar'}`,
+        `Proveedor: ${o.provider_email || 'Sin proveedor'}`,
       ].filter(Boolean).join('\n');
 
       setGuideText(text);
@@ -347,7 +324,7 @@ export default function OrdersView() {
     const allText = selected.map(o => {
       const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json || '[]') : (o.items_json || []);
       const itemsText = items.map((it: any, i: number) => `  ${i + 1}. ${it.title || it.sku} x${it.qty}`).join('\n');
-      return `${o.order_number || o.id.slice(0, 8)} — ${o.customer_name} — ${o.city}\nTeléfono: ${o.phone}\nDirección: ${o.street || ''} ${o.district || ''}\n${itemsText}\nTotal: Gs ${nf(Number(o.total_gs || 0))}\n${o.obs ? 'Obs: ' + o.obs : ''}`;
+      return `${o.order_number || o.id.slice(0, 8)} — ${o.customer_name} — ${o.city}\nTeléfono: ${o.phone}\nDirección: ${o.street || ''} ${o.district || ''}\n${itemsText}\nTotal: Gs ${nf(Number(o.total_gs || 0))}\nProveedor: ${o.provider_email || 'Sin proveedor'}\n${o.obs ? 'Obs: ' + o.obs : ''}`;
     }).join('\n\n════════════════════\n\n');
     navigator.clipboard.writeText(allText);
     toast.success(`${selected.length} guías copiadas`);
@@ -367,49 +344,9 @@ export default function OrdersView() {
   const canDeletePermanently = ['ADMIN', 'DESPACHANTE', 'PROVEEDOR'].includes(role);
   const canAssignProvider = role === 'ADMIN' || role === 'DESPACHANTE'; // Solo ADMIN y DESPACHANTE pueden asignar proveedores
 
-  // Mapa de colores por proveedor para la leyenda
-  const uniqueProviders = useMemo(() => {
-    const providerMap = new Map();
-    providers.forEach(p => {
-      const name = p.name || p.company_name || p.email;
-      providerMap.set(p.email, name);
-    });
-    orders.forEach(o => {
-      if (o.provider_email && !providerMap.has(o.provider_email)) {
-        const provider = providers.find(p => p.email === o.provider_email);
-        if (provider) {
-          const name = provider.name || provider.company_name || provider.email;
-          providerMap.set(o.provider_email, name);
-        }
-      }
-    });
-    return Array.from(providerMap.entries()).map(([email, name]) => ({ email, name }));
-  }, [providers, orders]);
-
   return (
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Pedidos</h3>
-
-      {/* Leyenda de colores de proveedores */}
-      {uniqueProviders.length > 0 && (
-        <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
-          <div className="text-sm font-semibold mb-2">🎨 Proveedores por color:</div>
-          <div className="flex flex-wrap gap-3">
-            {uniqueProviders.map(provider => {
-              const color = getProviderColor(provider.name);
-              return (
-                <div key={provider.email} className="flex items-center gap-2">
-                  <div 
-                    className="w-5 h-5 rounded border border-gray-300"
-                    style={{ backgroundColor: color }}
-                  />
-                  <span className="text-xs">{provider.name}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
 
       {/* Filtros */}
       <div className="flex flex-col sm:flex-row flex-wrap items-center gap-2 mb-3">
@@ -425,7 +362,7 @@ export default function OrdersView() {
           <option value="">Todos los estados</option>
           {STATUS1_ALL.map(s => <option key={s} value={s}>{s}</option>)}
         </select>
-        <input className="app-input w-full sm:!w-auto sm:min-w-[250px] sm:flex-1" placeholder="🔎 Buscar por cliente, teléfono, ID o ciudad"
+        <input className="app-input w-full sm:!w-auto sm:min-w-[250px] sm:flex-1" placeholder="🔎 Buscar por cliente, teléfono, ID, ciudad o proveedor"
           value={search} onChange={e => setSearch(e.target.value)} />
         <button className="nav-btn active w-full sm:w-auto" onClick={loadOrders} disabled={loading}>Filtrar</button>
         {selectedIds.size > 0 && (
@@ -449,7 +386,7 @@ export default function OrdersView() {
               <th>Ciudad</th>
               <th>Cliente</th>
               <th>Vendedor</th>
-              <th>Proveedor</th>
+              <th>Proveedor</th> {/* NUEVA COLUMNA */}
               {role !== 'DESPACHANTE' && <th>Delivery</th>}
               <th className="text-right">Total (Gs)</th>
               <th className="text-right">{role === 'DELIVERY' ? 'Tarifa (Gs)' : 'Comisión (Gs)'}</th>
@@ -472,11 +409,10 @@ export default function OrdersView() {
                 : new Date(o.created_at).toLocaleString('es-PY');
               
               const provider = providers.find(p => p.email === o.provider_email);
-              const providerName = provider?.name || provider?.company_name || o.provider_email || '';
-              const rowColor = getProviderColor(providerName);
+              const providerDisplay = provider?.name || provider?.company_name || o.provider_email || '';
 
               return (
-                <tr key={o.id} style={{ backgroundColor: rowColor }}>
+                <tr key={o.id}>
                   <td className="text-center">
                     <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
                   </td>
@@ -500,7 +436,7 @@ export default function OrdersView() {
                         ))}
                       </select>
                     ) : (
-                      <span className="text-xs font-medium">{providerName || '—'}</span>
+                      <span className="text-xs font-medium">{providerDisplay || '—'}</span>
                     )}
                   </td>
                   {role !== 'DESPACHANTE' && <td className="text-xs">{o.assigned_delivery || '—'}</td>}
@@ -603,11 +539,10 @@ export default function OrdersView() {
             : new Date(o.created_at).toLocaleString('es-PY');
           
           const provider = providers.find(p => p.email === o.provider_email);
-          const providerName = provider?.name || provider?.company_name || o.provider_email || '';
-          const cardColor = getProviderColor(providerName);
+          const providerDisplay = provider?.name || provider?.company_name || o.provider_email || '';
 
           return (
-            <div key={o.id} className="bg-card border border-border rounded-lg p-4 shadow-sm" style={{ backgroundColor: cardColor }}>
+            <div key={o.id} className="bg-card border border-border rounded-lg p-4 shadow-sm">
               <div className="flex justify-between items-start mb-3">
                 <div>
                   <div className="font-bold text-sm">{o.order_number || o.id.slice(0, 8)}</div>
@@ -628,7 +563,7 @@ export default function OrdersView() {
                   <span className="text-right">{o.created_by}</span>
                   
                   <span className="font-medium">Proveedor:</span>
-                  <span className="text-right font-medium">{providerName || '—'}</span>
+                  <span className="text-right font-medium">{providerDisplay || '—'}</span>
                   
                   {role !== 'DESPACHANTE' && (
                     <>
