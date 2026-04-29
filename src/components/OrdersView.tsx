@@ -28,24 +28,11 @@ interface EditOrder {
   provider_email?: string;
 }
 
-// Helper para verificar si el proveedor tiene acceso al pedido
+// ✅ FUNCIÓN CORREGIDA - Usa provider_email en lugar de provider_emails_list
 function isProviderAllowed(order: any, userEmail: string): boolean {
-  const providerList = order.provider_emails_list;
-  if (!providerList) return false;
-
-  let emails: string[] = [];
-  if (Array.isArray(providerList)) {
-    emails = providerList;
-  } else if (typeof providerList === 'string') {
-    try {
-      const parsed = JSON.parse(providerList);
-      if (Array.isArray(parsed)) emails = parsed;
-      else emails = providerList.split(',').map(s => s.trim());
-    } catch {
-      emails = providerList.split(',').map(s => s.trim());
-    }
-  }
-  return emails.some(email => norm(email) === norm(userEmail));
+  const orderProviderEmail = order.provider_email;
+  if (!orderProviderEmail) return false;
+  return norm(orderProviderEmail) === norm(userEmail);
 }
 
 export default function OrdersView() {
@@ -100,6 +87,7 @@ export default function OrdersView() {
   const filtered = useMemo(() => {
     const q = norm(search);
     return orders.filter(o => {
+      // ✅ FILTRO CORREGIDO PARA PROVEEDOR
       if (role === 'VENDEDOR' && norm(o.created_by || '') !== norm(myEmail)) return false;
       if (role === 'DELIVERY' && norm(o.assigned_delivery || '') !== norm(myEmail)) return false;
       if (role === 'PROVEEDOR' && !isProviderAllowed(o, myEmail)) return false;
