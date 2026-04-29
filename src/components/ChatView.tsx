@@ -161,6 +161,10 @@ export default function ChatView() {
 
   const messages = tab === 'dm' ? dmMessages : channelMessages;
 
+  const channelPreviewMessages = useMemo(() => {
+    return channelMessages.slice(-6).reverse();
+  }, [channelMessages]);
+
   const threadKey = (a: string, b: string) => {
     const x = a.toLowerCase();
     const y = b.toLowerCase();
@@ -836,61 +840,137 @@ export default function ChatView() {
       </div>
 
       <div className="chat-layout">
-        {tab === 'dm' && (
-          <aside className="chat-sidebar">
-            <div className="chat-sidebar-header">
-              <strong>Conversaciones</strong>
-              <button type="button" onClick={loadThreads}>
-                ↻
-              </button>
-            </div>
-
-            <label className="chat-label">Escribir a</label>
-
-            <select
-              value={selectedPeer}
-              onChange={(event) => selectPeer(event.target.value)}
-              className="chat-select"
-            >
-              <option value="">-- Elegir destinatario --</option>
-              {contacts
-                .filter((contact) => contact.email !== myEmail)
-                .map((contact) => (
-                  <option key={contact.email} value={contact.email}>
-                    {contact.role ? `${contact.role} · ` : ''}
-                    {contact.name || contact.email}
-                  </option>
-                ))}
-            </select>
-
-            <div className="chat-thread-list">
-              {threads.map((thread) => (
-                <button
-                  key={thread.key}
-                  type="button"
-                  onClick={() => selectPeer(thread.peer)}
-                  className={`chat-thread ${selectedPeer === thread.peer ? 'active' : ''}`}
-                >
-                  <div className="chat-thread-top">
-                    <strong>{thread.peerName}</strong>
-                    <span>{formatTime(thread.lastTime)}</span>
-                  </div>
-
-                  <div className="chat-thread-bottom">
-                    <span>{thread.lastMsg}</span>
-                    {!!thread.unread && (
-                      <span className="chat-unread-badge">{thread.unread}</span>
-                    )}
-                  </div>
+        <aside className="chat-sidebar">
+          {tab === 'dm' ? (
+            <>
+              <div className="chat-sidebar-header">
+                <strong>Conversaciones</strong>
+                <button type="button" onClick={loadThreads}>
+                  ↻
                 </button>
-              ))}
+              </div>
 
-              {threads.length === 0 && (
-                <p className="chat-empty-small">Sin conversaciones aún</p>
-              )}
-            </div>
-          </aside>
-        )}
+              <label className="chat-label">Escribir a</label>
+
+              <select
+                value={selectedPeer}
+                onChange={(event) => selectPeer(event.target.value)}
+                className="chat-select"
+              >
+                <option value="">-- Elegir destinatario --</option>
+                {contacts
+                  .filter((contact) => contact.email !== myEmail)
+                  .map((contact) => (
+                    <option key={contact.email} value={contact.email}>
+                      {contact.role ? `${contact.role} · ` : ''}
+                      {contact.name || contact.email}
+                    </option>
+                  ))}
+              </select>
+
+              <div className="chat-thread-list">
+                {threads.map((thread) => (
+                  <button
+                    key={thread.key}
+                    type="button"
+                    onClick={() => selectPeer(thread.peer)}
+                    className={`chat-thread ${selectedPeer === thread.peer ? 'active' : ''}`}
+                  >
+                    <div className="chat-thread-top">
+                      <strong>{thread.peerName}</strong>
+                      <span>{formatTime(thread.lastTime)}</span>
+                    </div>
+
+                    <div className="chat-thread-bottom">
+                      <span>{thread.lastMsg}</span>
+                      {!!thread.unread && (
+                        <span className="chat-unread-badge">{thread.unread}</span>
+                      )}
+                    </div>
+                  </button>
+                ))}
+
+                {threads.length === 0 && (
+                  <p className="chat-empty-small">Sin conversaciones aún</p>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="chat-sidebar-header">
+                <strong>Pestaña</strong>
+                <button type="button" onClick={() => loadChannelMessages(tab)}>
+                  ↻
+                </button>
+              </div>
+
+              <div className="chat-channel-profile">
+                <div className="chat-channel-logo">
+                  {activeChannel?.logo_url ? (
+                    <img src={activeChannel.logo_url} alt={activeChannel.title} />
+                  ) : (
+                    <span>💬</span>
+                  )}
+
+                  {canEditChannelLogo && (
+                    <button
+                      type="button"
+                      className="chat-logo-edit"
+                      onClick={() => logoInputRef.current?.click()}
+                      title="Cambiar logo de esta pestaña"
+                      disabled={uploading}
+                    >
+                      📷
+                    </button>
+                  )}
+                </div>
+
+                <div>
+                  <span className="chat-current-label">Canal activo</span>
+                  <strong>{activeChannel?.title}</strong>
+                </div>
+              </div>
+
+              <input
+                ref={logoInputRef}
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={handleLogoUpload}
+              />
+
+              <div className="chat-thread-list" style={{ marginTop: 18 }}>
+                {channelPreviewMessages.map((message) => {
+                  const senderEmail = message.sender_email || '';
+                  const senderName =
+                    contactMap[senderEmail.toLowerCase()]?.name || senderEmail || 'Usuario';
+
+                  return (
+                    <button
+                      key={message.id}
+                      type="button"
+                      className="chat-thread"
+                      onClick={scrollBottom}
+                    >
+                      <div className="chat-thread-top">
+                        <strong>{senderName}</strong>
+                        <span>{formatTime(message.created_at)}</span>
+                      </div>
+
+                      <div className="chat-thread-bottom">
+                        <span>{message.message_text || message.attachment_name || 'Adjunto'}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+
+                {channelPreviewMessages.length === 0 && (
+                  <p className="chat-empty-small">Sin mensajes en esta pestaña</p>
+                )}
+              </div>
+            </>
+          )}
+        </aside>
 
         <section className="chat-main">
           <div className="chat-current-header">
@@ -913,42 +993,10 @@ export default function ChatView() {
                 </div>
               </>
             ) : (
-              <>
-                <div className="chat-channel-profile">
-                  <div className="chat-channel-logo">
-                    {activeChannel?.logo_url ? (
-                      <img src={activeChannel.logo_url} alt={activeChannel.title} />
-                    ) : (
-                      <span>💬</span>
-                    )}
-
-                    {canEditChannelLogo && (
-                      <button
-                        type="button"
-                        className="chat-logo-edit"
-                        onClick={() => logoInputRef.current?.click()}
-                        title="Cambiar logo de esta pestaña"
-                        disabled={uploading}
-                      >
-                        📷
-                      </button>
-                    )}
-                  </div>
-
-                  <div>
-                    <span className="chat-current-label">Pestaña</span>
-                    <strong>{activeChannel?.title}</strong>
-                  </div>
-                </div>
-
-                <input
-                  ref={logoInputRef}
-                  type="file"
-                  accept="image/*"
-                  hidden
-                  onChange={handleLogoUpload}
-                />
-              </>
+              <div className="chat-current-title">
+                <span className="chat-current-label">Mensajes de</span>
+                <strong>{activeChannel?.title}</strong>
+              </div>
             )}
           </div>
 
