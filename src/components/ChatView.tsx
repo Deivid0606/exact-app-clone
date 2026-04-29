@@ -1029,22 +1029,25 @@ export default function ChatView() {
 
       <div className="chat-layout">
         <aside className="chat-sidebar">
-          <div className="chat-dm-selector">
-            <label className="chat-label">Escribir a</label>
-            <select
-              value={selectedPeer}
-              onChange={(event) => selectPeer(event.target.value)}
-              className="chat-select"
-            >
-              <option value="">-- Elegir destinatario --</option>
-              {filteredContacts.map((contact) => (
-                <option key={contact.email} value={contact.email}>
-                  {contact.role ? `${contact.role} · ` : ''}
-                  {contact.name || contact.email}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Selector de destinatario - SOLO en Mensajes Directos y NO en Chat General */}
+          {tab !== 'general' && (
+            <div className="chat-dm-selector">
+              <label className="chat-label">Escribir a</label>
+              <select
+                value={selectedPeer}
+                onChange={(event) => selectPeer(event.target.value)}
+                className="chat-select"
+              >
+                <option value="">-- Elegir destinatario --</option>
+                {filteredContacts.map((contact) => (
+                  <option key={contact.email} value={contact.email}>
+                    {contact.role ? `${contact.role} · ` : ''}
+                    {contact.name || contact.email}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
           {tab === 'dm' ? (
             <>
