@@ -25,7 +25,7 @@ interface EditOrder {
   email: string;
   obs: string;
   assigned_at: string;
-  provider_email?: string; // NUEVO: campo para el email del proveedor
+  provider_email?: string;
 }
 
 // Helper para verificar si el proveedor tiene acceso al pedido
@@ -55,7 +55,7 @@ export default function OrdersView() {
 
   const [orders, setOrders] = useState<any[]>([]);
   const [deliveries, setDeliveries] = useState<any[]>([]);
-  const [providers, setProviders] = useState<any[]>([]); // NUEVO: lista de proveedores
+  const [providers, setProviders] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -84,7 +84,7 @@ export default function OrdersView() {
         const deliveryUserIds = new Set((roles || []).map(r => r.user_id));
         return profiles.filter(p => deliveryUserIds.has(p.user_id));
       }),
-      supabase.from('profiles').select('email, name, company_name').eq('role', 'PROVEEDOR') // NUEVO: cargar proveedores
+      supabase.from('profiles').select('email, name, company_name').eq('role', 'PROVEEDOR')
     ]);
     setOrders(ordersRes.data || []);
     setDeliveries(deliveriesRes);
@@ -166,7 +166,6 @@ export default function OrdersView() {
     if (deliveryEmail) postNews(`${myEmail} asignó pedido ${orderNum} a ${deliveryEmail}`, orderNum);
   };
 
-  // NUEVA FUNCIÓN: Asignar/Editar proveedor
   const handleAssignProvider = async (orderId: string, providerEmail: string) => {
     const order = orders.find(o => o.id === orderId);
     const orderNum = order?.order_number || orderId.slice(0, 8);
@@ -342,7 +341,7 @@ export default function OrdersView() {
   const canAssign = role === 'ADMIN' || role === 'PROVEEDOR';
   const canEdit = role === 'ADMIN' || role === 'DESPACHANTE' || role === 'PROVEEDOR';
   const canDeletePermanently = ['ADMIN', 'DESPACHANTE', 'PROVEEDOR'].includes(role);
-  const canAssignProvider = role === 'ADMIN' || role === 'DESPACHANTE'; // Solo ADMIN y DESPACHANTE pueden asignar proveedores
+  const canAssignProvider = role === 'ADMIN' || role === 'DESPACHANTE';
 
   return (
     <div className="app-card">
@@ -386,7 +385,7 @@ export default function OrdersView() {
               <th>Ciudad</th>
               <th>Cliente</th>
               <th>Vendedor</th>
-              <th>Proveedor</th> {/* NUEVA COLUMNA */}
+              <th>Proveedor</th>
               {role !== 'DESPACHANTE' && <th>Delivery</th>}
               <th className="text-right">Total (Gs)</th>
               <th className="text-right">{role === 'DELIVERY' ? 'Tarifa (Gs)' : 'Comisión (Gs)'}</th>
@@ -407,9 +406,6 @@ export default function OrdersView() {
               const dateShown = (role === 'DELIVERY' && o.assigned_at)
                 ? new Date(o.assigned_at).toLocaleString('es-PY')
                 : new Date(o.created_at).toLocaleString('es-PY');
-              
-              const provider = providers.find(p => p.email === o.provider_email);
-              const providerDisplay = provider?.name || provider?.company_name || o.provider_email || '';
 
               return (
                 <tr key={o.id}>
@@ -431,12 +427,12 @@ export default function OrdersView() {
                         <option value="">-- Sin proveedor --</option>
                         {providers.map(p => (
                           <option key={p.email} value={p.email}>
-                            {p.name || p.company_name || p.email}
+                            {p.email}
                           </option>
                         ))}
                       </select>
                     ) : (
-                      <span className="text-xs font-medium">{providerDisplay || '—'}</span>
+                      <span className="text-xs font-medium">{o.provider_email || '—'}</span>
                     )}
                   </td>
                   {role !== 'DESPACHANTE' && <td className="text-xs">{o.assigned_delivery || '—'}</td>}
@@ -537,9 +533,6 @@ export default function OrdersView() {
           const dateShown = (role === 'DELIVERY' && o.assigned_at)
             ? new Date(o.assigned_at).toLocaleString('es-PY')
             : new Date(o.created_at).toLocaleString('es-PY');
-          
-          const provider = providers.find(p => p.email === o.provider_email);
-          const providerDisplay = provider?.name || provider?.company_name || o.provider_email || '';
 
           return (
             <div key={o.id} className="bg-card border border-border rounded-lg p-4 shadow-sm">
@@ -563,7 +556,7 @@ export default function OrdersView() {
                   <span className="text-right">{o.created_by}</span>
                   
                   <span className="font-medium">Proveedor:</span>
-                  <span className="text-right font-medium">{providerDisplay || '—'}</span>
+                  <span className="text-right font-medium">{o.provider_email || '—'}</span>
                   
                   {role !== 'DESPACHANTE' && (
                     <>
@@ -640,7 +633,7 @@ export default function OrdersView() {
                       <option value="">-- Sin proveedor --</option>
                       {providers.map(p => (
                         <option key={p.email} value={p.email}>
-                          {p.name || p.company_name || p.email}
+                          {p.email}
                         </option>
                       ))}
                     </select>
@@ -733,7 +726,7 @@ export default function OrdersView() {
                   <option value="">-- Sin proveedor --</option>
                   {providers.map(p => (
                     <option key={p.email} value={p.email}>
-                      {p.name || p.company_name || p.email}
+                      {p.email}
                     </option>
                   ))}
                 </select>
