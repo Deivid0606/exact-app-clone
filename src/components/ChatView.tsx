@@ -3,262 +3,1100 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 
-type ChatTab = 'general' | 'dm';
+type ChannelKey =
+  | 'general'
+  | 'consulta_comisiones'
+  | 'comprobantes_transferencias'
+  | 'reclamos_garantias'
+  | 'consultas_estados'
+  | 'fotos_productos';
+
+type ChatTab = ChannelKey | 'dm';
+
+type Contact = {
+  email: string;
+  name: string | null;
+  role: string | null;
+};
+
+type ChatChannel = {
+  id?: string;
+  channel_key: ChannelKey;
+  title: string;
+  logo_url: string | null;
+};
+
+type Attachment = {
+  url: string;
+  name: string;
+  type: 'image' | 'audio' | 'file';
+  mime: string;
+};
+
+type ChatMessage = {
+  id: string;
+  sender_email?: string | null;
+  sender_role?: string | null;
+  from_email?: string | null;
+  from_role?: string | null;
+  to_email?: string | null;
+  message_text: string | null;
+  attachment_url: string | null;
+  attachment_name: string | null;
+  attachment_type?: string | null;
+  attachment_mime?: string | null;
+  channel_key?: string | null;
+  created_at: string;
+  read_at?: string | null;
+};
+
+type Thread = {
+  key: string;
+  peer: string;
+  peerName: string;
+  lastMsg: string;
+  lastTime: string;
+  unread?: number;
+};
+
+const FALLBACK_CHANNELS: ChatChannel[] = [
+  {
+    channel_key: 'general',
+    title: 'Chat General',
+    logo_url: null,
+  },
+  {
+    channel_key: 'consulta_comisiones',
+    title: 'Consulta de comisiones',
+    logo_url: null,
+  },
+  {
+    channel_key: 'comprobantes_transferencias',
+    title: 'Comprobantes de transferencias para encomienda',
+    logo_url: null,
+  },
+  {
+    channel_key: 'reclamos_garantias',
+    title: 'Reclamos y garantías',
+    logo_url: null,
+  },
+  {
+    channel_key: 'consultas_estados',
+    title: 'Consultas de estados',
+    logo_url: null,
+  },
+  {
+    channel_key: 'fotos_productos',
+    title: 'Fotos de productos',
+    logo_url: null,
+  },
+];
+
+const EMOJIS = ['😀', '😂', '😍', '👍', '🙏', '🔥', '📦', '✅', '⚠️', '💰', '🚚', '🧾'];
+
+function getAttachmentType(file: File): Attachment['type'] {
+  if (file.type.startsWith('image/')) return 'image';
+  if (file.type.startsWith('audio/')) return 'audio';
+  return 'file';
+}
+
+function inferAttachmentType(message: ChatMessage): Attachment['type'] {
+  if (message.attachment_type === 'image') return 'image';
+  if (message.attachment_type === 'audio') return 'audio';
+
+  const name = (message.attachment_name || message.attachment_url || '').toLowerCase();
+
+  if (/\.(png|jpg|jpeg|webp|gif|bmp|svg)$/.test(name)) return 'image';
+  if (/\.(mp3|wav|ogg|webm|m4a|aac)$/.test(name)) return 'audio';
+
+  return 'file';
+}
+
+function formatTime(value?: string | null) {
+  if (!value) return '';
+  return new Date(value).toLocaleTimeString('es-PY', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return '';
+  return new Date(value).toLocaleString('es-PY');
+}
 
 export default function ChatView() {
   const { profile } = useAuth();
+
   const myEmail = profile?.email || '';
   const myRole = profile?.role || '';
+  const isApproved = Boolean(profile?.approved);
+
+  const canEditChannelLogo =
+    isApproved && (myRole === 'ADMIN' || myRole === 'PROVEEDOR');
 
   const [tab, setTab] = useState<ChatTab>('general');
-  const [contacts, setContacts] = useState<{ email: string; name: string | null; role: string | null }[]>([]);
-  const [text, setText] = useState('');
-  const msgRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
+  const [channels, setChannels] = useState<ChatChannel[]>(FALLBACK_CHANNELS);
 
-  const [generalMessages, setGeneralMessages] = useState<any[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [text, setText] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [showEmojis, setShowEmojis] = useState(false);
+
+  const [channelMessages, setChannelMessages] = useState<ChatMessage[]>([]);
   const [selectedPeer, setSelectedPeer] = useState('');
-  const [dmMessages, setDmMessages] = useState<any[]>([]);
-  const [threads, setThreads] = useState<{ key: string; peer: string; peerName: string; lastMsg: string; lastTime: string }[]>([]);
+  const [dmMessages, setDmMessages] = useState<ChatMessage[]>([]);
+  const [threads, setThreads] = useState<Thread[]>([]);
+
+  const [unreadByChannel, setUnreadByChannel] = useState<Record<string, number>>({});
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  const [recording, setRecording] = useState(false);
+
+  const msgRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const logoInputRef = useRef<HTMLInputElement | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const typingTimeoutRef = useRef<number | null>(null);
+
+  const activeChannel = useMemo(() => {
+    if (tab === 'dm') return null;
+    return channels.find((c) => c.channel_key === tab) || FALLBACK_CHANNELS[0];
+  }, [channels, tab]);
+
+  const contactMap = useMemo(() => {
+    const map: Record<string, { name: string; role: string }> = {};
+
+    contacts.forEach((contact) => {
+      map[contact.email.toLowerCase()] = {
+        name: contact.name || contact.email,
+        role: contact.role || '',
+      };
+    });
+
+    return map;
+  }, [contacts]);
 
   const threadKey = (a: string, b: string) => {
-    const x = a.toLowerCase(), y = b.toLowerCase();
+    const x = a.toLowerCase();
+    const y = b.toLowerCase();
     return x < y ? `${x}|${y}` : `${y}|${x}`;
   };
 
-  useEffect(() => {
-    const loadContacts = async () => {
-      const [profRes, rolesRes] = await Promise.all([
-        supabase.from('profiles').select('email, name, user_id'),
-        supabase.from('user_roles').select('user_id, role'),
-      ]);
-      const roleMap = new Map<string, string>();
-      (rolesRes.data || []).forEach(r => roleMap.set(r.user_id, r.role));
-      setContacts((profRes.data || []).map(p => ({
-        email: p.email, name: p.name, role: roleMap.get(p.user_id) || null,
-      })));
-    };
-    loadContacts();
-  }, []);
+  const scrollBottom = () => {
+    setTimeout(() => {
+      if (msgRef.current) {
+        msgRef.current.scrollTop = msgRef.current.scrollHeight;
+      }
+    }, 100);
+  };
 
-  const contactMap = useMemo(() => {
-    const m: Record<string, { name: string; role: string }> = {};
-    contacts.forEach(c => { m[c.email.toLowerCase()] = { name: c.name || c.email, role: c.role || '' }; });
-    return m;
-  }, [contacts]);
+  const getLastSeenKey = (channelKey: string) => `chat_last_seen_${myEmail}_${channelKey}`;
 
-  const loadGeneral = async () => {
-    const { data } = await supabase.from('chat_messages').select('*')
-      .order('created_at', { ascending: true }).limit(200);
-    setGeneralMessages(data || []);
+  const markChannelSeenLocal = (channelKey: string) => {
+    if (!myEmail) return;
+    localStorage.setItem(getLastSeenKey(channelKey), new Date().toISOString());
+    setUnreadByChannel((prev) => ({ ...prev, [channelKey]: 0 }));
+  };
+
+  const loadChannels = async () => {
+    const { data, error } = await (supabase as any)
+      .from('chat_channels')
+      .select('*')
+      .order('created_at', { ascending: true });
+
+    if (error || !data?.length) {
+      setChannels(FALLBACK_CHANNELS);
+      return;
+    }
+
+    setChannels(
+      data.map((item: any) => ({
+        id: item.id,
+        channel_key: item.channel_key,
+        title: item.title,
+        logo_url: item.logo_url || null,
+      })),
+    );
+  };
+
+  const loadContacts = async () => {
+    const [profRes, rolesRes] = await Promise.all([
+      supabase.from('profiles').select('email, name, user_id'),
+      supabase.from('user_roles').select('user_id, role'),
+    ]);
+
+    const roleMap = new Map<string, string>();
+
+    (rolesRes.data || []).forEach((role: any) => {
+      roleMap.set(role.user_id, role.role);
+    });
+
+    setContacts(
+      (profRes.data || []).map((person: any) => ({
+        email: person.email,
+        name: person.name,
+        role: roleMap.get(person.user_id) || null,
+      })),
+    );
+  };
+
+  const loadChannelMessages = async (channelKey: ChannelKey = tab as ChannelKey) => {
+    if (!channelKey || channelKey === 'dm') return;
+
+    const { data, error } = await (supabase as any)
+      .from('chat_messages')
+      .select('*')
+      .eq('channel_key', channelKey)
+      .order('created_at', { ascending: true })
+      .limit(250);
+
+    if (error) {
+      console.error(error);
+      toast.error('No se pudieron cargar los mensajes del canal');
+      return;
+    }
+
+    setChannelMessages(data || []);
     scrollBottom();
+  };
+
+  const loadUnreadCounts = async () => {
+    if (!myEmail) return;
+
+    const next: Record<string, number> = {};
+
+    await Promise.all(
+      channels.map(async (channel) => {
+        const lastSeen = localStorage.getItem(getLastSeenKey(channel.channel_key));
+
+        let query = (supabase as any)
+          .from('chat_messages')
+          .select('id, sender_email, created_at')
+          .eq('channel_key', channel.channel_key)
+          .neq('sender_email', myEmail);
+
+        if (lastSeen) {
+          query = query.gt('created_at', lastSeen);
+        }
+
+        const { data, error } = await query;
+
+        if (!error) {
+          next[channel.channel_key] = data?.length || 0;
+        }
+      }),
+    );
+
+    setUnreadByChannel(next);
   };
 
   const loadThreads = async () => {
     if (!myEmail) return;
-    const { data } = await supabase.from('chat_dm_messages').select('*')
+
+    const { data, error } = await (supabase as any)
+      .from('chat_dm_messages')
+      .select('*')
       .or(`from_email.eq.${myEmail},to_email.eq.${myEmail}`)
-      .order('created_at', { ascending: false }).limit(500);
-    const map = new Map<string, { peer: string; lastMsg: string; lastTime: string }>();
-    (data || []).forEach(m => {
-      const peer = m.from_email?.toLowerCase() === myEmail.toLowerCase() ? m.to_email : m.from_email;
-      const key = threadKey(myEmail, peer!);
-      if (!map.has(key)) map.set(key, { peer: peer!, lastMsg: m.message_text || '', lastTime: m.created_at });
+      .order('created_at', { ascending: false })
+      .limit(500);
+
+    if (error) {
+      console.error(error);
+      return;
+    }
+
+    const map = new Map<string, Thread>();
+
+    (data || []).forEach((message: ChatMessage) => {
+      const peer =
+        message.from_email?.toLowerCase() === myEmail.toLowerCase()
+          ? message.to_email
+          : message.from_email;
+
+      if (!peer) return;
+
+      const key = threadKey(myEmail, peer);
+
+      if (!map.has(key)) {
+        const peerName = contactMap[peer.toLowerCase()]?.name || peer;
+        const unread = (data || []).filter(
+          (item: ChatMessage) =>
+            item.thread_key === key &&
+            item.to_email?.toLowerCase() === myEmail.toLowerCase() &&
+            !item.read_at,
+        ).length;
+
+        map.set(key, {
+          key,
+          peer,
+          peerName,
+          lastMsg: message.message_text || message.attachment_name || 'Adjunto',
+          lastTime: message.created_at,
+          unread,
+        });
+      }
     });
-    setThreads(Array.from(map.entries()).map(([key, v]) => ({
-      key, peer: v.peer,
-      peerName: contactMap[v.peer.toLowerCase()]?.name || v.peer,
-      lastMsg: v.lastMsg, lastTime: v.lastTime,
-    })));
+
+    setThreads(Array.from(map.values()));
   };
 
   const loadDmMessages = async (peer: string) => {
     if (!myEmail || !peer) return;
+
     const key = threadKey(myEmail, peer);
-    const { data } = await supabase.from('chat_dm_messages').select('*')
-      .eq('thread_key', key).order('created_at', { ascending: true }).limit(200);
+
+    const { data, error } = await (supabase as any)
+      .from('chat_dm_messages')
+      .select('*')
+      .eq('thread_key', key)
+      .order('created_at', { ascending: true })
+      .limit(250);
+
+    if (error) {
+      console.error(error);
+      toast.error('No se pudieron cargar los mensajes directos');
+      return;
+    }
+
     setDmMessages(data || []);
     scrollBottom();
+
+    await (supabase as any)
+      .from('chat_dm_messages')
+      .update({ read_at: new Date().toISOString() })
+      .eq('thread_key', key)
+      .eq('to_email', myEmail)
+      .is('read_at', null);
+
+    loadThreads();
   };
 
-  const scrollBottom = () => {
-    setTimeout(() => { if (msgRef.current) msgRef.current.scrollTop = msgRef.current.scrollHeight; }, 100);
+  const selectPeer = (peer: string) => {
+    setSelectedPeer(peer);
+    loadDmMessages(peer);
   };
 
-  useEffect(() => { loadGeneral(); loadThreads(); }, [myEmail]);
-
-  useEffect(() => {
-    const iv = setInterval(() => {
-      if (tab === 'general') loadGeneral();
-      else { loadThreads(); if (selectedPeer) loadDmMessages(selectedPeer); }
-    }, 5000);
-    return () => clearInterval(iv);
-  }, [tab, selectedPeer]);
-
-  const selectPeer = (peer: string) => { setSelectedPeer(peer); loadDmMessages(peer); };
-
-  // File upload handler
-  const handleFileUpload = async (file: File): Promise<{ url: string; name: string } | null> => {
+  const handleFileUpload = async (file: File): Promise<Attachment | null> => {
     setUploading(true);
+
     try {
-      const ext = file.name.split('.').pop();
-      const path = `${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+      const ext = file.name.split('.').pop() || 'file';
+      const safeName = file.name.replace(/[^\w.\-]+/g, '_');
+      const path = `${myEmail || 'anon'}/${Date.now()}_${Math.random()
+        .toString(36)
+        .slice(2)}_${safeName}.${ext}`;
+
       const { error } = await supabase.storage.from('chat-attachments').upload(path, file);
-      if (error) { toast.error('Error subiendo archivo'); return null; }
+
+      if (error) {
+        console.error(error);
+        toast.error('Error subiendo archivo');
+        return null;
+      }
+
       const { data: urlData } = supabase.storage.from('chat-attachments').getPublicUrl(path);
-      return { url: urlData.publicUrl, name: file.name };
-    } catch { toast.error('Error subiendo archivo'); return null; }
-    finally { setUploading(false); }
+
+      return {
+        url: urlData.publicUrl,
+        name: file.name,
+        type: getAttachmentType(file),
+        mime: file.type || 'application/octet-stream',
+      };
+    } catch (error) {
+      console.error(error);
+      toast.error('Error subiendo archivo');
+      return null;
+    } finally {
+      setUploading(false);
+    }
   };
 
-  const sendGeneral = async (attachment?: { url: string; name: string }) => {
+  const sendChannelMessage = async (attachment?: Attachment) => {
+    if (tab === 'dm') return;
     if (!text.trim() && !attachment) return;
     if (!myEmail) return;
-    await supabase.from('chat_messages').insert({
-      sender_email: myEmail, sender_role: myRole,
+
+    const payload = {
+      sender_email: myEmail,
+      sender_role: myRole,
       message_text: text.trim() || (attachment ? `📎 ${attachment.name}` : ''),
       attachment_url: attachment?.url || null,
       attachment_name: attachment?.name || null,
-    });
+      attachment_type: attachment?.type || null,
+      attachment_mime: attachment?.mime || null,
+      channel_key: tab,
+    };
+
+    const { error } = await (supabase as any).from('chat_messages').insert(payload);
+
+    if (error) {
+      console.error(error);
+      toast.error('No se pudo enviar el mensaje');
+      return;
+    }
+
     setText('');
-    loadGeneral();
+    setShowEmojis(false);
+    markChannelSeenLocal(tab);
+    loadChannelMessages(tab);
+    loadUnreadCounts();
   };
 
-  const sendDm = async (attachment?: { url: string; name: string }) => {
+  const sendDm = async (attachment?: Attachment) => {
     if (!text.trim() && !attachment) return;
     if (!selectedPeer || !myEmail) return;
+
     const key = threadKey(myEmail, selectedPeer);
-    await supabase.from('chat_dm_messages').insert({
-      thread_key: key, from_email: myEmail, to_email: selectedPeer, from_role: myRole,
+
+    const payload = {
+      thread_key: key,
+      from_email: myEmail,
+      to_email: selectedPeer,
+      from_role: myRole,
       message_text: text.trim() || (attachment ? `📎 ${attachment.name}` : ''),
       attachment_url: attachment?.url || null,
       attachment_name: attachment?.name || null,
-    });
+      attachment_type: attachment?.type || null,
+      attachment_mime: attachment?.mime || null,
+      read_at: null,
+    };
+
+    const { error } = await (supabase as any).from('chat_dm_messages').insert(payload);
+
+    if (error) {
+      console.error(error);
+      toast.error('No se pudo enviar el mensaje');
+      return;
+    }
+
     setText('');
+    setShowEmojis(false);
     loadDmMessages(selectedPeer);
     loadThreads();
   };
 
-  const send = () => tab === 'general' ? sendGeneral() : sendDm();
-
-  const handleFileInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const attachment = await handleFileUpload(file);
-    if (!attachment) return;
-    if (tab === 'general') await sendGeneral(attachment);
-    else await sendDm(attachment);
-    if (fileInputRef.current) fileInputRef.current.value = '';
+  const send = () => {
+    if (tab === 'dm') {
+      sendDm();
+    } else {
+      sendChannelMessage();
+    }
   };
 
-  const messages = tab === 'general' ? generalMessages : dmMessages;
+  const handleFileInput = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+
+    if (!file) return;
+
+    const attachment = await handleFileUpload(file);
+
+    if (!attachment) return;
+
+    if (tab === 'dm') {
+      await sendDm(attachment);
+    } else {
+      await sendChannelMessage(attachment);
+    }
+
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handleLogoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+
+    if (!file || tab === 'dm' || !activeChannel) return;
+
+    if (!canEditChannelLogo) {
+      toast.error('Solo ADMIN o PROVEEDOR aprobado puede cambiar el logo');
+      return;
+    }
+
+    setUploading(true);
+
+    try {
+      const ext = file.name.split('.').pop() || 'png';
+      const path = `channel-logos/${activeChannel.channel_key}_${Date.now()}.${ext}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('chat-attachments')
+        .upload(path, file, { upsert: true });
+
+      if (uploadError) {
+        console.error(uploadError);
+        toast.error('No se pudo subir el logo');
+        return;
+      }
+
+      const { data: urlData } = supabase.storage.from('chat-attachments').getPublicUrl(path);
+
+      const { error: updateError } = await (supabase as any)
+        .from('chat_channels')
+        .update({
+          logo_url: urlData.publicUrl,
+          updated_by: profile?.user_id || null,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('channel_key', activeChannel.channel_key);
+
+      if (updateError) {
+        console.error(updateError);
+        toast.error('No se pudo actualizar el logo del canal');
+        return;
+      }
+
+      toast.success('Logo actualizado');
+      loadChannels();
+    } catch (error) {
+      console.error(error);
+      toast.error('Error actualizando logo');
+    } finally {
+      setUploading(false);
+
+      if (logoInputRef.current) {
+        logoInputRef.current.value = '';
+      }
+    }
+  };
+
+  const startRecording = async () => {
+    if (recording) {
+      mediaRecorderRef.current?.stop();
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      toast.error('Tu navegador no permite grabar audio');
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+
+      audioChunksRef.current = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        setRecording(false);
+
+        stream.getTracks().forEach((track) => track.stop());
+
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+
+        const file = new File([blob], `audio_${Date.now()}.webm`, {
+          type: 'audio/webm',
+        });
+
+        const attachment = await handleFileUpload(file);
+
+        if (!attachment) return;
+
+        if (tab === 'dm') {
+          await sendDm(attachment);
+        } else {
+          await sendChannelMessage(attachment);
+        }
+      };
+
+      mediaRecorderRef.current = recorder;
+      recorder.start();
+      setRecording(true);
+      toast.success('Grabando audio...');
+    } catch (error) {
+      console.error(error);
+      toast.error('No se pudo iniciar la grabación');
+    }
+  };
+
+  const trackTyping = (value: string) => {
+    setText(value);
+
+    if (!myEmail) return;
+
+    const typingChannelName =
+      tab === 'dm' && selectedPeer
+        ? `typing-dm-${threadKey(myEmail, selectedPeer)}`
+        : `typing-channel-${tab}`;
+
+    const channel = supabase.channel(typingChannelName);
+
+    channel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        channel.track({
+          email: myEmail,
+          name: profile?.name || myEmail,
+          tab,
+          typing: true,
+        });
+      }
+    });
+
+    if (typingTimeoutRef.current) {
+      window.clearTimeout(typingTimeoutRef.current);
+    }
+
+    typingTimeoutRef.current = window.setTimeout(() => {
+      channel.track({
+        email: myEmail,
+        name: profile?.name || myEmail,
+        tab,
+        typing: false,
+      });
+
+      supabase.removeChannel(channel);
+    }, 1200);
+  };
+
+  const renderAttachment = (message: ChatMessage) => {
+    if (!message.attachment_url) return null;
+
+    const type = inferAttachmentType(message);
+
+    if (type === 'image') {
+      return (
+        <a
+          href={message.attachment_url}
+          target="_blank"
+          rel="noreferrer"
+          className="chat-attachment chat-attachment-image"
+        >
+          <img
+            src={message.attachment_url}
+            alt={message.attachment_name || 'Imagen enviada'}
+            className="chat-image-preview"
+          />
+        </a>
+      );
+    }
+
+    if (type === 'audio') {
+      return (
+        <div className="chat-attachment chat-attachment-audio">
+          <audio controls src={message.attachment_url}>
+            Tu navegador no puede reproducir este audio.
+          </audio>
+        </div>
+      );
+    }
+
+    return (
+      <a
+        href={message.attachment_url}
+        target="_blank"
+        rel="noreferrer"
+        className="chat-attachment chat-attachment-file"
+      >
+        📎 {message.attachment_name || 'Archivo adjunto'}
+      </a>
+    );
+  };
+
+  const renderMessage = (message: ChatMessage) => {
+    const senderEmail = tab === 'dm' ? message.from_email : message.sender_email;
+    const senderRole = tab === 'dm' ? message.from_role : message.sender_role;
+    const mine = senderEmail?.toLowerCase() === myEmail.toLowerCase();
+    const senderName = contactMap[senderEmail?.toLowerCase() || '']?.name || senderEmail;
+
+    return (
+      <div
+        key={message.id}
+        className={`chat-message-row ${mine ? 'mine' : 'theirs'}`}
+      >
+        <div className="chat-message-bubble">
+          <div className="chat-message-meta">
+            {senderRole && <span className="chat-role">{senderRole}</span>}
+            <strong>{senderName}</strong>
+          </div>
+
+          {message.message_text && (
+            <p className="chat-message-text">{message.message_text}</p>
+          )}
+
+          {renderAttachment(message)}
+
+          <div className="chat-message-footer">
+            <span>{formatDateTime(message.created_at)}</span>
+
+            {tab === 'dm' && mine && (
+              <span className="chat-read-state">
+                {message.read_at ? '✓✓ Leído' : '✓ Enviado'}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const messages = tab === 'dm' ? dmMessages : channelMessages;
+
+  useEffect(() => {
+    loadChannels();
+    loadContacts();
+  }, []);
+
+  useEffect(() => {
+    if (!myEmail) return;
+
+    loadThreads();
+    loadUnreadCounts();
+
+    if (tab === 'dm') {
+      if (selectedPeer) loadDmMessages(selectedPeer);
+    } else {
+      loadChannelMessages(tab);
+      markChannelSeenLocal(tab);
+    }
+  }, [myEmail, tab, selectedPeer, channels.length]);
+
+  useEffect(() => {
+    if (!myEmail) return;
+
+    const channel = supabase
+      .channel('chat-realtime')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'chat_messages',
+        },
+        () => {
+          if (tab !== 'dm') {
+            loadChannelMessages(tab);
+          }
+
+          loadUnreadCounts();
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'chat_dm_messages',
+        },
+        () => {
+          loadThreads();
+
+          if (selectedPeer) {
+            loadDmMessages(selectedPeer);
+          }
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [myEmail, tab, selectedPeer]);
+
+  useEffect(() => {
+    if (!myEmail) return;
+
+    const typingChannelName =
+      tab === 'dm' && selectedPeer
+        ? `typing-dm-${threadKey(myEmail, selectedPeer)}`
+        : `typing-channel-${tab}`;
+
+    const channel = supabase.channel(typingChannelName, {
+      config: {
+        presence: {
+          key: myEmail,
+        },
+      },
+    });
+
+    channel
+      .on('presence', { event: 'sync' }, () => {
+        const state = channel.presenceState();
+
+        const users = Object.values(state)
+          .flat()
+          .filter((item: any) => item.email !== myEmail && item.typing)
+          .map((item: any) => item.name || item.email);
+
+        setTypingUsers([...new Set(users)]);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+      setTypingUsers([]);
+    };
+  }, [myEmail, tab, selectedPeer]);
 
   return (
-    <div className="app-card">
-      <h3 className="text-lg font-extrabold mb-3">Chat</h3>
-      <div className="flex gap-2 mb-3">
-        <button className={`nav-btn ${tab === 'general' ? 'active' : ''}`} onClick={() => setTab('general')}>💬 Chat General</button>
-        <button className={`nav-btn ${tab === 'dm' ? 'active' : ''}`} onClick={() => setTab('dm')}>📩 Mensajes Directos</button>
+    <div className="chat-view">
+      <div className="chat-header">
+        <h2>Chat</h2>
       </div>
 
-      <div className="flex gap-3" style={{ alignItems: 'stretch' }}>
+      <div className="chat-tabs">
+        {channels.map((channel) => (
+          <button
+            key={channel.channel_key}
+            type="button"
+            onClick={() => setTab(channel.channel_key)}
+            className={`chat-tab ${tab === channel.channel_key ? 'active' : ''}`}
+          >
+            <span className="chat-tab-avatar">
+              {channel.logo_url ? (
+                <img src={channel.logo_url} alt={channel.title} />
+              ) : (
+                <span>{channel.title.slice(0, 1).toUpperCase()}</span>
+              )}
+            </span>
+
+            <span className="chat-tab-title">{channel.title}</span>
+
+            {!!unreadByChannel[channel.channel_key] && (
+              <span className="chat-unread-badge">
+                {unreadByChannel[channel.channel_key]}
+              </span>
+            )}
+          </button>
+        ))}
+
+        <button
+          type="button"
+          onClick={() => setTab('dm')}
+          className={`chat-tab ${tab === 'dm' ? 'active' : ''}`}
+        >
+          <span className="chat-tab-avatar">📩</span>
+          <span className="chat-tab-title">Mensajes Directos</span>
+        </button>
+      </div>
+
+      <div className="chat-layout">
         {tab === 'dm' && (
-          <div className="app-card !p-3 w-[300px] overflow-auto shrink-0" style={{ maxHeight: 520 }}>
-            <div className="flex justify-between items-center mb-2">
-              <b className="text-sm">Conversaciones</b>
-              <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={loadThreads}>↻</button>
+          <aside className="chat-sidebar">
+            <div className="chat-sidebar-header">
+              <strong>Conversaciones</strong>
+              <button type="button" onClick={loadThreads}>
+                ↻
+              </button>
             </div>
-            <label className="app-label !mt-0">Escribir a</label>
-            <select className="app-input mb-2" value={selectedPeer} onChange={e => selectPeer(e.target.value)}>
+
+            <label className="chat-label">Escribir a</label>
+
+            <select
+              value={selectedPeer}
+              onChange={(event) => selectPeer(event.target.value)}
+              className="chat-select"
+            >
               <option value="">-- Elegir destinatario --</option>
-              {contacts.filter(c => c.email !== myEmail).map(c => (
-                <option key={c.email} value={c.email}>
-                  {c.role ? `${c.role} · ` : ''}{c.name || c.email}
-                </option>
-              ))}
+              {contacts
+                .filter((contact) => contact.email !== myEmail)
+                .map((contact) => (
+                  <option key={contact.email} value={contact.email}>
+                    {contact.role ? `${contact.role} · ` : ''}
+                    {contact.name || contact.email}
+                  </option>
+                ))}
             </select>
-            <div className="flex flex-col gap-1">
-              {threads.map(t => (
-                <button key={t.key} className={`nav-btn text-left text-xs w-full ${selectedPeer === t.peer ? 'active' : ''}`}
-                  onClick={() => selectPeer(t.peer)}>
-                  <div className="flex justify-between items-center">
-                    <span className="truncate font-bold">{t.peerName}</span>
-                    <span className="text-[9px] text-muted-foreground whitespace-nowrap ml-1">
-                      {t.lastTime ? new Date(t.lastTime).toLocaleTimeString('es-PY', { hour: '2-digit', minute: '2-digit' }) : ''}
-                    </span>
+
+            <div className="chat-thread-list">
+              {threads.map((thread) => (
+                <button
+                  key={thread.key}
+                  type="button"
+                  onClick={() => selectPeer(thread.peer)}
+                  className={`chat-thread ${
+                    selectedPeer === thread.peer ? 'active' : ''
+                  }`}
+                >
+                  <div className="chat-thread-top">
+                    <strong>{thread.peerName}</strong>
+                    <span>{formatTime(thread.lastTime)}</span>
                   </div>
-                  <div className="text-[10px] text-muted-foreground truncate">{t.lastMsg}</div>
+
+                  <div className="chat-thread-bottom">
+                    <span>{thread.lastMsg}</span>
+
+                    {!!thread.unread && (
+                      <span className="chat-unread-badge">{thread.unread}</span>
+                    )}
+                  </div>
                 </button>
               ))}
-              {threads.length === 0 && <span className="text-xs text-muted-foreground">Sin conversaciones aún</span>}
+
+              {threads.length === 0 && (
+                <p className="chat-empty-small">Sin conversaciones aún</p>
+              )}
             </div>
-          </div>
+          </aside>
         )}
 
-        <div className="flex-1 min-w-[320px] flex flex-col gap-2">
-          <div className="app-card !p-3">
-            {tab === 'general' ? (
-              <div className="font-bold text-sm">💬 Chat general — todos los usuarios</div>
-            ) : (
+        <section className="chat-main">
+          <div className="chat-current-header">
+            {tab === 'dm' ? (
               <>
-                <span className="chip text-[10px]">Chat con</span>
-                <div className="font-bold mt-1">
-                  {selectedPeer ? (contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer) : 'Seleccione un destinatario'}
+                <span className="chat-current-label">Chat con</span>
+
+                <div className="chat-current-title">
+                  <strong>
+                    {selectedPeer
+                      ? contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer
+                      : 'Seleccione un destinatario'}
+                  </strong>
+
                   {selectedPeer && contactMap[selectedPeer.toLowerCase()]?.role && (
-                    <span className="chip text-[9px] ml-2">{contactMap[selectedPeer.toLowerCase()].role}</span>
+                    <span className="chat-role">
+                      {contactMap[selectedPeer.toLowerCase()].role}
+                    </span>
                   )}
                 </div>
+              </>
+            ) : (
+              <>
+                <div className="chat-channel-profile">
+                  <div className="chat-channel-logo">
+                    {activeChannel?.logo_url ? (
+                      <img src={activeChannel.logo_url} alt={activeChannel.title} />
+                    ) : (
+                      <span>{activeChannel?.title.slice(0, 1).toUpperCase()}</span>
+                    )}
+
+                    {canEditChannelLogo && (
+                      <button
+                        type="button"
+                        className="chat-logo-edit"
+                        onClick={() => logoInputRef.current?.click()}
+                        title="Cambiar logo de esta pestaña"
+                        disabled={uploading}
+                      >
+                        📷
+                      </button>
+                    )}
+                  </div>
+
+                  <div>
+                    <span className="chat-current-label">Pestaña</span>
+                    <strong>{activeChannel?.title}</strong>
+                  </div>
+                </div>
+
+                <input
+                  ref={logoInputRef}
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={handleLogoUpload}
+                />
               </>
             )}
           </div>
 
-          <div ref={msgRef} className="app-card !p-3 overflow-auto flex-1" style={{ maxHeight: 420, minHeight: 300 }}>
+          <div ref={msgRef} className="chat-messages">
             {messages.length === 0 && (
-              <span className="chip">{tab === 'general' ? 'Sin mensajes aún. ¡Escribí el primero!' : 'Elegí un destinatario para empezar.'}</span>
+              <div className="chat-empty">
+                {tab === 'dm'
+                  ? 'Elegí un destinatario para empezar.'
+                  : 'Sin mensajes aún. ¡Escribí el primero!'}
+              </div>
             )}
-            {messages.map(m => {
-              const senderEmail = tab === 'general' ? m.sender_email : m.from_email;
-              const senderRole = tab === 'general' ? m.sender_role : m.from_role;
-              const mine = senderEmail?.toLowerCase() === myEmail.toLowerCase();
-              const senderName = contactMap[senderEmail?.toLowerCase()]?.name || senderEmail;
-              return (
-                <div key={m.id} className={`flex mb-2 ${mine ? 'justify-end' : 'justify-start'}`}>
-                  <div className={`app-card !p-2.5 max-w-[75%] !rounded-[14px] ${mine ? '!border-primary/30' : ''}`}>
-                    <div className="flex items-center gap-1.5">
-                      <span className="chip text-[9px]">{senderRole}</span>
-                      <span className="text-[11px] font-bold">{senderName}</span>
-                    </div>
-                    <div className="mt-1 text-sm">{m.message_text}</div>
-                    {m.attachment_url && (
-                      <a href={m.attachment_url} target="_blank" rel="noopener" className="text-[11px] text-primary mt-1 block hover:underline">
-                        📎 {m.attachment_name || 'Adjunto'}
-                      </a>
-                    )}
-                    <div className="text-[9px] text-muted-foreground mt-1">
-                      {m.created_at ? new Date(m.created_at).toLocaleString('es-PY') : ''}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+
+            {messages.map(renderMessage)}
+
+            {typingUsers.length > 0 && (
+              <div className="chat-typing">
+                {typingUsers.join(', ')} está escribiendo...
+              </div>
+            )}
           </div>
 
-          <div className="flex gap-2">
-            <input type="file" ref={fileInputRef} className="hidden" onChange={handleFileInput} />
-            <button className="nav-btn !px-3" onClick={() => fileInputRef.current?.click()}
+          <div className="chat-composer">
+            <input
+              ref={fileInputRef}
+              type="file"
+              hidden
+              onChange={handleFileInput}
+            />
+
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
               disabled={(tab === 'dm' && !selectedPeer) || uploading}
-              title="Adjuntar archivo">
+              title="Adjuntar archivo"
+              className="chat-icon-button"
+            >
               {uploading ? '⏳' : '📎'}
             </button>
-            <input className="app-input flex-1" placeholder="Escribí tu mensaje..."
-              value={text} onChange={e => setText(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && send()}
-              disabled={tab === 'dm' && !selectedPeer} />
-            <button className="nav-btn active" onClick={send}
-              disabled={tab === 'dm' && !selectedPeer}>Enviar</button>
+
+            <button
+              type="button"
+              onClick={startRecording}
+              disabled={(tab === 'dm' && !selectedPeer) || uploading}
+              title={recording ? 'Detener audio' : 'Grabar audio'}
+              className={`chat-icon-button ${recording ? 'recording' : ''}`}
+            >
+              {recording ? '⏹️' : '🎙️'}
+            </button>
+
+            <div className="chat-emoji-wrap">
+              <button
+                type="button"
+                onClick={() => setShowEmojis((value) => !value)}
+                disabled={tab === 'dm' && !selectedPeer}
+                title="Emojis"
+                className="chat-icon-button"
+              >
+                😊
+              </button>
+
+              {showEmojis && (
+                <div className="chat-emoji-panel">
+                  {EMOJIS.map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => setText((prev) => `${prev}${emoji}`)}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <input
+              value={text}
+              placeholder="Escribí tu mensaje..."
+              onChange={(event) => trackTyping(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  send();
+                }
+              }}
+              disabled={tab === 'dm' && !selectedPeer}
+              className="chat-input"
+            />
+
+            <button
+              type="button"
+              onClick={send}
+              disabled={
+                uploading ||
+                recording ||
+                (tab === 'dm' && !selectedPeer) ||
+                !text.trim()
+              }
+              className="chat-send-button"
+            >
+              Enviar
+            </button>
           </div>
-        </div>
+        </section>
       </div>
     </div>
   );
