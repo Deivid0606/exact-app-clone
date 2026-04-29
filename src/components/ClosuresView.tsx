@@ -10,12 +10,10 @@ export default function ClosuresView() {
   const myEmail = profile?.email || '';
   
   // ========== DETECCIÓN DE ROL ==========
-  // PROVEEDORES (3 principales)
   const isSupplier = myEmail === 'skylinestore06@gmail.com' || 
                      myEmail === 'importadoraaliado@gmail.com' || 
                      myEmail === 'nkshop@gmail.com';
   
-  // ADMIN
   const isAdmin = myEmail === 'aleimportss@gmail.com';
   
   const [orders, setOrders] = useState<any[]>([]);
@@ -24,7 +22,6 @@ export default function ClosuresView() {
   const [fees, setFees] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
   
-  // Filtros
   const [filterDelivery, setFilterDelivery] = useState('');
   const [filterSupplier, setFilterSupplier] = useState('');
   const [filterType, setFilterType] = useState('ENTREGADO');
@@ -37,7 +34,6 @@ export default function ClosuresView() {
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [totalPedidosAsignados, setTotalPedidosAsignados] = useState(0);
 
-  // ========== CARGAR LISTA DE DELIVERIES ==========
   const loadDeliveries = async () => {
     const { data: ordersData } = await supabase
       .from('orders')
@@ -46,7 +42,6 @@ export default function ClosuresView() {
     
     if (ordersData && ordersData.length > 0) {
       const uniqueEmails = [...new Set(ordersData.map(o => o.assigned_delivery))];
-      
       const { data: profilesData } = await supabase
         .from('profiles')
         .select('email, name')
@@ -60,7 +55,6 @@ export default function ClosuresView() {
     }
   };
 
-  // ========== CARGAR LISTA DE PROVEEDORES ==========
   const loadSuppliers = () => {
     const supplierList = [
       { email: 'skylinestore06@gmail.com', name: 'PROVEEDOR SKYLINE' },
@@ -77,7 +71,6 @@ export default function ClosuresView() {
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
   }, []);
 
-  // Determinar si el usuario actual es delivery
   const isDelivery = !isSupplier && !isAdmin && deliveries.some(d => d.email === myEmail);
 
   const loadClosures = async () => {
@@ -332,7 +325,7 @@ export default function ClosuresView() {
           </select>
         )}
 
-        {/* FILTRO POR PROVEEDOR - para DELIVERY y ADMIN */}
+        {/* FILTRO POR PROVEEDOR - para DELIVERY y ADMIN (siempre visible para delivery) */}
         {(isDelivery || isAdmin) && suppliers.length > 0 && (
           <select className="app-input !w-auto min-w-[280px]" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
             <option value="">Todos los proveedores</option>
@@ -463,7 +456,7 @@ export default function ClosuresView() {
               <th>Estado de retiro</th>
               <th>Estado 2 (cierre)</th>
               {canManageRendicion && <th></th>}
-            </td>
+            </tr>
           </thead>
           <tbody>
             {orders.map(o => {
