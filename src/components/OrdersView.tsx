@@ -169,8 +169,6 @@ export default function OrdersView() {
   const handleAssignProvider = async (orderId: string, providerEmail: string) => {
     const order = orders.find(o => o.id === orderId);
     const orderNum = order?.order_number || orderId.slice(0, 8);
-    const provider = providers.find(p => p.email === providerEmail);
-    const providerName = provider?.name || provider?.company_name || providerEmail;
     
     const { error } = await supabase
       .from('orders')
@@ -185,10 +183,10 @@ export default function OrdersView() {
       return; 
     }
     
-    toast.success(providerEmail ? `Proveedor: ${providerName}` : 'Proveedor removido');
+    toast.success(providerEmail ? `Proveedor: ${providerEmail}` : 'Proveedor removido');
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, provider_email: providerEmail } : o));
     if (providerEmail) {
-      postNews(`${myEmail} asignó pedido ${orderNum} al proveedor ${providerName}`, orderNum);
+      postNews(`${myEmail} asignó pedido ${orderNum} al proveedor ${providerEmail}`, orderNum);
     }
   };
 
@@ -347,7 +345,6 @@ export default function OrdersView() {
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Pedidos</h3>
 
-      {/* Filtros */}
       <div className="flex flex-col sm:flex-row flex-wrap items-center gap-2 mb-3">
         <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
           <label className="app-label !mt-0">Desde</label>
@@ -420,7 +417,7 @@ export default function OrdersView() {
                   <td className="text-xs">
                     {canAssignProvider ? (
                       <select
-                        className="app-input !py-1 !px-2 !text-[11px] !w-auto !min-w-[140px]"
+                        className="app-input !py-1 !px-2 !text-[11px] !w-auto !min-w-[180px]"
                         value={o.provider_email || ''}
                         onChange={e => handleAssignProvider(o.id, e.target.value)}
                       >
@@ -432,7 +429,7 @@ export default function OrdersView() {
                         ))}
                       </select>
                     ) : (
-                      <span className="text-xs font-medium">{o.provider_email || '—'}</span>
+                      <span className="text-xs font-medium text-blue-600">{o.provider_email || '—'}</span>
                     )}
                   </td>
                   {role !== 'DESPACHANTE' && <td className="text-xs">{o.assigned_delivery || '—'}</td>}
@@ -556,7 +553,7 @@ export default function OrdersView() {
                   <span className="text-right">{o.created_by}</span>
                   
                   <span className="font-medium">Proveedor:</span>
-                  <span className="text-right font-medium">{o.provider_email || '—'}</span>
+                  <span className="text-right font-medium text-blue-600">{o.provider_email || '—'}</span>
                   
                   {role !== 'DESPACHANTE' && (
                     <>
