@@ -10,10 +10,9 @@ export default function ClosuresView() {
   const myEmail = profile?.email || '';
   const myRole = profile?.role || '';
   
-  // ========== DETECCIÓN DE ROL (usando role de la BD) ==========
+  // ========== DETECCIÓN DE ROL ==========
   const isSupplier = myRole === 'PROVEEDOR';
   const isAdmin = myRole === 'ADMIN';
-  const isDelivery = myRole === 'DELIVERY';
   
   const [orders, setOrders] = useState<any[]>([]);
   const [deliveries, setDeliveries] = useState<any[]>([]);
@@ -54,37 +53,11 @@ export default function ClosuresView() {
     }
   };
 
-  // ✅ FUNCIÓN LOADSUPPLIERS CORREGIDA
   const loadSuppliers = async () => {
-    console.log('🔍 Cargando proveedores...');
-    
-    // Intentar con diferentes variaciones del role
-    let { data } = await supabase
+    const { data } = await supabase
       .from('profiles')
-      .select('email, name, company_name, role')
-      .ilike('role', '%proveedor%');
-    
-    console.log('📦 Proveedores encontrados (ilike proveedor):', data);
-    
-    if (!data || data.length === 0) {
-      const { data: data2 } = await supabase
-        .from('profiles')
-        .select('email, name, company_name, role')
-        .eq('role', 'PROVEEDOR');
-      
-      console.log('📦 Proveedores encontrados (eq PROVEEDOR):', data2);
-      data = data2;
-    }
-    
-    if (!data || data.length === 0) {
-      const { data: data3 } = await supabase
-        .from('profiles')
-        .select('email, name, company_name, role')
-        .eq('role', 'proveedor');
-      
-      console.log('📦 Proveedores encontrados (eq proveedor):', data3);
-      data = data3;
-    }
+      .select('email, name, company_name')
+      .eq('role', 'PROVEEDOR');
     
     if (data && data.length > 0) {
       setSuppliers(data.map(s => ({ 
@@ -92,8 +65,7 @@ export default function ClosuresView() {
         name: s.company_name || s.name || s.email 
       })));
     } else {
-      console.log('⚠️ No se encontraron proveedores.');
-      // Como fallback, usar proveedores que aparecen en los pedidos
+      // Fallback: proveedores desde pedidos
       const { data: ordersData } = await supabase
         .from('orders')
         .select('provider_email')
@@ -101,7 +73,6 @@ export default function ClosuresView() {
       
       if (ordersData && ordersData.length > 0) {
         const uniqueSuppliers = [...new Set(ordersData.map(o => o.provider_email))];
-        console.log('📦 Proveedores desde pedidos:', uniqueSuppliers);
         setSuppliers(uniqueSuppliers.map(email => ({ email, name: email })));
       }
     }
@@ -114,35 +85,26 @@ export default function ClosuresView() {
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
   }, []);
 
+  // ✅ DETECCIÓN DE DELIVERY - como en el código que funcionaba
+  const isDelivery = !isSupplier && !isAdmin && deliveries.some(d => d.email === myEmail);
+
   const loadClosures = async () => {
     let query = supabase.from('orders').select('*')
-      .order('created_at', { ascending: false });
+      .gte('assigned_at', dateFrom + 'T00:00:00')
+      .lte('assigned_at', dateTo + 'T23:59:59')
+      .order('assigned_at', { ascending: false });
 
     if (isSupplier) {
-      query = query
-        .gte('created_at', dateFrom + 'T00:00:00')
-        .lte('created_at', dateTo + 'T23:59:59')
-        .eq('provider_email', myEmail);
-      
+      query = query.eq('provider_email', myEmail);
       if (filterDelivery) {
         query = query.eq('assigned_delivery', filterDelivery);
       }
-    } 
-    else if (isDelivery) {
-      query = query
-        .gte('assigned_at', dateFrom + 'T00:00:00')
-        .lte('assigned_at', dateTo + 'T23:59:59')
-        .eq('assigned_delivery', myEmail);
-      
+    } else if (isDelivery) {
+      query = query.eq('assigned_delivery', myEmail);
       if (filterSupplier) {
         query = query.eq('provider_email', filterSupplier);
       }
-    } 
-    else if (isAdmin) {
-      query = query
-        .gte('assigned_at', dateFrom + 'T00:00:00')
-        .lte('assigned_at', dateTo + 'T23:59:59');
-      
+    } else if (isAdmin) {
       if (filterDelivery) query = query.eq('assigned_delivery', filterDelivery);
       if (filterSupplier) query = query.eq('provider_email', filterSupplier);
     }
@@ -374,8 +336,8 @@ export default function ClosuresView() {
           </select>
         )}
 
-        {/* ✅ SELECTOR DE PROVEEDORES - SIEMPRE visible */}
-        {(isDelivery || isAdmin) && (
+        {/* ✅ SELECTOR DE PROVEEDORES - visible para DELIVERY y ADMIN */}
+        {(isDelivery || isAdmin) && suppliers.length > 0 && (
           <select className="app-input !w-auto min-w-[280px]" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
             <option value="">Todos los proveedores</option>
             {suppliers.map(s => (
