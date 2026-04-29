@@ -570,7 +570,7 @@ export default function ChatView() {
 
     if (error) {
       console.error(error);
-      toast.error('No se pudo enviar el mensaje');
+      toast.error('No se pudo enviar el mensaje al canal');
       return;
     }
 
@@ -609,7 +609,7 @@ export default function ChatView() {
 
     if (error) {
       console.error(error);
-      toast.error('No se pudo enviar el mensaje');
+      toast.error('No se pudo enviar el mensaje directo');
       return;
     }
 
@@ -1029,28 +1029,26 @@ export default function ChatView() {
 
       <div className="chat-layout">
         <aside className="chat-sidebar">
-          {/* Selector de destinatario - SOLO en Mensajes Directos y NO en Chat General */}
-          {tab !== 'general' && (
-            <div className="chat-dm-selector">
-              <label className="chat-label">Escribir a</label>
-              <select
-                value={selectedPeer}
-                onChange={(event) => selectPeer(event.target.value)}
-                className="chat-select"
-              >
-                <option value="">-- Elegir destinatario --</option>
-                {filteredContacts.map((contact) => (
-                  <option key={contact.email} value={contact.email}>
-                    {contact.role ? `${contact.role} · ` : ''}
-                    {contact.name || contact.email}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
           {tab === 'dm' ? (
             <>
+              {/* Selector de destinatario - SOLO en Mensajes Directos */}
+              <div className="chat-dm-selector">
+                <label className="chat-label">Escribir a</label>
+                <select
+                  value={selectedPeer}
+                  onChange={(event) => selectPeer(event.target.value)}
+                  className="chat-select"
+                >
+                  <option value="">-- Elegir destinatario --</option>
+                  {filteredContacts.map((contact) => (
+                    <option key={contact.email} value={contact.email}>
+                      {contact.role ? `${contact.role} · ` : ''}
+                      {contact.name || contact.email}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="chat-sidebar-header">
                 <strong>Conversaciones</strong>
                 <button type="button" onClick={loadThreads}>
@@ -1267,14 +1265,14 @@ export default function ChatView() {
                   send();
                 }
               }}
-              disabled={tab === 'dm' && !selectedPeer}
+              disabled={false}
               className="chat-input"
             />
 
             <button
               type="button"
               onClick={send}
-              disabled={uploading || recording || (tab === 'dm' && !selectedPeer) || !text.trim()}
+              disabled={uploading || recording || !text.trim()}
               className="chat-send-button"
             >
               Enviar
