@@ -145,7 +145,6 @@ export default function ChatView() {
   const [channelThreads, setChannelThreads] = useState<Thread[]>([]);
 
   const [unreadByChannel, setUnreadByChannel] = useState<Record<string, number>>({});
-  const [unreadByThread, setUnreadByThread] = useState<Record<string, number>>({});
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [recording, setRecording] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
@@ -265,7 +264,7 @@ export default function ChatView() {
       if (msgRef.current) {
         msgRef.current.scrollTop = msgRef.current.scrollHeight;
       }
-    }, 100);
+    }, 200);
   };
 
   const getLastSeenKey = (channelKey: string) => `chat_last_seen_${myEmail}_${channelKey}`;
@@ -280,13 +279,7 @@ export default function ChatView() {
 
   const markThreadSeenLocal = (threadKeyValue: string, topicChannel: string) => {
     if (!myEmail) return;
-    const key = `${topicChannel}_${threadKeyValue}`;
     localStorage.setItem(getLastSeenThreadKey(threadKeyValue, topicChannel), new Date().toISOString());
-    setUnreadByThread((prev) => {
-      const newState = { ...prev };
-      newState[key] = 0;
-      return newState;
-    });
   };
 
   const loadChannels = async () => {
@@ -384,20 +377,12 @@ export default function ChatView() {
       const key = threadKey(myEmail, peer);
 
       if (!threadsMap.has(key)) {
-        const lastSeen = localStorage.getItem(getLastSeenThreadKey(key, channelTab));
-        let unread = 0;
-        
         const unreadMessages = notDeletedForMe.filter(
           (item: ChatMessage) =>
             item.thread_key === key &&
-            item.to_email?.toLowerCase() === myEmail.toLowerCase()
+            item.to_email?.toLowerCase() === myEmail.toLowerCase() &&
+            !item.read_at
         );
-        
-        if (lastSeen) {
-          unread = unreadMessages.filter(item => item.created_at > lastSeen).length;
-        } else {
-          unread = unreadMessages.length;
-        }
 
         threadsMap.set(key, {
           key,
@@ -405,7 +390,7 @@ export default function ChatView() {
           peerName: contactMap[peer.toLowerCase()]?.name || peer,
           lastMsg: message.message_text || message.attachment_name || 'Adjunto',
           lastTime: message.created_at,
-          unread,
+          unread: unreadMessages.length,
           topicChannel: channelTab,
         });
       }
@@ -451,6 +436,7 @@ export default function ChatView() {
     const { data, error } = await (supabase as any)
       .from('chat_dm_messages')
       .select('*')
+      .eq('topic_channel', 'dm')
       .or(`from_email.eq.${myEmail},to_email.eq.${myEmail}`)
       .order('created_at', { ascending: false })
       .limit(500);
@@ -477,20 +463,12 @@ export default function ChatView() {
       if (!map.has(key)) {
         if (!canViewChat(peer)) return;
 
-        const lastSeen = localStorage.getItem(getLastSeenThreadKey(key, 'dm'));
-        let unread = 0;
-        
         const unreadMessages = notDeletedForMe.filter(
           (item: ChatMessage) =>
             item.thread_key === key &&
-            item.to_email?.toLowerCase() === myEmail.toLowerCase()
+            item.to_email?.toLowerCase() === myEmail.toLowerCase() &&
+            !item.read_at
         );
-        
-        if (lastSeen) {
-          unread = unreadMessages.filter(item => item.created_at > lastSeen).length;
-        } else {
-          unread = unreadMessages.length;
-        }
 
         map.set(key, {
           key,
@@ -498,8 +476,8 @@ export default function ChatView() {
           peerName: contactMap[peer.toLowerCase()]?.name || peer,
           lastMsg: message.message_text || message.attachment_name || 'Adjunto',
           lastTime: message.created_at,
-          unread,
-          topicChannel: message.topic_channel || 'dm',
+          unread: unreadMessages.length,
+          topicChannel: 'dm',
         });
       }
     });
@@ -526,6 +504,8 @@ export default function ChatView() {
 
     if (channel !== 'dm') {
       query = query.eq('topic_channel', channel);
+    } else {
+      query = query.eq('topic_channel', 'dm');
     }
 
     const { data, error } = await query
@@ -541,29 +521,40 @@ export default function ChatView() {
     setDmMessages(data || []);
     scrollBottom();
 
-    await (supabase as any)
-      .from('chat_dm_messages')
-      .update({ read_at: new Date().toISOString() })
-      .eq('thread_key', key)
-      .eq('to_email', myEmail)
-      .is('read_at', null);
+    // Marcar como leídos los mensajes donde el usuario actual es el receptor
+    const unreadMessages = data?.filter(
+      (msg: ChatMessage) => msg.to_email === myEmail && !msg.read_at
+    );
+
+    if (unreadMessages && unreadMessages.length > 0) {
+      await (supabase as any)
+        .from('chat_dm_messages')
+        .update({ read_at: new Date().toISOString() })
+        .in('id', unreadMessages.map((m: ChatMessage) => m.id));
+    }
 
     if (channel !== 'dm') {
       markThreadSeenLocal(key, channel);
-      loadChannelThreads(tab);
+      await loadChannelThreads(tab);
     } else {
       markThreadSeenLocal(key, 'dm');
-      loadDMThreads();
+      await loadDMThreads();
     }
   };
 
   const selectPeer = (peer: string, topicChannel?: string) => {
-    if (peer && !canSendToPeer(peer)) {
+    if (!peer) {
+      setSelectedPeer('');
+      return;
+    }
+    
+    if (!canSendToPeer(peer)) {
       toast.error('No tenés permiso para escribirle a este destinatario');
       return;
     }
+    
     setSelectedPeer(peer);
-    if (peer) loadDmMessages(peer, topicChannel);
+    loadDmMessages(peer, topicChannel);
   };
 
   const handleFileUpload = async (file: File): Promise<Attachment | null> => {
@@ -1024,11 +1015,13 @@ export default function ChatView() {
     );
   };
 
+  // Efecto inicial
   useEffect(() => {
     loadChannels();
     loadContacts();
   }, []);
 
+  // Efecto para cargar datos según la pestaña
   useEffect(() => {
     if (!myEmail) return;
 
@@ -1049,6 +1042,18 @@ export default function ChatView() {
     }
   }, [myEmail, tab, selectedPeer, channels.length]);
 
+  // Efecto para recargar mensajes cuando cambia selectedPeer
+  useEffect(() => {
+    if (selectedPeer) {
+      if (isDMChannel) {
+        loadDmMessages(selectedPeer, tab);
+      } else if (tab === 'dm') {
+        loadDmMessages(selectedPeer);
+      }
+    }
+  }, [selectedPeer, tab]);
+
+  // Suscripción en tiempo real
   useEffect(() => {
     if (!myEmail) return;
 
@@ -1089,15 +1094,6 @@ export default function ChatView() {
               if (selectedPeer && (newMessage.from_email === selectedPeer || newMessage.to_email === selectedPeer)) {
                 setDmMessages((prev) => [...prev, newMessage]);
                 scrollBottom();
-                
-                if (newMessage.to_email === myEmail) {
-                  setTimeout(async () => {
-                    await (supabase as any)
-                      .from('chat_dm_messages')
-                      .update({ read_at: new Date().toISOString() })
-                      .eq('id', newMessage.id);
-                  }, 500);
-                }
               }
               
               if (msgTopic !== 'dm') {
@@ -1116,6 +1112,7 @@ export default function ChatView() {
     };
   }, [myEmail, tab, selectedPeer, isPublicChannel]);
 
+  // Typing presence
   useEffect(() => {
     if (!myEmail) return;
 
@@ -1286,7 +1283,16 @@ export default function ChatView() {
             <>
               <div className="chat-sidebar-header">
                 <strong>📋 Conversaciones en {activeChannel?.title}</strong>
-                <button type="button" onClick={() => loadChannelThreads(tab)} title="Actualizar">
+                <button 
+                  type="button" 
+                  onClick={async () => {
+                    await loadChannelThreads(tab);
+                    if (selectedPeer) {
+                      await loadDmMessages(selectedPeer, tab);
+                    }
+                  }} 
+                  title="Actualizar"
+                >
                   ↻
                 </button>
               </div>
@@ -1296,9 +1302,9 @@ export default function ChatView() {
                   <button
                     key={thread.key}
                     type="button"
-                    onClick={() => {
+                    onClick={async () => {
                       setSelectedPeer(thread.peer);
-                      loadDmMessages(thread.peer, tab);
+                      await loadDmMessages(thread.peer, tab);
                     }}
                     className={`chat-thread ${selectedPeer === thread.peer ? 'active' : ''}`}
                   >
@@ -1315,9 +1321,9 @@ export default function ChatView() {
                   </button>
                 ))}
 
-                {channelThreads.length === 0 && selectedPeer === '' && (
+                {channelThreads.length === 0 && (
                   <p className="chat-empty-small">
-                    Selecciona un destinatario arriba para comenzar
+                    No hay conversaciones aún. Selecciona un destinatario arriba para comenzar.
                   </p>
                 )}
               </div>
@@ -1422,7 +1428,13 @@ export default function ChatView() {
 
             {isDMChannel && selectedPeer && dmMessages.length === 0 && (
               <div className="chat-empty">
-                💬 Sin mensajes aún con {contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer}
+                💬 Sin mensajes aún con {contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer}. ¡Envía tu primer mensaje!
+              </div>
+            )}
+
+            {isDMChannel && selectedPeer && dmMessages.length > 0 && (
+              <div className="chat-messages-list">
+                {dmMessages.map(renderMessage)}
               </div>
             )}
 
@@ -1438,7 +1450,11 @@ export default function ChatView() {
               </div>
             )}
 
-            {(tab === 'dm' ? dmMessages : messages).map(renderMessage)}
+            {tab === 'dm' && selectedPeer && dmMessages.length > 0 && (
+              <div className="chat-messages-list">
+                {dmMessages.map(renderMessage)}
+              </div>
+            )}
 
             {typingUsers.length > 0 && (
               <div className="chat-typing">
