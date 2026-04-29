@@ -13,6 +13,7 @@ export default function ClosuresView() {
   // ========== DETECCIÓN DE ROL (usando role de la BD) ==========
   const isSupplier = myRole === 'PROVEEDOR';
   const isAdmin = myRole === 'ADMIN';
+  const isDelivery = myRole === 'DELIVERY';  // ✅ CORREGIDO
   
   const [orders, setOrders] = useState<any[]>([]);
   const [deliveries, setDeliveries] = useState<any[]>([]);
@@ -54,7 +55,6 @@ export default function ClosuresView() {
   };
 
   const loadSuppliers = async () => {
-    // Cargar proveedores desde la tabla profiles
     const { data } = await supabase
       .from('profiles')
       .select('email, name, company_name')
@@ -75,13 +75,10 @@ export default function ClosuresView() {
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
   }, []);
 
-  const isDelivery = !isSupplier && !isAdmin && deliveries.some(d => d.email === myEmail);
-
   const loadClosures = async () => {
     let query = supabase.from('orders').select('*')
       .order('created_at', { ascending: false });
 
-    // ✅ PROVEEDOR - usa created_at y filtra por provider_email
     if (isSupplier) {
       query = query
         .gte('created_at', dateFrom + 'T00:00:00')
@@ -92,19 +89,16 @@ export default function ClosuresView() {
         query = query.eq('assigned_delivery', filterDelivery);
       }
     } 
-    // ✅ DELIVERY - usa assigned_at y puede filtrar por proveedor
     else if (isDelivery) {
       query = query
         .gte('assigned_at', dateFrom + 'T00:00:00')
         .lte('assigned_at', dateTo + 'T23:59:59')
         .eq('assigned_delivery', myEmail);
       
-      // ✅ FILTRO DE PROVEEDOR PARA DELIVERY
       if (filterSupplier) {
         query = query.eq('provider_email', filterSupplier);
       }
     } 
-    // ✅ ADMIN - usa assigned_at y puede filtrar por delivery y proveedor
     else if (isAdmin) {
       query = query
         .gte('assigned_at', dateFrom + 'T00:00:00')
@@ -114,7 +108,6 @@ export default function ClosuresView() {
       if (filterSupplier) query = query.eq('provider_email', filterSupplier);
     }
 
-    // ✅ FILTRO DE ESTADO
     if (filterType && filterType !== '') {
       query = query.eq('status', filterType);
     }
@@ -323,14 +316,12 @@ export default function ClosuresView() {
         </div>
       )}
 
-      {/* ========== FILTROS ========== */}
       <div className="flex flex-wrap gap-2 mb-3">
         <label className="app-label !mt-0">Desde</label>
         <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
         <label className="app-label !mt-0">Hasta</label>
         <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
         
-        {/* FILTRO POR DELIVERY - para PROVEEDOR y ADMIN */}
         {(isSupplier || isAdmin) && deliveries.length > 0 && (
           <select className="app-input !w-auto min-w-[280px]" value={filterDelivery} onChange={e => setFilterDelivery(e.target.value)}>
             <option value="">Todos los repartidores</option>
@@ -342,7 +333,7 @@ export default function ClosuresView() {
           </select>
         )}
 
-        {/* ✅ FILTRO POR PROVEEDOR - para DELIVERY y ADMIN */}
+        {/* ✅ SELECTOR DE PROVEEDORES - Ahora visible para DELIVERY */}
         {(isDelivery || isAdmin) && suppliers.length > 0 && (
           <select className="app-input !w-auto min-w-[280px]" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
             <option value="">Todos los proveedores</option>
@@ -367,7 +358,6 @@ export default function ClosuresView() {
         <button className="nav-btn active" onClick={loadClosures}>Aplicar</button>
       </div>
 
-      {/* Total de Pedidos Asignados */}
       {(filterDelivery || isDelivery || isSupplier) && (
         <div className="grid-kpi mb-4">
           <div className="kpi-card">
@@ -378,7 +368,6 @@ export default function ClosuresView() {
         </div>
       )}
 
-      {/* Control de Rendición */}
       {canViewRendicion && delivered.length > 0 && (
         <div className="app-card !p-4 mb-4 border-l-4 border-l-[hsl(var(--primary))]">
           <h4 className="font-extrabold mb-3">📋 Control de Rendición</h4>
@@ -450,7 +439,6 @@ export default function ClosuresView() {
 
       <p className="chip mb-3 text-[10px]">Los KPIs se calculan <strong>solo</strong> con Estado 1 = ENTREGADO.</p>
 
-      {/* KPIs */}
       <div className="grid-kpi mb-4">
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">ENTREGADOS</div><div className="text-[22px] font-extrabold">{kpis.entregados}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.entregadosRev)}</div></div>
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">ENCOMIENDAS</div><div className="text-[22px] font-extrabold">{kpis.encomiendas}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.encomiendaRev)}</div></div>
@@ -460,7 +448,6 @@ export default function ClosuresView() {
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Ya rendidos</div><div className="text-[22px] font-extrabold" style={{ color: '#4ade80' }}>{kpis.rendidos}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.montoRendido)}</div></div>
       </div>
 
-      {/* Tabla de pedidos */}
       <div className="overflow-auto">
         <table className="app-table min-w-[1500px]">
           <thead>
