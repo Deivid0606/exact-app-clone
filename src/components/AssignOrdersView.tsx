@@ -17,6 +17,7 @@ export default function AssignOrdersView() {
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [idsInput, setIdsInput] = useState('');
   const [selectAll, setSelectAll] = useState(false);
+  const [filterBy, setFilterBy] = useState<'created_at' | 'assigned_at'>('created_at');
 
   useEffect(() => {
     if (role === 'ADMIN' || role === 'PROVEEDOR') {
@@ -26,9 +27,9 @@ export default function AssignOrdersView() {
 
   const load = async () => {
     let query = supabase.from('orders').select('*')
-      .gte('created_at', dateFrom + 'T00:00:00')
-      .lte('created_at', dateTo + 'T23:59:59')
-      .order('created_at', { ascending: false }).limit(300);
+      .gte(filterBy, dateFrom + 'T00:00:00')
+      .lte(filterBy, dateTo + 'T23:59:59')
+      .order(filterBy, { ascending: false }).limit(500);
     
     // Si es delivery, solo ver pedidos no asignados o los suyos
     if (role === 'DELIVERY') {
@@ -41,7 +42,7 @@ export default function AssignOrdersView() {
     setSelected(new Set());
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [filterBy]);
 
   const filtered = orders.filter(o => {
     if (!search) return true;
@@ -76,13 +77,20 @@ export default function AssignOrdersView() {
       return;
     }
     
-    const deliveryEmail = profile?.email;
+    let deliveryEmail = '';
+    
+    if (role === 'DELIVERY') {
+      deliveryEmail = profile?.email || '';
+    } else if ((role === 'ADMIN' || role === 'PROVEEDOR') && assignDelivery) {
+      deliveryEmail = assignDelivery;
+    }
+    
     if (!deliveryEmail) {
-      toast.error('Error: No se encontró tu usuario');
+      toast.error('Seleccioná un delivery primero');
       return;
     }
 
-    const loadingToast = toast.loading(`Asignando ${selected.size} pedido(s) a tu cuenta...`);
+    const loadingToast = toast.loading(`Asignando ${selected.size} pedido(s)...`);
     
     let successCount = 0;
     let errorCount = 0;
@@ -107,7 +115,7 @@ export default function AssignOrdersView() {
     toast.dismiss(loadingToast);
     
     if (successCount > 0) {
-      toast.success(`✅ ${successCount} pedido(s) asignado(s) a vos`);
+      toast.success(`✅ ${successCount} pedido(s) asignado(s) a ${role === 'DELIVERY' ? 'vos' : deliveryEmail}`);
     }
     if (errorCount > 0) {
       toast.error(`❌ Error en ${errorCount} pedido(s)`);
@@ -120,10 +128,16 @@ export default function AssignOrdersView() {
 
   // Para DELIVERY: asigna IDs manuales a sí mismo
   const assignByIds = async () => {
-    const deliveryEmail = profile?.email;
+    let deliveryEmail = '';
     
-    if (!deliveryEmail && role !== 'ADMIN' && role !== 'PROVEEDOR') {
-      toast.error('Error: No se encontró tu usuario');
+    if (role === 'DELIVERY') {
+      deliveryEmail = profile?.email || '';
+    } else if ((role === 'ADMIN' || role === 'PROVEEDOR') && assignDelivery) {
+      deliveryEmail = assignDelivery;
+    }
+    
+    if (!deliveryEmail) {
+      toast.error('Seleccioná un delivery primero');
       return;
     }
     
@@ -151,7 +165,7 @@ export default function AssignOrdersView() {
         .limit(1);
       
       if (data && data[0]) {
-        // Si ya está asignado a otro delivery, avisar
+        // Si ya está asignado a otro delivery y soy delivery, avisar
         if (data[0].assigned_delivery && data[0].assigned_delivery !== deliveryEmail && role === 'DELIVERY') {
           alreadyAssigned++;
           continue;
@@ -176,7 +190,7 @@ export default function AssignOrdersView() {
     toast.dismiss(loadingToast);
     
     if (count > 0) {
-      toast.success(`✅ ${count} pedido(s) asignado(s) a vos`);
+      toast.success(`✅ ${count} pedido(s) asignado(s) a ${role === 'DELIVERY' ? 'vos' : deliveryEmail}`);
     }
     if (alreadyAssigned > 0) {
       toast.warning(`⚠️ ${alreadyAssigned} pedido(s) ya estaban asignados a otro delivery`);
@@ -228,6 +242,13 @@ export default function AssignOrdersView() {
         <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
         <label className="app-label !mt-0">Hasta</label>
         <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+        
+        {/* Selector para elegir filtrar por fecha de venta o asignación */}
+        <select className="app-input !w-auto" value={filterBy} onChange={e => setFilterBy(e.target.value as any)}>
+          <option value="created_at">📅 Fecha de venta</option>
+          <option value="assigned_at">🚚 Fecha de asignación</option>
+        </select>
+        
         <input className="app-input flex-1 min-w-[200px]" placeholder="🔎 Buscar cliente, ID, ciudad..."
           value={search} onChange={e => setSearch(e.target.value)} />
         <button className="nav-btn active" onClick={load}>Filtrar</button>
@@ -270,14 +291,14 @@ export default function AssignOrdersView() {
         </div>
       )}
 
-      {/* Asignar por IDs - Versión para DELIVERY */}
+      {/* Asignar por IDs */}
       <div className="app-card !p-3 mb-3">
         <div className="flex justify-between items-center mb-2">
           <b className="text-sm">Asignar por IDs manualmente</b>
           <span className="chip text-[10px]">Máximo 35 IDs por carga</span>
         </div>
         
-        {/* Solo mostrar selector de delivery si es ADMIN/PROVEEDOR */}
+        {/* Mostrar selector de delivery si es ADMIN/PROVEEDOR */}
         {(role === 'ADMIN' || role === 'PROVEEDOR') && (
           <select className="app-input !w-auto min-w-[200px] mb-2" value={assignDelivery} onChange={e => setAssignDelivery(e.target.value)}>
             <option value="">Seleccionar delivery...</option>
@@ -303,7 +324,7 @@ export default function AssignOrdersView() {
         <button 
           className="nav-btn active text-xs" 
           onClick={assignByIds}
-          disabled={(role !== 'DELIVERY' && !assignDelivery) || idsInput.trim() === ''}
+          disabled={((role !== 'DELIVERY') && !assignDelivery) || idsInput.trim() === ''}
         >
           🚀 Asignar IDs masivamente
         </button>
@@ -325,7 +346,7 @@ export default function AssignOrdersView() {
                   />
                 </th>
               )}
-              <th>Fecha</th>
+              <th>{filterBy === 'created_at' ? 'Fecha venta' : 'Fecha asignación'}</th>
               <th>ID</th>
               <th>Ciudad</th>
               <th>Cliente</th>
@@ -348,7 +369,13 @@ export default function AssignOrdersView() {
                     />
                   </td>
                 )}
-                <td className="text-xs whitespace-nowrap">{new Date(o.created_at).toLocaleDateString('es-PY')}</td>
+                <td className="text-xs whitespace-nowrap">
+                  {filterBy === 'created_at' 
+                    ? new Date(o.created_at).toLocaleDateString('es-PY')
+                    : o.assigned_at 
+                      ? new Date(o.assigned_at).toLocaleDateString('es-PY')
+                      : '—'}
+                </td>
                 <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
                 <td className="text-xs">{o.city}</td>
                 <td className="text-xs">{o.customer_name}</td>
