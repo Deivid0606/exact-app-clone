@@ -26,6 +26,35 @@ export default function AssignOrdersView() {
   const isAdmin = myEmail === 'aleimportss@gmail.com';
   const isDelivery = !isSupplier && !isAdmin;
 
+  // ========== DETECTAR PROVEEDOR SEGÚN EL DELIVERY ==========
+  const getSupplierByDelivery = (deliveryEmail: string): string | null => {
+    if (!deliveryEmail) return null;
+    
+    const email = deliveryEmail.toLowerCase();
+    
+    // Deliveries de SKYLINE
+    if (email.includes('skyline') ||
+        email === 'roberto.skyline.@gmail.com' ||
+        email === 'josema.skyline.@gmail.com' ||
+        email === 'deliverynico-skyline@gmail.com' ||
+        email === 'nayder-skyline@gmail.com' ||
+        email === 'fabianskyline@gmail.com' ||
+        email === 'diegoskyline@gmail.com') {
+      return 'skylinestore06@gmail.com';
+    }
+    
+    // Deliveries de IMPORTADORA ALIADO
+    if (email.includes('importaliado') ||
+        email === 'pablo-godoy09importaliado@gmail.com' ||
+        email === 'chirstianimporaliado04@gmail.com' ||
+        email === 'santiagonandedeliveryimportaliado@gmail.com') {
+      return 'importadoraaliado@gmail.com';
+    }
+    
+    // Si no se puede detectar, retornar null
+    return null;
+  };
+
   useEffect(() => {
     if (isAdmin || isSupplier) {
       supabase.from('profiles').select('email, name').then(({ data }) => setDeliveries(data || []));
@@ -76,7 +105,7 @@ export default function AssignOrdersView() {
     }
   };
 
-  // Función común para asignar pedidos
+  // Función común para asignar pedidos (AHORA CON DETECCIÓN AUTOMÁTICA DE PROVEEDOR)
   const assignOrdersToDelivery = async (orderIds: string[], deliveryEmail: string, supplierEmail?: string) => {
     let successCount = 0;
     let errorCount = 0;
@@ -89,6 +118,21 @@ export default function AssignOrdersView() {
         .eq('id', id)
         .single();
       
+      // Determinar el supplier_email final
+      let finalSupplierEmail = currentOrder?.supplier_email;
+      
+      // Si el pedido NO tiene supplier_email, intentar determinarlo
+      if (!finalSupplierEmail) {
+        // 1. Si el usuario es proveedor, usar su email
+        if (supplierEmail) {
+          finalSupplierEmail = supplierEmail;
+        }
+        // 2. Si no, detectar automáticamente por el delivery
+        else {
+          finalSupplierEmail = getSupplierByDelivery(deliveryEmail);
+        }
+      }
+      
       // Preparar los datos a actualizar
       const updateData: any = { 
         assigned_delivery: deliveryEmail, 
@@ -96,9 +140,9 @@ export default function AssignOrdersView() {
         status: 'EN RUTA'
       };
       
-      // Si el pedido no tiene supplier_email y se proporcionó uno, asignarlo
-      if (!currentOrder?.supplier_email && supplierEmail) {
-        updateData.supplier_email = supplierEmail;
+      // Solo asignar supplier_email si se determinó uno
+      if (finalSupplierEmail) {
+        updateData.supplier_email = finalSupplierEmail;
       }
       
       const { error } = await supabase
@@ -135,13 +179,15 @@ export default function AssignOrdersView() {
     const { successCount, errorCount } = await assignOrdersToDelivery(
       Array.from(selected), 
       deliveryEmail,
-      isSupplier ? myEmail : undefined // Si es proveedor, pasar su email como supplier
+      isSupplier ? myEmail : undefined
     );
     
     toast.dismiss(loadingToast);
     
     if (successCount > 0) {
       toast.success(`✅ ${successCount} pedido(s) asignado(s) correctamente`);
+      // Mostrar resumen de proveedores asignados
+      toast.info(`📦 Los proveedores podrán ver sus pedidos en Cierres`);
     }
     if (errorCount > 0) {
       toast.error(`❌ Error en ${errorCount} pedido(s)`);
@@ -228,13 +274,30 @@ export default function AssignOrdersView() {
       return;
     }
     
+    // Obtener el pedido actual para preservar supplier_email
+    const { data: currentOrder } = await supabase
+      .from('orders')
+      .select('supplier_email')
+      .eq('id', orderId)
+      .single();
+    
+    const updateData: any = { 
+      assigned_delivery: deliveryEmail, 
+      assigned_at: new Date().toISOString(),
+      status: 'EN RUTA'
+    };
+    
+    // Si no tiene supplier_email, detectar automáticamente
+    if (!currentOrder?.supplier_email) {
+      const detectedSupplier = getSupplierByDelivery(deliveryEmail);
+      if (detectedSupplier) {
+        updateData.supplier_email = detectedSupplier;
+      }
+    }
+    
     const { error } = await supabase
       .from('orders')
-      .update({ 
-        assigned_delivery: deliveryEmail, 
-        assigned_at: new Date().toISOString(),
-        status: 'EN RUTA'
-      })
+      .update(updateData)
       .eq('id', orderId);
     
     if (error) {
@@ -384,7 +447,13 @@ export default function AssignOrdersView() {
                 <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
                 <td className="text-xs">{o.city}</td>
                 <td className="text-xs">{o.customer_name}</td>
-                <td className="text-xs">{o.supplier_email || '—'}</td>
+                <td className="text-xs">
+                  {o.supplier_email ? (
+                    <span className="text-blue-600 font-medium">{o.supplier_email}</span>
+                  ) : (
+                    <span className="text-red-500 italic">Sin proveedor</span>
+                  )}
+                </td>
                 <td>
                   <span className={`badge-status ${o.status === 'ENTREGADO' ? 'badge-entregado' : o.status === 'CANCELADO' ? 'badge-cancelado' : 'badge-pendiente'}`}>
                     {o.status || 'PENDIENTE'}
@@ -431,6 +500,7 @@ export default function AssignOrdersView() {
             <div>
               <span className="text-sm font-bold text-green-800">✅ {selected.size} pedido(s) seleccionado(s)</span>
               <p className="text-xs text-green-600 mt-1">Se asignarán automáticamente a tu cuenta</p>
+              <p className="text-xs text-green-600">📦 Los proveedores verán estos pedidos en Cierres</p>
             </div>
             <button 
               className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-green-700"
