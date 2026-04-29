@@ -94,7 +94,10 @@ export default function ClosuresView() {
       if (filterSupplier) query = query.eq('supplier_email', filterSupplier);
     }
 
-    if (filterType) query = query.eq('status', filterType);
+    // ✅ FILTRO DE ESTADO: Solo aplicar si hay un valor seleccionado (no vacío)
+    if (filterType && filterType !== '') {
+      query = query.eq('status', filterType);
+    }
 
     const { data } = await query;
     setOrders(data || []);
