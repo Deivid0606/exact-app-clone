@@ -7,16 +7,17 @@ const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
 export default function ClosuresView() {
   const { profile } = useAuth();
-  const role = profile?.role;
   const myEmail = profile?.email || '';
+  const myUserId = profile?.id || '';
+  
+  const [userRole, setUserRole] = useState<string>('');
   const [orders, setOrders] = useState<any[]>([]);
   const [deliveries, setDeliveries] = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [fees, setFees] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
   
-  // Filtros mejorados para DELIVERY
-  const [filterDelivery, setFilterDelivery] = useState(role === 'DELIVERY' ? (profile?.email || '') : '');
+  const [filterDelivery, setFilterDelivery] = useState('');
   const [filterSupplier, setFilterSupplier] = useState('');
   const [filterType, setFilterType] = useState('ENTREGADO');
   const [rendicionNote, setRendicionNote] = useState('');
@@ -26,8 +27,26 @@ export default function ClosuresView() {
     return d.toISOString().slice(0, 10);
   });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
-
   const [totalPedidosAsignados, setTotalPedidosAsignados] = useState(0);
+
+  // Cargar el rol del usuario desde user_roles
+  useEffect(() => {
+    const loadUserRole = async () => {
+      if (!myUserId) return;
+      
+      const { data } = await supabase
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', myUserId)
+        .maybeSingle();
+      
+      if (data) {
+        setUserRole(data.role);
+      }
+    };
+    
+    loadUserRole();
+  }, [myUserId]);
 
   // Cargar los 3 proveedores del sistema
   const loadSuppliers = () => {
@@ -39,16 +58,28 @@ export default function ClosuresView() {
     setSuppliers(mainSuppliers);
   };
 
+  // Cargar deliveries desde user_roles
+  const loadDeliveries = async () => {
+    // Obtener usuarios con rol DELIVERY
+    const { data: roleData } = await supabase
+      .from('user_roles')
+      .select('user_id')
+      .eq('role', 'DELIVERY');
+    
+    if (roleData && roleData.length > 0) {
+      const userIds = roleData.map(r => r.user_id);
+      const { data: profilesData } = await supabase
+        .from('profiles')
+        .select('email, name')
+        .in('id', userIds);
+      
+      setDeliveries(profilesData || []);
+    }
+  };
+
   useEffect(() => {
-    // Cargar deliveries
-    supabase.from('profiles').select('email, name, role').then(({ data }) => {
-      const deliveryUsers = (data || []).filter(d => d.role === 'DELIVERY' || d.email === 'aleimportss@gmail.com');
-      setDeliveries(deliveryUsers);
-    });
-    
-    // Cargar los 3 proveedores
     loadSuppliers();
-    
+    loadDeliveries();
     supabase.from('delivery_fees').select('*').then(({ data }) => setFees(data || []));
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
   }, []);
@@ -59,19 +90,15 @@ export default function ClosuresView() {
       .lte('assigned_at', dateTo + 'T23:59:59')
       .order('assigned_at', { ascending: false });
 
-    // FILTRO POR ROL Y PROVEEDOR
-    if (role === 'PROVEEDOR') {
-      // PROVEEDOR solo ve sus propios pedidos
+    // FILTROS SEGÚN ROL DESDE user_roles
+    if (userRole === 'PROVEEDOR') {
       query = query.eq('supplier_email', myEmail);
-    } else if (role === 'DELIVERY') {
-      // DELIVERY ve sus pedidos asignados
+    } else if (userRole === 'DELIVERY') {
       query = query.eq('assigned_delivery', myEmail);
-      // Si seleccionó un proveedor específico, filtrar
       if (filterSupplier) {
         query = query.eq('supplier_email', filterSupplier);
       }
-    } else if (role === 'ADMIN') {
-      // ADMIN puede filtrar por delivery y proveedor
+    } else if (userRole === 'ADMIN') {
       if (filterDelivery) query = query.eq('assigned_delivery', filterDelivery);
       if (filterSupplier) query = query.eq('supplier_email', filterSupplier);
     }
@@ -82,14 +109,11 @@ export default function ClosuresView() {
     setOrders(data || []);
     setTotalPedidosAsignados(data?.length || 0);
 
-    // Check if rendición already paid
+    // Check rendición pagada
     let deliveryToCheck = '';
-    if (role === 'PROVEEDOR') {
-      setRendicionPagada(null);
-      return;
-    } else if (role === 'DELIVERY') {
+    if (userRole === 'DELIVERY') {
       deliveryToCheck = myEmail;
-    } else if (role === 'ADMIN' && filterDelivery) {
+    } else if (userRole === 'ADMIN' && filterDelivery) {
       deliveryToCheck = filterDelivery;
     }
     
@@ -106,7 +130,7 @@ export default function ClosuresView() {
     }
   };
 
-  useEffect(() => { loadClosures(); }, [filterSupplier, filterDelivery, filterType, dateFrom, dateTo]);
+  useEffect(() => { loadClosures(); }, [filterSupplier, filterDelivery, filterType, dateFrom, dateTo, userRole]);
 
   const getFee = (deliveryEmail: string, city: string) => {
     const f = fees.find(f => f.delivery_email?.toLowerCase() === deliveryEmail?.toLowerCase() && f.city?.toLowerCase() === city?.toLowerCase());
@@ -137,7 +161,6 @@ export default function ClosuresView() {
   }, [orders, rendidos, noRendidos]);
 
   const netRendir = kpis.entregadosRev + kpis.encomiendaRev - kpis.deliveryFee;
-
   const totalAPagar = useMemo(() => {
     return delivered.reduce((s, o) => {
       const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
@@ -146,111 +169,68 @@ export default function ClosuresView() {
   }, [delivered]);
 
   const updateStatus1 = async (orderId: string, status: string) => {
-    if (status === 'DEVUELTO A DEPÓSITO' && role === 'DELIVERY') {
+    if (status === 'DEVUELTO A DEPÓSITO' && userRole === 'DELIVERY') {
       toast.error('Los repartidores no pueden cambiar a DEVUELTO A DEPÓSITO');
       return;
     }
-
-    const { error } = await supabase.from('orders').update({ 
-      status,
-      updated_at: new Date().toISOString()
-    }).eq('id', orderId);
+    const { error } = await supabase.from('orders').update({ status, updated_at: new Date().toISOString() }).eq('id', orderId);
     if (error) toast.error(error.message);
-    else { 
-      toast.success('Estado actualizado'); 
-      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
-      loadClosures();
-    }
+    else { toast.success('Estado actualizado'); loadClosures(); }
   };
 
   const updateStatus2 = async (orderId: string, status2: string) => {
-    const { error } = await supabase.from('orders').update({ 
-      status2,
-      updated_at: new Date().toISOString()
-    }).eq('id', orderId);
+    const { error } = await supabase.from('orders').update({ status2, updated_at: new Date().toISOString() }).eq('id', orderId);
     if (error) toast.error(error.message);
-    else { toast.success('Estado 2 actualizado'); setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status2 } : o)); }
+    else { toast.success('Estado 2 actualizado'); loadClosures(); }
   };
 
   const updateRetiro = async (orderId: string, estado: string) => {
-    const { error } = await supabase.from('orders').update({ 
-      estado_retiro: estado,
-      updated_at: new Date().toISOString()
-    }).eq('id', orderId);
+    const { error } = await supabase.from('orders').update({ estado_retiro: estado, updated_at: new Date().toISOString() }).eq('id', orderId);
     if (error) toast.error(error.message);
-    else { toast.success('Estado de retiro actualizado'); setOrders(prev => prev.map(o => o.id === orderId ? { ...o, estado_retiro: estado } : o)); }
+    else { toast.success('Estado de retiro actualizado'); loadClosures(); }
   };
 
   const updateAssignedAt = async (orderId: string, dateVal: string) => {
     if (!dateVal) return;
     const { error } = await supabase.from('orders').update({ assigned_at: dateVal + 'T00:00:00', updated_at: new Date().toISOString() }).eq('id', orderId);
     if (error) toast.error(error.message);
-    else { toast.success('Fecha actualizada'); setOrders(prev => prev.map(o => o.id === orderId ? { ...o, assigned_at: dateVal + 'T00:00:00' } : o)); }
+    else { toast.success('Fecha actualizada'); loadClosures(); }
   };
 
   const updateCity = async (orderId: string, city: string) => {
     const { error } = await supabase.from('orders').update({ city, updated_at: new Date().toISOString() }).eq('id', orderId);
     if (error) toast.error(error.message);
-    else { toast.success('Ciudad actualizada'); setOrders(prev => prev.map(o => o.id === orderId ? { ...o, city } : o)); }
+    else { toast.success('Ciudad actualizada'); loadClosures(); }
   };
 
   const markSingleRendido = async (orderId: string) => {
     const { error } = await supabase.from('orders').update({
-      delivery_settled: true,
-      status2: 'RENDIDO',
-      updated_at: new Date().toISOString(),
+      delivery_settled: true, status2: 'RENDIDO', updated_at: new Date().toISOString(),
     }).eq('id', orderId);
     if (error) { toast.error(error.message); return; }
     toast.success('Marcado como RENDIDO');
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, delivery_settled: true, status2: 'RENDIDO' } : o));
-    const order = orders.find(o => o.id === orderId);
-    await supabase.from('news').insert({
-      message: `Pedido ${order?.order_number || orderId.slice(0, 8)} marcado como RENDIDO por ${myEmail}`,
-      actor_email: myEmail,
-      role_scope: role,
-    });
+    loadClosures();
   };
 
   const markRendicionPagada = async () => {
-    let deliveryEmail = '';
-    if (role === 'DELIVERY') {
-      deliveryEmail = myEmail;
-    } else if (role === 'ADMIN') {
-      deliveryEmail = filterDelivery;
-    }
-    
+    let deliveryEmail = userRole === 'DELIVERY' ? myEmail : filterDelivery;
     if (!deliveryEmail) { toast.error('Seleccioná un delivery primero'); return; }
-
     if (totalAPagar <= 0) { toast.error('No hay monto para rendir'); return; }
     if (!confirm(`¿Marcar rendición de ${deliveryEmail} por Gs ${nf(totalAPagar)} como PAGADA?`)) return;
 
     for (const o of delivered) {
       await supabase.from('orders').update({
-        delivery_settled: true,
-        delivery_paid_at: new Date().toISOString(),
-        status2: 'RENDIDO',
-        updated_at: new Date().toISOString(),
+        delivery_settled: true, delivery_paid_at: new Date().toISOString(), status2: 'RENDIDO',
       }).eq('id', o.id);
     }
 
     const { error } = await supabase.from('rendiciones_pagadas').insert({
-      delivery_email: deliveryEmail,
-      fecha_rendicion: new Date().toISOString().slice(0, 10),
-      monto_total: totalAPagar,
-      nota: rendicionNote || `Rendición ${dateFrom} a ${dateTo} — ${delivered.length} pedidos`,
-      marcado_por: myEmail,
-      marcado_en: new Date().toISOString(),
-      pagado_en: new Date().toISOString(),
+      delivery_email: deliveryEmail, fecha_rendicion: new Date().toISOString().slice(0, 10),
+      monto_total: totalAPagar, nota: rendicionNote || `Rendición ${dateFrom} a ${dateTo} — ${delivered.length} pedidos`,
+      marcado_por: myEmail, marcado_en: new Date().toISOString(), pagado_en: new Date().toISOString(),
     });
 
     if (error) { toast.error(error.message); return; }
-
-    await supabase.from('news').insert({
-      message: `Rendición de ${deliveryEmail} marcada como PAGADA — Gs ${nf(totalAPagar)}`,
-      actor_email: myEmail,
-      role_scope: role,
-    });
-
     toast.success(`Rendición de Gs ${nf(totalAPagar)} marcada como PAGADA`);
     setRendicionNote('');
     loadClosures();
@@ -259,31 +239,12 @@ export default function ClosuresView() {
   const desmarcarPagado = async () => {
     if (!rendicionPagada) return;
     if (!confirm('¿Desmarcar esta rendición como pagada?')) return;
-
-    let deliveryEmail = '';
-    if (role === 'DELIVERY') {
-      deliveryEmail = myEmail;
-    } else if (role === 'ADMIN') {
-      deliveryEmail = filterDelivery;
-    }
-
     for (const o of delivered) {
       await supabase.from('orders').update({
-        delivery_settled: false,
-        delivery_paid_at: null,
-        status2: '--',
-        updated_at: new Date().toISOString(),
+        delivery_settled: false, delivery_paid_at: null, status2: '--',
       }).eq('id', o.id);
     }
-
     await supabase.from('rendiciones_pagadas').delete().eq('id', rendicionPagada.id);
-
-    await supabase.from('news').insert({
-      message: `Rendición de ${deliveryEmail} DESMARCADA como pagada por ${myEmail}`,
-      actor_email: myEmail,
-      role_scope: role,
-    });
-
     toast.success('Rendición desmarcada');
     loadClosures();
   };
@@ -293,37 +254,35 @@ export default function ClosuresView() {
   const retiroOpts = ['', 'PENDIENTE', 'REALIZADO', 'CANCELADO'];
   
   let deliveryName = '';
-  if (role === 'DELIVERY') {
+  if (userRole === 'DELIVERY') {
     deliveryName = profile?.name || myEmail;
-  } else if (role === 'ADMIN' && filterDelivery) {
-    deliveryName = deliveries.find(d => d.email === filterDelivery)?.name || filterDelivery;
-  } else {
-    deliveryName = 'Todos los repartidores';
+  } else if (userRole === 'ADMIN' && filterDelivery) {
+    const found = deliveries.find(d => d.email === filterDelivery);
+    deliveryName = found?.name || filterDelivery;
   }
   
   const allRendered = noRendidos.length === 0 && delivered.length > 0;
   
-  // PERMISOS
-  const canEditFull = role === 'ADMIN' || role === 'PROVEEDOR';
-  const canEditStatus1 = role === 'ADMIN' || role === 'PROVEEDOR' || role === 'DELIVERY';
-  const canManageRendicion = role === 'ADMIN';
-  const canViewRendicion = role === 'ADMIN' || role === 'DELIVERY';
+  const canEditFull = userRole === 'ADMIN' || userRole === 'PROVEEDOR';
+  const canEditStatus1 = userRole === 'ADMIN' || userRole === 'PROVEEDOR' || userRole === 'DELIVERY';
+  const canManageRendicion = userRole === 'ADMIN';
+  const canViewRendicion = userRole === 'ADMIN' || userRole === 'DELIVERY';
 
   return (
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Cierres</h3>
 
-      {role === 'DELIVERY' && (
+      {userRole === 'DELIVERY' && (
         <div className="mb-3">
           <span className="badge-status badge-entregado">✏️ DELIVERY: solo podés editar Estado 1</span>
-          <p className="text-xs text-muted-foreground mt-1">Podés actualizar el estado de tus pedidos (PENDIENTE → EN RUTA → ENTREGADO). No podés cambiar a DEVUELTO A DEPÓSITO.</p>
+          <p className="text-xs text-muted-foreground mt-1">Podés actualizar el estado de tus pedidos. No podés cambiar a DEVUELTO A DEPÓSITO.</p>
         </div>
       )}
 
-      {(role === 'PROVEEDOR' || role === 'ADMIN') && (
+      {(userRole === 'PROVEEDOR' || userRole === 'ADMIN') && (
         <div className="mb-3">
           <span className="badge-status badge-entregado">✏️ PROVEEDOR/ADMIN: edición completa</span>
-          <p className="text-xs text-muted-foreground mt-1">Podés actualizar estados (incluyendo DEVUELTO A DEPÓSITO y REAGENDADO), fechas, ciudades y gestionar rendiciones.</p>
+          <p className="text-xs text-muted-foreground mt-1">Podés actualizar estados, fechas, ciudades y gestionar rendiciones.</p>
         </div>
       )}
 
@@ -334,15 +293,15 @@ export default function ClosuresView() {
         <label className="app-label !mt-0">Hasta</label>
         <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
         
-        {role === 'ADMIN' && (
+        {userRole === 'ADMIN' && (
           <select className="app-input !w-auto min-w-[280px]" value={filterDelivery} onChange={e => setFilterDelivery(e.target.value)}>
             <option value="">Todos los repartidores</option>
             {deliveries.map(d => <option key={d.email} value={d.email}>{d.name || d.email}</option>)}
           </select>
         )}
 
-        {/* FILTRO POR PROVEEDOR - para ADMIN y DELIVERY con los 3 proveedores */}
-        {(role === 'ADMIN' || role === 'DELIVERY') && (
+        {/* FILTRO POR PROVEEDOR - para ADMIN y DELIVERY */}
+        {(userRole === 'ADMIN' || userRole === 'DELIVERY') && (
           <select className="app-input !w-auto min-w-[280px]" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
             <option value="">📋 Todos los proveedores</option>
             {suppliers.map(s => (
@@ -367,7 +326,7 @@ export default function ClosuresView() {
       </div>
 
       {/* Total de Pedidos Asignados */}
-      {(filterDelivery || role === 'DELIVERY' || role === 'PROVEEDOR') && (
+      {(filterDelivery || userRole === 'DELIVERY' || userRole === 'PROVEEDOR') && (
         <div className="grid-kpi mb-4">
           <div className="kpi-card">
             <div className="text-xs text-muted-foreground mb-1">📦 Pedidos Asignados</div>
@@ -419,7 +378,7 @@ export default function ClosuresView() {
                     <span className="font-bold text-foreground">Nota:</span> {rendicionPagada.nota}
                   </div>
                 )}
-                {role === 'ADMIN' && (
+                {userRole === 'ADMIN' && (
                   <button
                     onClick={desmarcarPagado}
                     className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold border border-destructive/30 text-destructive hover:bg-destructive/10 transition-all"
@@ -436,7 +395,7 @@ export default function ClosuresView() {
                   value={rendicionNote} onChange={e => setRendicionNote(e.target.value)} />
                 <button
                   onClick={markRendicionPagada}
-                  disabled={!filterDelivery && role === 'ADMIN' || totalAPagar <= 0}
+                  disabled={!filterDelivery && userRole === 'ADMIN' || totalAPagar <= 0}
                   className="nav-btn active"
                 >
                   ✅ MARCAR COMO PAGADO
@@ -468,7 +427,7 @@ export default function ClosuresView() {
               <th className="text-right">Total (Gs)</th><th className="text-right">Tarifa (Gs)</th>
               <th className="text-right">Neto (Gs)</th><th>Estado 1</th>
               <th>Estado de retiro</th><th>Estado 2 (cierre)</th>
-              {(role === 'ADMIN' || role === 'PROVEEDOR') && <th></th>}
+              {(userRole === 'ADMIN' || userRole === 'PROVEEDOR') && <th></th>}
             </tr>
           </thead>
           <tbody>
@@ -488,7 +447,7 @@ export default function ClosuresView() {
               
               return (
                 <tr key={o.id} className={isSettled ? 'opacity-60' : ''}>
-                  </td>
+                  <td>
                     {canEditFull ? (
                       <input type="date" className="app-input !py-1 !px-2 !text-xs !w-[130px]"
                         value={assignedDate}
@@ -545,7 +504,7 @@ export default function ClosuresView() {
                       </select>
                     ) : <span className="text-xs">{o.status2 || '—'}</span>}
                   </td>
-                  {(role === 'ADMIN' || role === 'PROVEEDOR') && (
+                  {(userRole === 'ADMIN' || userRole === 'PROVEEDOR') && (
                     <td>
                       <div className="flex items-center gap-1">
                         {!isSettled && (o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA') && (
@@ -565,7 +524,7 @@ export default function ClosuresView() {
                 </tr>
               );
             })}
-            {orders.length === 0 && <tr><td colSpan={(role === 'ADMIN' || role === 'PROVEEDOR') ? 12 : 11} className="text-center text-muted-foreground py-8">Sin resultados</td></tr>}
+            {orders.length === 0 && <tr><td colSpan={(userRole === 'ADMIN' || userRole === 'PROVEEDOR') ? 12 : 11} className="text-center text-muted-foreground py-8">Sin resultados</td></tr>}
           </tbody>
         </table>
       </div>
