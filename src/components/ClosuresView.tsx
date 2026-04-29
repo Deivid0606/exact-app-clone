@@ -54,17 +54,56 @@ export default function ClosuresView() {
     }
   };
 
+  // ✅ FUNCIÓN LOADSUPPLIERS CORREGIDA
   const loadSuppliers = async () => {
-    const { data } = await supabase
+    console.log('🔍 Cargando proveedores...');
+    
+    // Intentar con diferentes variaciones del role
+    let { data } = await supabase
       .from('profiles')
-      .select('email, name, company_name')
-      .eq('role', 'PROVEEDOR');
+      .select('email, name, company_name, role')
+      .ilike('role', '%proveedor%');
+    
+    console.log('📦 Proveedores encontrados (ilike proveedor):', data);
+    
+    if (!data || data.length === 0) {
+      const { data: data2 } = await supabase
+        .from('profiles')
+        .select('email, name, company_name, role')
+        .eq('role', 'PROVEEDOR');
+      
+      console.log('📦 Proveedores encontrados (eq PROVEEDOR):', data2);
+      data = data2;
+    }
+    
+    if (!data || data.length === 0) {
+      const { data: data3 } = await supabase
+        .from('profiles')
+        .select('email, name, company_name, role')
+        .eq('role', 'proveedor');
+      
+      console.log('📦 Proveedores encontrados (eq proveedor):', data3);
+      data = data3;
+    }
     
     if (data && data.length > 0) {
       setSuppliers(data.map(s => ({ 
         email: s.email, 
         name: s.company_name || s.name || s.email 
       })));
+    } else {
+      console.log('⚠️ No se encontraron proveedores.');
+      // Como fallback, usar proveedores que aparecen en los pedidos
+      const { data: ordersData } = await supabase
+        .from('orders')
+        .select('provider_email')
+        .not('provider_email', 'is', null);
+      
+      if (ordersData && ordersData.length > 0) {
+        const uniqueSuppliers = [...new Set(ordersData.map(o => o.provider_email))];
+        console.log('📦 Proveedores desde pedidos:', uniqueSuppliers);
+        setSuppliers(uniqueSuppliers.map(email => ({ email, name: email })));
+      }
     }
   };
 
@@ -335,7 +374,7 @@ export default function ClosuresView() {
           </select>
         )}
 
-        {/* ✅ SELECTOR DE PROVEEDORES - SIEMPRE visible para DELIVERY y ADMIN (sin condición de suppliers.length) */}
+        {/* ✅ SELECTOR DE PROVEEDORES - SIEMPRE visible */}
         {(isDelivery || isAdmin) && (
           <select className="app-input !w-auto min-w-[280px]" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
             <option value="">Todos los proveedores</option>
