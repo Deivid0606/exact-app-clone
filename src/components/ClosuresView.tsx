@@ -24,7 +24,7 @@ export default function ClosuresView() {
   
   const [filterDelivery, setFilterDelivery] = useState('');
   const [filterSupplier, setFilterSupplier] = useState('');
-  const [filterType, setFilterType] = useState('ENTREGADO');
+  const [filterType, setFilterType] = useState('');
   const [rendicionNote, setRendicionNote] = useState('');
   const [rendicionPagada, setRendicionPagada] = useState<{ id: string; pagado_en: string; nota: string; marcado_por: string } | null>(null);
   const [dateFrom, setDateFrom] = useState(() => {
@@ -325,7 +325,7 @@ export default function ClosuresView() {
           </select>
         )}
 
-        {/* FILTRO POR PROVEEDOR - para DELIVERY y ADMIN (siempre visible para delivery) */}
+        {/* FILTRO POR PROVEEDOR - para DELIVERY y ADMIN */}
         {(isDelivery || isAdmin) && suppliers.length > 0 && (
           <select className="app-input !w-auto min-w-[280px]" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
             <option value="">Todos los proveedores</option>
