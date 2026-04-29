@@ -80,7 +80,32 @@ export default function ClosuresView() {
       .order('assigned_at', { ascending: false });
 
     if (isSupplier) {
-      query = query.eq('supplier_email', myEmail);
+      // Obtener IDs de productos de este proveedor
+      const { data: myProducts } = await supabase
+        .from('products')
+        .select('id')
+        .eq('supplier_email', myEmail);
+      
+      const productIds = myProducts?.map(p => p.id) || [];
+      
+      if (productIds.length > 0) {
+        // Obtener order_ids que contengan productos de este proveedor
+        const { data: orderItems } = await supabase
+          .from('order_items')
+          .select('order_id')
+          .in('product_id', productIds);
+        
+        const orderIds = [...new Set(orderItems?.map(oi => oi.order_id) || [])];
+        
+        if (orderIds.length > 0) {
+          query = query.in('id', orderIds);
+        } else {
+          query = query.in('id', []); // No hay pedidos con productos de este proveedor
+        }
+      } else {
+        query = query.in('id', []); // No hay productos de este proveedor
+      }
+      
       if (filterDelivery) {
         query = query.eq('assigned_delivery', filterDelivery);
       }
