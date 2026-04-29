@@ -107,6 +107,9 @@ function formatDateTime(value?: string | null) {
   return new Date(value).toLocaleString('es-PY');
 }
 
+// Canales que NO deben tener selector de destinatario (son públicos)
+const PUBLIC_CHANNELS: ChatTab[] = ['general', 'fotos_productos'];
+
 export default function ChatView() {
   const { profile } = useAuth();
 
@@ -142,6 +145,9 @@ export default function ChatView() {
   const audioChunksRef = useRef<Blob[]>([]);
   const typingTimeoutRef = useRef<number | null>(null);
   const typingChannelRef = useRef<any>(null);
+
+  // Verificar si el canal actual es público (sin selector de destinatario)
+  const isPublicChannel = PUBLIC_CHANNELS.includes(tab);
 
   const activeChannel = useMemo(() => {
     if (tab === 'dm') return null;
@@ -1017,8 +1023,8 @@ export default function ChatView() {
 
       <div className="chat-layout">
         <aside className="chat-sidebar">
-          {/* Selector de destinatario - Aparece en TODAS las pestañas EXCEPTO en "general" */}
-          {tab !== 'general' && (
+          {/* Selector de destinatario - SOLO en canales que NO son públicos (general y fotos_productos NO tienen) */}
+          {!isPublicChannel && tab !== 'dm' && (
             <div className="chat-dm-selector">
               <label className="chat-label">Escribir a</label>
               <select
@@ -1039,6 +1045,23 @@ export default function ChatView() {
 
           {tab === 'dm' ? (
             <>
+              <div className="chat-dm-selector">
+                <label className="chat-label">Escribir a</label>
+                <select
+                  value={selectedPeer}
+                  onChange={(event) => selectPeer(event.target.value)}
+                  className="chat-select"
+                >
+                  <option value="">-- Elegir destinatario --</option>
+                  {filteredContacts.map((contact) => (
+                    <option key={contact.email} value={contact.email}>
+                      {contact.role ? `${contact.role} · ` : ''}
+                      {contact.name || contact.email}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <div className="chat-sidebar-header">
                 <strong>Conversaciones</strong>
                 <button type="button" onClick={loadThreads}>
