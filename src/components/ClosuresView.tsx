@@ -503,7 +503,7 @@ export default function ClosuresView() {
                   <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
                   <td className="text-right text-xs">{nf(fee)}</td>
                   <td className="text-right text-xs">{nf(net)}</td>
-                  <tr>
+                  <td>
                     {canEditStatus1 ? (
                       <select 
                         className="app-input !w-auto !py-1 !px-2 text-xs"
@@ -523,7 +523,7 @@ export default function ClosuresView() {
                         {retiroOpts.map(s => <option key={s} value={s}>{s || '—'}</option>)}
                       </select>
                     ) : <span className="text-xs">{o.estado_retiro || '—'}</span>}
-                   </td>
+                  </td>
                   <td>
                     {canEditFull ? (
                       <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.status2 || '--'}
@@ -531,7 +531,7 @@ export default function ClosuresView() {
                         {state2Opts.map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
                     ) : <span className="text-xs">{o.status2 || '—'}</span>}
-                   </td>
+                  </td>
                   {canManageRendicion && (
                     <td>
                       <div className="flex items-center gap-1">
