@@ -161,7 +161,6 @@ export default function ChatView() {
     return map;
   }, [contacts]);
 
-  // Función para verificar si puede escribir a un destinatario
   const canSendToPeer = (peerEmail: string): boolean => {
     if (!myEmail || !peerEmail) return false;
     
@@ -171,17 +170,14 @@ export default function ChatView() {
     const peerRole = peer.role;
     const myRoleUpper = myRole?.toUpperCase();
     
-    // VENDEDOR solo puede escribir a PROVEEDOR
     if (myRoleUpper === 'VENDEDOR') {
       return peerRole === 'PROVEEDOR';
     }
     
-    // PROVEEDOR puede escribir a VENDEDOR (y a otros)
     if (myRoleUpper === 'PROVEEDOR') {
       return true;
     }
     
-    // ADMIN y DESPACHANTE pueden escribir a todos
     if (myRoleUpper === 'ADMIN' || myRoleUpper === 'DESPACHANTE') {
       return true;
     }
@@ -189,13 +185,11 @@ export default function ChatView() {
     return true;
   };
 
-  // Función para verificar si puede VER un chat (solo los participantes)
   const canViewChat = (peerEmail: string): boolean => {
     if (!myEmail || !peerEmail) return false;
     
     const myRoleUpper = myRole?.toUpperCase();
     
-    // ADMIN y DESPACHANTE pueden ver todos los chats
     if (myRoleUpper === 'ADMIN' || myRoleUpper === 'DESPACHANTE') {
       return true;
     }
@@ -203,12 +197,10 @@ export default function ChatView() {
     const peer = contacts.find(c => c.email.toLowerCase() === peerEmail.toLowerCase());
     const peerRole = peer?.role;
     
-    // VENDEDOR solo puede ver chats con PROVEEDOR
     if (myRoleUpper === 'VENDEDOR') {
       return peerRole === 'PROVEEDOR';
     }
     
-    // PROVEEDOR puede ver chats con VENDEDOR
     if (myRoleUpper === 'PROVEEDOR') {
       return peerRole === 'VENDEDOR' || peerRole === 'PROVEEDOR' || peerRole === 'ADMIN' || peerRole === 'DESPACHANTE';
     }
@@ -216,18 +208,15 @@ export default function ChatView() {
     return true;
   };
 
-  // Filtrar contactos basado en el rol del usuario actual
   const filteredContacts = useMemo(() => {
     if (!myRole) return [];
     
     const myRoleUpper = myRole.toUpperCase();
     
-    // ADMIN, PROVEEDOR y DESPACHANTE ven todos
     if (myRoleUpper === 'ADMIN' || myRoleUpper === 'PROVEEDOR' || myRoleUpper === 'DESPACHANTE') {
       return contacts.filter((contact) => contact.email !== myEmail);
     }
     
-    // VENDEDOR solo ve PROVEEDOR
     if (myRoleUpper === 'VENDEDOR') {
       return contacts.filter(
         (contact) => contact.email !== myEmail && contact.role === 'PROVEEDOR'
@@ -237,12 +226,10 @@ export default function ChatView() {
     return contacts.filter((contact) => contact.email !== myEmail);
   }, [contacts, myEmail, myRole]);
 
-  // Filtrar hilos de conversación que el usuario puede ver
   const visibleThreads = useMemo(() => {
     return threads.filter(thread => canViewChat(thread.peer));
   }, [threads, myEmail]);
 
-  // Filtrar mensajes eliminados para el usuario actual
   const filterDeletedMessages = (messages: ChatMessage[]): ChatMessage[] => {
     if (!myEmail) return messages;
     return messages.filter(msg => !msg.deleted_for?.includes(myEmail));
@@ -386,7 +373,6 @@ export default function ChatView() {
       return;
     }
 
-    // Filtrar mensajes eliminados para este usuario
     const notDeletedForMe = data?.filter(msg => !msg.deleted_for?.includes(myEmail)) || [];
 
     const map = new Map<string, Thread>();
@@ -402,7 +388,6 @@ export default function ChatView() {
       const key = threadKey(myEmail, peer);
 
       if (!map.has(key)) {
-        // Verificar si el usuario puede ver este hilo
         if (!canViewChat(peer)) return;
 
         const unread = notDeletedForMe.filter(
@@ -429,7 +414,6 @@ export default function ChatView() {
   const loadDmMessages = async (peer: string) => {
     if (!myEmail || !peer) return;
 
-    // Verificar que el usuario puede ver este chat
     if (!canViewChat(peer)) {
       toast.error('No tenés permiso para ver esta conversación');
       setSelectedPeer('');
@@ -465,7 +449,6 @@ export default function ChatView() {
   };
 
   const selectPeer = (peer: string) => {
-    // Verificar permiso antes de seleccionar
     if (peer && !canSendToPeer(peer)) {
       toast.error('No tenés permiso para escribirle a este destinatario');
       return;
@@ -556,7 +539,7 @@ export default function ChatView() {
     if (!text.trim() && !attachment) return;
     if (!myEmail) return;
 
-    const { error } = await (supabase as any).from('chat_messages').insert({
+    const messageData: any = {
       sender_email: myEmail,
       sender_role: myRole,
       message_text: text.trim() || (attachment ? `📎 ${attachment.name}` : ''),
@@ -565,27 +548,29 @@ export default function ChatView() {
       attachment_type: attachment?.type || null,
       attachment_mime: attachment?.mime || null,
       channel_key: tab,
-      deleted_for: [],
-    });
+    };
+
+    const { error } = await (supabase as any)
+      .from('chat_messages')
+      .insert(messageData);
 
     if (error) {
-      console.error(error);
-      toast.error('No se pudo enviar el mensaje al canal');
+      console.error('Error detallado:', error);
+      toast.error(`No se pudo enviar: ${error.message || 'Error desconocido'}`);
       return;
     }
 
     setText('');
     setShowEmojis(false);
     markChannelSeenLocal(tab);
-    loadChannelMessages(tab);
-    loadUnreadCounts();
+    await loadChannelMessages(tab);
+    await loadUnreadCounts();
   };
 
   const sendDm = async (attachment?: Attachment) => {
     if (!text.trim() && !attachment) return;
     if (!selectedPeer || !myEmail) return;
 
-    // Validar permiso antes de enviar
     if (!canSendToPeer(selectedPeer)) {
       toast.error('No tenés permiso para escribirle a este destinatario');
       return;
@@ -593,7 +578,7 @@ export default function ChatView() {
 
     const key = threadKey(myEmail, selectedPeer);
 
-    const { error } = await (supabase as any).from('chat_dm_messages').insert({
+    const messageData: any = {
       thread_key: key,
       from_email: myEmail,
       to_email: selectedPeer,
@@ -604,19 +589,22 @@ export default function ChatView() {
       attachment_type: attachment?.type || null,
       attachment_mime: attachment?.mime || null,
       read_at: null,
-      deleted_for: [],
-    });
+    };
+
+    const { error } = await (supabase as any)
+      .from('chat_dm_messages')
+      .insert(messageData);
 
     if (error) {
-      console.error(error);
-      toast.error('No se pudo enviar el mensaje directo');
+      console.error('Error detallado:', error);
+      toast.error(`No se pudo enviar: ${error.message || 'Error desconocido'}`);
       return;
     }
 
     setText('');
     setShowEmojis(false);
-    loadDmMessages(selectedPeer);
-    loadThreads();
+    await loadDmMessages(selectedPeer);
+    await loadThreads();
   };
 
   const send = () => {
@@ -1029,26 +1017,28 @@ export default function ChatView() {
 
       <div className="chat-layout">
         <aside className="chat-sidebar">
+          {/* Selector de destinatario - Aparece en TODAS las pestañas EXCEPTO en "general" */}
+          {tab !== 'general' && (
+            <div className="chat-dm-selector">
+              <label className="chat-label">Escribir a</label>
+              <select
+                value={selectedPeer}
+                onChange={(event) => selectPeer(event.target.value)}
+                className="chat-select"
+              >
+                <option value="">-- Elegir destinatario --</option>
+                {filteredContacts.map((contact) => (
+                  <option key={contact.email} value={contact.email}>
+                    {contact.role ? `${contact.role} · ` : ''}
+                    {contact.name || contact.email}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
           {tab === 'dm' ? (
             <>
-              {/* Selector de destinatario - SOLO en Mensajes Directos */}
-              <div className="chat-dm-selector">
-                <label className="chat-label">Escribir a</label>
-                <select
-                  value={selectedPeer}
-                  onChange={(event) => selectPeer(event.target.value)}
-                  className="chat-select"
-                >
-                  <option value="">-- Elegir destinatario --</option>
-                  {filteredContacts.map((contact) => (
-                    <option key={contact.email} value={contact.email}>
-                      {contact.role ? `${contact.role} · ` : ''}
-                      {contact.name || contact.email}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
               <div className="chat-sidebar-header">
                 <strong>Conversaciones</strong>
                 <button type="button" onClick={loadThreads}>
@@ -1212,7 +1202,7 @@ export default function ChatView() {
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              disabled={(tab === 'dm' && !selectedPeer) || uploading}
+              disabled={uploading}
               title="Adjuntar archivo"
               className="chat-icon-button"
             >
@@ -1222,7 +1212,7 @@ export default function ChatView() {
             <button
               type="button"
               onClick={startRecording}
-              disabled={(tab === 'dm' && !selectedPeer) || uploading}
+              disabled={uploading}
               title={recording ? 'Detener audio' : 'Grabar audio'}
               className={`chat-icon-button ${recording ? 'recording' : ''}`}
             >
@@ -1233,7 +1223,6 @@ export default function ChatView() {
               <button
                 type="button"
                 onClick={() => setShowEmojis((value) => !value)}
-                disabled={tab === 'dm' && !selectedPeer}
                 title="Emojis"
                 className="chat-icon-button"
               >
@@ -1265,7 +1254,6 @@ export default function ChatView() {
                   send();
                 }
               }}
-              disabled={false}
               className="chat-input"
             />
 
