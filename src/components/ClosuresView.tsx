@@ -11,9 +11,13 @@ export default function ClosuresView() {
   const myEmail = profile?.email || '';
   const [orders, setOrders] = useState<any[]>([]);
   const [deliveries, setDeliveries] = useState<any[]>([]);
+  const [suppliers, setSuppliers] = useState<any[]>([]);
   const [fees, setFees] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
+  
+  // Filtros mejorados para DELIVERY
   const [filterDelivery, setFilterDelivery] = useState(role === 'DELIVERY' ? (profile?.email || '') : '');
+  const [filterSupplier, setFilterSupplier] = useState('');
   const [filterType, setFilterType] = useState('ENTREGADO');
   const [rendicionNote, setRendicionNote] = useState('');
   const [rendicionPagada, setRendicionPagada] = useState<{ id: string; pagado_en: string; nota: string; marcado_por: string } | null>(null);
@@ -23,11 +27,21 @@ export default function ClosuresView() {
   });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
 
-  // Total de pedidos asignados
   const [totalPedidosAsignados, setTotalPedidosAsignados] = useState(0);
 
   useEffect(() => {
-    supabase.from('profiles').select('email, name').then(({ data }) => setDeliveries(data || []));
+    // Cargar deliveries
+    supabase.from('profiles').select('email, name, role').then(({ data }) => {
+      const deliveryUsers = (data || []).filter(d => d.role === 'DELIVERY');
+      setDeliveries(deliveryUsers);
+    });
+    
+    // Cargar proveedores
+    supabase.from('profiles').select('email, name, role').then(({ data }) => {
+      const supplierUsers = (data || []).filter(d => d.role === 'PROVEEDOR');
+      setSuppliers(supplierUsers);
+    });
+    
     supabase.from('delivery_fees').select('*').then(({ data }) => setFees(data || []));
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
   }, []);
@@ -38,19 +52,44 @@ export default function ClosuresView() {
       .lte('assigned_at', dateTo + 'T23:59:59')
       .order('assigned_at', { ascending: false });
 
-    if (filterDelivery) query = query.eq('assigned_delivery', filterDelivery);
+    // FILTRO POR ROL Y PROVEEDOR
+    if (role === 'PROVEEDOR') {
+      // PROVEEDOR solo ve sus propios pedidos
+      query = query.eq('supplier_email', myEmail);
+    } else if (role === 'DELIVERY') {
+      // DELIVERY ve sus pedidos asignados
+      query = query.eq('assigned_delivery', myEmail);
+      // Si seleccionó un proveedor específico, filtrar
+      if (filterSupplier) {
+        query = query.eq('supplier_email', filterSupplier);
+      }
+    } else if (role === 'ADMIN') {
+      // ADMIN puede filtrar por delivery y proveedor
+      if (filterDelivery) query = query.eq('assigned_delivery', filterDelivery);
+      if (filterSupplier) query = query.eq('supplier_email', filterSupplier);
+    }
+
     if (filterType) query = query.eq('status', filterType);
 
     const { data } = await query;
     setOrders(data || []);
-    
-    // Calcular total de pedidos asignados
     setTotalPedidosAsignados(data?.length || 0);
 
     // Check if rendición already paid
-    if (filterDelivery) {
+    let deliveryToCheck = '';
+    if (role === 'PROVEEDOR') {
+      // PROVEEDOR no necesita ver rendiciones pagadas
+      setRendicionPagada(null);
+      return;
+    } else if (role === 'DELIVERY') {
+      deliveryToCheck = myEmail;
+    } else if (role === 'ADMIN' && filterDelivery) {
+      deliveryToCheck = filterDelivery;
+    }
+    
+    if (deliveryToCheck) {
       const { data: rp } = await supabase.from('rendiciones_pagadas').select('*')
-        .eq('delivery_email', filterDelivery)
+        .eq('delivery_email', deliveryToCheck)
         .gte('pagado_en', dateFrom + 'T00:00:00')
         .lte('pagado_en', dateTo + 'T23:59:59')
         .order('pagado_en', { ascending: false })
@@ -61,7 +100,7 @@ export default function ClosuresView() {
     }
   };
 
-  useEffect(() => { loadClosures(); }, []);
+  useEffect(() => { loadClosures(); }, [filterSupplier]);
 
   const getFee = (deliveryEmail: string, city: string) => {
     const f = fees.find(f => f.delivery_email?.toLowerCase() === deliveryEmail?.toLowerCase() && f.city?.toLowerCase() === city?.toLowerCase());
@@ -100,14 +139,11 @@ export default function ClosuresView() {
     }, 0);
   }, [delivered]);
 
-  // FUNCIONES DE ACTUALIZACIÓN DE ESTADOS
   const updateStatus1 = async (orderId: string, status: string) => {
-    // VALIDACIÓN: Solo ADMIN y PROVEEDOR pueden cambiar a DEVUELTO A DEPÓSITO
-    if (status === 'DEVUELTO A DEPÓSITO') {
-      if (role !== 'ADMIN' && role !== 'PROVEEDOR') {
-        toast.error('No tienes permiso para cambiar a DEVUELTO A DEPÓSITO. Solo Administradores y Proveedores pueden hacerlo.');
-        return;
-      }
+    // VALIDACIÓN: DELIVERY no puede cambiar a DEVUELTO A DEPÓSITO
+    if (status === 'DEVUELTO A DEPÓSITO' && role === 'DELIVERY') {
+      toast.error('Los repartidores no pueden cambiar a DEVUELTO A DEPÓSITO');
+      return;
     }
 
     const { error } = await supabase.from('orders').update({ 
@@ -116,7 +152,7 @@ export default function ClosuresView() {
     }).eq('id', orderId);
     if (error) toast.error(error.message);
     else { 
-      toast.success('Estado 1 actualizado'); 
+      toast.success('Estado actualizado'); 
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status } : o));
       loadClosures();
     }
@@ -171,7 +207,13 @@ export default function ClosuresView() {
   };
 
   const markRendicionPagada = async () => {
-    const deliveryEmail = filterDelivery;
+    let deliveryEmail = '';
+    if (role === 'DELIVERY') {
+      deliveryEmail = myEmail;
+    } else if (role === 'ADMIN') {
+      deliveryEmail = filterDelivery;
+    }
+    
     if (!deliveryEmail) { toast.error('Seleccioná un delivery primero'); return; }
 
     if (totalAPagar <= 0) { toast.error('No hay monto para rendir'); return; }
@@ -213,6 +255,13 @@ export default function ClosuresView() {
     if (!rendicionPagada) return;
     if (!confirm('¿Desmarcar esta rendición como pagada?')) return;
 
+    let deliveryEmail = '';
+    if (role === 'DELIVERY') {
+      deliveryEmail = myEmail;
+    } else if (role === 'ADMIN') {
+      deliveryEmail = filterDelivery;
+    }
+
     for (const o of delivered) {
       await supabase.from('orders').update({
         delivery_settled: false,
@@ -225,7 +274,7 @@ export default function ClosuresView() {
     await supabase.from('rendiciones_pagadas').delete().eq('id', rendicionPagada.id);
 
     await supabase.from('news').insert({
-      message: `Rendición de ${filterDelivery} DESMARCADA como pagada por ${myEmail}`,
+      message: `Rendición de ${deliveryEmail} DESMARCADA como pagada por ${myEmail}`,
       actor_email: myEmail,
       role_scope: role,
     });
@@ -234,20 +283,26 @@ export default function ClosuresView() {
     loadClosures();
   };
 
-  // OPCIONES DE ESTADO 1 CON LOS NUEVOS ESTADOS AGREGADOS
   const status1Opts = ['PENDIENTE', 'EN RUTA', 'ENTREGADO', 'ENCOMIENDA ENTREGADA', 'CANCELADO', 'DEVUELTO A DEPÓSITO', 'REAGENDADO'];
   const state2Opts = ['--', 'GUIA GENERADA', 'FUERA DE COBERTURA', 'CANCELADO', 'REPETIDO', 'RENDIDO'];
   const retiroOpts = ['', 'PENDIENTE', 'REALIZADO', 'CANCELADO'];
   
-  const deliveryName = deliveries.find(d => d.email === filterDelivery)?.name || filterDelivery || 'Todos los repartidores';
+  let deliveryName = '';
+  if (role === 'DELIVERY') {
+    deliveryName = profile?.name || myEmail;
+  } else if (role === 'ADMIN' && filterDelivery) {
+    deliveryName = deliveries.find(d => d.email === filterDelivery)?.name || filterDelivery;
+  } else {
+    deliveryName = 'Todos los repartidores';
+  }
+  
   const allRendered = noRendidos.length === 0 && delivered.length > 0;
   
-  // PERMISOS:
-  // DELIVERY: solo puede editar Estado 1 (pero no puede cambiar a DEVUELTO A DEPÓSITO)
-  // ADMIN y PROVEEDOR: pueden editar todo
-  const canEditFull = role === 'ADMIN' || role === 'PROVEEDOR';  // Puede editar fecha, ciudad, estado retiro, estado2
-  const canEditStatus1 = role === 'ADMIN' || role === 'PROVEEDOR' || role === 'DELIVERY';  // Puede editar Estado 1
-  const canManageRendicion = role === 'ADMIN' || role === 'PROVEEDOR';  // Puede ver Control de Rendición y marcar PAGADO
+  // PERMISOS
+  const canEditFull = role === 'ADMIN' || role === 'PROVEEDOR';
+  const canEditStatus1 = role === 'ADMIN' || role === 'PROVEEDOR' || role === 'DELIVERY';
+  const canManageRendicion = role === 'ADMIN'; // Solo ADMIN puede marcar rendiciones pagadas
+  const canViewRendicion = role === 'ADMIN' || role === 'DELIVERY'; // DELIVERY puede ver su control
 
   return (
     <div className="app-card">
@@ -267,17 +322,29 @@ export default function ClosuresView() {
         </div>
       )}
 
+      {/* Filtros */}
       <div className="flex flex-wrap gap-2 mb-3">
         <label className="app-label !mt-0">Desde</label>
         <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
         <label className="app-label !mt-0">Hasta</label>
         <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
-        {role !== 'DELIVERY' && (
+        
+        {/* Filtro por Delivery - solo para ADMIN */}
+        {role === 'ADMIN' && (
           <select className="app-input !w-auto min-w-[280px]" value={filterDelivery} onChange={e => setFilterDelivery(e.target.value)}>
             <option value="">Todos los repartidores</option>
             {deliveries.map(d => <option key={d.email} value={d.email}>{d.name || d.email}</option>)}
           </select>
         )}
+
+        {/* FILTRO POR PROVEEDOR - para ADMIN y DELIVERY */}
+        {(role === 'ADMIN' || role === 'DELIVERY') && (
+          <select className="app-input !w-auto min-w-[280px]" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
+            <option value="">Todos los proveedores</option>
+            {suppliers.map(s => <option key={s.email} value={s.email}>{s.name || s.email}</option>)}
+          </select>
+        )}
+
         <select className="app-input !w-auto min-w-[200px]" value={filterType} onChange={e => setFilterType(e.target.value)}>
           <option value="">Todos los tipos</option>
           <option value="ENTREGADO">ENTREGADO</option>
@@ -291,8 +358,8 @@ export default function ClosuresView() {
         <button className="nav-btn active" onClick={loadClosures}>Aplicar</button>
       </div>
 
-      {/* NUEVO KPI - Total de Pedidos Asignados */}
-      {filterDelivery && (
+      {/* Total de Pedidos Asignados */}
+      {(filterDelivery || role === 'DELIVERY' || role === 'PROVEEDOR') && (
         <div className="grid-kpi mb-4">
           <div className="kpi-card">
             <div className="text-xs text-muted-foreground mb-1">📦 Pedidos Asignados</div>
@@ -302,8 +369,8 @@ export default function ClosuresView() {
         </div>
       )}
 
-      {/* Control de Rendición card - solo para ADMIN y PROVEEDOR */}
-      {canManageRendicion && delivered.length > 0 && (
+      {/* Control de Rendición - para ADMIN y DELIVERY */}
+      {canViewRendicion && delivered.length > 0 && (
         <div className="app-card !p-4 mb-4 border-l-4 border-l-[hsl(var(--primary))]">
           <h4 className="font-extrabold mb-3">📋 Control de Rendición</h4>
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mb-3">
@@ -313,7 +380,7 @@ export default function ClosuresView() {
             </div>
             <div className="flex items-center gap-2">
               <span className="chip text-[11px]">Fecha:</span>
-              <span className="text-sm">{dateFrom}</span>
+              <span className="text-sm">{dateFrom} a {dateTo}</span>
             </div>
             <div className="flex items-center gap-2">
               <span className="chip text-[11px]">Total a pagar:</span>
@@ -326,6 +393,7 @@ export default function ClosuresView() {
               </span>
             </div>
           </div>
+          
           {rendicionPagada ? (
             <div className="p-3 rounded-xl border border-[#4ade80]/30 bg-[#4ade80]/10">
               <div className="flex flex-wrap items-center gap-4">
@@ -343,7 +411,7 @@ export default function ClosuresView() {
                     <span className="font-bold text-foreground">Nota:</span> {rendicionPagada.nota}
                   </div>
                 )}
-                {(role === 'ADMIN' || role === 'PROVEEDOR') && (
+                {role === 'ADMIN' && (
                   <button
                     onClick={desmarcarPagado}
                     className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold border border-destructive/30 text-destructive hover:bg-destructive/10 transition-all"
@@ -354,23 +422,26 @@ export default function ClosuresView() {
               </div>
             </div>
           ) : (
-            <div className="flex flex-wrap items-center gap-3">
-              <input className="app-input flex-1 min-w-[250px]" placeholder="Agregar nota (opcional)"
-                value={rendicionNote} onChange={e => setRendicionNote(e.target.value)} />
-              <button
-                onClick={markRendicionPagada}
-                disabled={!filterDelivery || totalAPagar <= 0}
-                className="nav-btn active"
-              >
-                ✅ MARCAR COMO PAGADO
-              </button>
-            </div>
+            canManageRendicion && (
+              <div className="flex flex-wrap items-center gap-3">
+                <input className="app-input flex-1 min-w-[250px]" placeholder="Agregar nota (opcional)"
+                  value={rendicionNote} onChange={e => setRendicionNote(e.target.value)} />
+                <button
+                  onClick={markRendicionPagada}
+                  disabled={!filterDelivery && role === 'ADMIN' || totalAPagar <= 0}
+                  className="nav-btn active"
+                >
+                  ✅ MARCAR COMO PAGADO
+                </button>
+              </div>
+            )
           )}
         </div>
       )}
 
       <p className="chip mb-3 text-[10px]">Los KPIs se calculan <strong>solo</strong> con Estado 1 = ENTREGADO.</p>
 
+      {/* KPIs */}
       <div className="grid-kpi mb-4">
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">ENTREGADOS</div><div className="text-[22px] font-extrabold">{kpis.entregados}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.entregadosRev)}</div></div>
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">ENCOMIENDAS</div><div className="text-[22px] font-extrabold">{kpis.encomiendas}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.encomiendaRev)}</div></div>
@@ -380,15 +451,16 @@ export default function ClosuresView() {
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Ya rendidos</div><div className="text-[22px] font-extrabold" style={{ color: '#4ade80' }}>{kpis.rendidos}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.montoRendido)}</div></div>
       </div>
 
+      {/* Tabla de pedidos */}
       <div className="overflow-auto">
         <table className="app-table min-w-[1500px]">
           <thead>
             <tr>
-              <th>Asignado</th><th>ID</th><th>Ciudad</th><th>Cliente</th>
+              <th>Asignado</th><th>ID</th><th>Ciudad</th><th>Cliente</th><th>Proveedor</th>
               <th className="text-right">Total (Gs)</th><th className="text-right">Tarifa (Gs)</th>
               <th className="text-right">Neto (Gs)</th><th>Estado 1</th>
               <th>Estado de retiro</th><th>Estado 2 (cierre)</th>
-              {canManageRendicion && <th></th>}
+              {(role === 'ADMIN' || role === 'PROVEEDOR') && <th></th>}
             </tr>
           </thead>
           <tbody>
@@ -398,19 +470,17 @@ export default function ClosuresView() {
               const isSettled = o.delivery_settled;
               const assignedDate = o.assigned_at ? new Date(o.assigned_at).toISOString().slice(0, 10) : '';
               
-              // Determinar estilo del badge para los nuevos estados
               const getStatusBadgeClass = (status: string) => {
                 if (status === 'ENTREGADO' || status === 'ENCOMIENDA ENTREGADA') return 'badge-entregado';
                 if (status === 'CANCELADO') return 'badge-cancelado';
-                if (status === 'DEVUELTO A DEPÓSITO') return 'badge-warning'; // Puedes definir esta clase en tu CSS
-                if (status === 'REAGENDADO') return 'badge-info'; // Puedes definir esta clase en tu CSS
+                if (status === 'DEVUELTO A DEPÓSITO') return 'badge-warning';
+                if (status === 'REAGENDADO') return 'badge-info';
                 return 'badge-pendiente';
               };
               
               return (
                 <tr key={o.id} className={isSettled ? 'opacity-60' : ''}>
                   <td>
-                    {/* Fecha: solo ADMIN y PROVEEDOR pueden editar */}
                     {canEditFull ? (
                       <input type="date" className="app-input !py-1 !px-2 !text-xs !w-[130px]"
                         value={assignedDate}
@@ -421,7 +491,6 @@ export default function ClosuresView() {
                   </td>
                   <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
                   <td>
-                    {/* Ciudad: solo ADMIN y PROVEEDOR pueden editar */}
                     {canEditFull ? (
                       <select className="app-input !py-1 !px-2 !text-xs !w-auto !min-w-[120px]"
                         value={o.city || ''}
@@ -435,11 +504,11 @@ export default function ClosuresView() {
                     )}
                   </td>
                   <td className="text-xs">{o.customer_name}</td>
+                  <td className="text-xs">{o.supplier_email || '—'}</td>
                   <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
                   <td className="text-right text-xs">{nf(fee)}</td>
                   <td className="text-right text-xs">{nf(net)}</td>
                   <td>
-                    {/* Estado 1: DELIVERY, ADMIN y PROVEEDOR pueden editar */}
                     {canEditStatus1 ? (
                       <select 
                         className="app-input !w-auto !py-1 !px-2 text-xs"
@@ -453,7 +522,6 @@ export default function ClosuresView() {
                     )}
                   </td>
                   <td>
-                    {/* Estado de retiro: solo ADMIN y PROVEEDOR pueden editar */}
                     {canEditFull ? (
                       <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.estado_retiro || ''}
                         onChange={e => updateRetiro(o.id, e.target.value)}>
@@ -462,7 +530,6 @@ export default function ClosuresView() {
                     ) : <span className="text-xs">{o.estado_retiro || '—'}</span>}
                   </td>
                   <td>
-                    {/* Estado 2: solo ADMIN y PROVEEDOR pueden editar */}
                     {canEditFull ? (
                       <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.status2 || '--'}
                         onChange={e => updateStatus2(o.id, e.target.value)}>
@@ -470,7 +537,7 @@ export default function ClosuresView() {
                       </select>
                     ) : <span className="text-xs">{o.status2 || '—'}</span>}
                   </td>
-                  {canManageRendicion && (
+                  {(role === 'ADMIN' || role === 'PROVEEDOR') && (
                     <td>
                       <div className="flex items-center gap-1">
                         {!isSettled && (o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA') && (
@@ -490,7 +557,7 @@ export default function ClosuresView() {
                 </tr>
               );
             })}
-            {orders.length === 0 && <tr><td colSpan={canManageRendicion ? 11 : 10} className="text-center text-muted-foreground py-8">Sin resultados</td></tr>}
+            {orders.length === 0 && <tr><td colSpan={(role === 'ADMIN' || role === 'PROVEEDOR') ? 12 : 11} className="text-center text-muted-foreground py-8">Sin resultados</td></tr>}
           </tbody>
         </table>
       </div>
