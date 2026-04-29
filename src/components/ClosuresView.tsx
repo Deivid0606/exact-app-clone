@@ -29,18 +29,25 @@ export default function ClosuresView() {
 
   const [totalPedidosAsignados, setTotalPedidosAsignados] = useState(0);
 
+  // Cargar los 3 proveedores del sistema
+  const loadSuppliers = () => {
+    const mainSuppliers = [
+      { email: 'skylinestore06@gmail.com', name: '🏪 PROVEEDOR SKYLINE' },
+      { email: 'importadoraaliado@gmail.com', name: '📦 IMPORTS ALIADEX' },
+      { email: 'nkshop@gmail.com', name: '🛍️ PROVEEDOR NKSHOP' }
+    ];
+    setSuppliers(mainSuppliers);
+  };
+
   useEffect(() => {
     // Cargar deliveries
     supabase.from('profiles').select('email, name, role').then(({ data }) => {
-      const deliveryUsers = (data || []).filter(d => d.role === 'DELIVERY');
+      const deliveryUsers = (data || []).filter(d => d.role === 'DELIVERY' || d.email === 'aleimportss@gmail.com');
       setDeliveries(deliveryUsers);
     });
     
-    // Cargar proveedores
-    supabase.from('profiles').select('email, name, role').then(({ data }) => {
-      const supplierUsers = (data || []).filter(d => d.role === 'PROVEEDOR');
-      setSuppliers(supplierUsers);
-    });
+    // Cargar los 3 proveedores
+    loadSuppliers();
     
     supabase.from('delivery_fees').select('*').then(({ data }) => setFees(data || []));
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
@@ -78,7 +85,6 @@ export default function ClosuresView() {
     // Check if rendición already paid
     let deliveryToCheck = '';
     if (role === 'PROVEEDOR') {
-      // PROVEEDOR no necesita ver rendiciones pagadas
       setRendicionPagada(null);
       return;
     } else if (role === 'DELIVERY') {
@@ -100,7 +106,7 @@ export default function ClosuresView() {
     }
   };
 
-  useEffect(() => { loadClosures(); }, [filterSupplier]);
+  useEffect(() => { loadClosures(); }, [filterSupplier, filterDelivery, filterType, dateFrom, dateTo]);
 
   const getFee = (deliveryEmail: string, city: string) => {
     const f = fees.find(f => f.delivery_email?.toLowerCase() === deliveryEmail?.toLowerCase() && f.city?.toLowerCase() === city?.toLowerCase());
@@ -140,7 +146,6 @@ export default function ClosuresView() {
   }, [delivered]);
 
   const updateStatus1 = async (orderId: string, status: string) => {
-    // VALIDACIÓN: DELIVERY no puede cambiar a DEVUELTO A DEPÓSITO
     if (status === 'DEVUELTO A DEPÓSITO' && role === 'DELIVERY') {
       toast.error('Los repartidores no pueden cambiar a DEVUELTO A DEPÓSITO');
       return;
@@ -301,8 +306,8 @@ export default function ClosuresView() {
   // PERMISOS
   const canEditFull = role === 'ADMIN' || role === 'PROVEEDOR';
   const canEditStatus1 = role === 'ADMIN' || role === 'PROVEEDOR' || role === 'DELIVERY';
-  const canManageRendicion = role === 'ADMIN'; // Solo ADMIN puede marcar rendiciones pagadas
-  const canViewRendicion = role === 'ADMIN' || role === 'DELIVERY'; // DELIVERY puede ver su control
+  const canManageRendicion = role === 'ADMIN';
+  const canViewRendicion = role === 'ADMIN' || role === 'DELIVERY';
 
   return (
     <div className="app-card">
@@ -329,7 +334,6 @@ export default function ClosuresView() {
         <label className="app-label !mt-0">Hasta</label>
         <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
         
-        {/* Filtro por Delivery - solo para ADMIN */}
         {role === 'ADMIN' && (
           <select className="app-input !w-auto min-w-[280px]" value={filterDelivery} onChange={e => setFilterDelivery(e.target.value)}>
             <option value="">Todos los repartidores</option>
@@ -337,11 +341,15 @@ export default function ClosuresView() {
           </select>
         )}
 
-        {/* FILTRO POR PROVEEDOR - para ADMIN y DELIVERY */}
+        {/* FILTRO POR PROVEEDOR - para ADMIN y DELIVERY con los 3 proveedores */}
         {(role === 'ADMIN' || role === 'DELIVERY') && (
           <select className="app-input !w-auto min-w-[280px]" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
-            <option value="">Todos los proveedores</option>
-            {suppliers.map(s => <option key={s.email} value={s.email}>{s.name || s.email}</option>)}
+            <option value="">📋 Todos los proveedores</option>
+            {suppliers.map(s => (
+              <option key={s.email} value={s.email}>
+                {s.name || s.email}
+              </option>
+            ))}
           </select>
         )}
 
@@ -369,7 +377,7 @@ export default function ClosuresView() {
         </div>
       )}
 
-      {/* Control de Rendición - para ADMIN y DELIVERY */}
+      {/* Control de Rendición */}
       {canViewRendicion && delivered.length > 0 && (
         <div className="app-card !p-4 mb-4 border-l-4 border-l-[hsl(var(--primary))]">
           <h4 className="font-extrabold mb-3">📋 Control de Rendición</h4>
@@ -480,7 +488,7 @@ export default function ClosuresView() {
               
               return (
                 <tr key={o.id} className={isSettled ? 'opacity-60' : ''}>
-                  <td>
+                  </td>
                     {canEditFull ? (
                       <input type="date" className="app-input !py-1 !px-2 !text-xs !w-[130px]"
                         value={assignedDate}
