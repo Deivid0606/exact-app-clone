@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
@@ -40,6 +40,7 @@ type ChatMessage = {
   from_email?: string | null;
   from_role?: string | null;
   to_email?: string | null;
+  thread_key?: string | null;
   message_text: string | null;
   attachment_url: string | null;
   attachment_name: string | null;
@@ -56,40 +57,20 @@ type Thread = {
   peerName: string;
   lastMsg: string;
   lastTime: string;
-  unread?: number;
+  unread: number;
 };
 
 const FALLBACK_CHANNELS: ChatChannel[] = [
-  {
-    channel_key: 'general',
-    title: 'Chat General',
-    logo_url: null,
-  },
-  {
-    channel_key: 'consulta_comisiones',
-    title: 'Consulta de comisiones',
-    logo_url: null,
-  },
+  { channel_key: 'general', title: 'Chat General', logo_url: null },
+  { channel_key: 'consulta_comisiones', title: 'Consulta de comisiones', logo_url: null },
   {
     channel_key: 'comprobantes_transferencias',
     title: 'Comprobantes de transferencias para encomienda',
     logo_url: null,
   },
-  {
-    channel_key: 'reclamos_garantias',
-    title: 'Reclamos y garantías',
-    logo_url: null,
-  },
-  {
-    channel_key: 'consultas_estados',
-    title: 'Consultas de estados',
-    logo_url: null,
-  },
-  {
-    channel_key: 'fotos_productos',
-    title: 'Fotos de productos',
-    logo_url: null,
-  },
+  { channel_key: 'reclamos_garantias', title: 'Reclamos y garantías', logo_url: null },
+  { channel_key: 'consultas_estados', title: 'Consultas de estados', logo_url: null },
+  { channel_key: 'fotos_productos', title: 'Fotos de productos', logo_url: null },
 ];
 
 const EMOJIS = ['😀', '😂', '😍', '👍', '🙏', '🔥', '📦', '✅', '⚠️', '💰', '🚚', '🧾'];
@@ -158,10 +139,11 @@ export default function ChatView() {
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const typingTimeoutRef = useRef<number | null>(null);
+  const typingChannelRef = useRef<any>(null);
 
   const activeChannel = useMemo(() => {
     if (tab === 'dm') return null;
-    return channels.find((c) => c.channel_key === tab) || FALLBACK_CHANNELS[0];
+    return channels.find((channel) => channel.channel_key === tab) || FALLBACK_CHANNELS[0];
   }, [channels, tab]);
 
   const contactMap = useMemo(() => {
@@ -176,6 +158,8 @@ export default function ChatView() {
 
     return map;
   }, [contacts]);
+
+  const messages = tab === 'dm' ? dmMessages : channelMessages;
 
   const threadKey = (a: string, b: string) => {
     const x = a.toLowerCase();
@@ -195,6 +179,7 @@ export default function ChatView() {
 
   const markChannelSeenLocal = (channelKey: string) => {
     if (!myEmail) return;
+
     localStorage.setItem(getLastSeenKey(channelKey), new Date().toISOString());
     setUnreadByChannel((prev) => ({ ...prev, [channelKey]: 0 }));
   };
@@ -213,7 +198,7 @@ export default function ChatView() {
     setChannels(
       data.map((item: any) => ({
         id: item.id,
-        channel_key: item.channel_key,
+        channel_key: item.channel_key as ChannelKey,
         title: item.title,
         logo_url: item.logo_url || null,
       })),
@@ -241,9 +226,7 @@ export default function ChatView() {
     );
   };
 
-  const loadChannelMessages = async (channelKey: ChannelKey = tab as ChannelKey) => {
-    if (!channelKey || channelKey === 'dm') return;
-
+  const loadChannelMessages = async (channelKey: ChannelKey) => {
     const { data, error } = await (supabase as any)
       .from('chat_messages')
       .select('*')
@@ -319,7 +302,6 @@ export default function ChatView() {
       const key = threadKey(myEmail, peer);
 
       if (!map.has(key)) {
-        const peerName = contactMap[peer.toLowerCase()]?.name || peer;
         const unread = (data || []).filter(
           (item: ChatMessage) =>
             item.thread_key === key &&
@@ -330,7 +312,7 @@ export default function ChatView() {
         map.set(key, {
           key,
           peer,
-          peerName,
+          peerName: contactMap[peer.toLowerCase()]?.name || peer,
           lastMsg: message.message_text || message.attachment_name || 'Adjunto',
           lastTime: message.created_at,
           unread,
@@ -374,18 +356,17 @@ export default function ChatView() {
 
   const selectPeer = (peer: string) => {
     setSelectedPeer(peer);
-    loadDmMessages(peer);
+    if (peer) loadDmMessages(peer);
   };
 
   const handleFileUpload = async (file: File): Promise<Attachment | null> => {
     setUploading(true);
 
     try {
-      const ext = file.name.split('.').pop() || 'file';
       const safeName = file.name.replace(/[^\w.\-]+/g, '_');
       const path = `${myEmail || 'anon'}/${Date.now()}_${Math.random()
         .toString(36)
-        .slice(2)}_${safeName}.${ext}`;
+        .slice(2)}_${safeName}`;
 
       const { error } = await supabase.storage.from('chat-attachments').upload(path, file);
 
@@ -417,7 +398,7 @@ export default function ChatView() {
     if (!text.trim() && !attachment) return;
     if (!myEmail) return;
 
-    const payload = {
+    const { error } = await (supabase as any).from('chat_messages').insert({
       sender_email: myEmail,
       sender_role: myRole,
       message_text: text.trim() || (attachment ? `📎 ${attachment.name}` : ''),
@@ -426,9 +407,7 @@ export default function ChatView() {
       attachment_type: attachment?.type || null,
       attachment_mime: attachment?.mime || null,
       channel_key: tab,
-    };
-
-    const { error } = await (supabase as any).from('chat_messages').insert(payload);
+    });
 
     if (error) {
       console.error(error);
@@ -449,7 +428,7 @@ export default function ChatView() {
 
     const key = threadKey(myEmail, selectedPeer);
 
-    const payload = {
+    const { error } = await (supabase as any).from('chat_dm_messages').insert({
       thread_key: key,
       from_email: myEmail,
       to_email: selectedPeer,
@@ -460,9 +439,7 @@ export default function ChatView() {
       attachment_type: attachment?.type || null,
       attachment_mime: attachment?.mime || null,
       read_at: null,
-    };
-
-    const { error } = await (supabase as any).from('chat_dm_messages').insert(payload);
+    });
 
     if (error) {
       console.error(error);
@@ -486,11 +463,9 @@ export default function ChatView() {
 
   const handleFileInput = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-
     if (!file) return;
 
     const attachment = await handleFileUpload(file);
-
     if (!attachment) return;
 
     if (tab === 'dm') {
@@ -586,17 +561,14 @@ export default function ChatView() {
 
       recorder.onstop = async () => {
         setRecording(false);
-
         stream.getTracks().forEach((track) => track.stop());
 
         const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
-
         const file = new File([blob], `audio_${Date.now()}.webm`, {
           type: 'audio/webm',
         });
 
         const attachment = await handleFileUpload(file);
-
         if (!attachment) return;
 
         if (tab === 'dm') {
@@ -619,24 +591,12 @@ export default function ChatView() {
   const trackTyping = (value: string) => {
     setText(value);
 
-    if (!myEmail) return;
+    if (!myEmail || !typingChannelRef.current) return;
 
-    const typingChannelName =
-      tab === 'dm' && selectedPeer
-        ? `typing-dm-${threadKey(myEmail, selectedPeer)}`
-        : `typing-channel-${tab}`;
-
-    const channel = supabase.channel(typingChannelName);
-
-    channel.subscribe((status) => {
-      if (status === 'SUBSCRIBED') {
-        channel.track({
-          email: myEmail,
-          name: profile?.name || myEmail,
-          tab,
-          typing: true,
-        });
-      }
+    typingChannelRef.current.track({
+      email: myEmail,
+      name: profile?.name || myEmail,
+      typing: true,
     });
 
     if (typingTimeoutRef.current) {
@@ -644,14 +604,11 @@ export default function ChatView() {
     }
 
     typingTimeoutRef.current = window.setTimeout(() => {
-      channel.track({
+      typingChannelRef.current?.track({
         email: myEmail,
         name: profile?.name || myEmail,
-        tab,
         typing: false,
       });
-
-      supabase.removeChannel(channel);
     }, 1200);
   };
 
@@ -706,19 +663,14 @@ export default function ChatView() {
     const senderName = contactMap[senderEmail?.toLowerCase() || '']?.name || senderEmail;
 
     return (
-      <div
-        key={message.id}
-        className={`chat-message-row ${mine ? 'mine' : 'theirs'}`}
-      >
+      <div key={message.id} className={`chat-message-row ${mine ? 'mine' : 'theirs'}`}>
         <div className="chat-message-bubble">
           <div className="chat-message-meta">
             {senderRole && <span className="chat-role">{senderRole}</span>}
             <strong>{senderName}</strong>
           </div>
 
-          {message.message_text && (
-            <p className="chat-message-text">{message.message_text}</p>
-          )}
+          {message.message_text && <p className="chat-message-text">{message.message_text}</p>}
 
           {renderAttachment(message)}
 
@@ -735,8 +687,6 @@ export default function ChatView() {
       </div>
     );
   };
-
-  const messages = tab === 'dm' ? dmMessages : channelMessages;
 
   useEffect(() => {
     loadChannels();
@@ -760,7 +710,7 @@ export default function ChatView() {
   useEffect(() => {
     if (!myEmail) return;
 
-    const channel = supabase
+    const realtimeChannel = supabase
       .channel('chat-realtime')
       .on(
         'postgres_changes',
@@ -795,7 +745,7 @@ export default function ChatView() {
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      supabase.removeChannel(realtimeChannel);
     };
   }, [myEmail, tab, selectedPeer]);
 
@@ -807,7 +757,7 @@ export default function ChatView() {
         ? `typing-dm-${threadKey(myEmail, selectedPeer)}`
         : `typing-channel-${tab}`;
 
-    const channel = supabase.channel(typingChannelName, {
+    const typingChannel = supabase.channel(typingChannelName, {
       config: {
         presence: {
           key: myEmail,
@@ -815,22 +765,31 @@ export default function ChatView() {
       },
     });
 
-    channel
+    typingChannelRef.current = typingChannel;
+
+    typingChannel
       .on('presence', { event: 'sync' }, () => {
-        const state = channel.presenceState();
+        const state = typingChannel.presenceState();
 
         const users = Object.values(state)
           .flat()
           .filter((item: any) => item.email !== myEmail && item.typing)
           .map((item: any) => item.name || item.email);
 
-        setTypingUsers([...new Set(users)]);
+        setTypingUsers([...new Set(users)] as string[]);
       })
       .subscribe();
 
     return () => {
-      supabase.removeChannel(channel);
+      typingChannel.track({
+        email: myEmail,
+        name: profile?.name || myEmail,
+        typing: false,
+      });
+
+      typingChannelRef.current = null;
       setTypingUsers([]);
+      supabase.removeChannel(typingChannel);
     };
   }, [myEmail, tab, selectedPeer]);
 
@@ -852,7 +811,7 @@ export default function ChatView() {
               {channel.logo_url ? (
                 <img src={channel.logo_url} alt={channel.title} />
               ) : (
-                <span>{channel.title.slice(0, 1).toUpperCase()}</span>
+                <span>💬</span>
               )}
             </span>
 
@@ -910,9 +869,7 @@ export default function ChatView() {
                   key={thread.key}
                   type="button"
                   onClick={() => selectPeer(thread.peer)}
-                  className={`chat-thread ${
-                    selectedPeer === thread.peer ? 'active' : ''
-                  }`}
+                  className={`chat-thread ${selectedPeer === thread.peer ? 'active' : ''}`}
                 >
                   <div className="chat-thread-top">
                     <strong>{thread.peerName}</strong>
@@ -921,7 +878,6 @@ export default function ChatView() {
 
                   <div className="chat-thread-bottom">
                     <span>{thread.lastMsg}</span>
-
                     {!!thread.unread && (
                       <span className="chat-unread-badge">{thread.unread}</span>
                     )}
@@ -963,7 +919,7 @@ export default function ChatView() {
                     {activeChannel?.logo_url ? (
                       <img src={activeChannel.logo_url} alt={activeChannel.title} />
                     ) : (
-                      <span>{activeChannel?.title.slice(0, 1).toUpperCase()}</span>
+                      <span>💬</span>
                     )}
 
                     {canEditChannelLogo && (
@@ -1015,12 +971,7 @@ export default function ChatView() {
           </div>
 
           <div className="chat-composer">
-            <input
-              ref={fileInputRef}
-              type="file"
-              hidden
-              onChange={handleFileInput}
-            />
+            <input ref={fileInputRef} type="file" hidden onChange={handleFileInput} />
 
             <button
               type="button"
@@ -1085,12 +1036,7 @@ export default function ChatView() {
             <button
               type="button"
               onClick={send}
-              disabled={
-                uploading ||
-                recording ||
-                (tab === 'dm' && !selectedPeer) ||
-                !text.trim()
-              }
+              disabled={uploading || recording || (tab === 'dm' && !selectedPeer) || !text.trim()}
               className="chat-send-button"
             >
               Enviar
