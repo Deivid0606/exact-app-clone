@@ -8,31 +8,16 @@ const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 export default function ClosuresView() {
   const { profile } = useAuth();
   const myEmail = profile?.email || '';
-  const myUserId = profile?.id || '';
   
-  // ========== DETECCIÓN DE ROL POR EMAIL (porque en profiles todos son "seller") ==========
-  const supplierEmails = [
-    'skylinestore06@gmail.com',
-    'importadoraaliado@gmail.com',
-    'nkshop@gmail.com'
-  ];
+  // ========== DETECCIÓN DE ROL ==========
+  // PROVEEDORES (3 principales)
+  const isSupplier = myEmail === 'skylinestore06@gmail.com' || 
+                     myEmail === 'importadoraaliado@gmail.com' || 
+                     myEmail === 'nkshop@gmail.com';
   
-  const deliveryEmails = [
-    'aleimportss@gmail.com',
-    'pablo-godoy09importaliado@gmail.com',
-    'chirstianimporaliado04@gmail.com',
-    'santiagonandedeliveryimportaliado@gmail.com',
-    'nayder-skyline@gmail.com',
-    'roberto.skyline.@gmail.com',
-    'entregasnelson@gmail.com',
-    'juanserviannk@gmail.com'
-  ];
-  
-  const adminEmails = ['aleimportss@gmail.com'];
-  
-  const isSupplier = supplierEmails.includes(myEmail);
-  const isDelivery = deliveryEmails.includes(myEmail);
-  const isAdmin = adminEmails.includes(myEmail);
+  // DELIVERY (todos los que tienen pedidos asignados - se carga dinámicamente)
+  // ADMIN
+  const isAdmin = myEmail === 'aleimportss@gmail.com';
   
   const [orders, setOrders] = useState<any[]>([]);
   const [deliveries, setDeliveries] = useState<any[]>([]);
@@ -41,7 +26,7 @@ export default function ClosuresView() {
   const [clientPrices, setClientPrices] = useState<any[]>([]);
   
   // Filtros
-  const [filterDelivery, setFilterDelivery] = useState(isDelivery ? myEmail : '');
+  const [filterDelivery, setFilterDelivery] = useState('');
   const [filterSupplier, setFilterSupplier] = useState('');
   const [filterType, setFilterType] = useState('ENTREGADO');
   const [rendicionNote, setRendicionNote] = useState('');
@@ -53,23 +38,40 @@ export default function ClosuresView() {
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [totalPedidosAsignados, setTotalPedidosAsignados] = useState(0);
 
-  // Cargar los 3 proveedores del sistema
-  const loadSuppliers = () => {
-    const mainSuppliers = [
+  // ========== CARGAR LISTA DE DELIVERIES (todos los que tienen pedidos) ==========
+  const loadDeliveries = async () => {
+    // Obtener todos los deliveries únicos de la tabla orders
+    const { data: ordersData } = await supabase
+      .from('orders')
+      .select('assigned_delivery')
+      .not('assigned_delivery', 'is', null);
+    
+    if (ordersData && ordersData.length > 0) {
+      const uniqueEmails = [...new Set(ordersData.map(o => o.assigned_delivery))];
+      
+      // Obtener nombres desde profiles
+      const { data: profilesData } = await supabase
+        .from('profiles')
+        .select('email, name')
+        .in('email', uniqueEmails);
+      
+      if (profilesData && profilesData.length > 0) {
+        setDeliveries(profilesData);
+      } else {
+        setDeliveries(uniqueEmails.map(email => ({ email, name: email })));
+      }
+    }
+  };
+
+  // ========== CARGAR LISTA DE PROVEEDORES ==========
+  const loadSuppliers = async () => {
+    // Proveedores fijos del sistema
+    const supplierList = [
       { email: 'skylinestore06@gmail.com', name: '🏪 PROVEEDOR SKYLINE' },
       { email: 'importadoraaliado@gmail.com', name: '📦 IMPORTS ALIADEX' },
       { email: 'nkshop@gmail.com', name: '🛍️ PROVEEDOR NKSHOP' }
     ];
-    setSuppliers(mainSuppliers);
-  };
-
-  // Cargar deliveries desde profiles
-  const loadDeliveries = async () => {
-    const { data } = await supabase
-      .from('profiles')
-      .select('email, name')
-      .in('email', deliveryEmails);
-    setDeliveries(data || []);
+    setSuppliers(supplierList);
   };
 
   useEffect(() => {
@@ -85,23 +87,23 @@ export default function ClosuresView() {
       .lte('assigned_at', dateTo + 'T23:59:59')
       .order('assigned_at', { ascending: false });
 
-    // ========== FILTROS SEGÚN EL ROL ==========
+    // ========== FILTROS SEGÚN ROL ==========
     if (isSupplier) {
-      // PROVEEDOR: solo ve sus propios pedidos
+      // PROVEEDOR: solo sus pedidos
       query = query.eq('supplier_email', myEmail);
-      // El proveedor PUEDE filtrar por delivery (qué repartidor llevó sus pedidos)
+      // PROVEEDOR puede filtrar por delivery
       if (filterDelivery) {
         query = query.eq('assigned_delivery', filterDelivery);
       }
     } else if (isDelivery) {
-      // DELIVERY: ve sus pedidos asignados
+      // DELIVERY: solo sus pedidos asignados
       query = query.eq('assigned_delivery', myEmail);
-      // El delivery PUEDE filtrar por proveedor
+      // DELIVERY puede filtrar por proveedor
       if (filterSupplier) {
         query = query.eq('supplier_email', filterSupplier);
       }
     } else if (isAdmin) {
-      // ADMIN: ve todo y puede filtrar por delivery y proveedor
+      // ADMIN: todo
       if (filterDelivery) query = query.eq('assigned_delivery', filterDelivery);
       if (filterSupplier) query = query.eq('supplier_email', filterSupplier);
     }
@@ -116,9 +118,7 @@ export default function ClosuresView() {
     let deliveryToCheck = '';
     if (isDelivery) {
       deliveryToCheck = myEmail;
-    } else if (isAdmin && filterDelivery) {
-      deliveryToCheck = filterDelivery;
-    } else if (isSupplier && filterDelivery) {
+    } else if ((isAdmin || isSupplier) && filterDelivery) {
       deliveryToCheck = filterDelivery;
     }
     
@@ -288,6 +288,9 @@ export default function ClosuresView() {
   const state2Opts = ['--', 'GUIA GENERADA', 'FUERA DE COBERTURA', 'CANCELADO', 'REPETIDO', 'RENDIDO'];
   const retiroOpts = ['', 'PENDIENTE', 'REALIZADO', 'CANCELADO'];
   
+  // Determinar si el usuario actual es delivery (por si tiene pedidos asignados)
+  const isDelivery = !isSupplier && !isAdmin && deliveries.some(d => d.email === myEmail);
+  
   let deliveryName = '';
   if (isDelivery) {
     deliveryName = profile?.name || myEmail;
@@ -306,6 +309,11 @@ export default function ClosuresView() {
   return (
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Cierres</h3>
+
+      {/* Debug info */}
+      <div className="text-xs text-gray-400 mb-2 p-1 bg-gray-100 rounded">
+        Debug: Email={myEmail} | isSupplier={isSupplier ? 'SI' : 'NO'} | isDelivery={isDelivery ? 'SI' : 'NO'} | isAdmin={isAdmin ? 'SI' : 'NO'}
+      </div>
 
       {isDelivery && (
         <div className="mb-3">
@@ -329,16 +337,25 @@ export default function ClosuresView() {
         <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
         
         {/* FILTRO POR DELIVERY - visible para PROVEEDOR y ADMIN */}
-        {(isSupplier || isAdmin) && (
+        {(isSupplier || isAdmin) && deliveries.length > 0 && (
           <select className="app-input !w-auto min-w-[280px]" value={filterDelivery} onChange={e => setFilterDelivery(e.target.value)}>
             <option value="">📋 Todos los repartidores</option>
-            {deliveries.map(d => <option key={d.email} value={d.email}>{d.name || d.email}</option>)}
+            {deliveries.map(d => (
+              <option key={d.email} value={d.email}>
+                {d.name || d.email}
+              </option>
+            ))}
           </select>
         )}
 
         {/* FILTRO POR PROVEEDOR - visible para DELIVERY y ADMIN */}
-        {(isDelivery || isAdmin) && (
-          <select className="app-input !w-auto min-w-[280px]" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
+        {(isDelivery || isAdmin) && suppliers.length > 0 && (
+          <select 
+            className="app-input !w-auto min-w-[280px]" 
+            value={filterSupplier} 
+            onChange={e => setFilterSupplier(e.target.value)}
+            style={{ borderColor: '#22c55e', borderWidth: '2px', backgroundColor: '#f0fdf4' }}
+          >
             <option value="">📋 Todos los proveedores</option>
             {suppliers.map(s => (
               <option key={s.email} value={s.email}>
