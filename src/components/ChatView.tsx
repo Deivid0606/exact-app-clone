@@ -29,7 +29,7 @@ type ChatChannel = {
 type Attachment = {
   url: string;
   name: string;
-  type: 'image' | 'audio' | 'file';
+  type: 'image' | 'audio' | 'video' | 'file';
   mime: string;
 };
 
@@ -92,16 +92,26 @@ const DM_CHANNELS: ChatTab[] = [
 function getAttachmentType(file: File): Attachment['type'] {
   if (file.type.startsWith('image/')) return 'image';
   if (file.type.startsWith('audio/')) return 'audio';
+  if (file.type.startsWith('video/')) return 'video';
   return 'file';
 }
 
 function inferAttachmentType(message: ChatMessage): Attachment['type'] {
   if (message.attachment_type === 'image') return 'image';
   if (message.attachment_type === 'audio') return 'audio';
+  if (message.attachment_type === 'video') return 'video';
 
   const name = (message.attachment_name || message.attachment_url || '').toLowerCase();
+  const mime = message.attachment_mime || '';
 
+  // Video por extensión o mime
+  if (mime.startsWith('video/')) return 'video';
+  if (/\.(mp4|webm|mov|avi|mkv|flv|wmv|m4v|mpg|mpeg|3gp)$/.test(name)) return 'video';
+  
+  // Imagen
   if (/\.(png|jpg|jpeg|webp|gif|bmp|svg)$/.test(name)) return 'image';
+  
+  // Audio
   if (/\.(mp3|wav|ogg|webm|m4a|aac)$/.test(name)) return 'audio';
 
   return 'file';
@@ -1013,9 +1023,27 @@ export default function ChatView() {
 
     const type = inferAttachmentType(message);
 
+    // Video - reproducción directa
+    if (type === 'video') {
+      return (
+        <div className="chat-attachment chat-attachment-video">
+          <video 
+            controls 
+            src={message.attachment_url}
+            className="chat-video-preview"
+            controlsList="nodownload"
+            preload="metadata"
+          >
+            Tu navegador no puede reproducir este video.
+          </video>
+        </div>
+      );
+    }
+
+    // Imagen
     if (type === 'image') {
       return (
-        <div className="chat-attachment">
+        <div className="chat-attachment chat-attachment-image">
           <a
             href={message.attachment_url}
             target="_blank"
@@ -1032,16 +1060,18 @@ export default function ChatView() {
       );
     }
 
+    // Audio
     if (type === 'audio') {
       return (
-        <div className="chat-attachment">
-          <audio controls src={message.attachment_url}>
+        <div className="chat-attachment chat-attachment-audio">
+          <audio controls src={message.attachment_url} preload="metadata">
             Tu navegador no puede reproducir este audio.
           </audio>
         </div>
       );
     }
 
+    // Archivo genérico
     return (
       <div className="chat-attachment">
         <a
@@ -1056,7 +1086,7 @@ export default function ChatView() {
     );
   };
 
-  // Función corregida para renderizar mensajes - soporta ambos tipos de mensajes
+  // Función para renderizar mensajes - soporta ambos tipos de mensajes
   const renderMessage = (message: ChatMessage) => {
     // Determinar quién es el remitente según el tipo de canal
     let senderEmail = '';
@@ -1611,13 +1641,13 @@ export default function ChatView() {
           </div>
 
           <div className="chat-composer">
-            <input ref={fileInputRef} type="file" hidden onChange={handleFileInput} />
+            <input ref={fileInputRef} type="file" hidden onChange={handleFileInput} accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt" />
 
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={uploading}
-              title="Adjuntar archivo"
+              title="Adjuntar archivo (imagen, video, audio)"
               className="chat-icon-button"
             >
               {uploading ? '⏳' : '📎'}
