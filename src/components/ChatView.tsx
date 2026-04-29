@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
@@ -76,12 +76,10 @@ const FALLBACK_CHANNELS: ChatChannel[] = [
 const EMOJIS = ['😀', '😂', '😍', '👍', '🙏', '🔥', '📦', '✅', '⚠️', '💰', '🚚', '🧾'];
 
 function normalizeRole(role?: string | null) {
-  return String(role || '')
-    .trim()
-    .toUpperCase();
+  return String(role || '').trim().toUpperCase();
 }
 
-function canWriteToContact(myRole: string, contactRole?: string | null) {
+function canWriteToContact(myRole: string | null | undefined, contactRole: string | null | undefined) {
   const role = normalizeRole(myRole);
   const targetRole = normalizeRole(contactRole);
 
@@ -93,7 +91,7 @@ function canWriteToContact(myRole: string, contactRole?: string | null) {
     return true;
   }
 
-  return targetRole === 'PROVEEDOR';
+  return false;
 }
 
 function getAttachmentType(file: File): Attachment['type'] {
@@ -135,7 +133,8 @@ export default function ChatView() {
   const myRole = profile?.role || '';
   const isApproved = Boolean(profile?.approved);
 
-  const canEditChannelLogo = isApproved && (normalizeRole(myRole) === 'ADMIN' || normalizeRole(myRole) === 'PROVEEDOR');
+  const canEditChannelLogo =
+    isApproved && (normalizeRole(myRole) === 'ADMIN' || normalizeRole(myRole) === 'PROVEEDOR');
 
   const [tab, setTab] = useState<ChatTab>('general');
   const [channels, setChannels] = useState<ChatChannel[]>(FALLBACK_CHANNELS);
@@ -507,7 +506,7 @@ export default function ChatView() {
     }
   };
 
-  const handleFileInput = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileInput = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -525,7 +524,7 @@ export default function ChatView() {
     }
   };
 
-  const handleLogoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoUpload = async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
 
     if (!file || tab === 'dm' || !activeChannel) return;
@@ -887,7 +886,7 @@ export default function ChatView() {
 
       <div className="chat-layout">
         <aside className="chat-sidebar">
-          <div className="chat-sidebar-section">
+          <div>
             <div className="chat-sidebar-title-row">
               <h3>Conversaciones</h3>
 
@@ -921,36 +920,34 @@ export default function ChatView() {
               ))}
             </select>
 
-            {allowedContacts.length === 0 && (
-              <p className="chat-empty-small">No hay destinatarios disponibles para tu rol.</p>
-            )}
-          </div>
+            <div className="chat-thread-list">
+              {threads.map((thread) => (
+                <button
+                  key={thread.key}
+                  type="button"
+                  onClick={() => selectPeer(thread.peer)}
+                  className={`chat-thread ${selectedPeer === thread.peer ? 'active' : ''}`}
+                >
+                  <div className="chat-thread-top">
+                    <strong>{thread.peerName}</strong>
+                    <span>{formatTime(thread.lastTime)}</span>
+                  </div>
 
-          <div className="chat-thread-list">
-            {threads.map((thread) => (
-              <button
-                key={thread.key}
-                type="button"
-                onClick={() => selectPeer(thread.peer)}
-                className={`chat-thread ${selectedPeer === thread.peer ? 'active' : ''}`}
-              >
-                <div className="chat-thread-top">
-                  <strong>{thread.peerName}</strong>
-                  <span>{formatTime(thread.lastTime)}</span>
-                </div>
+                  <div className="chat-thread-bottom">
+                    <span>{thread.lastMsg}</span>
+                    {!!thread.unread && <b>{thread.unread}</b>}
+                  </div>
+                </button>
+              ))}
 
-                <div className="chat-thread-bottom">
-                  <span>{thread.lastMsg}</span>
-                  {!!thread.unread && <b>{thread.unread}</b>}
-                </div>
-              </button>
-            ))}
-
-            {threads.length === 0 && <p className="chat-empty-small">Sin conversaciones aún</p>}
+              {threads.length === 0 && (
+                <p className="chat-empty-small">Sin conversaciones aún</p>
+              )}
+            </div>
           </div>
 
           {tab !== 'dm' && (
-            <div className="chat-sidebar-section chat-channel-card">
+            <>
               <div className="chat-sidebar-title-row">
                 <h3>Pestaña</h3>
 
@@ -1012,7 +1009,7 @@ export default function ChatView() {
                   <p className="chat-empty-small">Sin mensajes en esta pestaña</p>
                 )}
               </div>
-            </div>
+            </>
           )}
         </aside>
 
