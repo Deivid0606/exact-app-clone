@@ -1,4 +1,4 @@
-import { type ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
@@ -75,25 +75,6 @@ const FALLBACK_CHANNELS: ChatChannel[] = [
 
 const EMOJIS = ['😀', '😂', '😍', '👍', '🙏', '🔥', '📦', '✅', '⚠️', '💰', '🚚', '🧾'];
 
-function normalizeRole(role?: string | null) {
-  return String(role || '').trim().toUpperCase();
-}
-
-function canWriteToContact(myRole?: string | null, targetRole?: string | null) {
-  const role = normalizeRole(myRole);
-  const contactRole = normalizeRole(targetRole);
-
-  if (role === 'VENDEDOR') {
-    return contactRole === 'PROVEEDOR';
-  }
-
-  if (role === 'ADMIN' || role === 'PROVEEDOR' || role === 'DESPACHANTE') {
-    return true;
-  }
-
-  return false;
-}
-
 function getAttachmentType(file: File): Attachment['type'] {
   if (file.type.startsWith('image/')) return 'image';
   if (file.type.startsWith('audio/')) return 'audio';
@@ -133,7 +114,7 @@ export default function ChatView() {
   const isApproved = Boolean(profile?.approved);
 
   const canEditChannelLogo =
-    isApproved && (normalizeRole(myRole) === 'ADMIN' || normalizeRole(myRole) === 'PROVEEDOR');
+    isApproved && (myRole === 'ADMIN' || myRole === 'PROVEEDOR');
 
   const [tab, setTab] = useState<ChatTab>('general');
   const [channels, setChannels] = useState<ChatChannel[]>(FALLBACK_CHANNELS);
@@ -164,14 +145,6 @@ export default function ChatView() {
     if (tab === 'dm') return null;
     return channels.find((channel) => channel.channel_key === tab) || FALLBACK_CHANNELS[0];
   }, [channels, tab]);
-
-  const allowedContacts = useMemo(() => {
-    return contacts.filter((contact) => {
-      if (!contact.email) return false;
-      if (contact.email.toLowerCase() === myEmail.toLowerCase()) return false;
-      return canWriteToContact(myRole, contact.role);
-    });
-  }, [contacts, myEmail, myRole]);
 
   const contactMap = useMemo(() => {
     const map: Record<string, { name: string; role: string }> = {};
@@ -387,11 +360,7 @@ export default function ChatView() {
 
   const selectPeer = (peer: string) => {
     setSelectedPeer(peer);
-
-    if (peer) {
-      setTab('dm');
-      loadDmMessages(peer);
-    }
+    if (peer) loadDmMessages(peer);
   };
 
   const handleFileUpload = async (file: File): Promise<Attachment | null> => {
@@ -461,15 +430,6 @@ export default function ChatView() {
     if (!text.trim() && !attachment) return;
     if (!selectedPeer || !myEmail) return;
 
-    const target = contacts.find(
-      (contact) => contact.email.toLowerCase() === selectedPeer.toLowerCase(),
-    );
-
-    if (!target || !canWriteToContact(myRole, target.role)) {
-      toast.error('No tenés permiso para escribirle a este destinatario');
-      return;
-    }
-
     const key = threadKey(myEmail, selectedPeer);
 
     const { error } = await (supabase as any).from('chat_dm_messages').insert({
@@ -505,7 +465,7 @@ export default function ChatView() {
     }
   };
 
-  const handleFileInput = async (event: ChangeEvent<HTMLInputElement>) => {
+  const handleFileInput = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -523,7 +483,7 @@ export default function ChatView() {
     }
   };
 
-  const handleLogoUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+  const handleLogoUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
 
     if (!file || tab === 'dm' || !activeChannel) return;
@@ -663,11 +623,16 @@ export default function ChatView() {
 
     if (type === 'image') {
       return (
-        <a href={message.attachment_url} target="_blank" rel="noreferrer">
+        <a
+          href={message.attachment_url}
+          target="_blank"
+          rel="noreferrer"
+          className="chat-attachment chat-attachment-image"
+        >
           <img
             src={message.attachment_url}
-            alt={message.attachment_name || 'Imagen adjunta'}
-            className="chat-image"
+            alt={message.attachment_name || 'Imagen enviada'}
+            className="chat-image-preview"
           />
         </a>
       );
@@ -675,8 +640,8 @@ export default function ChatView() {
 
     if (type === 'audio') {
       return (
-        <div className="chat-audio-wrap">
-          <audio controls src={message.attachment_url} className="chat-audio">
+        <div className="chat-attachment chat-attachment-audio">
+          <audio controls src={message.attachment_url}>
             Tu navegador no puede reproducir este audio.
           </audio>
         </div>
@@ -684,7 +649,12 @@ export default function ChatView() {
     }
 
     return (
-      <a href={message.attachment_url} target="_blank" rel="noreferrer" className="chat-file">
+      <a
+        href={message.attachment_url}
+        target="_blank"
+        rel="noreferrer"
+        className="chat-attachment chat-attachment-file"
+      >
         📎 {message.attachment_name || 'Archivo adjunto'}
       </a>
     );
@@ -697,19 +667,18 @@ export default function ChatView() {
     const senderName = contactMap[senderEmail?.toLowerCase() || '']?.name || senderEmail;
 
     return (
-      <div key={message.id} className={`chat-message ${mine ? 'mine' : ''}`}>
-        <div className="chat-bubble">
-          <div className="chat-message-head">
-            <span>
-              {senderRole && <b>{senderRole}</b>} {senderName}
-            </span>
+      <div key={message.id} className={`chat-message-row ${mine ? 'mine' : 'theirs'}`}>
+        <div className="chat-message-bubble">
+          <div className="chat-message-meta">
+            {senderRole && <span className="chat-role">{senderRole}</span>}
+            <strong>{senderName}</strong>
           </div>
 
-          {message.message_text && <p>{message.message_text}</p>}
+          {message.message_text && <p className="chat-message-text">{message.message_text}</p>}
 
           {renderAttachment(message)}
 
-          <div className="chat-message-meta">
+          <div className="chat-message-footer">
             <span>{formatDateTime(message.created_at)}</span>
 
             {tab === 'dm' && mine && (
@@ -829,23 +798,8 @@ export default function ChatView() {
   }, [myEmail, tab, selectedPeer]);
 
   return (
-    <div className="chat-shell">
-      <input
-        ref={fileInputRef}
-        type="file"
-        className="hidden"
-        onChange={handleFileInput}
-      />
-
-      <input
-        ref={logoInputRef}
-        type="file"
-        accept="image/*"
-        className="hidden"
-        onChange={handleLogoUpload}
-      />
-
-      <div className="chat-topbar">
+    <div className="chat-view">
+      <div className="chat-header">
         <h2>Chat</h2>
       </div>
 
@@ -857,18 +811,20 @@ export default function ChatView() {
             onClick={() => setTab(channel.channel_key)}
             className={`chat-tab ${tab === channel.channel_key ? 'active' : ''}`}
           >
-            <span className="chat-tab-logo">
+            <span className="chat-tab-avatar">
               {channel.logo_url ? (
                 <img src={channel.logo_url} alt={channel.title} />
               ) : (
-                '💬'
+                <span>💬</span>
               )}
             </span>
 
-            <span>{channel.title}</span>
+            <span className="chat-tab-title">{channel.title}</span>
 
             {!!unreadByChannel[channel.channel_key] && (
-              <span className="chat-badge">{unreadByChannel[channel.channel_key]}</span>
+              <span className="chat-unread-badge">
+                {unreadByChannel[channel.channel_key]}
+              </span>
             )}
           </button>
         ))}
@@ -878,95 +834,88 @@ export default function ChatView() {
           onClick={() => setTab('dm')}
           className={`chat-tab ${tab === 'dm' ? 'active' : ''}`}
         >
-          <span>📩</span>
-          <span>Mensajes Directos</span>
+          <span className="chat-tab-avatar">📩</span>
+          <span className="chat-tab-title">Mensajes Directos</span>
         </button>
       </div>
 
       <div className="chat-layout">
         <aside className="chat-sidebar">
-          <div className="chat-sidebar-title-row">
-            <h3>Conversaciones</h3>
-
-            <button
-              type="button"
-              onClick={() => {
-                loadContacts();
-                loadThreads();
-              }}
-              className="chat-icon-button"
-              title="Actualizar conversaciones"
-            >
-              ↻
-            </button>
-          </div>
-
-          <label className="chat-label">Escribir a</label>
-
-          <select
-            value={selectedPeer}
-            onChange={(event) => selectPeer(event.target.value)}
-            className="chat-select"
-          >
-            <option value="">-- Elegir destinatario --</option>
-
-            {allowedContacts.map((contact) => (
-              <option key={contact.email} value={contact.email}>
-                {contact.role ? `${contact.role} · ` : ''}
-                {contact.name || contact.email}
-              </option>
-            ))}
-          </select>
-
-          <div className="chat-thread-list">
-            {threads.map((thread) => (
-              <button
-                key={thread.key}
-                type="button"
-                onClick={() => selectPeer(thread.peer)}
-                className={`chat-thread ${selectedPeer === thread.peer ? 'active' : ''}`}
-              >
-                <div className="chat-thread-top">
-                  <strong>{thread.peerName}</strong>
-                  <span>{formatTime(thread.lastTime)}</span>
-                </div>
-
-                <div className="chat-thread-bottom">
-                  <span>{thread.lastMsg}</span>
-                  {!!thread.unread && <b>{thread.unread}</b>}
-                </div>
-              </button>
-            ))}
-
-            {threads.length === 0 && <p className="chat-empty-small">Sin conversaciones aún</p>}
-          </div>
-
-          {tab !== 'dm' && (
+          {tab === 'dm' ? (
             <>
-              <div className="chat-sidebar-title-row">
-                <h3>Pestaña</h3>
-
-                <button
-                  type="button"
-                  onClick={() => loadChannelMessages(tab)}
-                  className="chat-icon-button"
-                  title="Actualizar pestaña"
-                >
+              <div className="chat-sidebar-header">
+                <strong>Conversaciones</strong>
+                <button type="button" onClick={loadThreads}>
                   ↻
                 </button>
               </div>
 
-              <div className="chat-channel-info">
+              <label className="chat-label">Escribir a</label>
+
+              <select
+                value={selectedPeer}
+                onChange={(event) => selectPeer(event.target.value)}
+                className="chat-select"
+              >
+                <option value="">-- Elegir destinatario --</option>
+                {contacts
+                  .filter((contact) => contact.email !== myEmail)
+                  .map((contact) => (
+                    <option key={contact.email} value={contact.email}>
+                      {contact.role ? `${contact.role} · ` : ''}
+                      {contact.name || contact.email}
+                    </option>
+                  ))}
+              </select>
+
+              <div className="chat-thread-list">
+                {threads.map((thread) => (
+                  <button
+                    key={thread.key}
+                    type="button"
+                    onClick={() => selectPeer(thread.peer)}
+                    className={`chat-thread ${selectedPeer === thread.peer ? 'active' : ''}`}
+                  >
+                    <div className="chat-thread-top">
+                      <strong>{thread.peerName}</strong>
+                      <span>{formatTime(thread.lastTime)}</span>
+                    </div>
+
+                    <div className="chat-thread-bottom">
+                      <span>{thread.lastMsg}</span>
+                      {!!thread.unread && (
+                        <span className="chat-unread-badge">{thread.unread}</span>
+                      )}
+                    </div>
+                  </button>
+                ))}
+
+                {threads.length === 0 && (
+                  <p className="chat-empty-small">Sin conversaciones aún</p>
+                )}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="chat-sidebar-header">
+                <strong>Pestaña</strong>
+                <button type="button" onClick={() => loadChannelMessages(tab)}>
+                  ↻
+                </button>
+              </div>
+
+              <div className="chat-channel-profile">
                 <div className="chat-channel-logo">
                   {activeChannel?.logo_url ? (
                     <img src={activeChannel.logo_url} alt={activeChannel.title} />
                   ) : (
-                    '💬'
+                    <span>💬</span>
                   )}
 
                   {canEditChannelLogo && (
                     <button
                       type="button"
+                      className="chat-logo-edit"
                       onClick={() => logoInputRef.current?.click()}
                       title="Cambiar logo de esta pestaña"
                       disabled={uploading}
@@ -977,26 +926,41 @@ export default function ChatView() {
                 </div>
 
                 <div>
-                  <span>Canal activo</span>
+                  <span className="chat-current-label">Canal activo</span>
                   <strong>{activeChannel?.title}</strong>
                 </div>
               </div>
 
-              <div className="chat-preview-list">
+              <input
+                ref={logoInputRef}
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={handleLogoUpload}
+              />
+
+              <div className="chat-thread-list" style={{ marginTop: 18 }}>
                 {channelPreviewMessages.map((message) => {
                   const senderEmail = message.sender_email || '';
                   const senderName =
                     contactMap[senderEmail.toLowerCase()]?.name || senderEmail || 'Usuario';
 
                   return (
-                    <div key={message.id} className="chat-preview-item">
-                      <div>
+                    <button
+                      key={message.id}
+                      type="button"
+                      className="chat-thread"
+                      onClick={scrollBottom}
+                    >
+                      <div className="chat-thread-top">
                         <strong>{senderName}</strong>
                         <span>{formatTime(message.created_at)}</span>
                       </div>
 
-                      <p>{message.message_text || message.attachment_name || 'Adjunto'}</p>
-                    </div>
+                      <div className="chat-thread-bottom">
+                        <span>{message.message_text || message.attachment_name || 'Adjunto'}</span>
+                      </div>
+                    </button>
                   );
                 })}
 
@@ -1009,12 +973,12 @@ export default function ChatView() {
         </aside>
 
         <section className="chat-main">
-          <div className="chat-main-header">
+          <div className="chat-current-header">
             {tab === 'dm' ? (
               <>
-                <span>Chat con</span>
+                <span className="chat-current-label">Chat con</span>
 
-                <div>
+                <div className="chat-current-title">
                   <strong>
                     {selectedPeer
                       ? contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer
@@ -1022,13 +986,15 @@ export default function ChatView() {
                   </strong>
 
                   {selectedPeer && contactMap[selectedPeer.toLowerCase()]?.role && (
-                    <em>{contactMap[selectedPeer.toLowerCase()].role}</em>
+                    <span className="chat-role">
+                      {contactMap[selectedPeer.toLowerCase()].role}
+                    </span>
                   )}
                 </div>
               </>
             ) : (
-              <div>
-                <span>Mensajes de</span>
+              <div className="chat-current-title">
+                <span className="chat-current-label">Mensajes de</span>
                 <strong>{activeChannel?.title}</strong>
               </div>
             )}
@@ -1046,11 +1012,15 @@ export default function ChatView() {
             {messages.map(renderMessage)}
 
             {typingUsers.length > 0 && (
-              <div className="chat-typing">{typingUsers.join(', ')} está escribiendo...</div>
+              <div className="chat-typing">
+                {typingUsers.join(', ')} está escribiendo...
+              </div>
             )}
           </div>
 
           <div className="chat-composer">
+            <input ref={fileInputRef} type="file" hidden onChange={handleFileInput} />
+
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
@@ -1064,9 +1034,9 @@ export default function ChatView() {
             <button
               type="button"
               onClick={startRecording}
-              disabled={tab === 'dm' && !selectedPeer}
-              title="Grabar audio"
-              className={`chat-icon-button ${recording ? 'active' : ''}`}
+              disabled={(tab === 'dm' && !selectedPeer) || uploading}
+              title={recording ? 'Detener audio' : 'Grabar audio'}
+              className={`chat-icon-button ${recording ? 'recording' : ''}`}
             >
               {recording ? '⏹️' : '🎙️'}
             </button>
@@ -1099,13 +1069,7 @@ export default function ChatView() {
 
             <input
               value={text}
-              placeholder={
-                tab === 'dm'
-                  ? selectedPeer
-                    ? 'Escribir mensaje directo...'
-                    : 'Elegí un destinatario...'
-                  : 'Escribir mensaje en esta pestaña...'
-              }
+              placeholder="Escribí tu mensaje..."
               onChange={(event) => trackTyping(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') {
@@ -1120,8 +1084,8 @@ export default function ChatView() {
             <button
               type="button"
               onClick={send}
-              disabled={(tab === 'dm' && !selectedPeer) || uploading || !text.trim()}
-              className="chat-send"
+              disabled={uploading || recording || (tab === 'dm' && !selectedPeer) || !text.trim()}
+              className="chat-send-button"
             >
               Enviar
             </button>
