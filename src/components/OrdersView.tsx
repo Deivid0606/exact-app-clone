@@ -25,7 +25,32 @@ interface EditOrder {
   email: string;
   obs: string;
   assigned_at: string;
+  provider_email?: string; // Agregado
 }
+
+// Función para obtener color consistente por proveedor
+const getProviderColor = (providerName: string): string => {
+  if (!providerName) return '#ffffff';
+  
+  const colorMap: { [key: string]: string } = {
+    'PROVEEDOR A': '#FFE5E5',
+    'PROVEEDOR B': '#E5FFE5',
+    'PROVEEDOR C': '#E5E5FF',
+    'PROVEEDOR D': '#FFFFE5',
+    'PROVEEDOR E': '#FFE5FF',
+    'PROVEEDOR F': '#E5FFFF',
+  };
+  
+  const normalized = providerName.toUpperCase();
+  if (colorMap[normalized]) return colorMap[normalized];
+  
+  let hash = 0;
+  for (let i = 0; i < providerName.length; i++) {
+    hash = providerName.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const hue = Math.abs(hash % 360);
+  return `hsl(${hue}, 70%, 90%)`;
+};
 
 // Helper para verificar si el proveedor tiene acceso al pedido
 function isProviderAllowed(order: any, userEmail: string): boolean {
@@ -54,6 +79,7 @@ export default function OrdersView() {
 
   const [orders, setOrders] = useState<any[]>([]);
   const [deliveries, setDeliveries] = useState<any[]>([]);
+  const [providers, setProviders] = useState<any[]>([]); // Nuevo: lista de proveedores
   const [clientPrices, setClientPrices] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
@@ -70,44 +96,40 @@ export default function OrdersView() {
 
   const loadOrders = async () => {
     setLoading(true);
-    const [ordersRes, deliveriesRes] = await Promise.all([
+    const [ordersRes, deliveriesRes, providersRes] = await Promise.all([
       supabase.from('orders').select('*')
         .gte('created_at', dateFrom + 'T00:00:00')
         .lte('created_at', dateTo + 'T23:59:59')
         .order('created_at', { ascending: false })
-        .range(0, 9999), // ✅ Hasta 10,000 pedidos
+        .range(0, 9999),
       supabase.from('profiles').select('email, name, user_id').then(async (profilesRes) => {
         const profiles = profilesRes.data || [];
         const { data: roles } = await supabase.from('user_roles').select('user_id, role').eq('role', 'DELIVERY');
         const deliveryUserIds = new Set((roles || []).map(r => r.user_id));
         return profiles.filter(p => deliveryUserIds.has(p.user_id));
-      })
+      }),
+      supabase.from('profiles').select('email, name, company_name').eq('role', 'PROVEEDOR')
     ]);
     setOrders(ordersRes.data || []);
     setDeliveries(deliveriesRes);
+    setProviders(providersRes.data || []);
     setLoading(false);
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
   };
 
-  // ✅ Ahora se actualiza cuando cambian las fechas
   useEffect(() => { 
     loadOrders(); 
   }, [dateFrom, dateTo]);
 
-  // Filtrado principal con reglas de negocio
   const filtered = useMemo(() => {
     const q = norm(search);
     return orders.filter(o => {
-      // 1. Filtro por rol (según imagen)
       if (role === 'VENDEDOR' && norm(o.created_by || '') !== norm(myEmail)) return false;
       if (role === 'DELIVERY' && norm(o.assigned_delivery || '') !== norm(myEmail)) return false;
       if (role === 'PROVEEDOR' && !isProviderAllowed(o, myEmail)) return false;
-      // ADMIN y DESPACHANTE ven todos, no filtramos
 
-      // 2. Filtro por estado
       if (statusFilter && (o.status || 'PENDIENTE') !== statusFilter) return false;
 
-      // 3. Búsqueda por texto
       if (q) {
         const idNum = String(o.order_number || o.id || '').replace(/^[a-z]+/i, '');
         const hay = [o.customer_name, o.phone, o.order_number, o.id, idNum, o.city, o.created_by, o.assigned_delivery].map(norm).join(' ');
@@ -168,6 +190,33 @@ export default function OrdersView() {
     if (deliveryEmail) postNews(`${myEmail} asignó pedido ${orderNum} a ${deliveryEmail}`, orderNum);
   };
 
+  // NUEVA FUNCIÓN: Asignar proveedor
+  const handleAssignProvider = async (orderId: string, providerEmail: string) => {
+    const order = orders.find(o => o.id === orderId);
+    const orderNum = order?.order_number || orderId.slice(0, 8);
+    const provider = providers.find(p => p.email === providerEmail);
+    const providerName = provider?.name || provider?.company_name || providerEmail;
+    
+    const { error } = await supabase
+      .from('orders')
+      .update({ 
+        provider_email: providerEmail || null,
+        updated_at: new Date().toISOString() 
+      })
+      .eq('id', orderId);
+      
+    if (error) { 
+      toast.error(error.message); 
+      return; 
+    }
+    
+    toast.success(providerEmail ? `Proveedor: ${providerName}` : 'Proveedor removido');
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, provider_email: providerEmail } : o));
+    if (providerEmail) {
+      postNews(`${myEmail} asignó pedido ${orderNum} al proveedor ${providerName}`, orderNum);
+    }
+  };
+
   const openEdit = (o: any) => {
     setEditOrder({
       id: o.id,
@@ -179,6 +228,7 @@ export default function OrdersView() {
       email: o.email || '',
       obs: o.obs || '',
       assigned_at: o.assigned_at ? new Date(o.assigned_at).toISOString().slice(0, 16) : '',
+      provider_email: o.provider_email || '',
     });
   };
 
@@ -188,9 +238,10 @@ export default function OrdersView() {
       toast.error('Cliente, teléfono y ciudad son obligatorios');
       return;
     }
-    const { id, assigned_at, ...data } = editOrder;
+    const { id, assigned_at, provider_email, ...data } = editOrder;
     const updates: any = { ...data, updated_at: new Date().toISOString() };
     if (assigned_at) updates.assigned_at = new Date(assigned_at).toISOString();
+    if (provider_email !== undefined) updates.provider_email = provider_email;
     const { error } = await supabase.from('orders').update(updates).eq('id', id);
     if (error) { toast.error(error.message); return; }
     toast.success('Pedido actualizado');
@@ -198,7 +249,6 @@ export default function OrdersView() {
     setEditOrder(null);
   };
 
-  // Función para CANCELAR (cambiar estado a CANCELADO)
   const cancelOrder = async (orderId: string) => {
     const order = orders.find(o => o.id === orderId);
     const orderNum = order?.order_number || orderId.slice(0, 8);
@@ -209,7 +259,6 @@ export default function OrdersView() {
     postNews(`Pedido ${orderNum} fue CANCELADO por ${myEmail}`, orderNum);
   };
 
-  // Función para ELIMINAR PERMANENTEMENTE (solo ADMIN, DESPACHANTE, PROVEEDOR)
   const deleteOrderPermanently = async (orderId: string) => {
     if (!['ADMIN', 'DESPACHANTE', 'PROVEEDOR'].includes(role)) {
       toast.error('No tienes permiso para eliminar pedidos');
@@ -316,12 +365,53 @@ export default function OrdersView() {
   const canAssign = role === 'ADMIN' || role === 'PROVEEDOR';
   const canEdit = role === 'ADMIN' || role === 'DESPACHANTE' || role === 'PROVEEDOR';
   const canDeletePermanently = ['ADMIN', 'DESPACHANTE', 'PROVEEDOR'].includes(role);
+  const canAssignProvider = role === 'ADMIN' || role === 'DESPACHANTE'; // Solo ADMIN y DESPACHANTE pueden asignar proveedores
+
+  // Mapa de colores por proveedor para la leyenda
+  const uniqueProviders = useMemo(() => {
+    const providerMap = new Map();
+    providers.forEach(p => {
+      const name = p.name || p.company_name || p.email;
+      providerMap.set(p.email, name);
+    });
+    orders.forEach(o => {
+      if (o.provider_email && !providerMap.has(o.provider_email)) {
+        const provider = providers.find(p => p.email === o.provider_email);
+        if (provider) {
+          const name = provider.name || provider.company_name || provider.email;
+          providerMap.set(o.provider_email, name);
+        }
+      }
+    });
+    return Array.from(providerMap.entries()).map(([email, name]) => ({ email, name }));
+  }, [providers, orders]);
 
   return (
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Pedidos</h3>
 
-      {/* Filtros - Responsive */}
+      {/* Leyenda de colores de proveedores */}
+      {uniqueProviders.length > 0 && (
+        <div className="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+          <div className="text-sm font-semibold mb-2">🎨 Proveedores por color:</div>
+          <div className="flex flex-wrap gap-3">
+            {uniqueProviders.map(provider => {
+              const color = getProviderColor(provider.name);
+              return (
+                <div key={provider.email} className="flex items-center gap-2">
+                  <div 
+                    className="w-5 h-5 rounded border border-gray-300"
+                    style={{ backgroundColor: color }}
+                  />
+                  <span className="text-xs">{provider.name}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Filtros */}
       <div className="flex flex-col sm:flex-row flex-wrap items-center gap-2 mb-3">
         <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto">
           <label className="app-label !mt-0">Desde</label>
@@ -359,19 +449,20 @@ export default function OrdersView() {
               <th>Ciudad</th>
               <th>Cliente</th>
               <th>Vendedor</th>
+              <th>Proveedor</th>
               {role !== 'DESPACHANTE' && <th>Delivery</th>}
               <th className="text-right">Total (Gs)</th>
               <th className="text-right">{role === 'DELIVERY' ? 'Tarifa (Gs)' : 'Comisión (Gs)'}</th>
               <th>Estado 1</th>
               {role !== 'DELIVERY' && <th>Estado 2</th>}
-              {canAssign && <th>Asignar</th>}
+              {canAssign && <th>Asignar Delivery</th>}
               <th>Guía</th>
               {canEdit && <th>Acciones</th>}
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={15} className="text-center text-muted-foreground py-8">Sin pedidos</td></tr>
+              <tr><td colSpan={16} className="text-center text-muted-foreground py-8">Sin pedidos</td></tr>
             )}
             {filtered.map(o => {
               const feeStored = Number(o.delivery_fee_gs || 0);
@@ -379,9 +470,13 @@ export default function OrdersView() {
               const dateShown = (role === 'DELIVERY' && o.assigned_at)
                 ? new Date(o.assigned_at).toLocaleString('es-PY')
                 : new Date(o.created_at).toLocaleString('es-PY');
+              
+              const provider = providers.find(p => p.email === o.provider_email);
+              const providerName = provider?.name || provider?.company_name || o.provider_email || '';
+              const rowColor = getProviderColor(providerName);
 
               return (
-                <tr key={o.id}>
+                <tr key={o.id} style={{ backgroundColor: rowColor }}>
                   <td className="text-center">
                     <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
                   </td>
@@ -390,6 +485,24 @@ export default function OrdersView() {
                   <td className="text-xs">{o.city}</td>
                   <td className="text-xs">{o.customer_name}</td>
                   <td className="text-xs">{o.created_by}</td>
+                  <td className="text-xs">
+                    {canAssignProvider ? (
+                      <select
+                        className="app-input !py-1 !px-2 !text-[11px] !w-auto !min-w-[140px]"
+                        value={o.provider_email || ''}
+                        onChange={e => handleAssignProvider(o.id, e.target.value)}
+                      >
+                        <option value="">-- Sin proveedor --</option>
+                        {providers.map(p => (
+                          <option key={p.email} value={p.email}>
+                            {p.name || p.company_name || p.email}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span className="text-xs font-medium">{providerName || '—'}</span>
+                    )}
+                  </td>
                   {role !== 'DESPACHANTE' && <td className="text-xs">{o.assigned_delivery || '—'}</td>}
                   <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
                   <td className="text-right text-xs">{nf(commVal)}</td>
@@ -488,9 +601,13 @@ export default function OrdersView() {
           const dateShown = (role === 'DELIVERY' && o.assigned_at)
             ? new Date(o.assigned_at).toLocaleString('es-PY')
             : new Date(o.created_at).toLocaleString('es-PY');
+          
+          const provider = providers.find(p => p.email === o.provider_email);
+          const providerName = provider?.name || provider?.company_name || o.provider_email || '';
+          const cardColor = getProviderColor(providerName);
 
           return (
-            <div key={o.id} className="bg-card border border-border rounded-lg p-4 shadow-sm">
+            <div key={o.id} className="bg-card border border-border rounded-lg p-4 shadow-sm" style={{ backgroundColor: cardColor }}>
               <div className="flex justify-between items-start mb-3">
                 <div>
                   <div className="font-bold text-sm">{o.order_number || o.id.slice(0, 8)}</div>
@@ -509,6 +626,9 @@ export default function OrdersView() {
                   
                   <span className="font-medium">Vendedor:</span>
                   <span className="text-right">{o.created_by}</span>
+                  
+                  <span className="font-medium">Proveedor:</span>
+                  <span className="text-right font-medium">{providerName || '—'}</span>
                   
                   {role !== 'DESPACHANTE' && (
                     <>
@@ -569,6 +689,24 @@ export default function OrdersView() {
                       <option value="">-- Sin asignar --</option>
                       {deliveries.map(d => (
                         <option key={d.email} value={d.email}>{d.name || d.email}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+                
+                {canAssignProvider && (
+                  <div>
+                    <span className="font-medium block mb-1">Asignar Proveedor:</span>
+                    <select
+                      className="app-input !py-2 !px-2 !text-sm w-full"
+                      value={o.provider_email || ''}
+                      onChange={e => handleAssignProvider(o.id, e.target.value)}
+                    >
+                      <option value="">-- Sin proveedor --</option>
+                      {providers.map(p => (
+                        <option key={p.email} value={p.email}>
+                          {p.name || p.company_name || p.email}
+                        </option>
                       ))}
                     </select>
                   </div>
@@ -649,6 +787,21 @@ export default function OrdersView() {
               <div className="col-span-1 sm:col-span-2">
                 <label className="app-label">Email</label>
                 <input className="app-input" value={editOrder.email} onChange={e => setEditOrder({ ...editOrder, email: e.target.value })} />
+              </div>
+              <div className="col-span-1 sm:col-span-2">
+                <label className="app-label">Proveedor</label>
+                <select 
+                  className="app-input" 
+                  value={editOrder.provider_email || ''}
+                  onChange={e => setEditOrder({ ...editOrder, provider_email: e.target.value })}
+                >
+                  <option value="">-- Sin proveedor --</option>
+                  {providers.map(p => (
+                    <option key={p.email} value={p.email}>
+                      {p.name || p.company_name || p.email}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
             <div>
