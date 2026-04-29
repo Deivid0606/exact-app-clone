@@ -79,24 +79,37 @@ export default function ClosuresView() {
 
   const loadClosures = async () => {
     let query = supabase.from('orders').select('*')
-      .gte('assigned_at', dateFrom + 'T00:00:00')
-      .lte('assigned_at', dateTo + 'T23:59:59')
-      .order('assigned_at', { ascending: false });
+      .order('created_at', { ascending: false });
 
-    // ✅ FILTRO CORREGIDO PARA PROVEEDOR - Usa provider_email directamente
+    // ✅ PROVEEDOR - usa created_at y filtra por provider_email
     if (isSupplier) {
-      // Filtrar por provider_email (el email del proveedor)
-      query = query.eq('provider_email', myEmail);
+      query = query
+        .gte('created_at', dateFrom + 'T00:00:00')
+        .lte('created_at', dateTo + 'T23:59:59')
+        .eq('provider_email', myEmail);
       
       if (filterDelivery) {
         query = query.eq('assigned_delivery', filterDelivery);
       }
-    } else if (isDelivery) {
-      query = query.eq('assigned_delivery', myEmail);
+    } 
+    // ✅ DELIVERY - usa assigned_at y puede filtrar por proveedor
+    else if (isDelivery) {
+      query = query
+        .gte('assigned_at', dateFrom + 'T00:00:00')
+        .lte('assigned_at', dateTo + 'T23:59:59')
+        .eq('assigned_delivery', myEmail);
+      
+      // ✅ FILTRO DE PROVEEDOR PARA DELIVERY
       if (filterSupplier) {
         query = query.eq('provider_email', filterSupplier);
       }
-    } else if (isAdmin) {
+    } 
+    // ✅ ADMIN - usa assigned_at y puede filtrar por delivery y proveedor
+    else if (isAdmin) {
+      query = query
+        .gte('assigned_at', dateFrom + 'T00:00:00')
+        .lte('assigned_at', dateTo + 'T23:59:59');
+      
       if (filterDelivery) query = query.eq('assigned_delivery', filterDelivery);
       if (filterSupplier) query = query.eq('provider_email', filterSupplier);
     }
@@ -207,12 +220,6 @@ export default function ClosuresView() {
     const { error } = await supabase.from('orders').update({ assigned_at: dateVal + 'T00:00:00', updated_at: new Date().toISOString() }).eq('id', orderId);
     if (error) toast.error(error.message);
     else { toast.success('Fecha actualizada'); loadClosures(); }
-  };
-
-  const updateCity = async (orderId: string, city: string) => {
-    const { error } = await supabase.from('orders').update({ city, updated_at: new Date().toISOString() }).eq('id', orderId);
-    if (error) toast.error(error.message);
-    else { toast.success('Ciudad actualizada'); loadClosures(); }
   };
 
   const markSingleRendido = async (orderId: string) => {
@@ -335,7 +342,7 @@ export default function ClosuresView() {
           </select>
         )}
 
-        {/* FILTRO POR PROVEEDOR - para DELIVERY y ADMIN */}
+        {/* ✅ FILTRO POR PROVEEDOR - para DELIVERY y ADMIN */}
         {(isDelivery || isAdmin) && suppliers.length > 0 && (
           <select className="app-input !w-auto min-w-[280px]" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
             <option value="">Todos los proveedores</option>
