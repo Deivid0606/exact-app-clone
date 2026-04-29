@@ -159,6 +159,47 @@ export default function ChatView() {
     return map;
   }, [contacts]);
 
+  // Función para verificar si puede escribir a un destinatario
+  const canSendToPeer = (peerEmail: string): boolean => {
+    if (!myEmail || !peerEmail) return false;
+    
+    const peer = contacts.find(c => c.email.toLowerCase() === peerEmail.toLowerCase());
+    if (!peer) return true;
+    
+    const peerRole = peer.role;
+    
+    // VENDEDOR solo puede escribir a PROVEEDOR
+    if (myRole === 'VENDEDOR') {
+      return peerRole === 'PROVEEDOR';
+    }
+    
+    // ADMIN, PROVEEDOR y DESPACHANTE pueden escribir a todos
+    if (myRole === 'ADMIN' || myRole === 'PROVEEDOR' || myRole === 'DESPACHANTE') {
+      return true;
+    }
+    
+    return true;
+  };
+
+  // Filtrar contactos basado en el rol del usuario actual
+  const filteredContacts = useMemo(() => {
+    if (!myRole) return [];
+    
+    // ADMIN, PROVEEDOR y DESPACHANTE ven todos
+    if (myRole === 'ADMIN' || myRole === 'PROVEEDOR' || myRole === 'DESPACHANTE') {
+      return contacts.filter((contact) => contact.email !== myEmail);
+    }
+    
+    // VENDEDOR solo ve PROVEEDOR
+    if (myRole === 'VENDEDOR') {
+      return contacts.filter(
+        (contact) => contact.email !== myEmail && contact.role === 'PROVEEDOR'
+      );
+    }
+    
+    return contacts.filter((contact) => contact.email !== myEmail);
+  }, [contacts, myEmail, myRole]);
+
   const messages = tab === 'dm' ? dmMessages : channelMessages;
 
   const channelPreviewMessages = useMemo(() => {
@@ -359,6 +400,11 @@ export default function ChatView() {
   };
 
   const selectPeer = (peer: string) => {
+    // Verificar permiso antes de seleccionar
+    if (peer && !canSendToPeer(peer)) {
+      toast.error('No tenés permiso para escribirle a este destinatario');
+      return;
+    }
     setSelectedPeer(peer);
     if (peer) loadDmMessages(peer);
   };
@@ -429,6 +475,12 @@ export default function ChatView() {
   const sendDm = async (attachment?: Attachment) => {
     if (!text.trim() && !attachment) return;
     if (!selectedPeer || !myEmail) return;
+
+    // Validar permiso antes de enviar
+    if (!canSendToPeer(selectedPeer)) {
+      toast.error('No tenés permiso para escribirle a este destinatario');
+      return;
+    }
 
     const key = threadKey(myEmail, selectedPeer);
 
@@ -841,6 +893,24 @@ export default function ChatView() {
 
       <div className="chat-layout">
         <aside className="chat-sidebar">
+          {/* Selector de destinatario - Siempre visible en todas las pestañas */}
+          <div className="chat-dm-selector">
+            <label className="chat-label">Escribir a</label>
+            <select
+              value={selectedPeer}
+              onChange={(event) => selectPeer(event.target.value)}
+              className="chat-select"
+            >
+              <option value="">-- Elegir destinatario --</option>
+              {filteredContacts.map((contact) => (
+                <option key={contact.email} value={contact.email}>
+                  {contact.role ? `${contact.role} · ` : ''}
+                  {contact.name || contact.email}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {tab === 'dm' ? (
             <>
               <div className="chat-sidebar-header">
@@ -849,24 +919,6 @@ export default function ChatView() {
                   ↻
                 </button>
               </div>
-
-              <label className="chat-label">Escribir a</label>
-
-              <select
-                value={selectedPeer}
-                onChange={(event) => selectPeer(event.target.value)}
-                className="chat-select"
-              >
-                <option value="">-- Elegir destinatario --</option>
-                {contacts
-                  .filter((contact) => contact.email !== myEmail)
-                  .map((contact) => (
-                    <option key={contact.email} value={contact.email}>
-                      {contact.role ? `${contact.role} · ` : ''}
-                      {contact.name || contact.email}
-                    </option>
-                  ))}
-              </select>
 
               <div className="chat-thread-list">
                 {threads.map((thread) => (
