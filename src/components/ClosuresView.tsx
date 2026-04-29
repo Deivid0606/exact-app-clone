@@ -79,27 +79,31 @@ export default function ClosuresView() {
     if (isDelivery) {
       // DELIVERY: SIN filtro de fechas - ver TODOS sus pedidos asignados
       query = supabase.from('orders').select('*')
-        .order('created_at', { ascending: false });
+        .order('assigned_at', { ascending: false });
       query = query.eq('assigned_delivery', myEmail);
       if (filterSupplier) {
         query = query.eq('supplier_email', filterSupplier);
       }
-    } else {
-      // PROVEEDOR y ADMIN: con filtro de fechas
+    } else if (isSupplier) {
+      // PROVEEDOR: filtrar por FECHA DE ASIGNACIÓN (assigned_at)
       query = supabase.from('orders').select('*')
-        .gte('created_at', dateFrom + 'T00:00:00')
-        .lte('created_at', dateTo + 'T23:59:59')
-        .order('created_at', { ascending: false });
-      
-      if (isSupplier) {
-        query = query.eq('supplier_email', myEmail);
-        if (filterDelivery) {
-          query = query.eq('assigned_delivery', filterDelivery);
-        }
-      } else if (isAdmin) {
-        if (filterDelivery) query = query.eq('assigned_delivery', filterDelivery);
-        if (filterSupplier) query = query.eq('supplier_email', filterSupplier);
+        .gte('assigned_at', dateFrom + 'T00:00:00')
+        .lte('assigned_at', dateTo + 'T23:59:59')
+        .order('assigned_at', { ascending: false });
+      query = query.eq('supplier_email', myEmail);
+      if (filterDelivery) {
+        query = query.eq('assigned_delivery', filterDelivery);
       }
+    } else if (isAdmin) {
+      // ADMIN: filtrar por FECHA DE ASIGNACIÓN
+      query = supabase.from('orders').select('*')
+        .gte('assigned_at', dateFrom + 'T00:00:00')
+        .lte('assigned_at', dateTo + 'T23:59:59')
+        .order('assigned_at', { ascending: false });
+      if (filterDelivery) query = query.eq('assigned_delivery', filterDelivery);
+      if (filterSupplier) query = query.eq('supplier_email', filterSupplier);
+    } else {
+      query = supabase.from('orders').select('*').order('assigned_at', { ascending: false });
     }
 
     if (filterType) query = query.eq('status', filterType);
@@ -499,7 +503,7 @@ export default function ClosuresView() {
                   <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
                   <td className="text-right text-xs">{nf(fee)}</td>
                   <td className="text-right text-xs">{nf(net)}</td>
-                  <td>
+                  <tr>
                     {canEditStatus1 ? (
                       <select 
                         className="app-input !w-auto !py-1 !px-2 text-xs"
@@ -519,7 +523,7 @@ export default function ClosuresView() {
                         {retiroOpts.map(s => <option key={s} value={s}>{s || '—'}</option>)}
                       </select>
                     ) : <span className="text-xs">{o.estado_retiro || '—'}</span>}
-                  </td>
+                   </td>
                   <td>
                     {canEditFull ? (
                       <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.status2 || '--'}
@@ -527,7 +531,7 @@ export default function ClosuresView() {
                         {state2Opts.map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
                     ) : <span className="text-xs">{o.status2 || '—'}</span>}
-                  </td>
+                   </td>
                   {canManageRendicion && (
                     <td>
                       <div className="flex items-center gap-1">
