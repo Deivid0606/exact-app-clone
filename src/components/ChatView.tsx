@@ -159,6 +159,7 @@ export default function ChatView() {
 
   const isPublicChannel = PUBLIC_CHANNELS.includes(tab as ChannelKey);
   const isDMChannel = DM_CHANNELS.includes(tab as ChannelKey);
+  const isAdminOrDespachante = myRole === 'ADMIN' || myRole === 'DESPACHANTE';
 
   const activeChannel = useMemo(() => {
     if (tab === 'dm') return null;
@@ -181,6 +182,9 @@ export default function ChatView() {
   const canSendToPeer = (peerEmail: string): boolean => {
     if (!myEmail || !peerEmail) return false;
     
+    // ADMIN y DESPACHANTE pueden escribir a TODOS
+    if (isAdminOrDespachante) return true;
+    
     const peer = contacts.find(c => c.email.toLowerCase() === peerEmail.toLowerCase());
     if (!peer) return true;
     
@@ -195,24 +199,18 @@ export default function ChatView() {
       return true;
     }
     
-    if (myRoleUpper === 'ADMIN' || myRoleUpper === 'DESPACHANTE') {
-      return true;
-    }
-    
     return true;
   };
 
   const canViewChat = (peerEmail: string): boolean => {
     if (!myEmail || !peerEmail) return false;
     
-    const myRoleUpper = myRole?.toUpperCase();
-    
-    if (myRoleUpper === 'ADMIN' || myRoleUpper === 'DESPACHANTE') {
-      return true;
-    }
+    // ADMIN y DESPACHANTE pueden ver TODOS los chats
+    if (isAdminOrDespachante) return true;
     
     const peer = contacts.find(c => c.email.toLowerCase() === peerEmail.toLowerCase());
     const peerRole = peer?.role;
+    const myRoleUpper = myRole?.toUpperCase();
     
     if (myRoleUpper === 'VENDEDOR') {
       return peerRole === 'PROVEEDOR';
@@ -228,9 +226,14 @@ export default function ChatView() {
   const filteredContacts = useMemo(() => {
     if (!myRole) return [];
     
+    // ADMIN y DESPACHANTE ven TODOS los contactos
+    if (isAdminOrDespachante) {
+      return contacts.filter((contact) => contact.email !== myEmail);
+    }
+    
     const myRoleUpper = myRole.toUpperCase();
     
-    if (myRoleUpper === 'ADMIN' || myRoleUpper === 'PROVEEDOR' || myRoleUpper === 'DESPACHANTE') {
+    if (myRoleUpper === 'PROVEEDOR') {
       return contacts.filter((contact) => contact.email !== myEmail);
     }
     
@@ -241,7 +244,7 @@ export default function ChatView() {
     }
     
     return contacts.filter((contact) => contact.email !== myEmail);
-  }, [contacts, myEmail, myRole]);
+  }, [contacts, myEmail, myRole, isAdminOrDespachante]);
 
   const filterDeletedMessages = (messages: ChatMessage[]): ChatMessage[] => {
     if (!myEmail) return messages;
@@ -350,12 +353,17 @@ export default function ChatView() {
     if (!myEmail) return;
     if (!DM_CHANNELS.includes(channelTab)) return;
 
-    const { data, error } = await (supabase as any)
+    let query = (supabase as any)
       .from('chat_dm_messages')
       .select('*')
-      .eq('topic_channel', channelTab)
-      .or(`from_email.eq.${myEmail},to_email.eq.${myEmail}`)
-      .order('created_at', { ascending: false });
+      .eq('topic_channel', channelTab);
+
+    // Si NO es ADMIN ni DESPACHANTE, filtrar por sus mensajes
+    if (!isAdminOrDespachante) {
+      query = query.or(`from_email.eq.${myEmail},to_email.eq.${myEmail}`);
+    }
+
+    const { data, error } = await query.order('created_at', { ascending: false });
 
     if (error) {
       console.error(error);
@@ -367,30 +375,60 @@ export default function ChatView() {
     const threadsMap = new Map<string, Thread>();
 
     notDeletedForMe.forEach((message: ChatMessage) => {
-      const peer = message.from_email?.toLowerCase() === myEmail.toLowerCase()
-        ? message.to_email
-        : message.from_email;
+      let peer: string;
+      let key: string;
+      
+      if (isAdminOrDespachante) {
+        const email1 = message.from_email?.toLowerCase() || '';
+        const email2 = message.to_email?.toLowerCase() || '';
+        key = email1 < email2 ? `${email1}|${email2}` : `${email2}|${email1}`;
+        peer = key;
+      } else {
+        peer = message.from_email?.toLowerCase() === myEmail.toLowerCase()
+          ? message.to_email || ''
+          : message.from_email || '';
+        key = threadKey(myEmail, peer);
+      }
 
       if (!peer) return;
-      if (!canViewChat(peer)) return;
-
-      const key = threadKey(myEmail, peer);
+      
+      if (!isAdminOrDespachante && !canViewChat(peer)) return;
 
       if (!threadsMap.has(key)) {
-        const unreadMessages = notDeletedForMe.filter(
-          (item: ChatMessage) =>
-            item.thread_key === key &&
-            item.to_email?.toLowerCase() === myEmail.toLowerCase() &&
-            !item.read_at
-        );
+        let peerName: string;
+        let unread = 0;
+        
+        if (isAdminOrDespachante) {
+          const participant1 = contactMap[message.from_email?.toLowerCase() || '']?.name || message.from_email;
+          const participant2 = contactMap[message.to_email?.toLowerCase() || '']?.name || message.to_email;
+          peerName = `${participant1} ↔ ${participant2}`;
+          
+          unread = notDeletedForMe.filter(
+            (item: ChatMessage) => {
+              const itemKey = item.from_email?.toLowerCase() < item.to_email?.toLowerCase()
+                ? `${item.from_email?.toLowerCase()}|${item.to_email?.toLowerCase()}`
+                : `${item.to_email?.toLowerCase()}|${item.from_email?.toLowerCase()}`;
+              return itemKey === key && !item.read_at;
+            }
+          ).length;
+        } else {
+          peerName = contactMap[peer.toLowerCase()]?.name || peer;
+          
+          unread = notDeletedForMe.filter(
+            (item: ChatMessage) =>
+              item.thread_key === key &&
+              item.to_email?.toLowerCase() === myEmail.toLowerCase() &&
+              !item.read_at
+          ).length;
+        }
 
         threadsMap.set(key, {
           key,
           peer,
-          peerName: contactMap[peer.toLowerCase()]?.name || peer,
+          peerName,
           lastMsg: message.message_text || message.attachment_name || 'Adjunto',
           lastTime: message.created_at,
-          unread: unreadMessages.length,
+          unread,
           topicChannel: channelTab,
         });
       }
@@ -433,13 +471,16 @@ export default function ChatView() {
   const loadDMThreads = async () => {
     if (!myEmail) return;
 
-    const { data, error } = await (supabase as any)
+    let query = (supabase as any)
       .from('chat_dm_messages')
       .select('*')
-      .eq('topic_channel', 'dm')
-      .or(`from_email.eq.${myEmail},to_email.eq.${myEmail}`)
-      .order('created_at', { ascending: false })
-      .limit(500);
+      .eq('topic_channel', 'dm');
+
+    if (!isAdminOrDespachante) {
+      query = query.or(`from_email.eq.${myEmail},to_email.eq.${myEmail}`);
+    }
+
+    const { data, error } = await query.order('created_at', { ascending: false }).limit(500);
 
     if (error) {
       console.error(error);
@@ -451,32 +492,59 @@ export default function ChatView() {
     const map = new Map<string, Thread>();
 
     notDeletedForMe.forEach((message: ChatMessage) => {
-      const peer =
-        message.from_email?.toLowerCase() === myEmail.toLowerCase()
-          ? message.to_email
-          : message.from_email;
+      let peer: string;
+      let key: string;
+      
+      if (isAdminOrDespachante) {
+        const email1 = message.from_email?.toLowerCase() || '';
+        const email2 = message.to_email?.toLowerCase() || '';
+        key = email1 < email2 ? `${email1}|${email2}` : `${email2}|${email1}`;
+        peer = key;
+      } else {
+        peer = message.from_email?.toLowerCase() === myEmail.toLowerCase()
+          ? message.to_email || ''
+          : message.from_email || '';
+        key = threadKey(myEmail, peer);
+      }
 
       if (!peer) return;
 
-      const key = threadKey(myEmail, peer);
-
       if (!map.has(key)) {
-        if (!canViewChat(peer)) return;
-
-        const unreadMessages = notDeletedForMe.filter(
-          (item: ChatMessage) =>
-            item.thread_key === key &&
-            item.to_email?.toLowerCase() === myEmail.toLowerCase() &&
-            !item.read_at
-        );
+        let peerName: string;
+        let unread = 0;
+        
+        if (isAdminOrDespachante) {
+          const participant1 = contactMap[message.from_email?.toLowerCase() || '']?.name || message.from_email;
+          const participant2 = contactMap[message.to_email?.toLowerCase() || '']?.name || message.to_email;
+          peerName = `${participant1} ↔ ${participant2}`;
+          
+          unread = notDeletedForMe.filter(
+            (item: ChatMessage) => {
+              const itemKey = item.from_email?.toLowerCase() < item.to_email?.toLowerCase()
+                ? `${item.from_email?.toLowerCase()}|${item.to_email?.toLowerCase()}`
+                : `${item.to_email?.toLowerCase()}|${item.from_email?.toLowerCase()}`;
+              return itemKey === key && !item.read_at;
+            }
+          ).length;
+        } else {
+          if (!canViewChat(peer)) return;
+          peerName = contactMap[peer.toLowerCase()]?.name || peer;
+          
+          unread = notDeletedForMe.filter(
+            (item: ChatMessage) =>
+              item.thread_key === key &&
+              item.to_email?.toLowerCase() === myEmail.toLowerCase() &&
+              !item.read_at
+          ).length;
+        }
 
         map.set(key, {
           key,
           peer,
-          peerName: contactMap[peer.toLowerCase()]?.name || peer,
+          peerName,
           lastMsg: message.message_text || message.attachment_name || 'Adjunto',
           lastTime: message.created_at,
-          unread: unreadMessages.length,
+          unread,
           topicChannel: 'dm',
         });
       }
@@ -488,24 +556,29 @@ export default function ChatView() {
   const loadDmMessages = async (peer: string, topicChannel?: string) => {
     if (!myEmail || !peer) return;
 
-    if (!canViewChat(peer)) {
+    if (!isAdminOrDespachante && !canViewChat(peer)) {
       toast.error('No tenés permiso para ver esta conversación');
       setSelectedPeer('');
       return;
     }
 
-    const key = threadKey(myEmail, peer);
     const channel = topicChannel || (isDMChannel ? tab : 'dm');
-
+    
     let query = (supabase as any)
       .from('chat_dm_messages')
       .select('*')
-      .eq('thread_key', key);
+      .eq('topic_channel', channel);
 
-    if (channel !== 'dm') {
-      query = query.eq('topic_channel', channel);
+    if (isAdminOrDespachante) {
+      if (peer.includes('|')) {
+        const [email1, email2] = peer.split('|');
+        query = query.or(`and(from_email.eq.${email1},to_email.eq.${email2}),and(from_email.eq.${email2},to_email.eq.${email1})`);
+      } else {
+        query = query.or(`from_email.eq.${peer},to_email.eq.${peer}`);
+      }
     } else {
-      query = query.eq('topic_channel', 'dm');
+      const key = threadKey(myEmail, peer);
+      query = query.eq('thread_key', key);
     }
 
     const { data, error } = await query
@@ -521,23 +594,31 @@ export default function ChatView() {
     setDmMessages(data || []);
     scrollBottom();
 
-    // Marcar como leídos los mensajes donde el usuario actual es el receptor
-    const unreadMessages = data?.filter(
-      (msg: ChatMessage) => msg.to_email === myEmail && !msg.read_at
-    );
+    // Marcar como leídos (solo si soy el receptor y no soy ADMIN/DESPACHANTE)
+    if (!isAdminOrDespachante) {
+      const unreadMessages = data?.filter(
+        (msg: ChatMessage) => msg.to_email === myEmail && !msg.read_at
+      );
 
-    if (unreadMessages && unreadMessages.length > 0) {
-      await (supabase as any)
-        .from('chat_dm_messages')
-        .update({ read_at: new Date().toISOString() })
-        .in('id', unreadMessages.map((m: ChatMessage) => m.id));
+      if (unreadMessages && unreadMessages.length > 0) {
+        await (supabase as any)
+          .from('chat_dm_messages')
+          .update({ read_at: new Date().toISOString() })
+          .in('id', unreadMessages.map((m: ChatMessage) => m.id));
+      }
     }
 
     if (channel !== 'dm') {
-      markThreadSeenLocal(key, channel);
+      if (!isAdminOrDespachante) {
+        const key = threadKey(myEmail, peer);
+        markThreadSeenLocal(key, channel);
+      }
       await loadChannelThreads(tab);
     } else {
-      markThreadSeenLocal(key, 'dm');
+      if (!isAdminOrDespachante) {
+        const key = threadKey(myEmail, peer);
+        markThreadSeenLocal(key, 'dm');
+      }
       await loadDMThreads();
     }
   };
@@ -1087,11 +1168,25 @@ export default function ChatView() {
         (payload) => {
           const newMessage = payload.new as ChatMessage;
           
-          if (newMessage.to_email === myEmail || newMessage.from_email === myEmail) {
+          if (newMessage.to_email === myEmail || newMessage.from_email === myEmail || isAdminOrDespachante) {
             const msgTopic = newMessage.topic_channel || 'dm';
             
             if (tab === msgTopic || (tab === 'dm' && msgTopic === 'dm')) {
-              if (selectedPeer && (newMessage.from_email === selectedPeer || newMessage.to_email === selectedPeer)) {
+              // Verificar si la conversación actual es la que se está viendo
+              let shouldUpdate = false;
+              
+              if (isAdminOrDespachante && selectedPeer) {
+                if (selectedPeer.includes('|')) {
+                  const [email1, email2] = selectedPeer.split('|');
+                  shouldUpdate = (newMessage.from_email === email1 || newMessage.from_email === email2);
+                } else {
+                  shouldUpdate = (newMessage.from_email === selectedPeer || newMessage.to_email === selectedPeer);
+                }
+              } else if (selectedPeer) {
+                shouldUpdate = (newMessage.from_email === selectedPeer || newMessage.to_email === selectedPeer);
+              }
+              
+              if (shouldUpdate) {
                 setDmMessages((prev) => [...prev, newMessage]);
                 scrollBottom();
               }
@@ -1110,7 +1205,7 @@ export default function ChatView() {
     return () => {
       supabase.removeChannel(channelSubscription);
     };
-  }, [myEmail, tab, selectedPeer, isPublicChannel]);
+  }, [myEmail, tab, selectedPeer, isPublicChannel, isAdminOrDespachante]);
 
   // Typing presence
   useEffect(() => {
@@ -1387,10 +1482,12 @@ export default function ChatView() {
                 <div className="chat-current-title">
                   <strong>
                     {selectedPeer
-                      ? contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer
+                      ? isAdminOrDespachante && selectedPeer.includes('|')
+                        ? selectedPeer.split('|').map(email => contactMap[email.toLowerCase()]?.name || email).join(' ↔ ')
+                        : contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer
                       : 'Seleccione un destinatario'}
                   </strong>
-                  {selectedPeer && contactMap[selectedPeer.toLowerCase()]?.role && (
+                  {selectedPeer && !selectedPeer.includes('|') && contactMap[selectedPeer.toLowerCase()]?.role && (
                     <span className="chat-role">{contactMap[selectedPeer.toLowerCase()].role}</span>
                   )}
                 </div>
@@ -1405,10 +1502,12 @@ export default function ChatView() {
                 <span className="chat-current-label">📌 {activeChannel?.title} - Conversación con</span>
                 <strong>
                   {selectedPeer
-                    ? contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer
+                    ? isAdminOrDespachante && selectedPeer.includes('|')
+                      ? selectedPeer.split('|').map(email => contactMap[email.toLowerCase()]?.name || email).join(' ↔ ')
+                      : contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer
                     : 'Seleccione un destinatario'}
                 </strong>
-                {selectedPeer && contactMap[selectedPeer.toLowerCase()]?.role && (
+                {selectedPeer && !selectedPeer.includes('|') && contactMap[selectedPeer.toLowerCase()]?.role && (
                   <span className="chat-role">{contactMap[selectedPeer.toLowerCase()].role}</span>
                 )}
               </div>
@@ -1428,7 +1527,9 @@ export default function ChatView() {
 
             {isDMChannel && selectedPeer && dmMessages.length === 0 && (
               <div className="chat-empty">
-                💬 Sin mensajes aún con {contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer}. ¡Envía tu primer mensaje!
+                💬 Sin mensajes aún con {selectedPeer.includes('|') 
+                  ? selectedPeer.split('|').map(email => contactMap[email.toLowerCase()]?.name || email).join(' y ')
+                  : contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer}. ¡Envía tu primer mensaje!
               </div>
             )}
 
@@ -1446,7 +1547,9 @@ export default function ChatView() {
 
             {tab === 'dm' && selectedPeer && dmMessages.length === 0 && (
               <div className="chat-empty">
-                💬 Sin mensajes aún con {contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer}
+                💬 Sin mensajes aún con {selectedPeer.includes('|')
+                  ? selectedPeer.split('|').map(email => contactMap[email.toLowerCase()]?.name || email).join(' y ')
+                  : contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer}
               </div>
             )}
 
