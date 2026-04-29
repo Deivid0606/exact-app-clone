@@ -24,7 +24,7 @@ export default function ClosuresView() {
   
   const [filterDelivery, setFilterDelivery] = useState('');
   const [filterSupplier, setFilterSupplier] = useState('');
-  const [filterType, setFilterType] = useState('');
+  const [filterType, setFilterType] = useState('ENTREGADO');
   const [rendicionNote, setRendicionNote] = useState('');
   const [rendicionPagada, setRendicionPagada] = useState<{ id: string; pagado_en: string; nota: string; marcado_por: string } | null>(null);
   const [dateFrom, setDateFrom] = useState(() => {
@@ -74,36 +74,24 @@ export default function ClosuresView() {
   const isDelivery = !isSupplier && !isAdmin && deliveries.some(d => d.email === myEmail);
 
   const loadClosures = async () => {
-    let query;
-    
-    if (isDelivery) {
-      // DELIVERY: SIN filtro de fechas - ver TODOS sus pedidos asignados
-      query = supabase.from('orders').select('*')
-        .order('assigned_at', { ascending: false });
-      query = query.eq('assigned_delivery', myEmail);
-      if (filterSupplier) {
-        query = query.eq('supplier_email', filterSupplier);
-      }
-    } else if (isSupplier) {
-      // PROVEEDOR: filtrar por FECHA DE ASIGNACIÓN (assigned_at)
-      query = supabase.from('orders').select('*')
-        .gte('assigned_at', dateFrom + 'T00:00:00')
-        .lte('assigned_at', dateTo + 'T23:59:59')
-        .order('assigned_at', { ascending: false });
+    let query = supabase.from('orders').select('*')
+      .gte('assigned_at', dateFrom + 'T00:00:00')
+      .lte('assigned_at', dateTo + 'T23:59:59')
+      .order('assigned_at', { ascending: false });
+
+    if (isSupplier) {
       query = query.eq('supplier_email', myEmail);
       if (filterDelivery) {
         query = query.eq('assigned_delivery', filterDelivery);
       }
+    } else if (isDelivery) {
+      query = query.eq('assigned_delivery', myEmail);
+      if (filterSupplier) {
+        query = query.eq('supplier_email', filterSupplier);
+      }
     } else if (isAdmin) {
-      // ADMIN: filtrar por FECHA DE ASIGNACIÓN
-      query = supabase.from('orders').select('*')
-        .gte('assigned_at', dateFrom + 'T00:00:00')
-        .lte('assigned_at', dateTo + 'T23:59:59')
-        .order('assigned_at', { ascending: false });
       if (filterDelivery) query = query.eq('assigned_delivery', filterDelivery);
       if (filterSupplier) query = query.eq('supplier_email', filterSupplier);
-    } else {
-      query = supabase.from('orders').select('*').order('assigned_at', { ascending: false });
     }
 
     if (filterType) query = query.eq('status', filterType);
@@ -337,7 +325,7 @@ export default function ClosuresView() {
           </select>
         )}
 
-        {/* FILTRO POR PROVEEDOR - para DELIVERY y ADMIN */}
+        {/* FILTRO POR PROVEEDOR - para DELIVERY y ADMIN (siempre visible para delivery) */}
         {(isDelivery || isAdmin) && suppliers.length > 0 && (
           <select className="app-input !w-auto min-w-[280px]" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
             <option value="">Todos los proveedores</option>
