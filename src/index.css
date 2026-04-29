@@ -778,6 +778,35 @@
     cursor: pointer;
   }
 
+  /* Estilos para videos en el chat */
+  .chat-attachment-video {
+    margin-top: 8px;
+    border-radius: 12px;
+    overflow: hidden;
+  }
+
+  .chat-video-preview {
+    max-width: 100%;
+    max-height: 300px;
+    width: auto;
+    height: auto;
+    border-radius: 12px;
+    border: 1px solid hsla(256, 100%, 68%, 0.3);
+    background: #000;
+  }
+
+  .chat-message-row.mine .chat-video-preview {
+    border-color: rgba(255, 255, 255, 0.3);
+  }
+
+  .chat-video-preview:focus {
+    outline: none;
+  }
+
+  video.chat-video-preview::-webkit-media-controls-panel {
+    background: rgba(0, 0, 0, 0.7);
+  }
+
   .chat-attachment-audio audio {
     max-width: 250px;
     height: 36px;
