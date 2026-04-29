@@ -142,8 +142,6 @@ export default function ChatView() {
   const [selectedPeer, setSelectedPeer] = useState('');
   const [dmMessages, setDmMessages] = useState<ChatMessage[]>([]);
   const [threads, setThreads] = useState<Thread[]>([]);
-  
-  // Conversaciones filtradas por el canal actual (pestaña)
   const [channelThreads, setChannelThreads] = useState<Thread[]>([]);
 
   const [unreadByChannel, setUnreadByChannel] = useState<Record<string, number>>({});
@@ -282,8 +280,13 @@ export default function ChatView() {
 
   const markThreadSeenLocal = (threadKeyValue: string, topicChannel: string) => {
     if (!myEmail) return;
+    const key = `${topicChannel}_${threadKeyValue}`;
     localStorage.setItem(getLastSeenThreadKey(threadKeyValue, topicChannel), new Date().toISOString());
-    setUnreadByThread((prev) => ({ ...prev, `${topicChannel}_${threadKeyValue}`: 0 }));
+    setUnreadByThread((prev) => {
+      const newState = { ...prev };
+      newState[key] = 0;
+      return newState;
+    });
   };
 
   const loadChannels = async () => {
@@ -350,7 +353,6 @@ export default function ChatView() {
     }
   };
 
-  // Cargar conversaciones para un canal DM específico (por pestaña)
   const loadChannelThreads = async (channelTab: ChatTab) => {
     if (!myEmail) return;
     if (!DM_CHANNELS.includes(channelTab)) return;
@@ -369,7 +371,6 @@ export default function ChatView() {
 
     const notDeletedForMe = data?.filter((msg: ChatMessage) => !msg.deleted_for?.includes(myEmail)) || [];
     
-    // Agrupar por thread (conversación con cada persona)
     const threadsMap = new Map<string, Thread>();
 
     notDeletedForMe.forEach((message: ChatMessage) => {
@@ -418,7 +419,6 @@ export default function ChatView() {
 
     const nextChannel: Record<string, number> = {};
 
-    // Para canales públicos
     await Promise.all(
       channels.filter(ch => PUBLIC_CHANNELS.includes(ch.channel_key)).map(async (channel) => {
         const lastSeen = localStorage.getItem(getLastSeenKey(channel.channel_key));
@@ -445,7 +445,6 @@ export default function ChatView() {
     setUnreadByChannel(nextChannel);
   };
 
-  // Cargar hilos de DM (para la pestaña de Mensajes Directos)
   const loadDMThreads = async () => {
     if (!myEmail) return;
 
@@ -542,7 +541,6 @@ export default function ChatView() {
     setDmMessages(data || []);
     scrollBottom();
 
-    // Marcar como leídos
     await (supabase as any)
       .from('chat_dm_messages')
       .update({ read_at: new Date().toISOString() })
@@ -651,7 +649,6 @@ export default function ChatView() {
     if (!text.trim() && !attachment) return;
     if (!myEmail) return;
 
-    // Canal público - todos ven
     if (isPublicChannel) {
       const messageData: any = {
         sender_email: myEmail,
@@ -679,7 +676,6 @@ export default function ChatView() {
       await loadChannelMessages(tab);
       await loadUnreadCounts();
     } 
-    // Canal con selector - enviar como DM al destinatario seleccionado
     else if (isDMChannel) {
       if (!selectedPeer) {
         toast.error('Debes seleccionar un destinatario');
@@ -698,7 +694,7 @@ export default function ChatView() {
         from_email: myEmail,
         to_email: selectedPeer,
         from_role: myRole,
-        topic_channel: tab, // Guardamos la pestaña donde se envió
+        topic_channel: tab,
         message_text: text.trim() || (attachment ? `📎 ${attachment.name}` : ''),
         attachment_url: attachment?.url || null,
         attachment_name: attachment?.name || null,
@@ -1028,13 +1024,11 @@ export default function ChatView() {
     );
   };
 
-  // Efecto inicial
   useEffect(() => {
     loadChannels();
     loadContacts();
   }, []);
 
-  // Efecto para cargar datos según la pestaña
   useEffect(() => {
     if (!myEmail) return;
 
@@ -1055,7 +1049,6 @@ export default function ChatView() {
     }
   }, [myEmail, tab, selectedPeer, channels.length]);
 
-  // Suscripción en tiempo real
   useEffect(() => {
     if (!myEmail) return;
 
@@ -1089,18 +1082,14 @@ export default function ChatView() {
         (payload) => {
           const newMessage = payload.new as ChatMessage;
           
-          // Si el mensaje es para mí o de mí
           if (newMessage.to_email === myEmail || newMessage.from_email === myEmail) {
             const msgTopic = newMessage.topic_channel || 'dm';
             
-            // Si estoy en la pestaña correcta
             if (tab === msgTopic || (tab === 'dm' && msgTopic === 'dm')) {
-              // Si estoy viendo la conversación con esa persona
               if (selectedPeer && (newMessage.from_email === selectedPeer || newMessage.to_email === selectedPeer)) {
                 setDmMessages((prev) => [...prev, newMessage]);
                 scrollBottom();
                 
-                // Marcar como leído si soy el receptor
                 if (newMessage.to_email === myEmail) {
                   setTimeout(async () => {
                     await (supabase as any)
@@ -1111,7 +1100,6 @@ export default function ChatView() {
                 }
               }
               
-              // Actualizar lista de conversaciones
               if (msgTopic !== 'dm') {
                 loadChannelThreads(tab);
               } else {
@@ -1128,7 +1116,6 @@ export default function ChatView() {
     };
   }, [myEmail, tab, selectedPeer, isPublicChannel]);
 
-  // Typing presence
   useEffect(() => {
     if (!myEmail) return;
 
@@ -1222,7 +1209,6 @@ export default function ChatView() {
 
       <div className="chat-layout">
         <aside className="chat-sidebar">
-          {/* Selector de destinatario - SOLO visible en canales que requieren destinatario */}
           {!isPublicChannel && tab !== 'dm' && (
             <div className="chat-dm-selector">
               <label className="chat-label">✏️ Escribir a</label>
