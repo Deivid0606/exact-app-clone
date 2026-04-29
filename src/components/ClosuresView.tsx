@@ -24,7 +24,7 @@ export default function ClosuresView() {
   
   const [filterDelivery, setFilterDelivery] = useState('');
   const [filterSupplier, setFilterSupplier] = useState('');
-  const [filterType, setFilterType] = useState('ENTREGADO');
+  const [filterType, setFilterType] = useState('');
   const [rendicionNote, setRendicionNote] = useState('');
   const [rendicionPagada, setRendicionPagada] = useState<{ id: string; pagado_en: string; nota: string; marcado_por: string } | null>(null);
   const [dateFrom, setDateFrom] = useState(() => {
@@ -74,10 +74,11 @@ export default function ClosuresView() {
   const isDelivery = !isSupplier && !isAdmin && deliveries.some(d => d.email === myEmail);
 
   const loadClosures = async () => {
+    // Usar created_at en lugar de assigned_at para que aparezcan TODOS los pedidos
     let query = supabase.from('orders').select('*')
-      .gte('assigned_at', dateFrom + 'T00:00:00')
-      .lte('assigned_at', dateTo + 'T23:59:59')
-      .order('assigned_at', { ascending: false });
+      .gte('created_at', dateFrom + 'T00:00:00')
+      .lte('created_at', dateTo + 'T23:59:59')
+      .order('created_at', { ascending: false });
 
     if (isSupplier) {
       query = query.eq('supplier_email', myEmail);
@@ -325,7 +326,7 @@ export default function ClosuresView() {
           </select>
         )}
 
-        {/* FILTRO POR PROVEEDOR - para DELIVERY y ADMIN (siempre visible para delivery) */}
+        {/* FILTRO POR PROVEEDOR - para DELIVERY y ADMIN */}
         {(isDelivery || isAdmin) && suppliers.length > 0 && (
           <select className="app-input !w-auto min-w-[280px]" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
             <option value="">Todos los proveedores</option>
