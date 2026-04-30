@@ -38,11 +38,26 @@ export default function CommissionRequestsView() {
 
   useEffect(() => { load(); }, []);
 
+  // ✅ Carga SOLO pedidos con status2 = 'RENDIDO'
   const loadBalanceOrders = async () => {
-    const { data } = await supabase.from('orders').select('*')
+    console.log('🔍 Cargando pedidos RENDIDOS para:', myEmail);
+    console.log('📅 Rango:', newFrom, 'a', newTo);
+    
+    const { data, error } = await supabase.from('orders').select('*')
       .gte('created_at', newFrom + 'T00:00:00')
       .lte('created_at', newTo + 'T23:59:59')
-      .eq('created_by', myEmail);
+      .eq('created_by', myEmail)
+      .eq('status2', 'RENDIDO');  // ← SOLO pedidos RENDIDOS
+    
+    if (error) {
+      console.error('Error:', error);
+    }
+    
+    console.log(`✅ Pedidos RENDIDOS encontrados: ${data?.length || 0}`);
+    data?.forEach(o => {
+      console.log(`   - ${o.id}: commission=${o.commission_gs}, status2=${o.status2}`);
+    });
+    
     setOrders(data || []);
   };
 
@@ -50,6 +65,7 @@ export default function CommissionRequestsView() {
     if (showForm && role === 'VENDEDOR') loadBalanceOrders(); 
   }, [showForm, newFrom, newTo]);
 
+  // ✅ Cálculo de balances - SOLO sobre pedidos RENDIDOS
   const balances = useMemo(() => {
     const skuProvider: Record<string, string> = {};
     products.forEach(p => {
@@ -58,13 +74,13 @@ export default function CommissionRequestsView() {
       }
     });
 
-    const map: Record<string, { provider: string; gross: number; grossRendido: number; orderIds: string[] }> = {};
+    const map: Record<string, { provider: string; grossRendido: number; orderIds: string[] }> = {};
+    
     orders.forEach(o => {
       const commission = Number(o.commission_gs || 0);
       if (commission <= 0) return;
 
-      const isRendido = o.status2 === 'RENDIDO';
-
+      // Ya sabemos que son RENDIDOS porque los filtramos arriba
       const provSet = new Set<string>();
       try {
         const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
@@ -87,13 +103,13 @@ export default function CommissionRequestsView() {
       const perProv = commission / provArr.length;
 
       provArr.forEach(prov => {
-        if (!map[prov]) map[prov] = { provider: prov, gross: 0, grossRendido: 0, orderIds: [] };
-        map[prov].gross += perProv;
-        if (isRendido) map[prov].grossRendido += perProv;
+        if (!map[prov]) map[prov] = { provider: prov, grossRendido: 0, orderIds: [] };
+        map[prov].grossRendido += perProv;
         if (!map[prov].orderIds.includes(o.id)) map[prov].orderIds.push(o.id);
       });
     });
 
+    // Calcular lo ya solicitado
     const requested: Record<string, number> = {};
     requests.forEach(r => {
       if (r.vendor_email?.toLowerCase() === myEmail.toLowerCase() && r.status !== 'RECHAZADO') {
@@ -102,11 +118,16 @@ export default function CommissionRequestsView() {
       }
     });
 
-    return Object.values(map).map(b => ({
-      ...b,
+    const result = Object.values(map).map(b => ({
+      provider: b.provider,
+      grossRendido: b.grossRendido,
       requested: requested[b.provider] || 0,
       available: Math.max(0, b.grossRendido - (requested[b.provider] || 0)),
+      orderIds: b.orderIds,
     }));
+
+    console.log('📊 Balances calculados:', result);
+    return result;
   }, [orders, products, requests, myEmail]);
 
   const filtered = requests.filter(r => {
@@ -139,7 +160,7 @@ export default function CommissionRequestsView() {
       range_to: newTo,
       requested_by: myEmail,
       status: 'PENDIENTE',
-      meta_json: { order_ids: balance?.orderIds || [], gross: balance?.gross || 0 },
+      meta_json: { order_ids: balance?.orderIds || [], gross: balance?.grossRendido || 0 },
     });
     if (error) { toast.error(error.message); return; }
     toast.success(`Solicitud creada por Gs ${nf(available)}`);
@@ -269,12 +290,11 @@ export default function CommissionRequestsView() {
             return (
               <div className="mb-3 p-3 rounded-xl border border-border bg-secondary/50">
                 <div className="text-xs text-muted-foreground">
-                  Comisión total: Gs {nf(bal?.gross || 0)} |
-                  Rendido: Gs {nf(bal?.grossRendido || 0)} |
+                  Total rendido: Gs {nf(bal?.grossRendido || 0)} |
                   Ya solicitado: Gs {nf(bal?.requested || 0)}
                 </div>
-                <div className="text-sm font-bold text-foreground mt-1">
-                  Disponible para solicitar: Gs {nf(bal?.available || 0)}
+                <div className="text-sm font-bold text-green-600 mt-1">
+                  ✅ Disponible para solicitar: Gs {nf(bal?.available || 0)}
                 </div>
               </div>
             );
