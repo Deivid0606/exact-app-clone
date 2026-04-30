@@ -25,7 +25,6 @@ export default function CommissionsView() {
   });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
 
-  // Cargar perfiles y productos
   useEffect(() => {
     Promise.all([
       supabase.from('profiles').select('email, name'),
@@ -60,7 +59,6 @@ export default function CommissionsView() {
 
   useEffect(() => { loadCommissions(); }, [dateFrom, dateTo]);
 
-  // ✅ Filtrar por búsqueda y estado de pago
   const filtered = orders.filter(o => {
     if (filterStatus === 'PENDIENTE' && o.commission_paid) return false;
     if (filterStatus === 'PAGADO' && !o.commission_paid) return false;
@@ -75,11 +73,10 @@ export default function CommissionsView() {
     return true;
   });
 
-  // ✅ Calcular balances por PROVEEDOR (para VENDEDOR) - SOLO pedidos RENDIDOS
+  // ✅ SOLO pedidos con status2 = 'RENDIDO' cuentan para "Rendido disponible"
   const providerBalances = useMemo(() => {
     if (role !== 'VENDEDOR') return [];
 
-    // Mapear SKU a proveedor
     const skuProvider: Record<string, string> = {};
     products.forEach(p => {
       if (p.sku && p.provider_email) {
@@ -87,11 +84,10 @@ export default function CommissionsView() {
       }
     });
 
-    // Agrupar por proveedor
     const map: Record<string, {
       provider: string;
-      totalComision: number;      // Total de comisiones de pedidos entregados
-      rendido: number;            // Total de comisiones de pedidos con status2 = 'RENDIDO' y NO pagados
+      totalComision: number;
+      rendido: number;
       orderIds: string[];
     }> = {};
 
@@ -99,10 +95,9 @@ export default function CommissionsView() {
       const commission = Number(o.commission_gs || 0);
       if (commission <= 0) return;
 
-      // ✅ CORREGIDO: Solo cuenta como RENDIDO si status2 = 'RENDIDO' Y NO está pagado
-      const isRendido = o.status2 === 'RENDIDO' && !o.commission_paid;
+      // ✅ SOLO los que tienen status2 = 'RENDIDO'
+      const esRendido = o.status2 === 'RENDIDO';
 
-      // Obtener proveedores del pedido
       const provSet = new Set<string>();
       try {
         const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
@@ -122,7 +117,6 @@ export default function CommissionsView() {
 
       if (provSet.size === 0) return;
       
-      // Distribuir comisión entre proveedores
       const perProv = commission / provSet.size;
       
       provSet.forEach(prov => {
@@ -130,8 +124,9 @@ export default function CommissionsView() {
           map[prov] = { provider: prov, totalComision: 0, rendido: 0, orderIds: [] };
         }
         map[prov].totalComision += perProv;
-        // ✅ Solo suma al "rendido" si el pedido está RENDIDO y NO pagado
-        if (isRendido) {
+        
+        // ✅ SOLO si es RENDIDO se suma a "rendido"
+        if (esRendido) {
           map[prov].rendido += perProv;
           if (!map[prov].orderIds.includes(o.id)) {
             map[prov].orderIds.push(o.id);
@@ -140,7 +135,6 @@ export default function CommissionsView() {
       });
     });
 
-    // Calcular lo ya solicitado a cada proveedor
     const yaSolicitado: Record<string, number> = {};
     commissionRequests.forEach(req => {
       if (req.vendor_email?.toLowerCase() === myEmail.toLowerCase() && 
@@ -150,7 +144,6 @@ export default function CommissionsView() {
       }
     });
 
-    // Retornar array con todos los datos
     return Object.values(map).map(b => ({
       ...b,
       yaSolicitado: yaSolicitado[b.provider] || 0,
@@ -158,15 +151,16 @@ export default function CommissionsView() {
     })).filter(b => b.totalComision > 0);
   }, [filtered, products, commissionRequests, myEmail, role]);
 
-  // ✅ KPIs generales - SOLO sumar comisiones de pedidos RENDIDOS
+  // ✅ Total de comisiones de pedidos ENTREGADOS
   const totalEntregado = filtered.reduce((s, o) => {
     const commission = Number(o.commission_gs || 0);
     return s + (commission > 0 ? commission : 0);
   }, 0);
   
+  // ✅ Total RENDIDO = SOLO pedidos con status2 = 'RENDIDO'
   const totalRendido = filtered.reduce((s, o) => {
     const commission = Number(o.commission_gs || 0);
-    if (commission > 0 && o.status2 === 'RENDIDO' && !o.commission_paid) {
+    if (commission > 0 && o.status2 === 'RENDIDO') {
       return s + commission;
     }
     return s;
@@ -202,7 +196,6 @@ export default function CommissionsView() {
         {role === 'VENDEDOR' ? '💰 Mis Comisiones' : role === 'PROVEEDOR' ? '💰 Comisiones a Pagar' : '💰 Pago de comisiones'}
       </h3>
 
-      {/* Filtros */}
       <div className="flex flex-wrap gap-2 mb-3">
         <label className="app-label !mt-0">Desde</label>
         <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
@@ -240,7 +233,6 @@ export default function CommissionsView() {
         </div>
       )}
 
-      {/* KPIs GENERALES */}
       <div className="grid-kpi mb-4">
         <div className="kpi-card">
           <div className="text-xs text-muted-foreground mb-1">Pedidos filtrados</div>
@@ -258,7 +250,6 @@ export default function CommissionsView() {
         </div>
       </div>
 
-      {/* ✅ TABLA DE DESGLOSE POR PROVEEDOR (solo para VENDEDOR) */}
       {role === 'VENDEDOR' && providerBalances.length > 0 && (
         <div className="mb-4">
           <h4 className="font-bold text-sm mb-2">📊 Desglose por Proveedor</h4>
@@ -271,7 +262,7 @@ export default function CommissionsView() {
                   <th className="text-right">Rendido disponible (Gs)</th>
                   <th className="text-right">Ya solicitado (Gs)</th>
                   <th className="text-right">Disponible para solicitar (Gs)</th>
-                 </tr>
+                </td>
               </thead>
               <tbody>
                 {providerBalances.map(b => {
@@ -301,7 +292,6 @@ export default function CommissionsView() {
         </div>
       )}
 
-      {/* Tabla de pedidos - SOLO muestra pedidos ENTREGADOS */}
       <div className="overflow-auto">
         <table className="app-table min-w-[1000px]">
           <thead>
@@ -312,7 +302,7 @@ export default function CommissionsView() {
           </thead>
           <tbody>
             {filtered.map(o => (
-              <tr key={o.id} className={o.status2 === 'RENDIDO' ? 'bg-green-500/5' : ''}>
+              <tr key={o.id} className={o.status2 === 'RENDIDO' ? 'bg-green-500/5' : 'opacity-60'}>
                 <td className="text-xs whitespace-nowrap">{new Date(o.created_at).toLocaleDateString('es-PY')}</td>
                 <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
                 <td className="text-xs">{o.city}</td>
@@ -320,15 +310,7 @@ export default function CommissionsView() {
                 <td className="text-xs">{o.created_by}</td>
                 <td className="text-xs">{o.assigned_delivery || '—'}</td>
                 <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
-                <td className="text-right text-xs">
-                  {(() => {
-                    const com = Number(o.commission_gs || 0);
-                    if (com < 0) {
-                      return <span className="text-red-500 font-bold">⚠️ {nf(com)}</span>;
-                    }
-                    return nf(com);
-                  })()}
-                </td>
+                <td className="text-right text-xs">{nf(Number(o.commission_gs || 0))}</td>
                 <td><span className="badge-status badge-entregado">{o.status}</span></td>
                 <td>
                   <span className={`badge-status ${o.status2 === 'RENDIDO' ? 'badge-entregado' : 'badge-pendiente'}`}>
