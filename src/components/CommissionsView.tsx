@@ -5,6 +5,13 @@ import { toast } from 'sonner';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
+// Helper para verificar si un pedido es elegible para comisión
+const isElegible = (estado1: any, status2: any) => {
+  const e1 = String(estado1 || '').toUpperCase().trim();
+  const s2 = String(status2 || '').toUpperCase().trim();
+  return (e1 === 'ENTREGADO' || e1 === 'ENCOMIENDA ENTREGADA') && s2 === 'RENDIDO';
+};
+
 export default function CommissionsView() {
   const { profile } = useAuth();
   const role = profile?.role;
@@ -42,7 +49,6 @@ export default function CommissionsView() {
     let query = supabase.from('orders').select('*')
       .gte('created_at', dateFrom + 'T00:00:00')
       .lte('created_at', dateTo + 'T23:59:59')
-      .in('status', ['ENTREGADO', 'ENCOMIENDA ENTREGADA'])
       .order('created_at', { ascending: false });
 
     if (role === 'VENDEDOR') {
@@ -54,7 +60,8 @@ export default function CommissionsView() {
     }
 
     const { data } = await query;
-    setOrders(data || []);
+    // Filtrar solo los pedidos elegibles (ENTREGADO/ENCOMIENDA ENTREGADA + RENDIDO)
+    setOrders((data || []).filter(o => isElegible(o.status, o.status2)));
   };
 
   useEffect(() => { loadCommissions(); }, [dateFrom, dateTo]);
@@ -73,7 +80,7 @@ export default function CommissionsView() {
     return true;
   });
 
-  // ✅ SOLO pedidos con status2 = 'RENDIDO' cuentan para "Rendido disponible"
+  // ✅ SOLO pedidos elegibles (ENTREGADO/ENCOMIENDA ENTREGADA + RENDIDO) cuentan para "Rendido disponible"
   const providerBalances = useMemo(() => {
     if (role !== 'VENDEDOR') return [];
 
@@ -95,8 +102,8 @@ export default function CommissionsView() {
       const commission = Number(o.commission_gs || 0);
       if (commission <= 0) return;
 
-      // ✅ SOLO los que tienen status2 = 'RENDIDO'
-      const esRendido = o.status2 === 'RENDIDO';
+      // ✅ Usar isElegible en lugar de solo status2
+      const esRendido = isElegible(o.status, o.status2);
 
       const provSet = new Set<string>();
       try {
@@ -125,7 +132,7 @@ export default function CommissionsView() {
         }
         map[prov].totalComision += perProv;
         
-        // ✅ SOLO si es RENDIDO se suma a "rendido"
+        // ✅ SOLO si es elegible se suma a "rendido"
         if (esRendido) {
           map[prov].rendido += perProv;
           if (!map[prov].orderIds.includes(o.id)) {
@@ -151,16 +158,16 @@ export default function CommissionsView() {
     })).filter(b => b.totalComision > 0);
   }, [filtered, products, commissionRequests, myEmail, role]);
 
-  // ✅ Total de comisiones de pedidos ENTREGADOS
+  // ✅ Total de comisiones de pedidos ENTREGADOS (todos los filtrados son elegibles)
   const totalEntregado = filtered.reduce((s, o) => {
     const commission = Number(o.commission_gs || 0);
     return s + (commission > 0 ? commission : 0);
   }, 0);
   
-  // ✅ Total RENDIDO = SOLO pedidos con status2 = 'RENDIDO'
+  // ✅ Total RENDIDO = SOLO pedidos elegibles (ya todos en filtered lo son)
   const totalRendido = filtered.reduce((s, o) => {
     const commission = Number(o.commission_gs || 0);
-    if (commission > 0 && o.status2 === 'RENDIDO') {
+    if (commission > 0 && isElegible(o.status, o.status2)) {
       return s + commission;
     }
     return s;
@@ -182,7 +189,8 @@ export default function CommissionsView() {
   };
 
   const markAllPaid = async () => {
-    const pending = filtered.filter(o => !o.commission_paid && o.status2 === 'RENDIDO');
+    // ✅ Usar isElegible en lugar de solo status2
+    const pending = filtered.filter(o => !o.commission_paid && isElegible(o.status, o.status2));
     for (const o of pending) {
       await supabase.from('orders').update({ commission_paid: true, paid_at: new Date().toISOString() }).eq('id', o.id);
     }
@@ -262,7 +270,7 @@ export default function CommissionsView() {
                   <th className="text-right">Rendido disponible (Gs)</th>
                   <th className="text-right">Ya solicitado (Gs)</th>
                   <th className="text-right">Disponible para solicitar (Gs)</th>
-                </td>
+                 </tr>
               </thead>
               <tbody>
                 {providerBalances.map(b => {
@@ -302,7 +310,7 @@ export default function CommissionsView() {
           </thead>
           <tbody>
             {filtered.map(o => (
-              <tr key={o.id} className={o.status2 === 'RENDIDO' ? 'bg-green-500/5' : 'opacity-60'}>
+              <tr key={o.id} className={isElegible(o.status, o.status2) ? 'bg-green-500/5' : 'opacity-60'}>
                 <td className="text-xs whitespace-nowrap">{new Date(o.created_at).toLocaleDateString('es-PY')}</td>
                 <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
                 <td className="text-xs">{o.city}</td>
