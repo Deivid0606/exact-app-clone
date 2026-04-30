@@ -38,14 +38,11 @@ export default function CommissionRequestsView() {
 
   useEffect(() => { load(); }, []);
 
-  // ✅ VERSIÓN CORREGIDA - Igual que el Dashboard, sin filtrar por payment_status
   const loadBalanceOrders = async () => {
     const { data } = await supabase.from('orders').select('*')
       .gte('created_at', newFrom + 'T00:00:00')
       .lte('created_at', newTo + 'T23:59:59')
       .eq('created_by', myEmail);
-    
-    console.log('📦 Pedidos encontrados:', data?.length);
     setOrders(data || []);
   };
 
@@ -53,7 +50,6 @@ export default function CommissionRequestsView() {
     if (showForm && role === 'VENDEDOR') loadBalanceOrders(); 
   }, [showForm, newFrom, newTo]);
 
-  // ✅ LÓGICA CORREGIDA - Igual que el Dashboard
   const balances = useMemo(() => {
     const skuProvider: Record<string, string> = {};
     products.forEach(p => {
@@ -67,7 +63,6 @@ export default function CommissionRequestsView() {
       const commission = Number(o.commission_gs || 0);
       if (commission <= 0) return;
 
-      // ✅ Solo los que están RENDIDOS cuentan como "disponibles"
       const isRendido = o.status2 === 'RENDIDO';
 
       const provSet = new Set<string>();
@@ -296,13 +291,18 @@ export default function CommissionRequestsView() {
         <table className="app-table">
           <thead>
             <tr>
-              <th>Fecha</th><th>Vendedor</th><th>Proveedor</th>
-              <th className="text-right">Monto (Gs)</th><th>Rango</th><th>Nota</th><th>Estado</th>
+              <th>Fecha</th>
+              <th>Vendedor</th>
+              <th>Proveedor</th>
+              <th className="text-right">Monto (Gs)</th>
+              <th>Rango</th>
+              <th>Nota</th>
+              <th>Estado</th>
               <th>Acción</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map(r => (
+            {filtered.map((r) => (
               <tr key={r.id}>
                 <td className="text-xs whitespace-nowrap">{r.requested_at ? new Date(r.requested_at).toLocaleDateString('es-PY') : ''}</td>
                 <td className="text-xs">{r.vendor_email}</td>
@@ -328,7 +328,12 @@ export default function CommissionRequestsView() {
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && <tr><td colSpan={8} className="text-center text-muted-foreground py-8">Sin solicitudes</td>}</tbody>
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={8} className="text-center text-muted-foreground py-8">Sin solicitudes</td>
+              </tr>
+            )}
+          </tbody>
         </table>
       </div>
     </div>
