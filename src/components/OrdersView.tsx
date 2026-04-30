@@ -47,7 +47,7 @@ export default function OrdersView() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [dateFrom, setDateFrom] = useState(() => {
-    // Últimos 90 días por defecto
+    // Por defecto: últimos 90 días
     const d = new Date();
     d.setDate(d.getDate() - 90);
     return d.toISOString().slice(0, 10);
@@ -62,13 +62,13 @@ export default function OrdersView() {
   const loadOrders = async () => {
     setLoading(true);
     
-    // Traer TODOS los pedidos sin filtro de fecha
+    // Traer hasta 50000 pedidos (suficiente para todos los históricos)
     const [ordersRes, deliveriesRes, providersRes] = await Promise.all([
       supabase
         .from('orders')
         .select('*')
         .order('created_at', { ascending: false })
-        .range(0, 9999),
+        .range(0, 49999),
       supabase.from('profiles').select('email, name, user_id').then(async (profilesRes) => {
         const profiles = profilesRes.data || [];
         const { data: roles } = await supabase.from('user_roles').select('user_id, role').eq('role', 'DELIVERY');
@@ -79,6 +79,14 @@ export default function OrdersView() {
     ]);
     
     const allOrdersData = ordersRes.data || [];
+    console.log('Total pedidos cargados de BD:', allOrdersData.length);
+    
+    // Verificar las fechas de los pedidos cargados
+    if (allOrdersData.length > 0) {
+      const fechas = allOrdersData.map(o => o.created_at).slice(0, 10);
+      console.log('Primeras fechas:', fechas);
+    }
+    
     setAllOrders(allOrdersData);
     
     // Filtrar por fecha en el frontend (evita problemas de zona horaria)
@@ -87,9 +95,8 @@ export default function OrdersView() {
       return orderDate >= dateFrom && orderDate <= dateTo;
     });
     
-    console.log('Total pedidos en BD:', allOrdersData.length);
     console.log('Pedidos después de filtro de fecha:', filteredByDate.length);
-    console.log('Rango de fechas:', dateFrom, 'a', dateTo);
+    console.log('Rango de fechas seleccionado:', dateFrom, 'a', dateTo);
     
     setOrders(filteredByDate);
     setDeliveries(deliveriesRes);
