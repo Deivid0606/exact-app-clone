@@ -28,7 +28,6 @@ interface EditOrder {
   provider_email?: string;
 }
 
-// ✅ FUNCIÓN CORREGIDA - Usa provider_email en lugar de provider_emails_list
 function isProviderAllowed(order: any, userEmail: string): boolean {
   const orderProviderEmail = order.provider_email;
   if (!orderProviderEmail) return false;
@@ -46,10 +45,8 @@ export default function OrdersView() {
   const [clientPrices, setClientPrices] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [dateFrom, setDateFrom] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() - 22);
-    return d.toISOString().slice(0, 10);
-  });
+  // ✅ CORREGIDO: Ahora muestra pedidos desde enero 2024 para que aparezcan pedidos antiguos
+  const [dateFrom, setDateFrom] = useState(() => '2024-01-01');
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [loading, setLoading] = useState(false);
   const [editOrder, setEditOrder] = useState<EditOrder | null>(null);
@@ -87,7 +84,6 @@ export default function OrdersView() {
   const filtered = useMemo(() => {
     const q = norm(search);
     return orders.filter(o => {
-      // ✅ FILTRO CORREGIDO PARA PROVEEDOR
       if (role === 'VENDEDOR' && norm(o.created_by || '') !== norm(myEmail)) return false;
       if (role === 'DELIVERY' && norm(o.assigned_delivery || '') !== norm(myEmail)) return false;
       if (role === 'PROVEEDOR' && !isProviderAllowed(o, myEmail)) return false;
@@ -439,7 +435,7 @@ export default function OrdersView() {
                     )}
                   </td>
                   {role !== 'DELIVERY' && (
-                    <td>
+                    <tr>
                       {canEditStatus2 ? (
                         <select
                           className="app-input !py-1 !px-2 !text-[11px] !w-auto !min-w-[120px]"
