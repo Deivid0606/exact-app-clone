@@ -38,22 +38,51 @@ export default function CommissionRequestsView() {
 
   useEffect(() => { load(); }, []);
 
-  // ✅ Carga SOLO pedidos con status2 = 'RENDIDO'
+  // ✅ Carga pedidos sin filtrar por status2 primero para depurar
   const loadBalanceOrders = async () => {
+    console.log('=== DEPURACIÓN ===');
+    console.log('Buscando pedidos para:', myEmail);
+    console.log('Rango:', newFrom, 'a', newTo);
+    
+    // Primero, traer TODOS los pedidos del vendedor para ver qué status2 existen
+    const { data: allOrders } = await supabase.from('orders').select('id, status2, commission_gs')
+      .gte('created_at', newFrom + 'T00:00:00')
+      .lte('created_at', newTo + 'T23:59:59')
+      .eq('created_by', myEmail);
+    
+    console.log('📊 TODOS los pedidos encontrados:', allOrders?.length || 0);
+    const status2Count: Record<string, number> = {};
+    allOrders?.forEach(o => {
+      const s2 = o.status2 || 'NULL';
+      status2Count[s2] = (status2Count[s2] || 0) + 1;
+    });
+    console.log('📋 Valores de status2 en la BD:', status2Count);
+    
+    // Ahora buscar específicamente RENDIDO (ignorando mayúsculas)
     const { data } = await supabase.from('orders').select('*')
       .gte('created_at', newFrom + 'T00:00:00')
       .lte('created_at', newTo + 'T23:59:59')
-      .eq('created_by', myEmail)
-      .eq('status2', 'RENDIDO');  // ← SOLO RENDIDO
+      .eq('created_by', myEmail);
     
-    setOrders(data || []);
+    // Filtrar en JavaScript para ignorar mayúsculas/minúsculas
+    const rendidos = (data || []).filter(o => {
+      const status2 = (o.status2 || '').toUpperCase().trim();
+      return status2 === 'RENDIDO';
+    });
+    
+    console.log(`✅ Pedidos RENDIDO encontrados (filtro flexible): ${rendidos.length}`);
+    rendidos.forEach(o => {
+      console.log(`   - ${o.id}: status2="${o.status2}", commission=${o.commission_gs}`);
+    });
+    
+    setOrders(rendidos);
   };
 
   useEffect(() => { 
     if (showForm && role === 'VENDEDOR') loadBalanceOrders(); 
   }, [showForm, newFrom, newTo]);
 
-  // ✅ Mapeo de proveedores por SKU
+  // Mapeo de proveedores por SKU
   const skuProviderMap = useMemo(() => {
     const map: Record<string, string> = {};
     products.forEach(p => {
@@ -64,7 +93,7 @@ export default function CommissionRequestsView() {
     return map;
   }, [products]);
 
-  // ✅ Calcular balances SOLO de pedidos RENDIDOS
+  // Calcular balances SOLO de pedidos RENDIDOS
   const balances = useMemo(() => {
     const providerCommissions: Record<string, { total: number; orderIds: string[] }> = {};
     
@@ -72,7 +101,6 @@ export default function CommissionRequestsView() {
       const commission = Number(order.commission_gs || 0);
       if (commission <= 0) return;
       
-      // Obtener proveedores del pedido
       const providerSet = new Set<string>();
       
       try {
@@ -82,11 +110,8 @@ export default function CommissionRequestsView() {
           const provider = skuProviderMap[sku];
           if (provider) providerSet.add(provider);
         });
-      } catch (e) {
-        console.error('Error parsing items:', e);
-      }
+      } catch (e) {}
       
-      // Si no se encontró por SKU, usar provider_emails_list
       if (providerSet.size === 0 && order.provider_emails_list) {
         const emails = order.provider_emails_list.split(',').map((e: string) => e.trim().toLowerCase());
         emails.forEach(e => providerSet.add(e));
@@ -95,7 +120,6 @@ export default function CommissionRequestsView() {
       const providersList = Array.from(providerSet);
       if (providersList.length === 0) return;
       
-      // Distribuir comisión entre proveedores
       const perProvider = commission / providersList.length;
       
       providersList.forEach(prov => {
@@ -118,14 +142,17 @@ export default function CommissionRequestsView() {
       }
     });
     
-    // Construir resultado
-    return Object.entries(providerCommissions).map(([providerEmail, data]) => ({
+    const result = Object.entries(providerCommissions).map(([providerEmail, data]) => ({
       provider: providerEmail,
       grossRendido: data.total,
       requested: requested[providerEmail] || 0,
       available: Math.max(0, data.total - (requested[providerEmail] || 0)),
       orderIds: data.orderIds,
     }));
+    
+    console.log('📊 Balances calculados:', result.map(r => ({ provider: r.provider, available: r.available })));
+    
+    return result;
   }, [orders, skuProviderMap, requests, myEmail]);
 
   const filtered = requests.filter(r => {
