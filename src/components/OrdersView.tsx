@@ -39,13 +39,19 @@ export default function OrdersView() {
   const role = profile?.role || '';
   const myEmail = profile?.email || '';
 
+  const [allOrders, setAllOrders] = useState<any[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
   const [deliveries, setDeliveries] = useState<any[]>([]);
   const [providers, setProviders] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [dateFrom, setDateFrom] = useState(() => '2024-01-01');
+  const [dateFrom, setDateFrom] = useState(() => {
+    // Últimos 90 días por defecto
+    const d = new Date();
+    d.setDate(d.getDate() - 90);
+    return d.toISOString().slice(0, 10);
+  });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [loading, setLoading] = useState(false);
   const [editOrder, setEditOrder] = useState<EditOrder | null>(null);
@@ -55,10 +61,12 @@ export default function OrdersView() {
 
   const loadOrders = async () => {
     setLoading(true);
+    
+    // Traer TODOS los pedidos sin filtro de fecha
     const [ordersRes, deliveriesRes, providersRes] = await Promise.all([
-      supabase.from('orders').select('*')
-        .gte('created_at', dateFrom + 'T00:00:00')
-        .lte('created_at', dateTo + 'T23:59:59')
+      supabase
+        .from('orders')
+        .select('*')
         .order('created_at', { ascending: false })
         .range(0, 9999),
       supabase.from('profiles').select('email, name, user_id').then(async (profilesRes) => {
@@ -69,16 +77,42 @@ export default function OrdersView() {
       }),
       supabase.from('profiles').select('email, name, company_name').eq('role', 'PROVEEDOR')
     ]);
-    setOrders(ordersRes.data || []);
+    
+    const allOrdersData = ordersRes.data || [];
+    setAllOrders(allOrdersData);
+    
+    // Filtrar por fecha en el frontend (evita problemas de zona horaria)
+    const filteredByDate = allOrdersData.filter(order => {
+      const orderDate = new Date(order.created_at).toISOString().slice(0, 10);
+      return orderDate >= dateFrom && orderDate <= dateTo;
+    });
+    
+    console.log('Total pedidos en BD:', allOrdersData.length);
+    console.log('Pedidos después de filtro de fecha:', filteredByDate.length);
+    console.log('Rango de fechas:', dateFrom, 'a', dateTo);
+    
+    setOrders(filteredByDate);
     setDeliveries(deliveriesRes);
     setProviders(providersRes.data || []);
     setLoading(false);
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
   };
 
+  // Aplicar filtros de fecha cuando cambien
+  useEffect(() => {
+    if (allOrders.length > 0) {
+      const filteredByDate = allOrders.filter(order => {
+        const orderDate = new Date(order.created_at).toISOString().slice(0, 10);
+        return orderDate >= dateFrom && orderDate <= dateTo;
+      });
+      setOrders(filteredByDate);
+    }
+  }, [dateFrom, dateTo, allOrders]);
+
+  // Cargar datos iniciales
   useEffect(() => { 
     loadOrders(); 
-  }, [dateFrom, dateTo]);
+  }, []);
 
   const filtered = useMemo(() => {
     const q = norm(search);
@@ -118,6 +152,7 @@ export default function OrdersView() {
     const { error } = await supabase.from('orders').update(updates).eq('id', orderId);
     if (error) { toast.error(error.message); return; }
     toast.success(`Estado → ${newStatus}`);
+    setAllOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updates } : o));
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updates } : o));
     postNews(`Pedido ${orderNum} cambió a ${newStatus} por ${myEmail}`, orderNum);
   };
@@ -129,6 +164,7 @@ export default function OrdersView() {
     const { error } = await supabase.from('orders').update({ status2: val, updated_at: new Date().toISOString() }).eq('id', orderId);
     if (error) { toast.error(error.message); return; }
     toast.success(`Estado 2 → ${newStatus2}`);
+    setAllOrders(prev => prev.map(o => o.id === orderId ? { ...o, status2: val } : o));
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status2: val } : o));
     if (val) postNews(`Pedido ${orderNum} estado 2 → ${val}`, orderNum);
   };
@@ -145,6 +181,7 @@ export default function OrdersView() {
     const { error } = await supabase.from('orders').update(updates).eq('id', orderId);
     if (error) { toast.error(error.message); return; }
     toast.success(deliveryEmail ? `Asignado a ${deliveryEmail}` : 'Delivery removido');
+    setAllOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updates } : o));
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updates } : o));
     if (deliveryEmail) postNews(`${myEmail} asignó pedido ${orderNum} a ${deliveryEmail}`, orderNum);
   };
@@ -167,6 +204,7 @@ export default function OrdersView() {
     }
     
     toast.success(providerEmail ? `Proveedor: ${providerEmail}` : 'Proveedor removido');
+    setAllOrders(prev => prev.map(o => o.id === orderId ? { ...o, provider_email: providerEmail } : o));
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, provider_email: providerEmail } : o));
     if (providerEmail) {
       postNews(`${myEmail} asignó pedido ${orderNum} al proveedor ${providerEmail}`, orderNum);
@@ -201,6 +239,7 @@ export default function OrdersView() {
     const { error } = await supabase.from('orders').update(updates).eq('id', id);
     if (error) { toast.error(error.message); return; }
     toast.success('Pedido actualizado');
+    setAllOrders(prev => prev.map(o => o.id === id ? { ...o, ...updates } : o));
     setOrders(prev => prev.map(o => o.id === id ? { ...o, ...updates } : o));
     setEditOrder(null);
   };
@@ -211,6 +250,7 @@ export default function OrdersView() {
     const { error } = await supabase.from('orders').update({ status: 'CANCELADO', updated_at: new Date().toISOString() }).eq('id', orderId);
     if (error) { toast.error(error.message); return; }
     toast.success('Pedido cancelado');
+    setAllOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'CANCELADO' } : o));
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status: 'CANCELADO' } : o));
     postNews(`Pedido ${orderNum} fue CANCELADO por ${myEmail}`, orderNum);
   };
@@ -238,6 +278,7 @@ export default function OrdersView() {
     }
     
     toast.success('Pedido ELIMINADO permanentemente');
+    setAllOrders(prev => prev.filter(o => o.id !== orderId));
     setOrders(prev => prev.filter(o => o.id !== orderId));
     await postNews(`Pedido ${orderNum} fue ELIMINADO PERMANENTEMENTE por ${myEmail}`, orderNum);
   };
@@ -343,7 +384,7 @@ export default function OrdersView() {
         </select>
         <input className="app-input w-full sm:!w-auto sm:min-w-[250px] sm:flex-1" placeholder="🔎 Buscar por cliente, teléfono, ID, ciudad o proveedor"
           value={search} onChange={e => setSearch(e.target.value)} />
-        <button className="nav-btn active w-full sm:w-auto" onClick={loadOrders} disabled={loading}>Filtrar</button>
+        <button className="nav-btn active w-full sm:w-auto" onClick={loadOrders} disabled={loading}>Actualizar</button>
         {selectedIds.size > 0 && (
           <button className="nav-btn w-full sm:w-auto" onClick={bulkGenerateGuides}>📋 Copiar {selectedIds.size} guías</button>
         )}
