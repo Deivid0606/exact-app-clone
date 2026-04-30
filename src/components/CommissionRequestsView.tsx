@@ -27,7 +27,7 @@ export default function CommissionRequestsView() {
   });
   const [newTo, setNewTo] = useState(() => new Date().toISOString().slice(0, 10));
   
-  // NEW: Para seleccionar pedidos individuales
+  // Para seleccionar pedidos individuales
   const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
   const [availableOrders, setAvailableOrders] = useState<any[]>([]);
 
@@ -77,13 +77,14 @@ export default function CommissionRequestsView() {
 
   // Load orders for balance calc when vendor opens form
   const loadBalanceOrders = async () => {
+    // CORRECCIÓN: Incluir 'RENDIDO' y también 'GUIA GENERAL' para que muestre los pedidos disponibles
     const { data } = await supabase.from('orders').select('*')
       .in('status', ['ENTREGADO', 'ENCOMIENDA ENTREGADA'])
       .gte('created_at', newFrom + 'T00:00:00')
       .lte('created_at', newTo + 'T23:59:59')
       .eq('created_by', myEmail)
-      .eq('status2', 'RENDIDO')
-      .eq('payment_status', 'PENDIENTE');  // Solo no pagados aún
+      .in('status2', ['RENDIDO', 'GUIA GENERAL'])  // ← CORREGIDO: Ahora incluye RENDIDO y GUIA GENERAL
+      .eq('payment_status', 'PENDIENTE');
     
     const ordersData = data || [];
     setOrders(ordersData);
@@ -120,7 +121,8 @@ export default function CommissionRequestsView() {
       const commission = Number(o.commission_gs || 0);
       if (commission <= 0) return;
 
-      const isRendido = o.status2 === 'RENDIDO';
+      // CORRECCIÓN: Incluir 'RENDIDO' y 'GUIA GENERAL'
+      const isRendido = o.status2 === 'RENDIDO' || o.status2 === 'GUIA GENERAL';
       if (!isRendido) return;
 
       const provSet = new Set<string>();
@@ -202,7 +204,7 @@ export default function CommissionRequestsView() {
       requested_by: myEmail,
       status: 'PENDIENTE',
       meta_json: { 
-        order_ids: selectedOrderIds,  // ← SOLO los pedidos seleccionados
+        order_ids: selectedOrderIds,
         gross: totalCommission,
         orders_detail: selectedOrdersDetails.map(o => ({ id: o.id, commission: o.commission_gs }))
       },
@@ -327,7 +329,7 @@ export default function CommissionRequestsView() {
               <label className="app-label">Proveedor</label>
               <select className="app-input" value={newProvider} onChange={e => { 
                 setNewProvider(e.target.value);
-                setSelectedOrderIds([]); // Reset selección al cambiar proveedor
+                setSelectedOrderIds([]);
               }}>
                 <option value="">-- Elegir --</option>
                 {balances.map(b => (
@@ -400,7 +402,7 @@ export default function CommissionRequestsView() {
           
           {newProvider && availableOrders.length === 0 && (
             <div className="mb-3 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-yellow-600 text-sm">
-              ⚠️ No hay pedidos rendidos y sin pagar para este proveedor en el rango seleccionado
+              ⚠️ No hay pedidos rendidos o en guía general para este proveedor en el rango seleccionado
             </div>
           )}
           
