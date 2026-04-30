@@ -38,41 +38,17 @@ export default function CommissionRequestsView() {
 
   useEffect(() => { load(); }, []);
 
-  // ✅ Carga pedidos sin filtrar por status2 primero para depurar
+  // ✅ Carga pedidos RENDIDOS del vendedor
   const loadBalanceOrders = async () => {
-    console.log('=== DEPURACIÓN ===');
-    console.log('Buscando pedidos para:', myEmail);
-    console.log('Rango:', newFrom, 'a', newTo);
-    
-    // Primero, traer TODOS los pedidos del vendedor para ver qué status2 existen
-    const { data: allOrders } = await supabase.from('orders').select('id, status2, commission_gs')
-      .gte('created_at', newFrom + 'T00:00:00')
-      .lte('created_at', newTo + 'T23:59:59')
-      .eq('created_by', myEmail);
-    
-    console.log('📊 TODOS los pedidos encontrados:', allOrders?.length || 0);
-    const status2Count: Record<string, number> = {};
-    allOrders?.forEach(o => {
-      const s2 = o.status2 || 'NULL';
-      status2Count[s2] = (status2Count[s2] || 0) + 1;
-    });
-    console.log('📋 Valores de status2 en la BD:', status2Count);
-    
-    // Ahora buscar específicamente RENDIDO (ignorando mayúsculas)
     const { data } = await supabase.from('orders').select('*')
       .gte('created_at', newFrom + 'T00:00:00')
       .lte('created_at', newTo + 'T23:59:59')
       .eq('created_by', myEmail);
     
-    // Filtrar en JavaScript para ignorar mayúsculas/minúsculas
+    // Filtrar SOLO los que tienen status2 = 'RENDIDO'
     const rendidos = (data || []).filter(o => {
       const status2 = (o.status2 || '').toUpperCase().trim();
       return status2 === 'RENDIDO';
-    });
-    
-    console.log(`✅ Pedidos RENDIDO encontrados (filtro flexible): ${rendidos.length}`);
-    rendidos.forEach(o => {
-      console.log(`   - ${o.id}: status2="${o.status2}", commission=${o.commission_gs}`);
     });
     
     setOrders(rendidos);
@@ -150,8 +126,6 @@ export default function CommissionRequestsView() {
       orderIds: data.orderIds,
     }));
     
-    console.log('📊 Balances calculados:', result.map(r => ({ provider: r.provider, available: r.available })));
-    
     return result;
   }, [orders, skuProviderMap, requests, myEmail]);
 
@@ -227,11 +201,12 @@ export default function CommissionRequestsView() {
       return;
     }
     
+    // ✅ CAMBIO IMPORTANTE: usar commission_paid en lugar de payment_status
     if (orderIds.length > 0) {
       const { error: ordersError } = await supabase
         .from('orders')
         .update({
-          payment_status: 'PAGADO',
+          commission_paid: true,  // ← Cambiado de payment_status a commission_paid
           paid_at: new Date().toISOString(),
         })
         .in('id', orderIds);
