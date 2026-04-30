@@ -40,23 +40,11 @@ export default function CommissionRequestsView() {
 
   // ✅ Carga SOLO pedidos con status2 = 'RENDIDO'
   const loadBalanceOrders = async () => {
-    console.log('🔍 Cargando pedidos RENDIDOS para:', myEmail);
-    console.log('📅 Rango:', newFrom, 'a', newTo);
-    
-    const { data, error } = await supabase.from('orders').select('*')
+    const { data } = await supabase.from('orders').select('*')
       .gte('created_at', newFrom + 'T00:00:00')
       .lte('created_at', newTo + 'T23:59:59')
       .eq('created_by', myEmail)
-      .eq('status2', 'RENDIDO');  // ← SOLO pedidos RENDIDOS
-    
-    if (error) {
-      console.error('Error:', error);
-    }
-    
-    console.log(`✅ Pedidos RENDIDOS encontrados: ${data?.length || 0}`);
-    data?.forEach(o => {
-      console.log(`   - ${o.id}: commission=${o.commission_gs}, status2=${o.status2}`);
-    });
+      .eq('status2', 'RENDIDO');  // ← SOLO RENDIDO
     
     setOrders(data || []);
   };
@@ -65,70 +53,80 @@ export default function CommissionRequestsView() {
     if (showForm && role === 'VENDEDOR') loadBalanceOrders(); 
   }, [showForm, newFrom, newTo]);
 
-  // ✅ Cálculo de balances - SOLO sobre pedidos RENDIDOS
-  const balances = useMemo(() => {
-    const skuProvider: Record<string, string> = {};
+  // ✅ Mapeo de proveedores por SKU
+  const skuProviderMap = useMemo(() => {
+    const map: Record<string, string> = {};
     products.forEach(p => {
       if (p.sku && p.provider_email) {
-        skuProvider[p.sku.trim()] = p.provider_email.toLowerCase().trim();
+        map[p.sku.trim()] = p.provider_email.toLowerCase().trim();
       }
     });
+    return map;
+  }, [products]);
 
-    const map: Record<string, { provider: string; grossRendido: number; orderIds: string[] }> = {};
+  // ✅ Calcular balances SOLO de pedidos RENDIDOS
+  const balances = useMemo(() => {
+    const providerCommissions: Record<string, { total: number; orderIds: string[] }> = {};
     
-    orders.forEach(o => {
-      const commission = Number(o.commission_gs || 0);
+    orders.forEach(order => {
+      const commission = Number(order.commission_gs || 0);
       if (commission <= 0) return;
-
-      // Ya sabemos que son RENDIDOS porque los filtramos arriba
-      const provSet = new Set<string>();
+      
+      // Obtener proveedores del pedido
+      const providerSet = new Set<string>();
+      
       try {
-        const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
-        items.forEach((it: any) => {
-          const sku = String(it.sku || '').trim();
-          const prov = skuProvider[sku];
-          if (prov) provSet.add(prov);
+        const items = typeof order.items_json === 'string' ? JSON.parse(order.items_json) : (order.items_json || []);
+        items.forEach((item: any) => {
+          const sku = String(item.sku || '').trim();
+          const provider = skuProviderMap[sku];
+          if (provider) providerSet.add(provider);
         });
-      } catch {}
-
-      if (provSet.size === 0 && o.provider_emails_list) {
-        o.provider_emails_list.split(',').forEach((e: string) => {
-          const t = e.trim().toLowerCase();
-          if (t) provSet.add(t);
-        });
+      } catch (e) {
+        console.error('Error parsing items:', e);
       }
-
-      const provArr = Array.from(provSet);
-      if (provArr.length === 0) return;
-      const perProv = commission / provArr.length;
-
-      provArr.forEach(prov => {
-        if (!map[prov]) map[prov] = { provider: prov, grossRendido: 0, orderIds: [] };
-        map[prov].grossRendido += perProv;
-        if (!map[prov].orderIds.includes(o.id)) map[prov].orderIds.push(o.id);
+      
+      // Si no se encontró por SKU, usar provider_emails_list
+      if (providerSet.size === 0 && order.provider_emails_list) {
+        const emails = order.provider_emails_list.split(',').map((e: string) => e.trim().toLowerCase());
+        emails.forEach(e => providerSet.add(e));
+      }
+      
+      const providersList = Array.from(providerSet);
+      if (providersList.length === 0) return;
+      
+      // Distribuir comisión entre proveedores
+      const perProvider = commission / providersList.length;
+      
+      providersList.forEach(prov => {
+        if (!providerCommissions[prov]) {
+          providerCommissions[prov] = { total: 0, orderIds: [] };
+        }
+        providerCommissions[prov].total += perProvider;
+        if (!providerCommissions[prov].orderIds.includes(order.id)) {
+          providerCommissions[prov].orderIds.push(order.id);
+        }
       });
     });
-
+    
     // Calcular lo ya solicitado
     const requested: Record<string, number> = {};
-    requests.forEach(r => {
-      if (r.vendor_email?.toLowerCase() === myEmail.toLowerCase() && r.status !== 'RECHAZADO') {
-        const prov = (r.provider_email || '').toLowerCase();
-        requested[prov] = (requested[prov] || 0) + Number(r.amount_gs || 0);
+    requests.forEach(req => {
+      if (req.vendor_email?.toLowerCase() === myEmail.toLowerCase() && req.status !== 'RECHAZADO') {
+        const prov = (req.provider_email || '').toLowerCase();
+        requested[prov] = (requested[prov] || 0) + Number(req.amount_gs || 0);
       }
     });
-
-    const result = Object.values(map).map(b => ({
-      provider: b.provider,
-      grossRendido: b.grossRendido,
-      requested: requested[b.provider] || 0,
-      available: Math.max(0, b.grossRendido - (requested[b.provider] || 0)),
-      orderIds: b.orderIds,
+    
+    // Construir resultado
+    return Object.entries(providerCommissions).map(([providerEmail, data]) => ({
+      provider: providerEmail,
+      grossRendido: data.total,
+      requested: requested[providerEmail] || 0,
+      available: Math.max(0, data.total - (requested[providerEmail] || 0)),
+      orderIds: data.orderIds,
     }));
-
-    console.log('📊 Balances calculados:', result);
-    return result;
-  }, [orders, products, requests, myEmail]);
+  }, [orders, skuProviderMap, requests, myEmail]);
 
   const filtered = requests.filter(r => {
     if (filterStatus && r.status !== filterStatus) return false;
