@@ -26,6 +26,10 @@ export default function CommissionRequestsView() {
     return d.toISOString().slice(0, 10);
   });
   const [newTo, setNewTo] = useState(() => new Date().toISOString().slice(0, 10));
+  
+  // NEW: Para seleccionar pedidos individuales
+  const [selectedOrderIds, setSelectedOrderIds] = useState<string[]>([]);
+  const [availableOrders, setAvailableOrders] = useState<any[]>([]);
 
   const load = async () => {
     const [reqRes, profRes, prodRes] = await Promise.all([
@@ -40,17 +44,64 @@ export default function CommissionRequestsView() {
 
   useEffect(() => { load(); }, []);
 
+  // Helper: filtrar órdenes por proveedor
+  const filterOrdersByProvider = (ordersList: any[], providerEmail: string) => {
+    const skuProvider: Record<string, string> = {};
+    products.forEach(p => {
+      if (p.sku && p.provider_email) {
+        skuProvider[p.sku.trim()] = p.provider_email.toLowerCase().trim();
+      }
+    });
+    
+    return ordersList.filter(order => {
+      const provSet = new Set<string>();
+      try {
+        const items = typeof order.items_json === 'string' ? JSON.parse(order.items_json) : (order.items_json || []);
+        items.forEach((it: any) => {
+          const sku = String(it.sku || '').trim();
+          const prov = skuProvider[sku];
+          if (prov) provSet.add(prov);
+        });
+      } catch {}
+      
+      if (provSet.size === 0 && order.provider_emails_list) {
+        order.provider_emails_list.split(',').forEach((e: string) => {
+          const t = e.trim().toLowerCase();
+          if (t) provSet.add(t);
+        });
+      }
+      
+      return provSet.has(providerEmail.toLowerCase());
+    });
+  };
+
   // Load orders for balance calc when vendor opens form
   const loadBalanceOrders = async () => {
     const { data } = await supabase.from('orders').select('*')
       .in('status', ['ENTREGADO', 'ENCOMIENDA ENTREGADA'])
       .gte('created_at', newFrom + 'T00:00:00')
       .lte('created_at', newTo + 'T23:59:59')
-      .eq('created_by', myEmail);
-    setOrders(data || []);
+      .eq('created_by', myEmail)
+      .eq('status2', 'RENDIDO')
+      .eq('payment_status', 'PENDIENTE');  // Solo no pagados aún
+    
+    const ordersData = data || [];
+    setOrders(ordersData);
+    
+    // Filtrar por proveedor seleccionado
+    if (newProvider) {
+      const filtered = filterOrdersByProvider(ordersData, newProvider);
+      setAvailableOrders(filtered);
+    } else {
+      setAvailableOrders([]);
+    }
   };
 
-  useEffect(() => { if (showForm && role === 'VENDEDOR') loadBalanceOrders(); }, [showForm, newFrom, newTo]);
+  useEffect(() => {
+    if (showForm && role === 'VENDEDOR') {
+      loadBalanceOrders();
+    }
+  }, [showForm, newFrom, newTo, newProvider]);
 
   // Calculate vendor-provider balances
   const balances = useMemo(() => {
@@ -63,10 +114,14 @@ export default function CommissionRequestsView() {
 
     const map: Record<string, { provider: string; gross: number; grossRendido: number; orderIds: string[] }> = {};
     orders.forEach(o => {
+      // Solo considerar pedidos no pagados
+      if (o.payment_status === 'PAGADO') return;
+      
       const commission = Number(o.commission_gs || 0);
       if (commission <= 0) return;
 
       const isRendido = o.status2 === 'RENDIDO';
+      if (!isRendido) return;
 
       const provSet = new Set<string>();
       try {
@@ -92,7 +147,7 @@ export default function CommissionRequestsView() {
       provArr.forEach(prov => {
         if (!map[prov]) map[prov] = { provider: prov, gross: 0, grossRendido: 0, orderIds: [] };
         map[prov].gross += perProv;
-        if (isRendido) map[prov].grossRendido += perProv;
+        map[prov].grossRendido += perProv;
         if (!map[prov].orderIds.includes(o.id)) map[prov].orderIds.push(o.id);
       });
     });
@@ -129,36 +184,47 @@ export default function CommissionRequestsView() {
 
   const createRequest = async () => {
     if (!newProvider) { toast.error('Elegí un proveedor'); return; }
-    const balance = balances.find(b => b.provider === newProvider);
-    const available = balance?.available || 0;
-    const amount = available;
-    if (amount <= 0) { toast.error('No tenés saldo disponible'); return; }
-
+    if (selectedOrderIds.length === 0) { toast.error('Seleccioná al menos un pedido'); return; }
+    
+    // Calcular el monto total de los pedidos seleccionados
+    const selectedOrdersDetails = availableOrders.filter(o => selectedOrderIds.includes(o.id));
+    const totalCommission = selectedOrdersDetails.reduce((sum, order) => {
+      return sum + Number(order.commission_gs || 0);
+    }, 0);
+    
     const { error } = await supabase.from('commission_requests').insert({
       vendor_email: myEmail,
       provider_email: newProvider,
-      amount_gs: amount,
+      amount_gs: totalCommission,
       note: newNote,
       range_from: newFrom,
       range_to: newTo,
       requested_by: myEmail,
       status: 'PENDIENTE',
-      meta_json: { order_ids: balance?.orderIds || [], gross: balance?.gross || 0 },
+      meta_json: { 
+        order_ids: selectedOrderIds,  // ← SOLO los pedidos seleccionados
+        gross: totalCommission,
+        orders_detail: selectedOrdersDetails.map(o => ({ id: o.id, commission: o.commission_gs }))
+      },
     });
-    if (error) { toast.error(error.message); return; }
-    toast.success('Solicitud creada exitosamente');
+    
+    if (error) { 
+      toast.error(error.message); 
+      return; 
+    }
+    
+    toast.success(`Solicitud creada con ${selectedOrderIds.length} pedido(s) por Gs ${nf(totalCommission)}`);
     setShowForm(false);
     setNewProvider('');
-    setNewAmount(0);
     setNewNote('');
+    setSelectedOrderIds([]);
+    setAvailableOrders([]);
     load();
   };
 
-  // ✅ FUNCIÓN CORREGIDA: Aprueba la solicitud y marca las órdenes como pagadas
   const approve = async (id: string) => {
     const note = prompt('Nota de aprobación (opcional):') || '';
     
-    // 1. Obtener la solicitud para saber qué órdenes afecta
     const { data: requestData, error: fetchError } = await supabase
       .from('commission_requests')
       .select('*')
@@ -170,11 +236,9 @@ export default function CommissionRequestsView() {
       return;
     }
     
-    // 2. Obtener los order_ids del meta_json
     const metaJson = requestData.meta_json as any;
     const orderIds = metaJson?.order_ids || [];
     
-    // 3. Actualizar el estado de la solicitud
     const { error: updateError } = await supabase
       .from('commission_requests')
       .update({
@@ -190,12 +254,11 @@ export default function CommissionRequestsView() {
       return;
     }
     
-    // 4. Marcar las órdenes como pagadas
     if (orderIds.length > 0) {
       const { error: ordersError } = await supabase
         .from('orders')
         .update({
-          commission_paid: true,
+          payment_status: 'PAGADO',
           paid_at: new Date().toISOString(),
         })
         .in('id', orderIds);
@@ -262,7 +325,10 @@ export default function CommissionRequestsView() {
             </div>
             <div>
               <label className="app-label">Proveedor</label>
-              <select className="app-input" value={newProvider} onChange={e => { setNewProvider(e.target.value); }}>
+              <select className="app-input" value={newProvider} onChange={e => { 
+                setNewProvider(e.target.value);
+                setSelectedOrderIds([]); // Reset selección al cambiar proveedor
+              }}>
                 <option value="">-- Elegir --</option>
                 {balances.map(b => (
                   <option key={b.provider} value={b.provider}>
@@ -272,32 +338,84 @@ export default function CommissionRequestsView() {
               </select>
             </div>
           </div>
-          {newProvider && (() => {
-            const bal = balances.find(b => b.provider === newProvider);
-            const pendiente = (bal?.gross || 0) - (bal?.grossRendido || 0);
-            return (
-              <div className="mb-3 p-3 rounded-xl border border-border bg-secondary/50 space-y-1">
-                <div className="text-xs text-muted-foreground">
-                  Comisión total: Gs {nf(bal?.gross || 0)} |
-                  Rendido: Gs {nf(bal?.grossRendido || 0)} |
-                  Ya solicitado: Gs {nf(bal?.requested || 0)}
-                </div>
-                {pendiente > 0 && (
-                  <div className="text-[10px] text-yellow-400">
-                    ⏳ Gs {nf(pendiente)} pendientes de rendir (no se pueden solicitar aún)
-                  </div>
-                )}
-                <div className="text-xs">
-                  <span className="font-bold text-foreground">Disponible para solicitar: Gs {nf(bal?.available || 0)}</span>
+          
+          {/* Selección de pedidos individuales */}
+          {newProvider && availableOrders.length > 0 && (
+            <div className="mb-3">
+              <div className="flex justify-between items-center mb-2">
+                <label className="app-label font-bold">📋 Seleccioná los pedidos a solicitar:</label>
+                <button 
+                  type="button"
+                  className="text-xs text-blue-500 hover:text-blue-600"
+                  onClick={() => {
+                    if (selectedOrderIds.length === availableOrders.length) {
+                      setSelectedOrderIds([]);
+                    } else {
+                      setSelectedOrderIds(availableOrders.map(o => o.id));
+                    }
+                  }}
+                >
+                  {selectedOrderIds.length === availableOrders.length ? 'Deseleccionar todos' : 'Seleccionar todos'}
+                </button>
+              </div>
+              <div className="border rounded-lg p-3 max-h-60 overflow-y-auto space-y-2 bg-secondary/20">
+                {availableOrders.map(order => (
+                  <label key={order.id} className="flex items-start gap-2 p-2 hover:bg-secondary/50 rounded cursor-pointer border border-border">
+                    <input
+                      type="checkbox"
+                      checked={selectedOrderIds.includes(order.id)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedOrderIds([...selectedOrderIds, order.id]);
+                        } else {
+                          setSelectedOrderIds(selectedOrderIds.filter(id => id !== order.id));
+                        }
+                      }}
+                      className="mt-1"
+                    />
+                    <div className="flex-1 text-sm">
+                      <div className="font-mono text-xs text-muted-foreground">{order.id}</div>
+                      <div className="font-medium">Cliente: {order.customer_name || order.client_name || 'N/A'}</div>
+                      <div className="text-green-600 font-bold">Comisión: Gs {nf(Number(order.commission_gs || 0))}</div>
+                      <div className="text-xs text-muted-foreground">Estado: {order.status2} | Fecha: {new Date(order.created_at).toLocaleDateString('es-PY')}</div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+              <div className="mt-3 p-2 bg-primary/5 rounded-lg">
+                <div className="text-sm">
+                  <span className="font-bold">✅ Seleccionados: {selectedOrderIds.length}</span>
+                  {selectedOrderIds.length > 0 && (
+                    <span className="ml-3 text-green-600 font-bold">
+                      Total a solicitar: Gs {nf(selectedOrderIds.reduce((sum, id) => {
+                        const order = availableOrders.find(o => o.id === id);
+                        return sum + Number(order?.commission_gs || 0);
+                      }, 0))}
+                    </span>
+                  )}
                 </div>
               </div>
-            );
-          })()}
+            </div>
+          )}
+          
+          {newProvider && availableOrders.length === 0 && (
+            <div className="mb-3 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-lg text-yellow-600 text-sm">
+              ⚠️ No hay pedidos rendidos y sin pagar para este proveedor en el rango seleccionado
+            </div>
+          )}
+          
           <div className="mb-3">
             <label className="app-label">Nota (opcional)</label>
             <input className="app-input" value={newNote} onChange={e => setNewNote(e.target.value)} placeholder="Nota para el proveedor" />
           </div>
-          <button className="nav-btn active" onClick={createRequest}>Enviar solicitud</button>
+          
+          <button 
+            className="nav-btn active" 
+            onClick={createRequest}
+            disabled={selectedOrderIds.length === 0}
+          >
+            Enviar solicitud {selectedOrderIds.length > 0 ? `(${selectedOrderIds.length} pedido${selectedOrderIds.length !== 1 ? 's' : ''})` : ''}
+          </button>
         </div>
       )}
 
