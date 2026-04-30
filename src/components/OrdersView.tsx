@@ -47,10 +47,8 @@ export default function OrdersView() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [dateFrom, setDateFrom] = useState(() => {
-    // Por defecto: últimos 90 días
-    const d = new Date();
-    d.setDate(d.getDate() - 90);
-    return d.toISOString().slice(0, 10);
+    // Mostrar desde enero 2024
+    return '2024-01-01';
   });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [loading, setLoading] = useState(false);
@@ -62,13 +60,46 @@ export default function OrdersView() {
   const loadOrders = async () => {
     setLoading(true);
     
-    // Traer hasta 50000 pedidos (suficiente para todos los históricos)
-    const [ordersRes, deliveriesRes, providersRes] = await Promise.all([
-      supabase
+    // Cargar TODOS los pedidos usando paginación
+    let allOrdersData: any[] = [];
+    let page = 0;
+    const pageSize = 1000;
+    let hasMore = true;
+    
+    while (hasMore) {
+      const { data, error } = await supabase
         .from('orders')
         .select('*')
         .order('created_at', { ascending: false })
-        .range(0, 49999),
+        .range(page * pageSize, (page + 1) * pageSize - 1);
+      
+      if (error) {
+        console.error('Error cargando pedidos:', error);
+        toast.error('Error al cargar pedidos: ' + error.message);
+        break;
+      }
+      
+      if (data && data.length > 0) {
+        allOrdersData = [...allOrdersData, ...data];
+        console.log(`Página ${page + 1}: cargados ${data.length} pedidos. Total: ${allOrdersData.length}`);
+        page++;
+      }
+      
+      if (!data || data.length < pageSize) {
+        hasMore = false;
+      }
+    }
+    
+    console.log('TOTAL DE PEDIDOS CARGADOS:', allOrdersData.length);
+    
+    if (allOrdersData.length > 0) {
+      // Mostrar las fechas más antigua y más reciente
+      const fechas = allOrdersData.map(o => o.created_at).sort();
+      console.log('Pedido más antiguo:', fechas[0]);
+      console.log('Pedido más reciente:', fechas[fechas.length - 1]);
+    }
+    
+    const [deliveriesRes, providersRes] = await Promise.all([
       supabase.from('profiles').select('email, name, user_id').then(async (profilesRes) => {
         const profiles = profilesRes.data || [];
         const { data: roles } = await supabase.from('user_roles').select('user_id, role').eq('role', 'DELIVERY');
@@ -78,18 +109,9 @@ export default function OrdersView() {
       supabase.from('profiles').select('email, name, company_name').eq('role', 'PROVEEDOR')
     ]);
     
-    const allOrdersData = ordersRes.data || [];
-    console.log('Total pedidos cargados de BD:', allOrdersData.length);
-    
-    // Verificar las fechas de los pedidos cargados
-    if (allOrdersData.length > 0) {
-      const fechas = allOrdersData.map(o => o.created_at).slice(0, 10);
-      console.log('Primeras fechas:', fechas);
-    }
-    
     setAllOrders(allOrdersData);
     
-    // Filtrar por fecha en el frontend (evita problemas de zona horaria)
+    // Filtrar por fecha en el frontend
     const filteredByDate = allOrdersData.filter(order => {
       const orderDate = new Date(order.created_at).toISOString().slice(0, 10);
       return orderDate >= dateFrom && orderDate <= dateTo;
@@ -397,7 +419,9 @@ export default function OrdersView() {
         )}
       </div>
 
-      <div className="text-xs text-muted-foreground mb-2">{filtered.length} pedidos</div>
+      <div className="text-xs text-muted-foreground mb-2">
+        {filtered.length} pedidos {allOrders.length > 0 && `(Total en BD: ${allOrders.length})`}
+      </div>
 
       {/* Vista Desktop/Tablet - Tabla */}
       <div className="hidden md:block overflow-x-auto">
@@ -466,7 +490,7 @@ export default function OrdersView() {
                   {role !== 'DESPACHANTE' && <td className="text-xs">{o.assigned_delivery || '—'}</td>}
                   <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
                   <td className="text-right text-xs">{nf(commVal)}</td>
-                  <td>
+                  <tr>
                     {canEditStatus1 ? (
                       <select
                         className="app-input !py-1 !px-2 !text-[11px] !w-auto !min-w-[130px]"
@@ -550,7 +574,7 @@ export default function OrdersView() {
         </table>
       </div>
 
-      {/* Vista Celular - Tarjetas */}
+      {/* Vista Celular - Tarjetas (igual que antes) */}
       <div className="md:hidden space-y-3">
         {filtered.length === 0 && (
           <div className="text-center text-muted-foreground py-8">Sin pedidos</div>
