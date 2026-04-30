@@ -16,10 +16,8 @@ export default function CommissionRequestsView() {
   const [orders, setOrders] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
 
-  // New request form
   const [showForm, setShowForm] = useState(false);
   const [newProvider, setNewProvider] = useState('');
-  const [newAmount, setNewAmount] = useState(0);
   const [newNote, setNewNote] = useState('');
   const [newFrom, setNewFrom] = useState(() => {
     const d = new Date(); d.setDate(d.getDate() - 30);
@@ -40,20 +38,22 @@ export default function CommissionRequestsView() {
 
   useEffect(() => { load(); }, []);
 
-  // Load orders for balance calc when vendor opens form
-  // ✅ VERSIÓN ANTIGUA QUE FUNCIONA - sin filtros adicionales
+  // ✅ VERSIÓN CORREGIDA - Igual que el Dashboard, sin filtrar por payment_status
   const loadBalanceOrders = async () => {
     const { data } = await supabase.from('orders').select('*')
-      .in('status', ['ENTREGADO', 'ENCOMIENDA ENTREGADA'])
       .gte('created_at', newFrom + 'T00:00:00')
       .lte('created_at', newTo + 'T23:59:59')
       .eq('created_by', myEmail);
+    
+    console.log('📦 Pedidos encontrados:', data?.length);
     setOrders(data || []);
   };
 
-  useEffect(() => { if (showForm && role === 'VENDEDOR') loadBalanceOrders(); }, [showForm, newFrom, newTo]);
+  useEffect(() => { 
+    if (showForm && role === 'VENDEDOR') loadBalanceOrders(); 
+  }, [showForm, newFrom, newTo]);
 
-  // Calculate vendor-provider balances
+  // ✅ LÓGICA CORREGIDA - Igual que el Dashboard
   const balances = useMemo(() => {
     const skuProvider: Record<string, string> = {};
     products.forEach(p => {
@@ -67,6 +67,7 @@ export default function CommissionRequestsView() {
       const commission = Number(o.commission_gs || 0);
       if (commission <= 0) return;
 
+      // ✅ Solo los que están RENDIDOS cuentan como "disponibles"
       const isRendido = o.status2 === 'RENDIDO';
 
       const provSet = new Set<string>();
@@ -132,13 +133,12 @@ export default function CommissionRequestsView() {
     if (!newProvider) { toast.error('Elegí un proveedor'); return; }
     const balance = balances.find(b => b.provider === newProvider);
     const available = balance?.available || 0;
-    const amount = available;
-    if (amount <= 0) { toast.error('No tenés saldo disponible'); return; }
+    if (available <= 0) { toast.error('No tenés saldo disponible para este proveedor'); return; }
 
     const { error } = await supabase.from('commission_requests').insert({
       vendor_email: myEmail,
       provider_email: newProvider,
-      amount_gs: amount,
+      amount_gs: available,
       note: newNote,
       range_from: newFrom,
       range_to: newTo,
@@ -147,15 +147,13 @@ export default function CommissionRequestsView() {
       meta_json: { order_ids: balance?.orderIds || [], gross: balance?.gross || 0 },
     });
     if (error) { toast.error(error.message); return; }
-    toast.success('Solicitud creada exitosamente');
+    toast.success(`Solicitud creada por Gs ${nf(available)}`);
     setShowForm(false);
     setNewProvider('');
-    setNewAmount(0);
     setNewNote('');
     load();
   };
 
-  // ✅ Función approve corregida y funcionando
   const approve = async (id: string) => {
     const note = prompt('Nota de aprobación (opcional):') || '';
     
@@ -244,7 +242,6 @@ export default function CommissionRequestsView() {
         )}
       </div>
 
-      {/* New request form for VENDEDOR */}
       {showForm && role === 'VENDEDOR' && (
         <div className="app-card !p-4 mb-4">
           <h4 className="font-bold mb-3">Nueva solicitud de comisión</h4>
@@ -261,31 +258,28 @@ export default function CommissionRequestsView() {
               <label className="app-label">Proveedor</label>
               <select className="app-input" value={newProvider} onChange={e => { setNewProvider(e.target.value); }}>
                 <option value="">-- Elegir --</option>
-                {balances.map(b => (
-                  <option key={b.provider} value={b.provider}>
-                    {providers.find(p => p.email.toLowerCase() === b.provider)?.name || b.provider} — Disponible: Gs {nf(b.available)}
-                  </option>
-                ))}
+                {balances.map(b => {
+                  const providerName = providers.find(p => p.email.toLowerCase() === b.provider)?.name || b.provider;
+                  return (
+                    <option key={b.provider} value={b.provider}>
+                      {providerName} — Disponible: Gs {nf(b.available)}
+                    </option>
+                  );
+                })}
               </select>
             </div>
           </div>
           {newProvider && (() => {
             const bal = balances.find(b => b.provider === newProvider);
-            const pendiente = (bal?.gross || 0) - (bal?.grossRendido || 0);
             return (
-              <div className="mb-3 p-3 rounded-xl border border-border bg-secondary/50 space-y-1">
+              <div className="mb-3 p-3 rounded-xl border border-border bg-secondary/50">
                 <div className="text-xs text-muted-foreground">
                   Comisión total: Gs {nf(bal?.gross || 0)} |
                   Rendido: Gs {nf(bal?.grossRendido || 0)} |
                   Ya solicitado: Gs {nf(bal?.requested || 0)}
                 </div>
-                {pendiente > 0 && (
-                  <div className="text-[10px] text-yellow-400">
-                    ⏳ Gs {nf(pendiente)} pendientes de rendir (no se pueden solicitar aún)
-                  </div>
-                )}
-                <div className="text-xs">
-                  <span className="font-bold text-foreground">Disponible para solicitar: Gs {nf(bal?.available || 0)}</span>
+                <div className="text-sm font-bold text-foreground mt-1">
+                  Disponible para solicitar: Gs {nf(bal?.available || 0)}
                 </div>
               </div>
             );
