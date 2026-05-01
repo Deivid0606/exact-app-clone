@@ -45,6 +45,83 @@ const normalizeCityName = (city: string): string => {
   return normalized;
 };
 
+// ========== NUEVA: Tabla de precios por ciudad (para matching inteligente) ==========
+const CITY_PRICES: Record<string, number> = {
+  "altos": 55000,
+  "aregua": 45000,
+  "asuncion": 35000,
+  "asunción": 35000,
+  "atyra": 55000,
+  "atyrá": 55000,
+  "benjaminaceval": 60000,
+  "benjamínaceval": 60000,
+  "caacupe": 55000,
+  "capiata": 45000,
+  "ciudaddeleste": 45000,
+  "coloniyguazu": 50000,
+  "emboscada": 55000,
+  "eusebioayala": 55000,
+  "fernandodelamora": 35000,
+  "guarambare": 50000,
+  "hernandarias": 50000,
+  "interiorpagoanticipado": 35000,
+  "ita": 55000,
+  "itacurubidelacordillera": 55000,
+  "itaugua": 45000,
+  "jaugustosaldívar": 45000,
+  "juanleonmalloriquin": 60000,
+  "lambare": 35000,
+  "limpio": 40000,
+  "lomagrande": 55000,
+  "luque": 35000,
+  "marianoroquealonso": 40000,
+  "mingaguazu": 50000,
+  "ñemby": 40000,
+  "nuevaitalia": 55000,
+  "paraguari": 55000,
+  "pirayu": 55000,
+  "pirayú": 55000,
+  "piribebuy": 55000,
+  "presidentefranco": 50000,
+  "puertopdtefranco": 50000,
+  "remansito": 60000,
+  "sanalberto": 55000,
+  "santonio": 45000,
+  "sanbernardino": 55000,
+  "sanlorenzo": 35000,
+  "santarita": 55000,
+  "tobati": 55000,
+  "villaelsa": 40000,
+  "villahayes": 60000,
+  "villarrica": 50000,
+  "villetta": 55000,
+  "yaguaron": 55000,
+  "yguazu": 60000,
+  "ypacarai": 55000,
+  "ypane": 45000
+};
+
+// Función para obtener precio de ciudad con matching inteligente
+const getCityPriceFromMap = (cityName: string): number | null => {
+  if (!cityName) return null;
+  
+  const normalized = normalizeCityName(cityName);
+  
+  // Búsqueda exacta
+  if (CITY_PRICES[normalized]) {
+    return CITY_PRICES[normalized];
+  }
+  
+  // Búsqueda por inclusión (para ciudades con textos adicionales)
+  for (const [key, price] of Object.entries(CITY_PRICES)) {
+    if (normalized.includes(key) || key.includes(normalized)) {
+      return price;
+    }
+  }
+  
+  return null;
+};
+
 function parseQuantity(value: any): number {
   if (!value) return 1;
   
@@ -226,10 +303,15 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   });
 
-  // NUEVOS ESTADOS PARA BÚSQUEDA MEJORADA
-  const [searchType, setSearchType] = useState<"all" | "product">("product");
+  // NUEVOS ESTADOS PARA FILTROS MEJORADOS
+  const [searchType, setSearchType] = useState<"all" | "product" | "city">("product");
   const [productSearch, setProductSearch] = useState("");
+  const [cityFilter, setCityFilter] = useState("");
   const [productSuggestions, setProductSuggestions] = useState<string[]>([]);
+  const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
+  
+  // NUEVO: Filtro de cobertura
+  const [coverageFilter, setCoverageFilter] = useState<"all" | "covered" | "uncovered">("all");
 
   const filterOnlyAvailable = true;
   const filterOnlyCoverage = true;
@@ -342,7 +424,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   }, [sheetUrl]);
 
-  // ========== AUTOCOMPLETADO DE PRODUCTOS ==========
+  // ========== AUTOCOMPLETADO DE PRODUCTOS Y CIUDADES ==========
   useEffect(() => {
     if (productSearch.length > 2 && searchType === "product") {
       const searchLower = productSearch.toLowerCase();
@@ -356,12 +438,32 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   }, [productSearch, products, searchType]);
 
+  // Autocompletado de ciudades desde el sheet
+  useEffect(() => {
+    if (cityFilter.length > 1 && searchType === "city") {
+      const uniqueCities = new Set<string>();
+      sheetOrders.forEach(order => {
+        const city = order[colKeys.city];
+        if (city && city.trim()) {
+          uniqueCities.add(city.trim());
+        }
+      });
+      
+      const searchLower = cityFilter.toLowerCase();
+      const suggestions = Array.from(uniqueCities)
+        .filter(city => city.toLowerCase().includes(searchLower))
+        .slice(0, 5);
+      setCitySuggestions(suggestions);
+    } else {
+      setCitySuggestions([]);
+    }
+  }, [cityFilter, sheetOrders, colKeys.city, searchType]);
+
   // ========== DETECCIÓN DE COLUMNAS ==========
   const colKeys = useMemo(() => {
     const h = sheetHeaders;
     console.log("📋 Headers del Sheet:", h);
     
-    // Función de búsqueda EXACTA (sin normalización)
     const findExact = (...candidates: string[]) => {
       for (let i = 0; i < h.length; i++) {
         const originalHeader = h[i];
@@ -374,7 +476,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       return "";
     };
     
-    // Función de búsqueda normalizada (para el resto de columnas)
     const find = (...candidates: string[]) => {
       const normalizedCandidates = candidates.map(c => normalizeText(c));
       
@@ -442,21 +543,19 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       qty: find("cantidad", "qty", "quantity", "unidades", "CANTIDAD"),
       amount: findAmount(),
       email: find("email", "correo", "mail"),
-      date: find("fecha", "date"),
+      date: find("fecha", "date", "fecha pedido", "fecha de pedido"), // NUEVO: detectar fecha
     };
   }, [sheetHeaders]);
 
-  // ========== FUNCIÓN DE BÚSQUEDA ESPECÍFICA PARA PRODUCTO ==========
+  // ========== FUNCIÓN DE BÚSQUEDA ESPECÍFICA ==========
   const filterByProduct = useCallback((order: SheetOrder, searchTerm: string) => {
     if (!searchTerm.trim()) return true;
     
     const searchLower = searchTerm.toLowerCase().trim();
     
-    // Buscar en la columna PRODUCTO OK
     const productOkValue = order[colKeys.product] || "";
     if (productOkValue.toLowerCase().includes(searchLower)) return true;
     
-    // También buscar en otras columnas que podrían contener "PRODUCTO"
     for (const key in order) {
       const keyLower = key.toLowerCase();
       if (keyLower.includes("producto") || keyLower === "product") {
@@ -468,63 +567,58 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return false;
   }, [colKeys.product]);
 
-  // Debug: Mostrar qué columna se está usando para producto
-  useEffect(() => {
-    if (sheetHeaders.length > 0 && colKeys.product) {
-      console.log(`✅ Usando columna de producto: "${colKeys.product}"`);
-      console.log(`📝 Valor de ejemplo: ${sheetOrders[0]?.[colKeys.product] || "sin datos"}`);
-    }
-  }, [sheetHeaders, colKeys.product, sheetOrders]);
+  // NUEVO: Filtro por ciudad
+  const filterByCity = useCallback((order: SheetOrder, citySearch: string) => {
+    if (!citySearch.trim()) return true;
+    
+    const orderCity = order[colKeys.city] || "";
+    const searchLower = citySearch.toLowerCase().trim();
+    
+    return orderCity.toLowerCase().includes(searchLower);
+  }, [colKeys.city]);
 
-  // ========== FUNCIÓN SUPER INTELIGENTE PARA NORMALIZAR (IGNORA EMOJIS, MAYÚSCULAS, ACENTOS) ==========
+  // NUEVO: Verificar si una ciudad tiene cobertura
+  const isCityCovered = useCallback((cityName: string): boolean => {
+    return getCityPriceFromMap(cityName) !== null;
+  }, []);
+
+  // ========== FUNCIÓN SUPER INTELIGENTE PARA NORMALIZAR ==========
   const normalizeForComparison = (text: string): string => {
     if (!text) return "";
     
     return text
-      .toLowerCase()                          // Minúsculas
-      .normalize("NFD")                       // Descompone caracteres acentuados
-      .replace(/[\u0300-\u036f]/g, "")       // Elimina acentos
-      .replace(/[^\w\s]/g, "")               // Elimina símbolos (excepto letras/números/espacios)
-      .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '') // Elimina emojis
-      .replace(/\s+/g, ' ')                  // Normaliza espacios
-      .trim();                                // Elimina espacios al inicio/final
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^\w\s]/g, "")
+      .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
+      .replace(/\s+/g, ' ')
+      .trim();
   };
 
-  // ========== MATCHING MEJORADO - ENCUENTRA CUALQUIER PRODUCTO IGNORANDO EMOJIS, MAYÚSCULAS, ETC ==========
+  // ========== MATCHING MEJORADO - ENCUENTRA CUALQUIER PRODUCTO ==========
   const matchProduct = useCallback(
     (rawName: string) => {
       if (!rawName || rawName === "—" || rawName === "-") {
-        console.log(`❌ Nombre vacío o inválido: "${rawName}"`);
         return null;
       }
       
-      // Limpiar nombre del sheet (elimina emojis, acentos, mayúsculas, etc.)
       const cleanSheetName = normalizeForComparison(rawName);
-      console.log(`🔍 Buscando: "${rawName}" → Normalizado: "${cleanSheetName}"`);
       
-      // 1. Búsqueda NORMALIZADA (ignora emojis, mayúsculas, acentos, símbolos)
       let found = products.find((p) => {
         const cleanProductName = normalizeForComparison(p.title || "");
         return cleanProductName === cleanSheetName;
       });
       
-      if (found) {
-        console.log(`✅ Producto encontrado (normalizado): "${rawName}" → "${found.title}"`);
-        return found;
-      }
+      if (found) return found;
       
-      // 2. Búsqueda por INCLUSIÓN (el sheet contiene el nombre del producto o viceversa)
       found = products.find((p) => {
         const cleanProductName = normalizeForComparison(p.title || "");
         return cleanSheetName.includes(cleanProductName) || cleanProductName.includes(cleanSheetName);
       });
       
-      if (found) {
-        console.log(`🔍 Producto encontrado (inclusión): "${rawName}" → "${found.title}"`);
-        return found;
-      }
+      if (found) return found;
       
-      // 3. Búsqueda por PALABRAS CLAVE (divide en palabras y busca coincidencias)
       const sheetWords = cleanSheetName.split(' ').filter(w => w.length > 2);
       
       if (sheetWords.length > 0) {
@@ -537,7 +631,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           
           for (const word of sheetWords) {
             if (cleanProductName === word) {
-              score += 100; // Bonus grande para coincidencia exacta de palabra
+              score += 100;
             } else if (cleanProductName.includes(word)) {
               score += word.length;
             } else if (word.includes(cleanProductName)) {
@@ -551,15 +645,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           }
         }
         
-        if (bestMatch) {
-          console.log(`🔍 Producto encontrado (palabras clave): "${rawName}" → "${bestMatch.title}" (score: ${bestScore})`);
-          return bestMatch;
-        }
+        if (bestMatch) return bestMatch;
       }
-      
-      // Debug: No encontrado
-      console.log(`❌ Producto NO encontrado: "${rawName}" (normalizado: "${cleanSheetName}")`);
-      console.log(`📋 Productos disponibles (normalizados):`, products.map(p => `"${normalizeForComparison(p.title)}"`).join(", "));
       
       return null;
     },
@@ -568,32 +655,16 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
   const getCityPrice = useCallback(
     (cityName: string) => {
-      if (!cityName) return null;
-      
-      const normalizedInput = normalizeCityName(cityName);
-      
-      const match = clientPrices.find((cp) => {
-        const normalizedCity = normalizeCityName(cp.city || "");
-        return normalizedCity === normalizedInput;
-      });
-      
-      return match ? match.price_gs : null;
+      return getCityPriceFromMap(cityName);
     },
-    [clientPrices],
+    [],
   );
 
   const hasCoverage = useCallback(
     (cityName: string) => {
-      if (!cityName) return false;
-      
-      const normalizedInput = normalizeCityName(cityName);
-      
-      return clientPrices.some((cp) => {
-        const normalizedCity = normalizeCityName(cp.city || "");
-        return normalizedCity === normalizedInput;
-      });
+      return getCityPriceFromMap(cityName) !== null;
     },
-    [clientPrices],
+    [],
   );
 
   const readSheet = useCallback(async () => {
@@ -824,159 +895,62 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     toast.success(`✅ ${count} cargados | ❌ ${errors} errores | ⏭️ ${skippedNoProduct} sin producto | 🚫 ${skippedNoCoverage} sin cobertura | 💰 ${skippedNoAmount} sin monto | 💰 Comisión total: ${totalCommission.toLocaleString("es-PY")} Gs`);
   }, [sheetOrders, rowStatuses, colKeys, matchProduct, getCityPrice, myEmail, setRowStatus]);
 
-  // ========== AUTO LOAD ORDERS ==========
-  const autoLoadOrders = useCallback(async () => {
-    if (isAutoLoadingRef.current) {
-      console.log("⏸️ Auto-carga ya en ejecución, omitiendo...");
-      return;
-    }
-    
-    if (!colKeys.product) {
-      console.log("⚠️ Auto-carga detenida: No se encontró la columna 'PRODUCTO OK'");
-      return;
-    }
-    
-    isAutoLoadingRef.current = true;
-    
-    let count = 0;
-    let totalCommission = 0;
-    
-    try {
-      const pendingIndices = sheetOrders
-        .map((_, i) => i)
-        .filter(i => {
-          const currentStatus = rowStatuses[String(i)] || "CARGAR";
-          return currentStatus === "CARGAR";
-        });
-      
-      console.log(`🤖 Auto-carga: ${pendingIndices.length} pedidos pendientes`);
-      
-      for (const i of pendingIndices) {
-        const currentStatus = rowStatuses[String(i)] || "CARGAR";
-        if (currentStatus !== "CARGAR") continue;
-        
-        const order = sheetOrders[i];
-        const productName = order[colKeys.product] || "";
-        
-        if (!productName) continue;
-        
-        const matched = matchProduct(productName);
-        if (!matched) continue;
-        
-        const city = order[colKeys.city] || "";
-        const deliveryPrice = getCityPrice(city);
-        if (!deliveryPrice) continue;
-        
-        const salePrice = getAmountFromRow(order, colKeys.amount);
-        if (salePrice === 0) continue;
-        
-        const productCost = matched?.provider_price_gs || 0;
-        const qty = parseQuantity(order[colKeys.qty]);
-        const commission = salePrice - (productCost + deliveryPrice);
-        
-        const orderId = await generateShopifyOrderId();
-        
-        const payload = {
-          order_number: orderId,
-          created_by: myEmail,
-          customer_name: (order[colKeys.name] || "").trim(),
-          phone: extractPhoneNumber(order[colKeys.phone] || ""),
-          city: city,
-          street: (order[colKeys.street] || "").trim(),
-          district: (order[colKeys.dept] || "").trim(),
-          email: order[colKeys.email] || "",
-          obs: "",
-          items_json: [{ 
-            sku: matched.sku || "",
-            title: matched.title, 
-            qty: qty, 
-            sale_gs: salePrice,
-            provider_price_gs: productCost,
-            provider_email: matched.provider_email || "",
-          }],
-          total_gs: salePrice * qty,
-          delivery_gs: deliveryPrice,
-          commission_gs: commission,
-          provider_emails_list: matched.provider_email || "",
-        };
-        
-        const { error } = await supabase.from("orders").insert(payload);
-        if (!error) {
-          await setRowStatus(String(i), "CARGADO", orderId);
-          count++;
-          totalCommission += commission;
-          console.log(`✅ Auto-cargado: ${orderId} (fila ${i + 1})`);
-          await new Promise(resolve => setTimeout(resolve, 100));
-        } else {
-          console.error(`❌ Error fila ${i + 1}:`, error);
-        }
-      }
-    } catch (err) {
-      console.error("Error en autoLoadOrders:", err);
-    } finally {
-      isAutoLoadingRef.current = false;
-    }
-    
-    if (count > 0) {
-      toast.success(`🤖 Auto: ${count} cargados | 💰 Comisión: ${totalCommission.toLocaleString("es-PY")} Gs`);
-    }
-  }, [sheetOrders, rowStatuses, colKeys, matchProduct, getCityPrice, myEmail, setRowStatus]);
-
-  const runAutoCycle = useCallback(async () => {
-    if (!autoLoadRef.current) {
-      console.log("⏹️ Auto-carga desactivada");
-      return;
-    }
-    
-    console.log("🔄 Ciclo de auto-carga iniciado...");
-    await readSheet();
-    
-    if (!autoLoadRef.current) return;
-    
-    await loadStatusesFromDatabase();
-    
-    await new Promise(resolve => setTimeout(resolve, 500));
-    
-    await autoLoadOrders();
-    console.log("✅ Ciclo completado");
-  }, [readSheet, autoLoadOrders, loadStatusesFromDatabase]);
-
-  useEffect(() => {
-    if (autoLoad && sheetUrl) {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-      
-      setTimeout(() => {
-        runAutoCycle();
-      }, 2000);
-      
-      intervalRef.current = setInterval(() => {
-        runAutoCycle();
-      }, 60000);
-      
-      console.log("🤖 Auto-carga activada - Ciclo cada 60 segundos");
-    } else {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-    }
-    
-    return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-    };
-  }, [autoLoad, sheetUrl, runAutoCycle]);
-
-  const toggleAutoLoad = () => {
-    const newValue = !autoLoad;
-    setAutoLoad(newValue);
-    toast.info(newValue ? "🤖 Auto-carga activada" : "⏹️ Auto-carga desactivada");
-  };
-
   const getDisplayAmount = (order: SheetOrder) => {
     return getAmountFromRow(order, colKeys.amount);
+  };
+
+  // ========== NUEVA: Estadísticas para el Dashboard ==========
+  const dashboardStats = useMemo(() => {
+    let totalVentas = 0;
+    let pedidosConMonto = 0;
+    let ciudadesUnicas = new Set<string>();
+    let ciudadesSinCobertura = new Set<string>();
+    
+    sheetOrders.forEach((order, idx) => {
+      const currentStatus = rowStatuses[String(idx)] || "CARGAR";
+      if (currentStatus !== "CARGAR") return;
+      
+      const monto = getAmountFromRow(order, colKeys.amount);
+      if (monto > 0) {
+        totalVentas += monto;
+        pedidosConMonto++;
+      }
+      
+      const city = order[colKeys.city];
+      if (city && city.trim()) {
+        ciudadesUnicas.add(city.trim());
+        if (!hasCoverage(city)) {
+          ciudadesSinCobertura.add(city.trim());
+        }
+      }
+    });
+    
+    return {
+      totalPedidos: sheetOrders.length,
+      pedidosPendientes: Object.values(rowStatuses).filter(s => s === "CARGAR").length,
+      totalVentas,
+      promedioVenta: pedidosConMonto > 0 ? totalVentas / pedidosConMonto : 0,
+      ciudadesCubiertas: ciudadesUnicas.size - ciudadesSinCobertura.size,
+      ciudadesSinCobertura: ciudadesSinCobertura.size,
+      ciudadesLista: Array.from(ciudadesUnicas).slice(0, 5) // Top 5 ciudades
+    };
+  }, [sheetOrders, rowStatuses, colKeys, hasCoverage]);
+
+  // NUEVO: Extraer fecha del pedido
+  const getOrderDate = (order: SheetOrder): string => {
+    const dateValue = order[colKeys.date];
+    if (!dateValue) return "—";
+    
+    try {
+      // Intenta parsear la fecha
+      const date = new Date(dateValue);
+      if (!isNaN(date.getTime())) {
+        return date.toLocaleDateString("es-PY");
+      }
+      return String(dateValue).split(' ')[0]; // Devuelve como está si no se puede parsear
+    } catch {
+      return String(dateValue);
+    }
   };
 
   // Filtrado de órdenes MEJORADO
@@ -995,14 +969,28 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           const productName = order[colKeys.product] || "";
           if (!matchProduct(productName)) return false;
         }
+        
+        // NUEVO: Filtro por cobertura
+        if (coverageFilter !== "all") {
+          const city = order[colKeys.city] || "";
+          const covered = isCityCovered(city);
+          if (coverageFilter === "covered" && !covered) return false;
+          if (coverageFilter === "uncovered" && covered) return false;
+        }
+        
         if (filterOnlyCoverage && currentStatus === "CARGAR") {
           const city = order[colKeys.city] || "";
           if (!hasCoverage(city)) return false;
         }
         
-        // NUEVA BÚSQUEDA ESPECÍFICA DE PRODUCTO
+        // Búsqueda específica de PRODUCTO
         if (searchType === "product" && productSearch) {
           return filterByProduct(order, productSearch);
+        }
+        
+        // NUEVO: Búsqueda específica de CIUDAD
+        if (searchType === "city" && cityFilter) {
+          return filterByCity(order, cityFilter);
         }
         
         // Búsqueda general (todos los campos)
@@ -1014,7 +1002,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         
         return true;
       });
-  }, [sheetOrders, rowStatuses, activeFilter, search, productSearch, searchType, colKeys, matchProduct, hasCoverage, filterOnlyAvailable, filterOnlyCoverage, filterByProduct]);
+  }, [sheetOrders, rowStatuses, activeFilter, search, productSearch, cityFilter, searchType, coverageFilter, colKeys, matchProduct, hasCoverage, filterOnlyAvailable, filterOnlyCoverage, filterByProduct, filterByCity, isCityCovered]);
 
   const counts = useMemo(() => {
     const cargar = Object.values(rowStatuses).filter(s => s === "CARGAR").length;
@@ -1076,6 +1064,34 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   return (
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">📦 Shopify Inbox — Lectura de Sheet</h3>
+
+      {/* ========== NUEVO: DASHBOARD KPI ========== */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-4">
+        <div className="app-card !p-3 text-center bg-blue-500/10 border-blue-500/20">
+          <div className="text-2xl font-bold text-blue-400">{dashboardStats.totalPedidos}</div>
+          <div className="text-xs text-muted-foreground">Total pedidos</div>
+        </div>
+        <div className="app-card !p-3 text-center bg-green-500/10 border-green-500/20">
+          <div className="text-xl font-bold text-green-400">{dashboardStats.pedidosPendientes}</div>
+          <div className="text-xs text-muted-foreground">Pendientes</div>
+        </div>
+        <div className="app-card !p-3 text-center bg-yellow-500/10 border-yellow-500/20">
+          <div className="text-lg font-bold text-yellow-400">{nf(dashboardStats.totalVentas)} Gs</div>
+          <div className="text-xs text-muted-foreground">Total ventas</div>
+        </div>
+        <div className="app-card !p-3 text-center bg-purple-500/10 border-purple-500/20">
+          <div className="text-lg font-bold text-purple-400">{nf(dashboardStats.promedioVenta)} Gs</div>
+          <div className="text-xs text-muted-foreground">Promedio pedido</div>
+        </div>
+        <div className="app-card !p-3 text-center bg-emerald-500/10 border-emerald-500/20">
+          <div className="text-2xl font-bold text-emerald-400">{dashboardStats.ciudadesCubiertas}</div>
+          <div className="text-xs text-muted-foreground">Ciudades con cobertura</div>
+        </div>
+        <div className="app-card !p-3 text-center bg-red-500/10 border-red-500/20">
+          <div className="text-2xl font-bold text-red-400">{dashboardStats.ciudadesSinCobertura}</div>
+          <div className="text-xs text-muted-foreground">Sin cobertura</div>
+        </div>
+      </div>
 
       <div className="app-card !p-4 mb-4">
         <div className="flex flex-wrap items-center gap-2 mb-2">
@@ -1165,9 +1181,44 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         </button>
       </div>
 
-      {/* BARRA DE BÚSQUEDA MEJORADA */}
+      {/* NUEVO: Filtro de cobertura */}
+      <div className="flex flex-wrap gap-2 mb-3">
+        <span className="text-xs text-muted-foreground self-center mr-1">📍 Cobertura:</span>
+        <button
+          onClick={() => setCoverageFilter("all")}
+          className={`px-2 py-1 rounded text-xs transition-all ${
+            coverageFilter === "all"
+              ? "bg-primary text-primary-foreground"
+              : "bg-muted hover:bg-muted/80"
+          }`}
+        >
+          Todas
+        </button>
+        <button
+          onClick={() => setCoverageFilter("covered")}
+          className={`px-2 py-1 rounded text-xs transition-all ${
+            coverageFilter === "covered"
+              ? "bg-green-500 text-white"
+              : "bg-green-500/10 hover:bg-green-500/20 text-green-400"
+          }`}
+        >
+          ✅ Con cobertura
+        </button>
+        <button
+          onClick={() => setCoverageFilter("uncovered")}
+          className={`px-2 py-1 rounded text-xs transition-all ${
+            coverageFilter === "uncovered"
+              ? "bg-red-500 text-white"
+              : "bg-red-500/10 hover:bg-red-500/20 text-red-400"
+          }`}
+        >
+          ❌ Sin cobertura
+        </button>
+      </div>
+
+      {/* BARRA DE BÚSQUEDA MEJORADA CON CIUDAD */}
       <div className="space-y-2 mb-3">
-        <div className="flex gap-2 items-center">
+        <div className="flex gap-2 items-center flex-wrap">
           <button
             onClick={() => setSearchType("product")}
             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
@@ -1179,6 +1230,16 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             🏷️ Buscar en PRODUCTO
           </button>
           <button
+            onClick={() => setSearchType("city")}
+            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+              searchType === "city"
+                ? "bg-emerald-500 text-white shadow-md"
+                : "bg-muted hover:bg-muted/80 text-muted-foreground"
+            }`}
+          >
+            📍 Buscar por CIUDAD
+          </button>
+          <button
             onClick={() => setSearchType("all")}
             className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
               searchType === "all"
@@ -1186,18 +1247,17 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                 : "bg-muted hover:bg-muted/80 text-muted-foreground"
             }`}
           >
-            🔍 Buscar en todo
+            🔍 Buscar en TODO
           </button>
           
-          {/* Indicador de columna de producto */}
           {colKeys.product && (
             <div className="ml-auto text-xs text-muted-foreground">
-              📌 Columna: <span className="font-mono text-blue-400">{colKeys.product}</span>
+              📌 Columna producto: <span className="font-mono text-blue-400">{colKeys.product}</span>
             </div>
           )}
         </div>
         
-        {searchType === "product" ? (
+        {searchType === "product" && (
           <div className="relative">
             <input
               className="app-input w-full pl-8"
@@ -1213,8 +1273,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                 ✕
               </button>
             )}
-            
-            {/* Sugerencias de autocompletado */}
             {productSuggestions.length > 0 && (
               <div className="absolute z-10 mt-1 w-full bg-background border border-border rounded-lg shadow-lg">
                 {productSuggestions.map((suggestion, i) => (
@@ -1229,10 +1287,44 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               </div>
             )}
           </div>
-        ) : (
+        )}
+
+        {searchType === "city" && (
+          <div className="relative">
+            <input
+              className="app-input w-full pl-8"
+              placeholder="📍 Buscar por ciudad (ej: Asunción, Luque, CDE)..."
+              value={cityFilter}
+              onChange={(e) => setCityFilter(e.target.value)}
+            />
+            {cityFilter && (
+              <button
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                onClick={() => setCityFilter("")}
+              >
+                ✕
+              </button>
+            )}
+            {citySuggestions.length > 0 && (
+              <div className="absolute z-10 mt-1 w-full bg-background border border-border rounded-lg shadow-lg">
+                {citySuggestions.map((suggestion, i) => (
+                  <button
+                    key={i}
+                    className="w-full text-left px-3 py-2 hover:bg-muted text-sm transition-colors"
+                    onClick={() => setCityFilter(suggestion)}
+                  >
+                    📍 {suggestion}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {searchType === "all" && (
           <input
             className="app-input w-full"
-            placeholder="🔎 Buscar en todos los campos (cliente, teléfono, ciudad, etc.)..."
+            placeholder="🔎 Buscar en todos los campos (cliente, teléfono, ciudad, producto, etc.)..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -1242,17 +1334,24 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       <div className="text-xs text-muted-foreground mb-2">
         Mostrando {filteredOrders.length} de {sheetOrders.length} filas totales
         {searchType === "product" && productSearch && (
-          <span className="ml-2 text-blue-400">
-            🔍 Buscando producto: "{productSearch}"
+          <span className="ml-2 text-blue-400">🔍 Buscando producto: "{productSearch}"</span>
+        )}
+        {searchType === "city" && cityFilter && (
+          <span className="ml-2 text-emerald-400">📍 Buscando ciudad: "{cityFilter}"</span>
+        )}
+        {coverageFilter !== "all" && (
+          <span className="ml-2 text-yellow-400">
+            {coverageFilter === "covered" ? "✅ Solo con cobertura" : "❌ Solo sin cobertura"}
           </span>
         )}
       </div>
 
       <div className="overflow-auto">
-        <table className="app-table min-w-[1300px]">
+        <table className="app-table min-w-[1400px]">
           <thead>
             <tr>
               <th>#</th>
+              <th>Fecha</th>
               <th>Cliente</th>
               <th>Teléfono</th>
               <th>Ciudad</th>
@@ -1281,6 +1380,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               const productCost = matched?.provider_price_gs || 0;
               const qty = parseQuantity(order[colKeys.qty]);
               const commission = salePrice - (productCost + (deliveryPrice || 0));
+              const orderDate = getOrderDate(order);
 
               const canLoadAuto = currentStatus === "CARGAR" && matched && covered && salePrice > 0 && colKeys.product;
               const canLoadManual = currentStatus === "CARGAR" && matched && covered && salePrice > 0 && colKeys.product;
@@ -1289,9 +1389,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               return (
                 <tr key={idx} className={getRowClassName(currentStatus)}>
                   <td className="text-xs">{idx + 1}</td>
+                  <td className="text-xs whitespace-nowrap">{orderDate}</td>
                   <td className="text-xs font-medium">{order[colKeys.name] || "—"}</td>
                   <td className="text-xs font-mono">{extractedPhone || phoneRaw || "—"}</td>
-                  <td className="text-xs">{city || "—"}</td>
+                  <td className={`text-xs ${!covered && city ? "text-red-400 font-semibold" : ""}`}>
+                    {city || "—"}
+                    {!covered && city && <span className="text-[10px] ml-1">⚠️</span>}
+                  </td>
                   <td className="text-xs">{order[colKeys.street] || "—"}</td>
                   <td className="text-right text-xs font-bold">
                     {deliveryPrice != null ? `${nf(deliveryPrice)} Gs` : <span className="text-muted-foreground">—</span>}
@@ -1368,20 +1472,22 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             })}
             {filteredOrders.length === 0 && (
               <tr>
-                <td colSpan={13} className="text-center text-muted-foreground py-8">
+                <td colSpan={14} className="text-center text-muted-foreground py-8">
                   {sheetOrders.length === 0 
                     ? "📊 Leé tu Sheet primero" 
                     : searchType === "product" && productSearch
                       ? `🔍 No se encontraron productos con "${productSearch}"`
-                      : activeFilter === "CARGAR" 
-                        ? "🎉 No hay pedidos pendientes" 
-                        : activeFilter === "CARGADO" 
-                          ? "📭 No hay pedidos cargados automáticamente"
-                          : activeFilter === "CARGADO_MANUAL"
-                            ? "📭 No hay pedidos cargados manualmente"
-                            : activeFilter === "A DROPEAR"
-                              ? "📭 No hay pedidos marcados para dropear"
-                              : "🎉 No hay pedidos para mostrar"}
+                      : searchType === "city" && cityFilter
+                        ? `📍 No se encontraron pedidos en "${cityFilter}"`
+                        : activeFilter === "CARGAR" 
+                          ? "🎉 No hay pedidos pendientes" 
+                          : activeFilter === "CARGADO" 
+                            ? "📭 No hay pedidos cargados automáticamente"
+                            : activeFilter === "CARGADO_MANUAL"
+                              ? "📭 No hay pedidos cargados manualmente"
+                              : activeFilter === "A DROPEAR"
+                                ? "📭 No hay pedidos marcados para dropear"
+                                : "🎉 No hay pedidos para mostrar"}
                 </td>
               </tr>
             )}
