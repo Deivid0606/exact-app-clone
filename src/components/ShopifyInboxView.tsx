@@ -30,51 +30,79 @@ const normalizeText = (text: string): string => {
     .replace(/[^a-z0-9]/g, "");
 };
 
-// Función de matching SUPER flexible para ciudades
-const matchCityName = (inputCity: string, targetCity: string): boolean => {
-  if (!inputCity || !targetCity) return false;
-  
-  const normalizedInput = normalizeText(inputCity);
-  const normalizedTarget = normalizeText(targetCity);
-  
-  if (normalizedInput === normalizedTarget) return true;
-  if (normalizedInput.includes(normalizedTarget)) return true;
-  if (normalizedTarget.includes(normalizedInput)) return true;
-  
-  const inputWords = normalizedInput.split(' ');
-  const targetWords = normalizedTarget.split(' ');
-  
-  for (const inputWord of inputWords) {
-    if (inputWord.length < 3) continue;
-    for (const targetWord of targetWords) {
-      if (targetWord.length < 3) continue;
-      if (inputWord === targetWord) return true;
-      if (inputWord.includes(targetWord) || targetWord.includes(inputWord)) return true;
-    }
-  }
-  
-  return false;
+// LISTA EXACTA DE CIUDADES CON COBERTURA Y SUS PRECIOS DE DELIVERY
+const CITY_DELIVERY_PRICES: Record<string, number> = {
+  "altos": 55000,
+  "aregua": 45000,
+  "asuncion": 35000,
+  "asunción": 35000,
+  "atyra": 55000,
+  "atyrá": 55000,
+  "benjaminaceval": 60000,
+  "benjamínaceval": 60000,
+  "caacupe": 55000,
+  "capiata": 45000,
+  "ciudaddeleste": 45000,
+  "coloniyguazu": 50000,
+  "emboscada": 55000,
+  "eusebioayala": 55000,
+  "fernandodelamora": 35000,
+  "guarambare": 50000,
+  "hernandarias": 50000,
+  "interiorpagoanticipado": 35000,
+  "ita": 55000,
+  "itacurubidelacordillera": 55000,
+  "itaugua": 45000,
+  "jaugustosaldívar": 45000,
+  "juanleonmalloriquin": 60000,
+  "lambare": 35000,
+  "limpio": 40000,
+  "lomagrande": 55000,
+  "luque": 35000,
+  "marianoroquealonso": 40000,
+  "mingaguazu": 50000,
+  "ñemby": 40000,
+  "nuevaitalia": 55000,
+  "paraguari": 55000,
+  "pirayu": 55000,
+  "pirayú": 55000,
+  "piribebuy": 55000,
+  "presidentefranco": 50000,
+  "puertopdtefranco": 50000,
+  "remansito": 60000,
+  "sanalberto": 55000,
+  "santonio": 45000,
+  "sanbernardino": 55000,
+  "sanlorenzo": 35000,
+  "santarita": 55000,
+  "tobati": 55000,
+  "villaelsa": 40000,
+  "villahayes": 60000,
+  "villarrica": 50000,
+  "villeta": 55000,
+  "yaguaron": 55000,
+  "yguazu": 60000,
+  "ypacarai": 55000,
+  "ypane": 45000
 };
 
-// LISTA COMPLETA DE CIUDADES CON COBERTURA
-const COVERAGE_CITIES: string[] = [
-  "Altos", "Aregua", "Asunción", "Atyrá", "Benjamín Aceval", "Caacupe", "Capiata",
-  "Ciudad del este", "Colonia Yguazu", "Emboscada", "Eusebio Ayala",
-  "Fernando de la Mora", "Guarambare", "Hernandarias", "Ita", "Itacurubí de la Cordillera",
-  "Itaugua", "J. Augusto Saldívar", "Juan leon malloriquin", "Lambare", "Limpio",
-  "Loma Grande", "Luque", "Mariano Roque Alonso", "Minga Guazu", "Ñemby", "Nueva Italia",
-  "Paraguarí", "PIRAYÚ", "Piribebuy", "Presidente franco", "Puerto Pdte. Franco",
-  "Remansito", "San Alberto", "San Antonio", "San Bernardino", "San Lorenzo",
-  "SANTA RITA", "Tobatí", "Villa Elisa", "Villa Hayes", "Villarrica", "Villeta",
-  "YAGUARON", "Yguazu", "YGUAZU", "Ypacaraí", "Ypane"
-];
-
-const hasCoverageFromMap = (cityName: string): boolean => {
-  if (!cityName) return false;
-  for (const coverageCity of COVERAGE_CITIES) {
-    if (matchCityName(cityName, coverageCity)) return true;
+// Función para obtener delivery price y verificar cobertura
+const getCityDeliveryPrice = (cityName: string): number | null => {
+  if (!cityName) return null;
+  
+  const normalizedInput = normalizeText(cityName);
+  
+  // Buscar coincidencia exacta o parcial
+  for (const [key, price] of Object.entries(CITY_DELIVERY_PRICES)) {
+    if (normalizedInput === key) return price;
+    if (normalizedInput.includes(key) || key.includes(normalizedInput)) return price;
   }
-  return false;
+  
+  return null;
+};
+
+const hasCoverage = (cityName: string): boolean => {
+  return getCityDeliveryPrice(cityName) !== null;
 };
 
 function parseQuantity(value: any): number {
@@ -321,25 +349,29 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
            null;
   }, [products]);
 
-  const hasCoverage = useCallback((cityName: string) => hasCoverageFromMap(cityName), []);
-
   const loadOrder = useCallback(async (order: SheetOrder, idx: number, source: "auto" | "manual" = "auto") => {
     const productName = order[colKeys.product] || "";
     const matched = matchProduct(productName);
     if (!matched) { toast.error(`❌ Producto no detectado: "${productName}"`); return false; }
+    
+    const city = order[colKeys.city] || "";
+    const deliveryPrice = getCityDeliveryPrice(city);
+    if (!deliveryPrice) { toast.warning(`⚠️ Ciudad "${city}" sin cobertura de delivery`); return false; }
     
     const salePrice = getAmountFromRow(order, colKeys.amount);
     if (salePrice === 0) { toast.warning(`⚠️ No se detectó monto`); return false; }
     
     const orderId = await generateShopifyOrderId();
     const newStatus: OrderStatus = source === "auto" ? "CARGADO" : "CARGADO_MANUAL";
+    const productCost = matched.provider_price_gs || 0;
+    const commission = salePrice - (productCost + deliveryPrice);
     
     const payload = {
       order_number: orderId, created_by: myEmail,
       customer_name: order[colKeys.name] || "", phone: extractPhoneNumber(order[colKeys.phone] || ""),
-      city: order[colKeys.city] || "", street: order[colKeys.street] || "", district: "", email: "", obs: "",
-      items_json: [{ sku: matched.sku || "", title: matched.title, qty: parseQuantity(order[colKeys.qty]), sale_gs: salePrice, provider_price_gs: matched.provider_price_gs || 0, provider_email: matched.provider_email || "" }],
-      total_gs: salePrice, delivery_gs: 0, commission_gs: salePrice - (matched.provider_price_gs || 0),
+      city: city, street: order[colKeys.street] || "", district: "", email: "", obs: "",
+      items_json: [{ sku: matched.sku || "", title: matched.title, qty: parseQuantity(order[colKeys.qty]), sale_gs: salePrice, provider_price_gs: productCost, provider_email: matched.provider_email || "" }],
+      total_gs: salePrice, delivery_gs: deliveryPrice, commission_gs: commission,
       provider_emails_list: matched.provider_email || "",
     };
     
@@ -347,12 +379,11 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     if (error) { toast.error("Error: " + error.message); return false; }
     
     await setRowStatus(String(idx), newStatus, orderId);
-    toast.success(`✅ Pedido ${orderId} cargado`);
+    toast.success(`✅ Pedido ${orderId} cargado | Comisión: ${nf(commission)} Gs`);
     return true;
   }, [colKeys, matchProduct, myEmail, setRowStatus]);
 
   const handleDirectSave = (order: SheetOrder, idx: number) => loadOrder(order, idx, "auto");
-  const handleManualSave = (idx: number) => setRowStatus(String(idx), "CARGADO_MANUAL");
   const handleOpenForm = (order: SheetOrder, idx: number) => {
     if (onSheetConfirm) onSheetConfirm({
       customer: order[colKeys.name] || "", phone: extractPhoneNumber(order[colKeys.phone] || ""),
@@ -365,7 +396,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const handleBulkLoad = async () => {
     let count = 0, errors = 0;
     for (let i = 0; i < sheetOrders.length; i++) {
-      if (getRowStatus(i) !== "CARGAR") continue;
+      const status = getRowStatus(i);
+      if (status !== "CARGAR") continue;
+      
+      const city = sheetOrders[i][colKeys.city] || "";
+      if (!hasCoverage(city)) continue;
+      
       const success = await loadOrder(sheetOrders[i], i, "auto");
       if (success) count++; else errors++;
       if (count % 3 === 0) await new Promise(r => setTimeout(r, 100));
@@ -383,50 +419,53 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return String(dateValue).split(' ')[0];
   };
 
-  // Dashboard stats PRO
+  // Dashboard SOLO con pedidos en cobertura
   const dashboardStats = useMemo(() => {
-    let totalVentas = 0, totalComisiones = 0, pedidosConMonto = 0;
-    let coveredCities = new Set(), uncoveredCities = new Set();
+    let totalVentas = 0, totalDelivery = 0, totalCostoProductos = 0, totalComisiones = 0;
+    let pedidosEnCobertura = 0;
+    const ciudadesUnicas = new Set<string>();
     
     sheetOrders.forEach((order, idx) => {
-      const status = getRowStatus(idx);
-      const monto = getAmountFromRow(order, colKeys.amount);
-      if (monto > 0 && status === "CARGAR") { 
-        totalVentas += monto; 
-        pedidosConMonto++;
-      }
+      const city = order[colKeys.city] || "";
+      const deliveryPrice = getCityDeliveryPrice(city);
       
-      const city = order[colKeys.city];
-      if (city?.trim()) {
-        if (hasCoverage(city)) coveredCities.add(city);
-        else uncoveredCities.add(city);
+      // Solo considerar pedidos CON COBERTURA
+      if (!deliveryPrice) return;
+      
+      const status = getRowStatus(idx);
+      if (status !== "CARGAR") return;
+      
+      ciudadesUnicas.add(city);
+      pedidosEnCobertura++;
+      
+      const salePrice = getAmountFromRow(order, colKeys.amount);
+      if (salePrice > 0) {
+        totalVentas += salePrice;
+        totalDelivery += deliveryPrice;
+        
+        const productName = order[colKeys.product] || "";
+        const matched = matchProduct(productName);
+        const productCost = matched?.provider_price_gs || 0;
+        totalCostoProductos += productCost;
+        
+        const commission = salePrice - (productCost + deliveryPrice);
+        if (commission > 0) totalComisiones += commission;
       }
     });
     
-    // Calcular comisiones estimadas
-    sheetOrders.forEach((order, idx) => {
-      if (getRowStatus(idx) !== "CARGAR") return;
-      const matched = matchProduct(order[colKeys.product] || "");
-      if (matched) {
-        const salePrice = getAmountFromRow(order, colKeys.amount);
-        const cost = matched.provider_price_gs || 0;
-        if (salePrice > 0) totalComisiones += salePrice - cost;
-      }
-    });
+    const gananciaNeta = totalVentas - totalDelivery - totalCostoProductos;
     
     return {
-      totalPedidos: sheetOrders.length,
-      pedidosPendientes: sheetOrders.filter((_, idx) => getRowStatus(idx) === "CARGAR").length,
-      totalVentas, 
-      promedioVenta: pedidosConMonto > 0 ? totalVentas / pedidosConMonto : 0,
+      pedidosEnCobertura,
+      totalVentas,
+      totalDelivery,
+      totalCostoProductos,
       totalComisiones,
-      ciudadesCubiertas: coveredCities.size,
-      ciudadesSinCobertura: uncoveredCities.size,
-      tasaCobertura: coveredCities.size + uncoveredCities.size > 0 
-        ? Math.round((coveredCities.size / (coveredCities.size + uncoveredCities.size)) * 100) 
-        : 0,
+      gananciaNeta,
+      ciudadesCubiertas: ciudadesUnicas.size,
+      tasaConversion: sheetOrders.length > 0 ? Math.round((pedidosEnCobertura / sheetOrders.length) * 100) : 0,
     };
-  }, [sheetOrders, colKeys, hasCoverage, matchProduct, getRowStatus]);
+  }, [sheetOrders, colKeys, matchProduct, getRowStatus]);
 
   // Filtros
   const filterByProduct = (order: SheetOrder, term: string) => {
@@ -444,18 +483,22 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       .map((o, i) => ({ order: o, idx: i }))
       .filter(({ order, idx }) => {
         const status = getRowStatus(idx);
+        const city = order[colKeys.city] || "";
+        const covered = hasCoverage(city);
         
-        if (activeFilter === "CARGAR" && status !== "CARGAR") return false;
+        // Filtro por estado
+        if (activeFilter === "CARGAR" && (status !== "CARGAR" || !covered)) return false;
         if (activeFilter === "CARGADO" && status !== "CARGADO") return false;
         if (activeFilter === "CARGADO_MANUAL" && status !== "CARGADO_MANUAL") return false;
         if (activeFilter === "A DROPEAR" && status !== "A DROPEAR") return false;
         
-        if (coverageFilter !== "all" && status === "CARGAR") {
-          const covered = hasCoverage(order[colKeys.city] || "");
+        // Filtro por cobertura manual
+        if (coverageFilter !== "all") {
           if (coverageFilter === "covered" && !covered) return false;
           if (coverageFilter === "uncovered" && covered) return false;
         }
         
+        // Filtros de búsqueda
         if (searchType === "product" && productSearch) return filterByProduct(order, productSearch);
         if (searchType === "city" && cityFilter) return filterByCity(order, cityFilter);
         if (searchType === "all" && search) {
@@ -465,19 +508,22 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         
         return true;
       });
-  }, [sheetOrders, activeFilter, search, productSearch, cityFilter, searchType, coverageFilter, colKeys, hasCoverage, getRowStatus]);
+  }, [sheetOrders, activeFilter, search, productSearch, cityFilter, searchType, coverageFilter, colKeys, getRowStatus]);
 
   const counts = useMemo(() => {
     let cargar = 0, cargado = 0, cargadoManual = 0, aDropear = 0;
-    sheetOrders.forEach((_, idx) => {
+    sheetOrders.forEach((order, idx) => {
       const status = getRowStatus(idx);
-      if (status === "CARGAR") cargar++;
+      const city = order[colKeys.city] || "";
+      const covered = hasCoverage(city);
+      
+      if (status === "CARGAR" && covered) cargar++;
       else if (status === "CARGADO") cargado++;
       else if (status === "CARGADO_MANUAL") cargadoManual++;
       else if (status === "A DROPEAR") aDropear++;
     });
     return { cargar, cargado, cargadoManual, aDropear, total: sheetOrders.length };
-  }, [sheetOrders, getRowStatus]);
+  }, [sheetOrders, colKeys, getRowStatus]);
 
   const changeFilter = (filter: FilterType) => setActiveFilter(filter);
   
@@ -505,7 +551,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
   return (
     <div className="app-card">
-      {/* Dashboard PRO */}
+      {/* Dashboard PRO - solo datos con cobertura */}
       <div className="mb-6">
         <div className="flex items-center justify-between mb-4">
           <h3 className="text-lg font-extrabold">📦 Shopify Inbox — Lectura de Sheet</h3>
@@ -513,53 +559,53 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         </div>
         
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-          {/* Tarjeta 1: Total Pedidos */}
+          {/* Pedidos en cobertura */}
           <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-blue-500/20 to-blue-600/5 p-3 border border-blue-500/20">
-            <div className="absolute top-0 right-0 text-4xl opacity-10">📋</div>
-            <div className="text-2xl font-bold text-blue-400">{dashboardStats.totalPedidos}</div>
-            <div className="text-xs text-muted-foreground">Total Pedidos</div>
+            <div className="absolute top-0 right-0 text-4xl opacity-10">📍</div>
+            <div className="text-2xl font-bold text-blue-400">{dashboardStats.pedidosEnCobertura}</div>
+            <div className="text-xs text-muted-foreground">Pedidos con cobertura</div>
           </div>
           
-          {/* Tarjeta 2: Pendientes */}
-          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-yellow-500/20 to-yellow-600/5 p-3 border border-yellow-500/20">
-            <div className="absolute top-0 right-0 text-4xl opacity-10">⏳</div>
-            <div className="text-2xl font-bold text-yellow-400">{dashboardStats.pedidosPendientes}</div>
-            <div className="text-xs text-muted-foreground">Pendientes</div>
-          </div>
-          
-          {/* Tarjeta 3: Total Ventas */}
+          {/* Total Ventas */}
           <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-green-500/20 to-green-600/5 p-3 border border-green-500/20">
             <div className="absolute top-0 right-0 text-4xl opacity-10">💰</div>
             <div className="text-lg font-bold text-green-400">{nf(dashboardStats.totalVentas)} Gs</div>
             <div className="text-xs text-muted-foreground">Total Ventas</div>
           </div>
           
-          {/* Tarjeta 4: Promedio */}
-          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-purple-500/20 to-purple-600/5 p-3 border border-purple-500/20">
-            <div className="absolute top-0 right-0 text-4xl opacity-10">📊</div>
-            <div className="text-lg font-bold text-purple-400">{nf(dashboardStats.promedioVenta)} Gs</div>
-            <div className="text-xs text-muted-foreground">Promedio Pedido</div>
+          {/* Delivery */}
+          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-orange-500/20 to-orange-600/5 p-3 border border-orange-500/20">
+            <div className="absolute top-0 right-0 text-4xl opacity-10">🚚</div>
+            <div className="text-lg font-bold text-orange-400">{nf(dashboardStats.totalDelivery)} Gs</div>
+            <div className="text-xs text-muted-foreground">Total Delivery</div>
           </div>
           
-          {/* Tarjeta 5: Comisiones */}
+          {/* Costo Productos */}
+          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-purple-500/20 to-purple-600/5 p-3 border border-purple-500/20">
+            <div className="absolute top-0 right-0 text-4xl opacity-10">📦</div>
+            <div className="text-lg font-bold text-purple-400">{nf(dashboardStats.totalCostoProductos)} Gs</div>
+            <div className="text-xs text-muted-foreground">Costo Productos</div>
+          </div>
+          
+          {/* Comisiones */}
           <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-pink-500/20 to-pink-600/5 p-3 border border-pink-500/20">
             <div className="absolute top-0 right-0 text-4xl opacity-10">💎</div>
             <div className="text-lg font-bold text-pink-400">{nf(dashboardStats.totalComisiones)} Gs</div>
-            <div className="text-xs text-muted-foreground">Comisiones Estimadas</div>
+            <div className="text-xs text-muted-foreground">Comisiones</div>
           </div>
           
-          {/* Tarjeta 6: Cobertura */}
+          {/* Ganancia Neta */}
           <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-emerald-500/20 to-emerald-600/5 p-3 border border-emerald-500/20">
-            <div className="absolute top-0 right-0 text-4xl opacity-10">📍</div>
-            <div className="text-2xl font-bold text-emerald-400">{dashboardStats.tasaCobertura}%</div>
-            <div className="text-xs text-muted-foreground">Tasa de Cobertura</div>
+            <div className="absolute top-0 right-0 text-4xl opacity-10">🏆</div>
+            <div className="text-lg font-bold text-emerald-400">{nf(dashboardStats.gananciaNeta)} Gs</div>
+            <div className="text-xs text-muted-foreground">Ganancia Neta</div>
           </div>
           
-          {/* Tarjeta 7: Ciudades */}
+          {/* Tasa conversión */}
           <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-cyan-500/20 to-cyan-600/5 p-3 border border-cyan-500/20">
-            <div className="absolute top-0 right-0 text-4xl opacity-10">🏙️</div>
-            <div className="text-xl font-bold text-cyan-400">{dashboardStats.ciudadesCubiertas} / {dashboardStats.ciudadesCubiertas + dashboardStats.ciudadesSinCobertura}</div>
-            <div className="text-xs text-muted-foreground">Ciudades Cubiertas</div>
+            <div className="absolute top-0 right-0 text-4xl opacity-10">📊</div>
+            <div className="text-2xl font-bold text-cyan-400">{dashboardStats.tasaConversion}%</div>
+            <div className="text-xs text-muted-foreground">Tasa conversión</div>
           </div>
         </div>
       </div>
@@ -571,7 +617,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             {loading ? "Leyendo..." : "📊 Leer Sheet"}
           </button>
           <button className="nav-btn active" onClick={handleBulkLoad} disabled={!sheetOrders.length}>
-            🚀 Cargar todos
+            🚀 Cargar todos (solo con cobertura)
           </button>
           <button className={`nav-btn ${autoLoad ? "!bg-green-600 !text-white" : ""}`} onClick={toggleAutoLoad}>
             {autoLoad ? "🤖 Auto-carga ON" : "🤖 Auto-carga OFF"}
@@ -643,14 +689,15 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         <table className="app-table min-w-[1400px]">
           <thead>
             <tr>
-              <th>#</th><th>Fecha</th><th>Cliente</th><th>Teléfono</th><th>Ciudad</th><th>Calle</th><th>Producto</th><th>Cant</th><th className="text-right">Venta</th><th>Estado</th><th>Acciones</th>
+              <th>#</th><th>Fecha</th><th>Cliente</th><th>Teléfono</th><th>Ciudad</th><th>Calle</th><th>Producto</th><th>Cant</th><th className="text-right">Venta</th><th className="text-right">Delivery</th><th>Estado</th><th>Acciones</th>
             </tr>
           </thead>
           <tbody>
             {filteredOrders.map(({ order, idx }) => {
               const status = getRowStatus(idx);
               const city = order[colKeys.city] || "";
-              const covered = hasCoverage(city);
+              const deliveryPrice = getCityDeliveryPrice(city);
+              const covered = deliveryPrice !== null;
               const salePrice = getDisplayAmount(order);
               const orderDate = getOrderDate(order);
               const canLoad = status === "CARGAR" && covered && salePrice > 0;
@@ -661,8 +708,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                   <td className="text-xs whitespace-nowrap">{orderDate}</td>
                   <td className="text-xs font-medium">{order[colKeys.name] || "—"}</td>
                   <td className="text-xs">{order[colKeys.phone] || "—"}</td>
-                  <td className={`text-xs ${!covered && city ? "text-red-400 font-semibold" : ""}`}>
+                  <td className={`text-xs ${!covered && city ? "text-red-400 font-semibold" : "text-green-400"}`}>
                     {city || "—"}
+                    {deliveryPrice && <span className="text-[10px] ml-1">({nf(deliveryPrice)} Gs)</span>}
                     {!covered && city && <span className="text-[10px] ml-1">⚠️</span>}
                   </td>
                   <td className="text-xs">{order[colKeys.street] || "—"}</td>
@@ -671,6 +719,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                   </td>
                   <td className="text-xs">{parseQuantity(order[colKeys.qty])}</td>
                   <td className="text-right text-xs text-green-400">{salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}</td>
+                  <td className="text-right text-xs text-orange-400">{deliveryPrice ? `${nf(deliveryPrice)} Gs` : "—"}</td>
                   <td className="min-w-[130px]">
                     <select
                       className="app-input !py-1 !px-2 !text-[11px] !w-full"
@@ -700,7 +749,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               );
             })}
             {filteredOrders.length === 0 && (
-              <tr><td colSpan={11} className="text-center text-muted-foreground py-8">No hay pedidos para mostrar</td></tr>
+              <tr><td colSpan={12} className="text-center text-muted-foreground py-8">No hay pedidos para mostrar</td></tr>
             )}
           </tbody>
         </table>
