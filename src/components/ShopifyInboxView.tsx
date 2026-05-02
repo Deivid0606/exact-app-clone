@@ -45,7 +45,7 @@ const normalizeCityName = (city: string): string => {
   return normalized;
 };
 
-// ========== NUEVA: Tabla de precios por ciudad (para matching inteligente) ==========
+// Tabla de precios por ciudad
 const CITY_PRICES: Record<string, number> = {
   "altos": 55000,
   "aregua": 45000,
@@ -101,18 +101,15 @@ const CITY_PRICES: Record<string, number> = {
   "ypane": 45000
 };
 
-// Función para obtener precio de ciudad con matching inteligente
 const getCityPriceFromMap = (cityName: string): number | null => {
   if (!cityName) return null;
   
   const normalized = normalizeCityName(cityName);
   
-  // Búsqueda exacta
   if (CITY_PRICES[normalized]) {
     return CITY_PRICES[normalized];
   }
   
-  // Búsqueda por inclusión (para ciudades con textos adicionales)
   for (const [key, price] of Object.entries(CITY_PRICES)) {
     if (normalized.includes(key) || key.includes(normalized)) {
       return price;
@@ -210,24 +207,6 @@ const getAmountFromRow = (order: SheetOrder, amountColumn: string): number => {
   return 0;
 };
 
-// ========== GENERA ID PARA PEDIDOS NORMALES (A302, A303, etc.) ==========
-const generateNormalOrderId = async (): Promise<string> => {
-  try {
-    const { data, error } = await supabase.rpc('get_next_order_number');
-    
-    if (error) {
-      console.error("Error generando ID normal:", error);
-      return `A${Date.now()}`;
-    }
-    
-    return data;
-  } catch (err) {
-    console.error("Error en generateNormalOrderId:", err);
-    return `A${Date.now()}`;
-  }
-};
-
-// ========== GENERA ID PARA SHOPIFY/SHOPIFY (SHOPIFY001, SHOPIFY002, etc.) ==========
 const generateShopifyOrderId = async (): Promise<string> => {
   try {
     const { data, error } = await supabase.rpc('get_next_shopify_order_number');
@@ -303,166 +282,22 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   });
 
-  // NUEVOS ESTADOS PARA FILTROS MEJORADOS
+  // Estados para filtros
   const [searchType, setSearchType] = useState<"all" | "product" | "city">("product");
   const [productSearch, setProductSearch] = useState("");
   const [cityFilter, setCityFilter] = useState("");
   const [productSuggestions, setProductSuggestions] = useState<string[]>([]);
   const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
-  
-  // NUEVO: Filtro de cobertura
   const [coverageFilter, setCoverageFilter] = useState<"all" | "covered" | "uncovered">("all");
-
-  const filterOnlyAvailable = true;
-  const filterOnlyCoverage = true;
   const [search, setSearch] = useState("");
 
   const autoLoadRef = useRef(autoLoad);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isAutoLoadingRef = useRef(false);
 
-  // ========== FUNCIONES DE BASE DE DATOS PARA ESTADOS ==========
-  
-  const loadStatusesFromDatabase = useCallback(async () => {
-    if (!myEmail || !sheetUrl) return;
-    
-    setLoadingStatuses(true);
-    try {
-      const { data, error } = await supabase
-        .from("sheet_row_statuses")
-        .select("row_index, status")
-        .eq("user_email", myEmail)
-        .eq("sheet_url", sheetUrl);
-      
-      if (error) {
-        console.error("Error cargando estados:", error);
-        return;
-      }
-      
-      const statusMap: Record<string, OrderStatus> = {};
-      data?.forEach(item => {
-        statusMap[String(item.row_index)] = item.status as OrderStatus;
-      });
-      
-      setRowStatuses(statusMap);
-      console.log(`📦 Estados cargados desde BD: ${Object.keys(statusMap).length} filas`);
-    } catch (err) {
-      console.error("Error en loadStatusesFromDatabase:", err);
-    } finally {
-      setLoadingStatuses(false);
-    }
-  }, [myEmail, sheetUrl]);
-
-  const saveStatusToDatabase = useCallback(async (rowIndex: number, status: OrderStatus, orderNumber?: string) => {
-    if (!myEmail || !sheetUrl) return false;
-    
-    try {
-      const { error } = await supabase
-        .from("sheet_row_statuses")
-        .upsert({
-          user_email: myEmail,
-          sheet_url: sheetUrl,
-          row_index: rowIndex,
-          status: status,
-          order_number: orderNumber || null,
-          updated_at: new Date().toISOString()
-        }, {
-          onConflict: 'user_email,sheet_url,row_index'
-        });
-      
-      if (error) {
-        console.error("Error guardando estado:", error);
-        return false;
-      }
-      return true;
-    } catch (err) {
-      console.error("Error en saveStatusToDatabase:", err);
-      return false;
-    }
-  }, [myEmail, sheetUrl]);
-
-  const setRowStatus = useCallback(async (key: string, status: OrderStatus, orderNumber?: string) => {
-    const rowIndex = parseInt(key);
-    
-    setRowStatuses((prev) => ({ ...prev, [key]: status }));
-    
-    await saveStatusToDatabase(rowIndex, status, orderNumber);
-  }, [saveStatusToDatabase]);
-
-  useEffect(() => {
-    localStorage.setItem(AUTO_LOAD_KEY, autoLoad.toString());
-    autoLoadRef.current = autoLoad;
-  }, [autoLoad]);
-
-  useEffect(() => {
-    localStorage.setItem(ACTIVE_FILTER_KEY, activeFilter);
-  }, [activeFilter]);
-
-  useEffect(() => {
-    const loadProducts = async () => {
-      const { data } = await supabase.from("products").select("*");
-      setProducts(data || []);
-    };
-    const loadPrices = async () => {
-      const { data } = await supabase.from("client_prices").select("*");
-      setClientPrices(data || []);
-    };
-    loadProducts();
-    loadPrices();
-  }, []);
-
-  useEffect(() => {
-    if (myEmail && sheetUrl) {
-      loadStatusesFromDatabase();
-    }
-  }, [myEmail, sheetUrl, loadStatusesFromDatabase]);
-
-  useEffect(() => {
-    if (sheetUrl && !initialLoadDone) {
-      readSheet();
-      setInitialLoadDone(true);
-    }
-  }, [sheetUrl]);
-
-  // ========== AUTOCOMPLETADO DE PRODUCTOS Y CIUDADES ==========
-  useEffect(() => {
-    if (productSearch.length > 2 && searchType === "product") {
-      const searchLower = productSearch.toLowerCase();
-      const suggestions = products
-        .filter(p => p.title && p.title.toLowerCase().includes(searchLower))
-        .map(p => p.title)
-        .slice(0, 5);
-      setProductSuggestions(suggestions);
-    } else {
-      setProductSuggestions([]);
-    }
-  }, [productSearch, products, searchType]);
-
-  // Autocompletado de ciudades desde el sheet
-  useEffect(() => {
-    if (cityFilter.length > 1 && searchType === "city") {
-      const uniqueCities = new Set<string>();
-      sheetOrders.forEach(order => {
-        const city = order[colKeys.city];
-        if (city && city.trim()) {
-          uniqueCities.add(city.trim());
-        }
-      });
-      
-      const searchLower = cityFilter.toLowerCase();
-      const suggestions = Array.from(uniqueCities)
-        .filter(city => city.toLowerCase().includes(searchLower))
-        .slice(0, 5);
-      setCitySuggestions(suggestions);
-    } else {
-      setCitySuggestions([]);
-    }
-  }, [cityFilter, sheetOrders, colKeys.city, searchType]);
-
-  // ========== DETECCIÓN DE COLUMNAS ==========
+  // ========== DETECCIÓN DE COLUMNAS (definido primero) ==========
   const colKeys = useMemo(() => {
     const h = sheetHeaders;
-    console.log("📋 Headers del Sheet:", h);
     
     const findExact = (...candidates: string[]) => {
       for (let i = 0; i < h.length; i++) {
@@ -530,8 +365,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       productColumn = find("PRODUCTO OK", "productook", "producto ok", "PRODUCTO");
     }
     
-    console.log("🎯 Columna de producto detectada:", productColumn || "❌ NO ENCONTRADA");
-    
     return {
       name: find("nombre", "cliente", "customer", "name", "NOMBRE"),
       phone: find("telefono", "phone", "tel", "celular", "whatsapp", "Teléfono"),
@@ -543,65 +376,183 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       qty: find("cantidad", "qty", "quantity", "unidades", "CANTIDAD"),
       amount: findAmount(),
       email: find("email", "correo", "mail"),
-      date: find("fecha", "date", "fecha pedido", "fecha de pedido"), // NUEVO: detectar fecha
+      date: find("fecha", "date", "fecha pedido", "fecha de pedido"),
     };
   }, [sheetHeaders]);
 
-  // ========== FUNCIÓN DE BÚSQUEDA ESPECÍFICA ==========
-  const filterByProduct = useCallback((order: SheetOrder, searchTerm: string) => {
-    if (!searchTerm.trim()) return true;
+  // ========== FUNCIONES ==========
+  
+  const loadStatusesFromDatabase = useCallback(async () => {
+    if (!myEmail || !sheetUrl) return;
     
-    const searchLower = searchTerm.toLowerCase().trim();
-    
-    const productOkValue = order[colKeys.product] || "";
-    if (productOkValue.toLowerCase().includes(searchLower)) return true;
-    
-    for (const key in order) {
-      const keyLower = key.toLowerCase();
-      if (keyLower.includes("producto") || keyLower === "product") {
-        const value = String(order[key] || "").toLowerCase();
-        if (value.includes(searchLower)) return true;
+    setLoadingStatuses(true);
+    try {
+      const { data, error } = await supabase
+        .from("sheet_row_statuses")
+        .select("row_index, status")
+        .eq("user_email", myEmail)
+        .eq("sheet_url", sheetUrl);
+      
+      if (error) {
+        console.error("Error cargando estados:", error);
+        return;
       }
+      
+      const statusMap: Record<string, OrderStatus> = {};
+      data?.forEach(item => {
+        statusMap[String(item.row_index)] = item.status as OrderStatus;
+      });
+      
+      setRowStatuses(statusMap);
+    } catch (err) {
+      console.error("Error en loadStatusesFromDatabase:", err);
+    } finally {
+      setLoadingStatuses(false);
     }
-    
-    return false;
-  }, [colKeys.product]);
+  }, [myEmail, sheetUrl]);
 
-  // NUEVO: Filtro por ciudad
-  const filterByCity = useCallback((order: SheetOrder, citySearch: string) => {
-    if (!citySearch.trim()) return true;
+  const saveStatusToDatabase = useCallback(async (rowIndex: number, status: OrderStatus, orderNumber?: string) => {
+    if (!myEmail || !sheetUrl) return false;
     
-    const orderCity = order[colKeys.city] || "";
-    const searchLower = citySearch.toLowerCase().trim();
-    
-    return orderCity.toLowerCase().includes(searchLower);
-  }, [colKeys.city]);
+    try {
+      const { error } = await supabase
+        .from("sheet_row_statuses")
+        .upsert({
+          user_email: myEmail,
+          sheet_url: sheetUrl,
+          row_index: rowIndex,
+          status: status,
+          order_number: orderNumber || null,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'user_email,sheet_url,row_index'
+        });
+      
+      if (error) {
+        console.error("Error guardando estado:", error);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.error("Error en saveStatusToDatabase:", err);
+      return false;
+    }
+  }, [myEmail, sheetUrl]);
 
-  // NUEVO: Verificar si una ciudad tiene cobertura
-  const isCityCovered = useCallback((cityName: string): boolean => {
-    return getCityPriceFromMap(cityName) !== null;
+  const setRowStatus = useCallback(async (key: string, status: OrderStatus, orderNumber?: string) => {
+    const rowIndex = parseInt(key);
+    setRowStatuses((prev) => ({ ...prev, [key]: status }));
+    await saveStatusToDatabase(rowIndex, status, orderNumber);
+  }, [saveStatusToDatabase]);
+
+  useEffect(() => {
+    localStorage.setItem(AUTO_LOAD_KEY, autoLoad.toString());
+    autoLoadRef.current = autoLoad;
+  }, [autoLoad]);
+
+  useEffect(() => {
+    localStorage.setItem(ACTIVE_FILTER_KEY, activeFilter);
+  }, [activeFilter]);
+
+  useEffect(() => {
+    const loadProducts = async () => {
+      const { data } = await supabase.from("products").select("*");
+      setProducts(data || []);
+    };
+    const loadPrices = async () => {
+      const { data } = await supabase.from("client_prices").select("*");
+      setClientPrices(data || []);
+    };
+    loadProducts();
+    loadPrices();
   }, []);
 
-  // ========== FUNCIÓN SUPER INTELIGENTE PARA NORMALIZAR ==========
+  useEffect(() => {
+    if (myEmail && sheetUrl) {
+      loadStatusesFromDatabase();
+    }
+  }, [myEmail, sheetUrl, loadStatusesFromDatabase]);
+
+  useEffect(() => {
+    if (sheetUrl && !initialLoadDone) {
+      readSheet();
+      setInitialLoadDone(true);
+    }
+  }, [sheetUrl]);
+
+  const readSheet = useCallback(async () => {
+    if (!sheetUrl) {
+      toast.error("Configurá tu URL de Google Sheet en tu perfil");
+      return;
+    }
+    
+    setLoading(true);
+    try {
+      const resp = await fetch(`/api/read-sheet?url=${encodeURIComponent(sheetUrl)}&t=${Date.now()}`);
+      const json = await resp.json();
+
+      if (json.error) {
+        toast.error(json.error);
+      } else {
+        setSheetHeaders(json.headers || []);
+        setSheetOrders(json.orders || []);
+        setLastSync(new Date());
+      }
+    } catch (err: any) {
+      toast.error("Error leyendo Sheet: " + (err.message || err));
+    }
+    setLoading(false);
+  }, [sheetUrl]);
+
+  // Autocompletado de productos
+  useEffect(() => {
+    if (productSearch.length > 2 && searchType === "product") {
+      const searchLower = productSearch.toLowerCase();
+      const suggestions = products
+        .filter(p => p.title && p.title.toLowerCase().includes(searchLower))
+        .map(p => p.title)
+        .slice(0, 5);
+      setProductSuggestions(suggestions);
+    } else {
+      setProductSuggestions([]);
+    }
+  }, [productSearch, products, searchType]);
+
+  // Autocompletado de ciudades
+  useEffect(() => {
+    if (cityFilter.length > 1 && searchType === "city" && colKeys.city) {
+      const uniqueCities = new Set<string>();
+      sheetOrders.forEach(order => {
+        const city = order[colKeys.city];
+        if (city && city.trim()) {
+          uniqueCities.add(city.trim());
+        }
+      });
+      
+      const searchLower = cityFilter.toLowerCase();
+      const suggestions = Array.from(uniqueCities)
+        .filter(city => city.toLowerCase().includes(searchLower))
+        .slice(0, 5);
+      setCitySuggestions(suggestions);
+    } else {
+      setCitySuggestions([]);
+    }
+  }, [cityFilter, sheetOrders, colKeys.city, searchType]);
+
   const normalizeForComparison = (text: string): string => {
     if (!text) return "";
-    
     return text
       .toLowerCase()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
       .replace(/[^\w\s]/g, "")
-      .replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F700}-\u{1F77F}\u{1F780}-\u{1F7FF}\u{1F800}-\u{1F8FF}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
       .replace(/\s+/g, ' ')
       .trim();
   };
 
-  // ========== MATCHING MEJORADO - ENCUENTRA CUALQUIER PRODUCTO ==========
   const matchProduct = useCallback(
     (rawName: string) => {
-      if (!rawName || rawName === "—" || rawName === "-") {
-        return null;
-      }
+      if (!rawName || rawName === "—" || rawName === "-") return null;
       
       const cleanSheetName = normalizeForComparison(rawName);
       
@@ -630,13 +581,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           let score = 0;
           
           for (const word of sheetWords) {
-            if (cleanProductName === word) {
-              score += 100;
-            } else if (cleanProductName.includes(word)) {
-              score += word.length;
-            } else if (word.includes(cleanProductName)) {
-              score += cleanProductName.length;
-            }
+            if (cleanProductName === word) score += 100;
+            else if (cleanProductName.includes(word)) score += word.length;
+            else if (word.includes(cleanProductName)) score += cleanProductName.length;
           }
           
           if (score > bestScore && score > 0) {
@@ -653,46 +600,18 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     [products],
   );
 
-  const getCityPrice = useCallback(
-    (cityName: string) => {
-      return getCityPriceFromMap(cityName);
-    },
-    [],
-  );
+  const getCityPrice = useCallback((cityName: string) => {
+    return getCityPriceFromMap(cityName);
+  }, []);
 
-  const hasCoverage = useCallback(
-    (cityName: string) => {
-      return getCityPriceFromMap(cityName) !== null;
-    },
-    [],
-  );
+  const hasCoverage = useCallback((cityName: string) => {
+    return getCityPriceFromMap(cityName) !== null;
+  }, []);
 
-  const readSheet = useCallback(async () => {
-    if (!sheetUrl) {
-      toast.error("Configurá tu URL de Google Sheet en tu perfil");
-      return;
-    }
-    
-    setLoading(true);
-    try {
-      const resp = await fetch(`/api/read-sheet?url=${encodeURIComponent(sheetUrl)}&t=${Date.now()}`);
-      const json = await resp.json();
+  const isCityCovered = useCallback((cityName: string): boolean => {
+    return getCityPriceFromMap(cityName) !== null;
+  }, []);
 
-      if (json.error) {
-        toast.error(json.error);
-      } else {
-        setSheetHeaders(json.headers || []);
-        setSheetOrders(json.orders || []);
-        setLastSync(new Date());
-        console.log("📊 Sheet actualizado:", json.orders?.length, "filas");
-      }
-    } catch (err: any) {
-      toast.error("Error leyendo Sheet: " + (err.message || err));
-    }
-    setLoading(false);
-  }, [sheetUrl]);
-
-  // ========== LOAD ORDER ==========
   const loadOrder = useCallback(async (
     order: SheetOrder, 
     idx: number, 
@@ -771,9 +690,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     } else {
       await setRowStatus(String(idx), newStatus, orderId);
       if (commission >= 0) {
-        toast.success(`✅ Pedido ${orderId} cargado (${source === "auto" ? "Automático" : "Manual"}) | 💰 Comisión: +${commission.toLocaleString("es-PY")} Gs`);
+        toast.success(`✅ Pedido ${orderId} cargado | 💰 Comisión: +${commission.toLocaleString("es-PY")} Gs`);
       } else {
-        toast.warning(`⚠️ Pedido ${orderId} cargado (${source === "auto" ? "Automático" : "Manual"}) | 💰 Comisión NEGATIVA: ${commission.toLocaleString("es-PY")} Gs`);
+        toast.warning(`⚠️ Pedido ${orderId} cargado | 💰 Comisión NEGATIVA: ${commission.toLocaleString("es-PY")} Gs`);
       }
       return true;
     }
@@ -785,7 +704,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
   const handleManualSave = useCallback(async (order: SheetOrder, idx: number) => {
     await setRowStatus(String(idx), "CARGADO_MANUAL");
-    toast.info(`✍️ Pedido marcado como "Cargado Manual" - Usa el botón "Formulario" para completar la carga`);
+    toast.info(`✍️ Pedido marcado como "Cargado Manual"`);
   }, [setRowStatus]);
 
   const handleOpenForm = useCallback((order: SheetOrder, idx: number) => {
@@ -805,18 +724,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     });
   }, [colKeys, onSheetConfirm]);
 
-  // ========== BULK LOAD ==========
   const handleBulkLoad = useCallback(async () => {
     if (!colKeys.product) {
-      toast.error(`❌ No se encontró la columna "PRODUCTO OK" en el Sheet. No se puede continuar.`);
+      toast.error(`❌ No se encontró la columna "PRODUCTO OK"`);
       return;
     }
     
     let count = 0;
     let errors = 0;
-    let skippedNoProduct = 0;
-    let skippedNoCoverage = 0;
-    let skippedNoAmount = 0;
     let totalCommission = 0;
     
     for (let i = 0; i < sheetOrders.length; i++) {
@@ -825,30 +740,17 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       
       const order = sheetOrders[i];
       const productName = order[colKeys.product] || "";
-      
-      if (!productName) {
-        skippedNoProduct++;
-        continue;
-      }
+      if (!productName) continue;
       
       const matched = matchProduct(productName);
-      if (!matched) {
-        skippedNoProduct++;
-        continue;
-      }
+      if (!matched) continue;
       
       const city = order[colKeys.city] || "";
       const deliveryPrice = getCityPrice(city);
-      if (!deliveryPrice) {
-        skippedNoCoverage++;
-        continue;
-      }
+      if (!deliveryPrice) continue;
       
       const salePrice = getAmountFromRow(order, colKeys.amount);
-      if (salePrice === 0) {
-        skippedNoAmount++;
-        continue;
-      }
+      if (salePrice === 0) continue;
       
       const productCost = matched?.provider_price_gs || 0;
       const qty = parseQuantity(order[colKeys.qty]);
@@ -892,14 +794,35 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       if (count % 3 === 0) await new Promise(resolve => setTimeout(resolve, 100));
     }
     
-    toast.success(`✅ ${count} cargados | ❌ ${errors} errores | ⏭️ ${skippedNoProduct} sin producto | 🚫 ${skippedNoCoverage} sin cobertura | 💰 ${skippedNoAmount} sin monto | 💰 Comisión total: ${totalCommission.toLocaleString("es-PY")} Gs`);
+    toast.success(`✅ ${count} cargados | ❌ ${errors} errores | 💰 Comisión total: ${totalCommission.toLocaleString("es-PY")} Gs`);
   }, [sheetOrders, rowStatuses, colKeys, matchProduct, getCityPrice, myEmail, setRowStatus]);
+
+  const toggleAutoLoad = () => {
+    const newValue = !autoLoad;
+    setAutoLoad(newValue);
+    toast.info(newValue ? "🤖 Auto-carga activada" : "⏹️ Auto-carga desactivada");
+  };
 
   const getDisplayAmount = (order: SheetOrder) => {
     return getAmountFromRow(order, colKeys.amount);
   };
 
-  // ========== NUEVA: Estadísticas para el Dashboard ==========
+  const getOrderDate = (order: SheetOrder): string => {
+    const dateValue = order[colKeys.date];
+    if (!dateValue) return "—";
+    
+    try {
+      const date = new Date(dateValue);
+      if (!isNaN(date.getTime())) {
+        return date.toLocaleDateString("es-PY");
+      }
+      return String(dateValue).split(' ')[0];
+    } catch {
+      return String(dateValue);
+    }
+  };
+
+  // Dashboard stats
   const dashboardStats = useMemo(() => {
     let totalVentas = 0;
     let pedidosConMonto = 0;
@@ -932,28 +855,24 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       promedioVenta: pedidosConMonto > 0 ? totalVentas / pedidosConMonto : 0,
       ciudadesCubiertas: ciudadesUnicas.size - ciudadesSinCobertura.size,
       ciudadesSinCobertura: ciudadesSinCobertura.size,
-      ciudadesLista: Array.from(ciudadesUnicas).slice(0, 5) // Top 5 ciudades
     };
   }, [sheetOrders, rowStatuses, colKeys, hasCoverage]);
 
-  // NUEVO: Extraer fecha del pedido
-  const getOrderDate = (order: SheetOrder): string => {
-    const dateValue = order[colKeys.date];
-    if (!dateValue) return "—";
-    
-    try {
-      // Intenta parsear la fecha
-      const date = new Date(dateValue);
-      if (!isNaN(date.getTime())) {
-        return date.toLocaleDateString("es-PY");
-      }
-      return String(dateValue).split(' ')[0]; // Devuelve como está si no se puede parsear
-    } catch {
-      return String(dateValue);
-    }
-  };
+  const filterByProduct = useCallback((order: SheetOrder, searchTerm: string) => {
+    if (!searchTerm.trim()) return true;
+    const searchLower = searchTerm.toLowerCase().trim();
+    const productOkValue = order[colKeys.product] || "";
+    if (productOkValue.toLowerCase().includes(searchLower)) return true;
+    return false;
+  }, [colKeys.product]);
 
-  // Filtrado de órdenes MEJORADO
+  const filterByCity = useCallback((order: SheetOrder, citySearch: string) => {
+    if (!citySearch.trim()) return true;
+    const orderCity = order[colKeys.city] || "";
+    return orderCity.toLowerCase().includes(citySearch.toLowerCase().trim());
+  }, [colKeys.city]);
+
+  // Filtrado de órdenes
   const filteredOrders = useMemo(() => {
     return sheetOrders
       .map((o, i) => ({ order: o, idx: i }))
@@ -965,12 +884,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         if (activeFilter === "CARGADO_MANUAL" && currentStatus !== "CARGADO_MANUAL") return false;
         if (activeFilter === "A DROPEAR" && currentStatus !== "A DROPEAR") return false;
         
-        if (filterOnlyAvailable && currentStatus === "CARGAR") {
-          const productName = order[colKeys.product] || "";
-          if (!matchProduct(productName)) return false;
-        }
-        
-        // NUEVO: Filtro por cobertura
         if (coverageFilter !== "all") {
           const city = order[colKeys.city] || "";
           const covered = isCityCovered(city);
@@ -978,22 +891,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           if (coverageFilter === "uncovered" && covered) return false;
         }
         
-        if (filterOnlyCoverage && currentStatus === "CARGAR") {
-          const city = order[colKeys.city] || "";
-          if (!hasCoverage(city)) return false;
-        }
-        
-        // Búsqueda específica de PRODUCTO
         if (searchType === "product" && productSearch) {
           return filterByProduct(order, productSearch);
         }
         
-        // NUEVO: Búsqueda específica de CIUDAD
         if (searchType === "city" && cityFilter) {
           return filterByCity(order, cityFilter);
         }
         
-        // Búsqueda general (todos los campos)
         if (searchType === "all" && search) {
           const q = search.toLowerCase();
           const vals = Object.values(order).join(" ").toLowerCase();
@@ -1002,7 +907,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         
         return true;
       });
-  }, [sheetOrders, rowStatuses, activeFilter, search, productSearch, cityFilter, searchType, coverageFilter, colKeys, matchProduct, hasCoverage, filterOnlyAvailable, filterOnlyCoverage, filterByProduct, filterByCity, isCityCovered]);
+  }, [sheetOrders, rowStatuses, activeFilter, search, productSearch, cityFilter, searchType, coverageFilter, colKeys, filterByProduct, filterByCity, isCityCovered]);
 
   const counts = useMemo(() => {
     const cargar = Object.values(rowStatuses).filter(s => s === "CARGAR").length;
@@ -1055,7 +960,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       <div className="app-card">
         <div className="flex items-center justify-center py-8">
           <div className="btn-spinner mr-2" />
-          <span>Cargando estados desde base de datos...</span>
+          <span>Cargando estados...</span>
         </div>
       </div>
     );
@@ -1065,43 +970,39 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">📦 Shopify Inbox — Lectura de Sheet</h3>
 
-      {/* ========== NUEVO: DASHBOARD KPI ========== */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 mb-4">
-        <div className="app-card !p-3 text-center bg-blue-500/10 border-blue-500/20">
+      {/* Dashboard KPI */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
+        <div className="app-card !p-3 text-center bg-blue-500/10">
           <div className="text-2xl font-bold text-blue-400">{dashboardStats.totalPedidos}</div>
           <div className="text-xs text-muted-foreground">Total pedidos</div>
         </div>
-        <div className="app-card !p-3 text-center bg-green-500/10 border-green-500/20">
+        <div className="app-card !p-3 text-center bg-green-500/10">
           <div className="text-xl font-bold text-green-400">{dashboardStats.pedidosPendientes}</div>
           <div className="text-xs text-muted-foreground">Pendientes</div>
         </div>
-        <div className="app-card !p-3 text-center bg-yellow-500/10 border-yellow-500/20">
+        <div className="app-card !p-3 text-center bg-yellow-500/10">
           <div className="text-lg font-bold text-yellow-400">{nf(dashboardStats.totalVentas)} Gs</div>
           <div className="text-xs text-muted-foreground">Total ventas</div>
         </div>
-        <div className="app-card !p-3 text-center bg-purple-500/10 border-purple-500/20">
+        <div className="app-card !p-3 text-center bg-purple-500/10">
           <div className="text-lg font-bold text-purple-400">{nf(dashboardStats.promedioVenta)} Gs</div>
           <div className="text-xs text-muted-foreground">Promedio pedido</div>
         </div>
-        <div className="app-card !p-3 text-center bg-emerald-500/10 border-emerald-500/20">
+        <div className="app-card !p-3 text-center bg-emerald-500/10">
           <div className="text-2xl font-bold text-emerald-400">{dashboardStats.ciudadesCubiertas}</div>
-          <div className="text-xs text-muted-foreground">Ciudades con cobertura</div>
+          <div className="text-xs text-muted-foreground">Con cobertura</div>
         </div>
-        <div className="app-card !p-3 text-center bg-red-500/10 border-red-500/20">
+        <div className="app-card !p-3 text-center bg-red-500/10">
           <div className="text-2xl font-bold text-red-400">{dashboardStats.ciudadesSinCobertura}</div>
           <div className="text-xs text-muted-foreground">Sin cobertura</div>
         </div>
       </div>
 
+      {/* Controles principales */}
       <div className="app-card !p-4 mb-4">
-        <div className="flex flex-wrap items-center gap-2 mb-2">
-          <span className="text-xs text-muted-foreground truncate max-w-[400px]">
-            {sheetUrl ? `📄 ${sheetUrl.slice(0, 60)}...` : "⚠️ Sin URL de Sheet configurada en perfil"}
-          </span>
-        </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 mb-2">
           <button className="nav-btn active" onClick={() => readSheet()} disabled={loading}>
-            {loading ? <span className="flex items-center gap-2"><span className="btn-spinner" /> Leyendo...</span> : "📊 Leer Sheet"}
+            {loading ? "Leyendo..." : "📊 Leer Sheet"}
           </button>
           <button className="nav-btn active" onClick={handleBulkLoad} disabled={!sheetOrders.length}>
             🚀 Cargar todos
@@ -1115,175 +1016,39 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             </span>
           )}
         </div>
-        {autoLoad && (
-          <div className="text-xs text-green-400 mt-1">
-            🤖 Auto-carga activa — Ciclo cada 60 segundos
-          </div>
-        )}
-        {!colKeys.product && sheetHeaders.length > 0 && (
-          <div className="text-xs text-red-400 mt-2 bg-red-500/10 p-2 rounded">
-            ⚠️ ADVERTENCIA: No se encontró la columna "PRODUCTO OK" en el Sheet. Las columnas disponibles son: {sheetHeaders.join(", ")}
-          </div>
-        )}
       </div>
 
-      {/* Filtros principales */}
+      {/* Filtros de estado */}
       <div className="flex flex-wrap gap-2 mb-4 border-b border-border pb-3">
-        <button
-          onClick={() => changeFilter("TODOS")}
-          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-            activeFilter === "TODOS"
-              ? "bg-primary text-primary-foreground shadow-md"
-              : "bg-muted hover:bg-muted/80 text-muted-foreground"
-          }`}
-        >
-          📋 Todos ({counts.total})
-        </button>
-        <button
-          onClick={() => changeFilter("CARGAR")}
-          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-            activeFilter === "CARGAR"
-              ? "bg-blue-500 text-white shadow-md"
-              : "bg-blue-500/10 hover:bg-blue-500/20 text-blue-400"
-          }`}
-        >
-          ⏳ Pendientes ({counts.cargar})
-        </button>
-        <button
-          onClick={() => changeFilter("CARGADO")}
-          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-            activeFilter === "CARGADO"
-              ? "bg-green-500 text-white shadow-md"
-              : "bg-green-500/10 hover:bg-green-500/20 text-green-400"
-          }`}
-        >
-          ✅ Cargado (Auto) ({counts.cargado})
-        </button>
-        <button
-          onClick={() => changeFilter("CARGADO_MANUAL")}
-          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-            activeFilter === "CARGADO_MANUAL"
-              ? "bg-emerald-500 text-white shadow-md"
-              : "bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400"
-          }`}
-        >
-          ✍️ Cargado (Manual) ({counts.cargadoManual})
-        </button>
-        <button
-          onClick={() => changeFilter("A DROPEAR")}
-          className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-            activeFilter === "A DROPEAR"
-              ? "bg-yellow-500 text-white shadow-md"
-              : "bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-400"
-          }`}
-        >
-          ⚠️ A Dropear ({counts.aDropear})
-        </button>
+        <button onClick={() => changeFilter("TODOS")} className={`px-3 py-1.5 rounded-lg text-sm font-medium ${activeFilter === "TODOS" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>📋 Todos ({counts.total})</button>
+        <button onClick={() => changeFilter("CARGAR")} className={`px-3 py-1.5 rounded-lg text-sm font-medium ${activeFilter === "CARGAR" ? "bg-blue-500 text-white" : "bg-blue-500/10 text-blue-400"}`}>⏳ Pendientes ({counts.cargar})</button>
+        <button onClick={() => changeFilter("CARGADO")} className={`px-3 py-1.5 rounded-lg text-sm font-medium ${activeFilter === "CARGADO" ? "bg-green-500 text-white" : "bg-green-500/10 text-green-400"}`}>✅ Auto ({counts.cargado})</button>
+        <button onClick={() => changeFilter("CARGADO_MANUAL")} className={`px-3 py-1.5 rounded-lg text-sm font-medium ${activeFilter === "CARGADO_MANUAL" ? "bg-emerald-500 text-white" : "bg-emerald-500/10 text-emerald-400"}`}>✍️ Manual ({counts.cargadoManual})</button>
+        <button onClick={() => changeFilter("A DROPEAR")} className={`px-3 py-1.5 rounded-lg text-sm font-medium ${activeFilter === "A DROPEAR" ? "bg-yellow-500 text-white" : "bg-yellow-500/10 text-yellow-400"}`}>⚠️ Dropear ({counts.aDropear})</button>
       </div>
 
-      {/* NUEVO: Filtro de cobertura */}
+      {/* Filtro de cobertura */}
       <div className="flex flex-wrap gap-2 mb-3">
-        <span className="text-xs text-muted-foreground self-center mr-1">📍 Cobertura:</span>
-        <button
-          onClick={() => setCoverageFilter("all")}
-          className={`px-2 py-1 rounded text-xs transition-all ${
-            coverageFilter === "all"
-              ? "bg-primary text-primary-foreground"
-              : "bg-muted hover:bg-muted/80"
-          }`}
-        >
-          Todas
-        </button>
-        <button
-          onClick={() => setCoverageFilter("covered")}
-          className={`px-2 py-1 rounded text-xs transition-all ${
-            coverageFilter === "covered"
-              ? "bg-green-500 text-white"
-              : "bg-green-500/10 hover:bg-green-500/20 text-green-400"
-          }`}
-        >
-          ✅ Con cobertura
-        </button>
-        <button
-          onClick={() => setCoverageFilter("uncovered")}
-          className={`px-2 py-1 rounded text-xs transition-all ${
-            coverageFilter === "uncovered"
-              ? "bg-red-500 text-white"
-              : "bg-red-500/10 hover:bg-red-500/20 text-red-400"
-          }`}
-        >
-          ❌ Sin cobertura
-        </button>
+        <span className="text-xs text-muted-foreground self-center">📍 Cobertura:</span>
+        <button onClick={() => setCoverageFilter("all")} className={`px-2 py-1 rounded text-xs ${coverageFilter === "all" ? "bg-primary" : "bg-muted"}`}>Todas</button>
+        <button onClick={() => setCoverageFilter("covered")} className={`px-2 py-1 rounded text-xs ${coverageFilter === "covered" ? "bg-green-500 text-white" : "bg-green-500/10 text-green-400"}`}>✅ Con cobertura</button>
+        <button onClick={() => setCoverageFilter("uncovered")} className={`px-2 py-1 rounded text-xs ${coverageFilter === "uncovered" ? "bg-red-500 text-white" : "bg-red-500/10 text-red-400"}`}>❌ Sin cobertura</button>
       </div>
 
-      {/* BARRA DE BÚSQUEDA MEJORADA CON CIUDAD */}
+      {/* Búsqueda */}
       <div className="space-y-2 mb-3">
-        <div className="flex gap-2 items-center flex-wrap">
-          <button
-            onClick={() => setSearchType("product")}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-              searchType === "product"
-                ? "bg-blue-500 text-white shadow-md"
-                : "bg-muted hover:bg-muted/80 text-muted-foreground"
-            }`}
-          >
-            🏷️ Buscar en PRODUCTO
-          </button>
-          <button
-            onClick={() => setSearchType("city")}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-              searchType === "city"
-                ? "bg-emerald-500 text-white shadow-md"
-                : "bg-muted hover:bg-muted/80 text-muted-foreground"
-            }`}
-          >
-            📍 Buscar por CIUDAD
-          </button>
-          <button
-            onClick={() => setSearchType("all")}
-            className={`px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-              searchType === "all"
-                ? "bg-primary text-primary-foreground shadow-md"
-                : "bg-muted hover:bg-muted/80 text-muted-foreground"
-            }`}
-          >
-            🔍 Buscar en TODO
-          </button>
-          
-          {colKeys.product && (
-            <div className="ml-auto text-xs text-muted-foreground">
-              📌 Columna producto: <span className="font-mono text-blue-400">{colKeys.product}</span>
-            </div>
-          )}
+        <div className="flex gap-2 flex-wrap">
+          <button onClick={() => setSearchType("product")} className={`px-3 py-1.5 rounded-lg text-sm ${searchType === "product" ? "bg-blue-500 text-white" : "bg-muted"}`}>🏷️ Producto</button>
+          <button onClick={() => setSearchType("city")} className={`px-3 py-1.5 rounded-lg text-sm ${searchType === "city" ? "bg-emerald-500 text-white" : "bg-muted"}`}>📍 Ciudad</button>
+          <button onClick={() => setSearchType("all")} className={`px-3 py-1.5 rounded-lg text-sm ${searchType === "all" ? "bg-primary text-white" : "bg-muted"}`}>🔍 Todo</button>
         </div>
         
         {searchType === "product" && (
           <div className="relative">
-            <input
-              className="app-input w-full pl-8"
-              placeholder={`🔎 Buscar en columna "${colKeys.product || 'PRODUCTO OK'}"...`}
-              value={productSearch}
-              onChange={(e) => setProductSearch(e.target.value)}
-            />
-            {productSearch && (
-              <button
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                onClick={() => setProductSearch("")}
-              >
-                ✕
-              </button>
-            )}
+            <input className="app-input w-full" placeholder={`Buscar en ${colKeys.product || "PRODUCTO OK"}...`} value={productSearch} onChange={(e) => setProductSearch(e.target.value)} />
             {productSuggestions.length > 0 && (
-              <div className="absolute z-10 mt-1 w-full bg-background border border-border rounded-lg shadow-lg">
-                {productSuggestions.map((suggestion, i) => (
-                  <button
-                    key={i}
-                    className="w-full text-left px-3 py-2 hover:bg-muted text-sm transition-colors"
-                    onClick={() => setProductSearch(suggestion)}
-                  >
-                    {suggestion}
-                  </button>
-                ))}
+              <div className="absolute z-10 mt-1 w-full bg-background border rounded-lg shadow-lg">
+                {productSuggestions.map((s, i) => (<button key={i} className="w-full text-left px-3 py-2 hover:bg-muted text-sm" onClick={() => setProductSearch(s)}>{s}</button>))}
               </div>
             )}
           </div>
@@ -1291,79 +1056,28 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
         {searchType === "city" && (
           <div className="relative">
-            <input
-              className="app-input w-full pl-8"
-              placeholder="📍 Buscar por ciudad (ej: Asunción, Luque, CDE)..."
-              value={cityFilter}
-              onChange={(e) => setCityFilter(e.target.value)}
-            />
-            {cityFilter && (
-              <button
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                onClick={() => setCityFilter("")}
-              >
-                ✕
-              </button>
-            )}
+            <input className="app-input w-full" placeholder="Buscar por ciudad..." value={cityFilter} onChange={(e) => setCityFilter(e.target.value)} />
             {citySuggestions.length > 0 && (
-              <div className="absolute z-10 mt-1 w-full bg-background border border-border rounded-lg shadow-lg">
-                {citySuggestions.map((suggestion, i) => (
-                  <button
-                    key={i}
-                    className="w-full text-left px-3 py-2 hover:bg-muted text-sm transition-colors"
-                    onClick={() => setCityFilter(suggestion)}
-                  >
-                    📍 {suggestion}
-                  </button>
-                ))}
+              <div className="absolute z-10 mt-1 w-full bg-background border rounded-lg shadow-lg">
+                {citySuggestions.map((s, i) => (<button key={i} className="w-full text-left px-3 py-2 hover:bg-muted text-sm" onClick={() => setCityFilter(s)}>📍 {s}</button>))}
               </div>
             )}
           </div>
         )}
 
         {searchType === "all" && (
-          <input
-            className="app-input w-full"
-            placeholder="🔎 Buscar en todos los campos (cliente, teléfono, ciudad, producto, etc.)..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
+          <input className="app-input w-full" placeholder="Buscar en todos los campos..." value={search} onChange={(e) => setSearch(e.target.value)} />
         )}
       </div>
 
-      <div className="text-xs text-muted-foreground mb-2">
-        Mostrando {filteredOrders.length} de {sheetOrders.length} filas totales
-        {searchType === "product" && productSearch && (
-          <span className="ml-2 text-blue-400">🔍 Buscando producto: "{productSearch}"</span>
-        )}
-        {searchType === "city" && cityFilter && (
-          <span className="ml-2 text-emerald-400">📍 Buscando ciudad: "{cityFilter}"</span>
-        )}
-        {coverageFilter !== "all" && (
-          <span className="ml-2 text-yellow-400">
-            {coverageFilter === "covered" ? "✅ Solo con cobertura" : "❌ Solo sin cobertura"}
-          </span>
-        )}
-      </div>
+      <div className="text-xs text-muted-foreground mb-2">Mostrando {filteredOrders.length} de {sheetOrders.length} filas</div>
 
+      {/* Tabla */}
       <div className="overflow-auto">
         <table className="app-table min-w-[1400px]">
           <thead>
             <tr>
-              <th>#</th>
-              <th>Fecha</th>
-              <th>Cliente</th>
-              <th>Teléfono</th>
-              <th>Ciudad</th>
-              <th>Calle</th>
-              <th className="text-right">Delivery</th>
-              <th>Producto</th>
-              <th>Cant</th>
-              <th className="text-right">Venta</th>
-              <th className="text-right">Costo</th>
-              <th className="text-right">Comisión</th>
-              <th>Estado</th>
-              <th>Acción</th>
+              <th>#</th><th>Fecha</th><th>Cliente</th><th>Teléfono</th><th>Ciudad</th><th>Calle</th><th className="text-right">Delivery</th><th>Producto</th><th>Cant</th><th className="text-right">Venta</th><th className="text-right">Costo</th><th className="text-right">Comisión</th><th>Estado</th><th>Acción</th>
             </tr>
           </thead>
           <tbody>
@@ -1374,123 +1088,35 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               const city = order[colKeys.city] || "";
               const covered = hasCoverage(city);
               const deliveryPrice = getCityPrice(city);
-              const phoneRaw = order[colKeys.phone] || "";
-              const extractedPhone = extractPhoneNumber(phoneRaw);
               const salePrice = getDisplayAmount(order);
               const productCost = matched?.provider_price_gs || 0;
               const qty = parseQuantity(order[colKeys.qty]);
               const commission = salePrice - (productCost + (deliveryPrice || 0));
               const orderDate = getOrderDate(order);
-
-              const canLoadAuto = currentStatus === "CARGAR" && matched && covered && salePrice > 0 && colKeys.product;
-              const canLoadManual = currentStatus === "CARGAR" && matched && covered && salePrice > 0 && colKeys.product;
-              const isLoaded = currentStatus === "CARGADO" || currentStatus === "CARGADO_MANUAL";
+              const canLoadAuto = currentStatus === "CARGAR" && matched && covered && salePrice > 0;
 
               return (
                 <tr key={idx} className={getRowClassName(currentStatus)}>
                   <td className="text-xs">{idx + 1}</td>
-                  <td className="text-xs whitespace-nowrap">{orderDate}</td>
-                  <td className="text-xs font-medium">{order[colKeys.name] || "—"}</td>
-                  <td className="text-xs font-mono">{extractedPhone || phoneRaw || "—"}</td>
-                  <td className={`text-xs ${!covered && city ? "text-red-400 font-semibold" : ""}`}>
-                    {city || "—"}
-                    {!covered && city && <span className="text-[10px] ml-1">⚠️</span>}
-                  </td>
+                  <td className="text-xs">{orderDate}</td>
+                  <td className="text-xs">{order[colKeys.name] || "—"}</td>
+                  <td className="text-xs">{order[colKeys.phone] || "—"}</td>
+                  <td className={`text-xs ${!covered && city ? "text-red-400 font-semibold" : ""}`}>{city || "—"}</td>
                   <td className="text-xs">{order[colKeys.street] || "—"}</td>
-                  <td className="text-right text-xs font-bold">
-                    {deliveryPrice != null ? `${nf(deliveryPrice)} Gs` : <span className="text-muted-foreground">—</span>}
-                  </td>
-                  <td className="text-xs truncate max-w-[180px]" title={productName}>
-                    {productName || "—"}
-                    {matched && searchType === "product" && productSearch && (
-                      <div className="text-[10px] text-green-400 mt-0.5">
-                        ✅ Match: {matched.title}
-                      </div>
-                    )}
-                  </td>
+                  <td className="text-right text-xs">{deliveryPrice ? `${nf(deliveryPrice)} Gs` : "—"}</td>
+                  <td className="text-xs truncate max-w-[180px]">{productName || "—"}</td>
                   <td className="text-xs">{qty}</td>
-                  <td className="text-right text-xs font-bold text-green-400">{salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}</td>
+                  <td className="text-right text-xs text-green-400">{salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}</td>
                   <td className="text-right text-xs text-orange-400">{productCost > 0 ? `${nf(productCost)} Gs` : "—"}</td>
-                  <td className={`text-right text-xs font-bold ${commission >= 0 ? "text-blue-400" : "text-red-400"}`}>
-                    {commission !== 0 ? `${commission > 0 ? "+" : ""}${nf(commission)} Gs` : "—"}
-                  </td>
-                  <td className="min-w-[130px]">
-                    {!isLoaded ? (
-                      <select
-                        className="app-input !py-1 !px-2 !text-[11px] !w-full"
-                        value={currentStatus}
-                        onChange={(e) => setRowStatus(String(idx), e.target.value as OrderStatus)}
-                      >
-                        <option value="CARGAR">⏳ CARGAR</option>
-                        <option value="A DROPEAR">⚠️ A DROPEAR</option>
-                      </select>
-                    ) : (
-                      getStatusBadge(currentStatus)
-                    )}
-                  </td>
-                  <td className="min-w-[200px] flex gap-1 flex-wrap">
-                    {canLoadAuto && (
-                      <button
-                        className="nav-btn active !py-1 !px-2 !text-[11px] whitespace-nowrap"
-                        onClick={() => handleDirectSave(order, idx)}
-                        title="Cargar pedido automáticamente"
-                      >
-                        💰 Cargar (Auto)
-                      </button>
-                    )}
-                    {canLoadManual && (
-                      <button
-                        className="nav-btn !py-1 !px-2 !text-[11px] whitespace-nowrap bg-emerald-600 hover:bg-emerald-700"
-                        onClick={() => handleManualSave(order, idx)}
-                        title="Marcar como cargado manualmente (sin cargar a BD)"
-                      >
-                        ✍️ Marcar Manual
-                      </button>
-                    )}
-                    {onSheetConfirm && !isLoaded && (
-                      <button
-                        className="nav-btn !py-1 !px-2 !text-[11px] whitespace-nowrap"
-                        onClick={() => handleOpenForm(order, idx)}
-                        title="Abrir formulario para editar y cargar"
-                      >
-                        📝 Formulario
-                      </button>
-                    )}
-                    {!canLoadAuto && !canLoadManual && currentStatus === "CARGAR" && (
-                      <span className="text-[10px] text-muted-foreground self-center">
-                        {!colKeys.product ? "❌ Sin columna PRODUCTO OK" : !matched ? "⚠️ Sin producto" : !covered ? "🚫 Sin cobertura" : !salePrice ? "💰 Sin monto" : ""}
-                      </span>
-                    )}
-                    {isLoaded && (
-                      <span className="text-[10px] text-green-400 self-center">
-                        ✓ Pedido cargado
-                      </span>
-                    )}
+                  <td className={`text-right text-xs font-bold ${commission >= 0 ? "text-blue-400" : "text-red-400"}`}>{commission !== 0 ? `${commission > 0 ? "+" : ""}${nf(commission)} Gs` : "—"}</td>
+                  <td>{!canLoadAuto ? getStatusBadge(currentStatus) : <select className="app-input !py-1 !px-2 !text-[11px]" value={currentStatus} onChange={(e) => setRowStatus(String(idx), e.target.value as OrderStatus)}><option value="CARGAR">⏳ CARGAR</option><option value="A DROPEAR">⚠️ A DROPEAR</option></select>}</td>
+                  <td className="flex gap-1">
+                    {canLoadAuto && <button className="nav-btn active !py-1 !px-2 !text-[11px]" onClick={() => handleDirectSave(order, idx)}>💰 Cargar</button>}
+                    {onSheetConfirm && !canLoadAuto && currentStatus === "CARGAR" && <button className="nav-btn !py-1 !px-2 !text-[11px]" onClick={() => handleOpenForm(order, idx)}>📝 Formulario</button>}
                   </td>
                 </tr>
               );
             })}
-            {filteredOrders.length === 0 && (
-              <tr>
-                <td colSpan={14} className="text-center text-muted-foreground py-8">
-                  {sheetOrders.length === 0 
-                    ? "📊 Leé tu Sheet primero" 
-                    : searchType === "product" && productSearch
-                      ? `🔍 No se encontraron productos con "${productSearch}"`
-                      : searchType === "city" && cityFilter
-                        ? `📍 No se encontraron pedidos en "${cityFilter}"`
-                        : activeFilter === "CARGAR" 
-                          ? "🎉 No hay pedidos pendientes" 
-                          : activeFilter === "CARGADO" 
-                            ? "📭 No hay pedidos cargados automáticamente"
-                            : activeFilter === "CARGADO_MANUAL"
-                              ? "📭 No hay pedidos cargados manualmente"
-                              : activeFilter === "A DROPEAR"
-                                ? "📭 No hay pedidos marcados para dropear"
-                                : "🎉 No hay pedidos para mostrar"}
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
       </div>
