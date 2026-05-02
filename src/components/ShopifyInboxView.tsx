@@ -80,7 +80,6 @@ const CITY_COVERAGE_MAP: Record<string, number> = {
   "tobati": 55000,
   "villaelsa": 40000,
   "villaelisa": 40000,
-  "villaelisa": 40000,
   "villahayes": 60000,
   "villarrica": 50000,
   "villeta": 55000,
@@ -205,7 +204,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [coverageFilter, setCoverageFilter] = useState<"all" | "covered" | "uncovered">("all");
   const [search, setSearch] = useState("");
 
-  // Detección de columnas
   const colKeys = useMemo(() => {
     const h = sheetHeaders;
     const find = (...candidates: string[]) => {
@@ -532,96 +530,96 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   }
 
   return (
-    <div className="space-y-3">
-      {/* Dashboard Compacto */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
-        <div className="bg-slate-800/50 rounded-lg p-2 text-center border border-slate-700">
-          <div className="text-xl font-bold text-blue-400">{dashboardStats.totalPedidos}</div>
-          <div className="text-[10px] text-slate-400">Total Pedidos</div>
+    <div className="space-y-2">
+      {/* Dashboard Compacto - SIN ESPACIOS */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-1.5">
+        <div className="bg-slate-800/50 rounded p-1.5 text-center border border-slate-700">
+          <div className="text-lg font-bold text-blue-400">{dashboardStats.totalPedidos}</div>
+          <div className="text-[9px] text-slate-400">Total Pedidos</div>
         </div>
-        <div className="bg-slate-800/50 rounded-lg p-2 text-center border border-slate-700">
-          <div className="text-xl font-bold text-green-400">{dashboardStats.conCobertura}</div>
-          <div className="text-[10px] text-slate-400">Con cobertura</div>
+        <div className="bg-slate-800/50 rounded p-1.5 text-center border border-slate-700">
+          <div className="text-lg font-bold text-green-400">{dashboardStats.conCobertura}</div>
+          <div className="text-[9px] text-slate-400">Con cobertura</div>
         </div>
-        <div className="bg-slate-800/50 rounded-lg p-2 text-center border border-slate-700">
-          <div className="text-xl font-bold text-red-400">{dashboardStats.sinCobertura}</div>
-          <div className="text-[10px] text-slate-400">Sin cobertura</div>
+        <div className="bg-slate-800/50 rounded p-1.5 text-center border border-slate-700">
+          <div className="text-lg font-bold text-red-400">{dashboardStats.sinCobertura}</div>
+          <div className="text-[9px] text-slate-400">Sin cobertura</div>
         </div>
-        <div className="bg-slate-800/50 rounded-lg p-2 text-center border border-slate-700">
-          <div className="text-xl font-bold text-yellow-400">{dashboardStats.pendientes}</div>
-          <div className="text-[10px] text-slate-400">Pendientes</div>
+        <div className="bg-slate-800/50 rounded p-1.5 text-center border border-slate-700">
+          <div className="text-lg font-bold text-yellow-400">{dashboardStats.pendientes}</div>
+          <div className="text-[9px] text-slate-400">Pendientes</div>
         </div>
-        <div className="bg-slate-800/50 rounded-lg p-2 text-center border border-slate-700">
-          <div className="text-xl font-bold text-emerald-400">{dashboardStats.completados}</div>
-          <div className="text-[10px] text-slate-400">Completados</div>
+        <div className="bg-slate-800/50 rounded p-1.5 text-center border border-slate-700">
+          <div className="text-lg font-bold text-emerald-400">{dashboardStats.completados}</div>
+          <div className="text-[9px] text-slate-400">Completados</div>
         </div>
-        <div className="bg-slate-800/50 rounded-lg p-2 text-center border border-slate-700">
-          <div className="text-xl font-bold text-orange-400">{dashboardStats.aDropear + dashboardStats.cancelados}</div>
-          <div className="text-[10px] text-slate-400">No procesados</div>
+        <div className="bg-slate-800/50 rounded p-1.5 text-center border border-slate-700">
+          <div className="text-lg font-bold text-orange-400">{dashboardStats.aDropear + dashboardStats.cancelados}</div>
+          <div className="text-[9px] text-slate-400">No procesados</div>
         </div>
       </div>
 
       {/* Métricas financieras compactas */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-        <div className="bg-slate-800/30 rounded-lg p-2">
-          <div className="text-[10px] text-slate-400">💰 Ventas</div>
-          <div className="text-sm font-bold text-green-400">{nf(dashboardStats.totalVentas)} Gs</div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5">
+        <div className="bg-slate-800/30 rounded p-1.5">
+          <div className="text-[9px] text-slate-400">💰 Ventas</div>
+          <div className="text-xs font-bold text-green-400">{nf(dashboardStats.totalVentas)} Gs</div>
         </div>
-        <div className="bg-slate-800/30 rounded-lg p-2">
-          <div className="text-[10px] text-slate-400">🚚 Delivery</div>
-          <div className="text-sm font-bold text-orange-400">{nf(dashboardStats.totalDelivery)} Gs</div>
+        <div className="bg-slate-800/30 rounded p-1.5">
+          <div className="text-[9px] text-slate-400">🚚 Delivery</div>
+          <div className="text-xs font-bold text-orange-400">{nf(dashboardStats.totalDelivery)} Gs</div>
         </div>
-        <div className="bg-slate-800/30 rounded-lg p-2">
-          <div className="text-[10px] text-slate-400">📦 Costo</div>
-          <div className="text-sm font-bold text-purple-400">{nf(dashboardStats.totalCostoProductos)} Gs</div>
+        <div className="bg-slate-800/30 rounded p-1.5">
+          <div className="text-[9px] text-slate-400">📦 Costo</div>
+          <div className="text-xs font-bold text-purple-400">{nf(dashboardStats.totalCostoProductos)} Gs</div>
         </div>
-        <div className="bg-emerald-800/20 rounded-lg p-2 border border-emerald-700/30">
-          <div className="text-[10px] text-slate-400">🏆 Ganancia</div>
-          <div className="text-sm font-bold text-emerald-400">{nf(dashboardStats.gananciaNeta)} Gs</div>
+        <div className="bg-emerald-800/20 rounded p-1.5 border border-emerald-700/30">
+          <div className="text-[9px] text-slate-400">🏆 Ganancia</div>
+          <div className="text-xs font-bold text-emerald-400">{nf(dashboardStats.gananciaNeta)} Gs</div>
         </div>
       </div>
 
-      {/* Controles */}
-      <div className="flex flex-wrap gap-2">
-        <button className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 rounded-lg transition" onClick={() => readSheet()} disabled={loading}>
+      {/* Controles - SIN espacios */}
+      <div className="flex flex-wrap gap-1.5 pt-1">
+        <button className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 rounded transition" onClick={() => readSheet()} disabled={loading}>
           {loading ? "Leyendo..." : "📊 Leer Sheet"}
         </button>
-        <button className="px-3 py-1.5 text-sm bg-emerald-600 hover:bg-emerald-700 rounded-lg transition" onClick={handleBulkLoad}>
+        <button className="px-2 py-1 text-xs bg-emerald-600 hover:bg-emerald-700 rounded transition" onClick={handleBulkLoad}>
           🚀 Cargar todos
         </button>
-        <button className={`px-3 py-1.5 text-sm rounded-lg transition ${autoLoad ? "bg-green-600" : "bg-slate-700"}`} onClick={toggleAutoLoad}>
+        <button className={`px-2 py-1 text-xs rounded transition ${autoLoad ? "bg-green-600" : "bg-slate-700"}`} onClick={toggleAutoLoad}>
           {autoLoad ? "🤖 Auto ON" : "🤖 Auto OFF"}
         </button>
-        {lastSync && <span className="text-xs text-slate-500 self-center">🔄 {lastSync.toLocaleTimeString("es-PY")}</span>}
+        {lastSync && <span className="text-[10px] text-slate-500 self-center">🔄 {lastSync.toLocaleTimeString("es-PY")}</span>}
       </div>
 
-      {/* Filtros */}
+      {/* Filtros - SIN espacios */}
       <div className="flex flex-wrap gap-1">
-        <button onClick={() => changeFilter("TODOS")} className={`px-2 py-1 rounded text-xs ${activeFilter === "TODOS" ? "bg-slate-700 text-white" : "text-slate-400"}`}>📋 Todos ({counts.total})</button>
-        <button onClick={() => changeFilter("CARGAR")} className={`px-2 py-1 rounded text-xs ${activeFilter === "CARGAR" ? "bg-blue-600 text-white" : "text-slate-400"}`}>⏳ Pendientes ({counts.cargar})</button>
-        <button onClick={() => changeFilter("CARGADO")} className={`px-2 py-1 rounded text-xs ${activeFilter === "CARGADO" ? "bg-green-600 text-white" : "text-slate-400"}`}>✅ Auto ({counts.cargado})</button>
-        <button onClick={() => changeFilter("CARGADO_MANUAL")} className={`px-2 py-1 rounded text-xs ${activeFilter === "CARGADO_MANUAL" ? "bg-emerald-600 text-white" : "text-slate-400"}`}>✍️ Manual ({counts.cargadoManual})</button>
-        <button onClick={() => changeFilter("A DROPEAR")} className={`px-2 py-1 rounded text-xs ${activeFilter === "A DROPEAR" ? "bg-yellow-600 text-white" : "text-slate-400"}`}>⚠️ Dropear ({counts.aDropear})</button>
-        <button onClick={() => changeFilter("CANCELADO")} className={`px-2 py-1 rounded text-xs ${activeFilter === "CANCELADO" ? "bg-red-600 text-white" : "text-slate-400"}`}>❌ Cancelado ({counts.cancelados})</button>
+        <button onClick={() => changeFilter("TODOS")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "TODOS" ? "bg-slate-700 text-white" : "text-slate-400"}`}>📋 Todos ({counts.total})</button>
+        <button onClick={() => changeFilter("CARGAR")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "CARGAR" ? "bg-blue-600 text-white" : "text-slate-400"}`}>⏳ Pendientes ({counts.cargar})</button>
+        <button onClick={() => changeFilter("CARGADO")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "CARGADO" ? "bg-green-600 text-white" : "text-slate-400"}`}>✅ Auto ({counts.cargado})</button>
+        <button onClick={() => changeFilter("CARGADO_MANUAL")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "CARGADO_MANUAL" ? "bg-emerald-600 text-white" : "text-slate-400"}`}>✍️ Manual ({counts.cargadoManual})</button>
+        <button onClick={() => changeFilter("A DROPEAR")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "A DROPEAR" ? "bg-yellow-600 text-white" : "text-slate-400"}`}>⚠️ Dropear ({counts.aDropear})</button>
+        <button onClick={() => changeFilter("CANCELADO")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "CANCELADO" ? "bg-red-600 text-white" : "text-slate-400"}`}>❌ Cancelado ({counts.cancelados})</button>
         
         <div className="flex-1"></div>
         
-        <div className="flex gap-1">
-          <button onClick={() => setCoverageFilter("all")} className={`px-2 py-1 rounded text-xs ${coverageFilter === "all" ? "bg-slate-700" : "text-slate-500"}`}>🌍 Todas</button>
-          <button onClick={() => setCoverageFilter("covered")} className={`px-2 py-1 rounded text-xs ${coverageFilter === "covered" ? "bg-green-600" : "text-slate-500"}`}>✅ Con cobertura</button>
-          <button onClick={() => setCoverageFilter("uncovered")} className={`px-2 py-1 rounded text-xs ${coverageFilter === "uncovered" ? "bg-red-600" : "text-slate-500"}`}>❌ Sin cobertura</button>
+        <div className="flex gap-0.5">
+          <button onClick={() => setCoverageFilter("all")} className={`px-1.5 py-0.5 rounded text-[10px] ${coverageFilter === "all" ? "bg-slate-700" : "text-slate-500"}`}>🌍 Todas</button>
+          <button onClick={() => setCoverageFilter("covered")} className={`px-1.5 py-0.5 rounded text-[10px] ${coverageFilter === "covered" ? "bg-green-600" : "text-slate-500"}`}>✅ Con cobertura</button>
+          <button onClick={() => setCoverageFilter("uncovered")} className={`px-1.5 py-0.5 rounded text-[10px] ${coverageFilter === "uncovered" ? "bg-red-600" : "text-slate-500"}`}>❌ Sin cobertura</button>
         </div>
       </div>
 
-      {/* Buscador */}
-      <div className="flex gap-2">
-        <div className="flex gap-1">
-          <button onClick={() => setSearchType("product")} className={`px-2 py-1 rounded text-xs ${searchType === "product" ? "bg-blue-600" : "bg-slate-800"}`}>🏷️ Producto</button>
-          <button onClick={() => setSearchType("city")} className={`px-2 py-1 rounded text-xs ${searchType === "city" ? "bg-blue-600" : "bg-slate-800"}`}>📍 Ciudad</button>
-          <button onClick={() => setSearchType("all")} className={`px-2 py-1 rounded text-xs ${searchType === "all" ? "bg-blue-600" : "bg-slate-800"}`}>🔍 Todo</button>
+      {/* Buscador compacto */}
+      <div className="flex gap-1">
+        <div className="flex gap-0.5">
+          <button onClick={() => setSearchType("product")} className={`px-1.5 py-0.5 rounded text-[10px] ${searchType === "product" ? "bg-blue-600" : "bg-slate-800"}`}>🏷️ Producto</button>
+          <button onClick={() => setSearchType("city")} className={`px-1.5 py-0.5 rounded text-[10px] ${searchType === "city" ? "bg-blue-600" : "bg-slate-800"}`}>📍 Ciudad</button>
+          <button onClick={() => setSearchType("all")} className={`px-1.5 py-0.5 rounded text-[10px] ${searchType === "all" ? "bg-blue-600" : "bg-slate-800"}`}>🔍 Todo</button>
         </div>
         <input
-          className="flex-1 bg-slate-800 rounded-lg px-3 py-1.5 text-sm border border-slate-700 focus:outline-none focus:border-blue-500"
+          className="flex-1 bg-slate-800 rounded px-2 py-1 text-xs border border-slate-700 focus:outline-none focus:border-blue-500"
           placeholder={searchType === "product" ? "Buscar producto..." : searchType === "city" ? "Buscar ciudad..." : "Buscar en todos los campos..."}
           value={searchType === "product" ? productSearch : searchType === "city" ? cityFilter : search}
           onChange={(e) => {
@@ -632,24 +630,24 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         />
       </div>
 
-      <div className="text-xs text-slate-500">Mostrando {filteredOrders.length} de {sheetOrders.length} filas</div>
+      <div className="text-[10px] text-slate-500">Mostrando {filteredOrders.length} de {sheetOrders.length} filas</div>
 
-      {/* Tabla */}
-      <div className="overflow-x-auto max-h-[500px] overflow-y-auto rounded-lg border border-slate-800">
-        <table className="w-full text-sm">
+      {/* Tabla compacta */}
+      <div className="overflow-x-auto max-h-[500px] overflow-y-auto rounded border border-slate-800">
+        <table className="w-full text-xs">
           <thead className="bg-slate-800 sticky top-0">
             <tr className="border-b border-slate-700">
-              <th className="px-2 py-2 text-left text-xs font-medium text-slate-400">#</th>
-              <th className="px-2 py-2 text-left text-xs font-medium text-slate-400">ID</th>
-              <th className="px-2 py-2 text-left text-xs font-medium text-slate-400">Fecha</th>
-              <th className="px-2 py-2 text-left text-xs font-medium text-slate-400">Cliente</th>
-              <th className="px-2 py-2 text-left text-xs font-medium text-slate-400">Teléfono</th>
-              <th className="px-2 py-2 text-left text-xs font-medium text-slate-400">Ciudad / Delivery</th>
-              <th className="px-2 py-2 text-left text-xs font-medium text-slate-400">Producto</th>
-              <th className="px-2 py-2 text-center text-xs font-medium text-slate-400">Cant</th>
-              <th className="px-2 py-2 text-right text-xs font-medium text-slate-400">Venta</th>
-              <th className="px-2 py-2 text-center text-xs font-medium text-slate-400">Estado</th>
-              <th className="px-2 py-2 text-center text-xs font-medium text-slate-400">Acciones</th>
+              <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">#</th>
+              <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">ID</th>
+              <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">Fecha</th>
+              <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">Cliente</th>
+              <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">Teléfono</th>
+              <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">Ciudad / Delivery</th>
+              <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">Producto</th>
+              <th className="px-1.5 py-1.5 text-center text-[10px] font-medium text-slate-400">Cant</th>
+              <th className="px-1.5 py-1.5 text-right text-[10px] font-medium text-slate-400">Venta</th>
+              <th className="px-1.5 py-1.5 text-center text-[10px] font-medium text-slate-400">Estado</th>
+              <th className="px-1.5 py-1.5 text-center text-[10px] font-medium text-slate-400">Acciones</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800">
@@ -665,27 +663,27 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
               return (
                 <tr key={idx} className={getRowClassName(status, covered)}>
-                  <td className="px-2 py-2 text-xs text-slate-400">{idx + 1}</td>
-                  <td className="px-2 py-2 text-xs font-mono">
+                  <td className="px-1.5 py-1 text-[10px] text-slate-400">{idx + 1}</td>
+                  <td className="px-1.5 py-1 text-[10px] font-mono">
                     {orderNumber ? <span className="text-green-400">{orderNumber}</span> : <span className="text-slate-600">—</span>}
                   </td>
-                  <td className="px-2 py-2 text-xs">{orderDate}</td>
-                  <td className="px-2 py-2 text-xs font-medium">{order[colKeys.name] || "—"}</td>
-                  <td className="px-2 py-2 text-xs">{order[colKeys.phone] || "—"}</td>
-                  <td className="px-2 py-2 text-xs">
+                  <td className="px-1.5 py-1 text-[10px]">{orderDate}</td>
+                  <td className="px-1.5 py-1 text-[10px] font-medium">{order[colKeys.name]?.substring(0, 20) || "—"}</td>
+                  <td className="px-1.5 py-1 text-[10px]">{order[colKeys.phone]?.substring(0, 15) || "—"}</td>
+                  <td className="px-1.5 py-1 text-[10px]">
                     <div className={covered ? "text-green-400" : "text-red-400"}>
-                      {city || "—"}
-                      {deliveryPrice && <span className="text-[10px] text-slate-400 ml-1">({nf(deliveryPrice)} Gs)</span>}
+                      {city?.substring(0, 20) || "—"}
+                      {deliveryPrice && <span className="text-[9px] text-slate-400 ml-0.5">({nf(deliveryPrice)} Gs)</span>}
                     </div>
                   </td>
-                  <td className="px-2 py-2 text-xs max-w-[180px] truncate" title={order[colKeys.product] || ""}>
-                    {order[colKeys.product] || "—"}
+                  <td className="px-1.5 py-1 text-[10px] max-w-[150px] truncate" title={order[colKeys.product] || ""}>
+                    {order[colKeys.product]?.substring(0, 25) || "—"}
                   </td>
-                  <td className="px-2 py-2 text-xs text-center">{parseQuantity(order[colKeys.qty])}</td>
-                  <td className="px-2 py-2 text-xs text-right text-green-400">{salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}</td>
-                  <td className="px-2 py-2 text-center">
+                  <td className="px-1.5 py-1 text-[10px] text-center">{parseQuantity(order[colKeys.qty])}</td>
+                  <td className="px-1.5 py-1 text-[10px] text-right text-green-400">{salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}</td>
+                  <td className="px-1.5 py-1 text-center">
                     <select
-                      className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-500"
+                      className="bg-slate-800 border border-slate-700 rounded px-1 py-0.5 text-[10px] focus:outline-none focus:border-blue-500"
                       value={status}
                       onChange={(e) => setRowStatus(String(idx), e.target.value as OrderStatus, orderNumber || undefined)}
                     >
@@ -696,14 +694,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                       <option value="CARGADO_MANUAL">✍️ Manual</option>
                     </select>
                   </td>
-                  <td className="px-2 py-2 text-center">
-                    <div className="flex gap-1 justify-center">
+                  <td className="px-1.5 py-1 text-center">
+                    <div className="flex gap-0.5 justify-center">
                       {canLoad && (
-                        <button className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 rounded" onClick={() => handleDirectSave(order, idx)} title="Cargar pedido">
+                        <button className="px-1.5 py-0.5 text-[10px] bg-blue-600 hover:bg-blue-700 rounded" onClick={() => handleDirectSave(order, idx)}>
                           Cargar
                         </button>
                       )}
-                      <button className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 rounded" onClick={() => handleOpenForm(order, idx)} title="Abrir formulario">
+                      <button className="px-1.5 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 rounded" onClick={() => handleOpenForm(order, idx)}>
                         Formulario
                       </button>
                     </div>
@@ -712,7 +710,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               );
             })}
             {filteredOrders.length === 0 && (
-              <tr><td colSpan={11} className="text-center py-8 text-slate-500">No hay pedidos para mostrar</td></tr>
+              <tr><td colSpan={11} className="text-center py-4 text-slate-500 text-[10px]">No hay pedidos para mostrar</td></tr>
             )}
           </tbody>
         </table>
