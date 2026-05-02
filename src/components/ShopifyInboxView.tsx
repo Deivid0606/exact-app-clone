@@ -10,8 +10,8 @@ type SheetOrder = Record<string, string>;
 const AUTO_LOAD_KEY = "shopify_auto_load_enabled";
 const ACTIVE_FILTER_KEY = "shopify_active_filter";
 
-type OrderStatus = "CARGAR" | "A DROPEAR" | "CARGADO" | "CARGADO_MANUAL";
-type FilterType = "TODOS" | "CARGAR" | "CARGADO" | "CARGADO_MANUAL" | "A DROPEAR";
+type OrderStatus = "CARGAR" | "A DROPEAR" | "CARGADO" | "CARGADO_MANUAL" | "CANCELADO";
+type FilterType = "TODOS" | "CARGAR" | "CARGADO" | "CARGADO_MANUAL" | "A DROPEAR" | "CANCELADO";
 
 function extractPhoneNumber(value: any): string {
   if (!value) return "";
@@ -21,7 +21,7 @@ function extractPhoneNumber(value: any): string {
   return phone;
 }
 
-// Normalización ESTRICTA - solo elimina acentos y espacios, NO altera palabras
+// Normalización ESTRICTA
 const strictNormalize = (text: string): string => {
   if (!text) return "";
   return text
@@ -29,73 +29,146 @@ const strictNormalize = (text: string): string => {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/\s+/g, "")
+    .replace(/\./g, "")
     .trim();
 };
 
-// LISTA EXACTA DE CIUDADES CON COBERTURA (key normalizada)
+// LISTA COMPLETA DE CIUDADES CON COBERTURA
 const CITY_COVERAGE_MAP: Record<string, number> = {
-  // Lista completa con todas las variantes
+  // Altos
   "altos": 55000,
+  // Areguá
   "aregua": 45000,
+  // Asunción
   "asuncion": 35000,
+  // Atyrá
   "atyra": 55000,
+  // Benjamín Aceval
   "benjaminaceval": 60000,
+  // Caacupé
   "caacupe": 55000,
+  // Capiatá
   "capiata": 45000,
+  // Ciudad del Este
   "ciudaddeleste": 45000,
+  // Colonia Yguazú
   "coloniyguazu": 50000,
+  // Emboscada
   "emboscada": 55000,
+  // Eusebio Ayala
   "eusebioayala": 55000,
+  // Fernando de la Mora
   "fernandodelamora": 35000,
+  // Guarambaré
   "guarambare": 50000,
+  // Hernandarias
   "hernandarias": 50000,
+  // INTERIOR PAGO ANTICIPADO (caso especial)
+  "interiorpagoanticipado": 35000,
+  // Itá
   "ita": 55000,
+  // Itacurubí de la Cordillera
   "itacurubidelacordillera": 55000,
+  // Itauguá
   "itaugua": 45000,
+  // J. Augusto Saldívar
   "jaugustosaldivar": 45000,
+  // Juan León Mallorquín
   "juanleonmalloriquin": 60000,
+  // Lambaré
   "lambare": 35000,
+  // Limpio
   "limpio": 40000,
+  // Loma Grande
   "lomagrande": 55000,
+  // Luque
   "luque": 35000,
+  // Mariano Roque Alonso
   "marianoroquealonso": 40000,
+  // Minga Guazú
   "mingaguazu": 50000,
+  // Ñemby
   "ñemby": 40000,
   "nemby": 40000,
+  // Nueva Italia
   "nuevaitalia": 55000,
+  // Paraguarí
   "paraguari": 55000,
+  // Pirayú
   "pirayu": 55000,
+  // Piribebuy
   "piribebuy": 55000,
+  // Presidente Franco
   "presidentefranco": 50000,
+  // Puerto Presidente Franco
   "puertopresidentefranco": 50000,
+  // Remansito
   "remansito": 60000,
+  // San Alberto
   "sanalberto": 55000,
+  // San Antonio (TODAS las variantes)
   "santonio": 45000,
+  "sanantonio": 45000,
   "sanantonioi": 45000,
+  // San Bernardino
   "sanbernardino": 55000,
+  // San Lorenzo
   "sanlorenzo": 35000,
+  // Santa Rita
   "santarita": 55000,
+  // Tobatí
   "tobati": 55000,
+  // Villa Elisa
   "villaelsa": 40000,
+  "villa elisa": 40000,
+  // Villa Hayes
   "villahayes": 60000,
+  // Villarrica
   "villarrica": 50000,
+  // Villeta
   "villeta": 55000,
+  // Yaguarón
   "yaguaron": 55000,
+  // Yguazú
   "yguazu": 60000,
+  // Ypacaraí
   "ypacarai": 55000,
+  // Ypané
   "ypane": 45000
 };
 
-// Función ESTRICTA para verificar cobertura - SOLO coincidencia exacta en el mapa
+// Función ESTRICTA para verificar cobertura
 const hasCoverage = (cityName: string): boolean => {
   if (!cityName) return false;
   const normalized = strictNormalize(cityName);
+  
+  // Para "Interior Pago Anticipado"
+  if (normalized.includes("interiorpagoanticipado") || normalized.includes("interior") || normalized.includes("pagoanticipado")) {
+    return true;
+  }
+  
+  // Para "Villa Elisa" - verificar específicamente
+  if (normalized.includes("villaelsa") || normalized === "villaelsa") {
+    return true;
+  }
+  
   return CITY_COVERAGE_MAP.hasOwnProperty(normalized);
 };
 
 const getCityDeliveryPrice = (cityName: string): number | null => {
   if (!cityName) return null;
   const normalized = strictNormalize(cityName);
+  
+  // Interior Pago Anticipado
+  if (normalized.includes("interiorpagoanticipado") || normalized.includes("interior") || normalized.includes("pagoanticipado")) {
+    return 35000;
+  }
+  
+  // Villa Elisa
+  if (normalized.includes("villaelsa") || normalized === "villaelsa") {
+    return 40000;
+  }
+  
   return CITY_COVERAGE_MAP[normalized] || null;
 };
 
@@ -413,11 +486,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return String(dateValue).split(' ')[0];
   };
 
-  // Estadísticas
+  // Estadísticas completas
   const dashboardStats = useMemo(() => {
     let conCobertura = 0, sinCobertura = 0;
-    let pendientes = 0, cargadoAuto = 0, cargadoManual = 0, aDropear = 0;
+    let pendientes = 0, cargadoAuto = 0, cargadoManual = 0, aDropear = 0, cancelados = 0;
     let totalVentas = 0, totalDelivery = 0, totalCostoProductos = 0;
+    let interiorPagoAnticipado = 0;
     
     sheetOrders.forEach((order, idx) => {
       const city = order[colKeys.city] || "";
@@ -428,6 +502,11 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       const productName = order[colKeys.product] || "";
       const matched = matchProduct(productName);
       const productCost = matched?.provider_price_gs || 0;
+      
+      // Detectar Interior Pago Anticipado
+      if (city.toLowerCase().includes("interior") || city.toLowerCase().includes("pago anticipado")) {
+        interiorPagoAnticipado++;
+      }
       
       if (covered) {
         conCobertura++;
@@ -444,14 +523,18 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       if (status === "CARGADO") cargadoAuto++;
       else if (status === "CARGADO_MANUAL") cargadoManual++;
       else if (status === "A DROPEAR") aDropear++;
+      else if (status === "CANCELADO") cancelados++;
     });
     
     const gananciaNeta = totalVentas - totalDelivery - totalCostoProductos;
     const totalPedidos = sheetOrders.length;
+    const completados = cargadoAuto + cargadoManual;
+    const tasaCompletados = conCobertura > 0 ? Math.round((completados / conCobertura) * 100) : 0;
     
     return {
-      totalPedidos, conCobertura, sinCobertura, pendientes, cargadoAuto, cargadoManual, aDropear,
-      totalVentas, totalDelivery, totalCostoProductos, gananciaNeta,
+      totalPedidos, conCobertura, sinCobertura, pendientes, cargadoAuto, cargadoManual, aDropear, cancelados,
+      totalVentas, totalDelivery, totalCostoProductos, gananciaNeta, completados, tasaCompletados,
+      interiorPagoAnticipado,
       tasaCobertura: totalPedidos > 0 ? Math.round((conCobertura / totalPedidos) * 100) : 0,
     };
   }, [sheetOrders, colKeys, matchProduct, getRowStatus]);
@@ -479,6 +562,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         if (activeFilter === "CARGADO" && status !== "CARGADO") return false;
         if (activeFilter === "CARGADO_MANUAL" && status !== "CARGADO_MANUAL") return false;
         if (activeFilter === "A DROPEAR" && status !== "A DROPEAR") return false;
+        if (activeFilter === "CANCELADO" && status !== "CANCELADO") return false;
         
         if (coverageFilter !== "all") {
           if (coverageFilter === "covered" && !covered) return false;
@@ -497,7 +581,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   }, [sheetOrders, activeFilter, search, productSearch, cityFilter, searchType, coverageFilter, colKeys, getRowStatus]);
 
   const counts = useMemo(() => {
-    let cargar = 0, cargado = 0, cargadoManual = 0, aDropear = 0;
+    let cargar = 0, cargado = 0, cargadoManual = 0, aDropear = 0, cancelados = 0;
     sheetOrders.forEach((order, idx) => {
       const status = getRowStatus(idx);
       const city = order[colKeys.city] || "";
@@ -506,8 +590,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       else if (status === "CARGADO") cargado++;
       else if (status === "CARGADO_MANUAL") cargadoManual++;
       else if (status === "A DROPEAR") aDropear++;
+      else if (status === "CANCELADO") cancelados++;
     });
-    return { cargar, cargado, cargadoManual, aDropear, total: sheetOrders.length };
+    return { cargar, cargado, cargadoManual, aDropear, cancelados, total: sheetOrders.length };
   }, [sheetOrders, colKeys, getRowStatus]);
 
   const changeFilter = (filter: FilterType) => setActiveFilter(filter);
@@ -515,8 +600,20 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const getRowClassName = (status: OrderStatus, hasCoverageCity: boolean) => {
     if (status === "CARGADO" || status === "CARGADO_MANUAL") return "bg-gradient-to-r from-green-500/10 to-transparent";
     if (status === "A DROPEAR") return "bg-gradient-to-r from-yellow-500/10 to-transparent";
-    if (!hasCoverageCity) return "bg-gradient-to-r from-red-500/5 to-transparent";
+    if (status === "CANCELADO") return "bg-gradient-to-r from-red-500/10 to-transparent";
+    if (!hasCoverageCity) return "bg-gradient-to-r from-orange-500/5 to-transparent";
     return "hover:bg-slate-800/50";
+  };
+
+  const getStatusLabel = (status: OrderStatus): string => {
+    const labels = {
+      CARGAR: "⏳ Pendiente",
+      "A DROPEAR": "⚠️ Dropear",
+      CARGADO: "✅ Auto",
+      CARGADO_MANUAL: "✍️ Manual",
+      CANCELADO: "❌ Cancelado"
+    };
+    return labels[status];
   };
 
   if (loadingStatuses) {
@@ -526,72 +623,62 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   return (
     <div className="space-y-4">
       {/* Dashboard Elegante */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 p-4 shadow-lg border border-slate-700">
-          <div className="absolute top-0 right-0 w-20 h-20 bg-blue-500/10 rounded-full -mr-10 -mt-10"></div>
-          <div className="relative z-10">
-            <div className="text-3xl font-bold text-blue-400">{dashboardStats.totalPedidos}</div>
-            <div className="text-sm text-slate-400 mt-1">📦 Total Pedidos</div>
-          </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 p-3 shadow-lg border border-slate-700">
+          <div className="text-2xl font-bold text-blue-400">{dashboardStats.totalPedidos}</div>
+          <div className="text-xs text-slate-400">📦 Total Pedidos</div>
         </div>
 
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 p-4 shadow-lg border border-slate-700">
-          <div className="absolute top-0 right-0 w-20 h-20 bg-green-500/10 rounded-full -mr-10 -mt-10"></div>
-          <div className="relative z-10">
-            <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-bold text-green-400">{dashboardStats.conCobertura}</span>
-              <span className="text-lg text-slate-500">/ {dashboardStats.totalPedidos}</span>
-            </div>
-            <div className="text-sm text-slate-400 mt-1">📍 Con cobertura</div>
-            <div className="mt-2">
-              <div className="w-full bg-slate-700 rounded-full h-1.5">
-                <div className="bg-green-500 h-1.5 rounded-full transition-all duration-500" style={{ width: `${dashboardStats.tasaCobertura}%` }} />
-              </div>
-              <div className="text-xs text-slate-500 mt-1">{dashboardStats.tasaCobertura}% del total</div>
-            </div>
-          </div>
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 p-3 shadow-lg border border-slate-700">
+          <div className="text-2xl font-bold text-green-400">{dashboardStats.conCobertura}</div>
+          <div className="text-xs text-slate-400">📍 Con cobertura</div>
+          <div className="text-[10px] text-slate-500 mt-1">{dashboardStats.tasaCobertura}%</div>
         </div>
 
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 p-4 shadow-lg border border-slate-700">
-          <div className="absolute top-0 right-0 w-20 h-20 bg-yellow-500/10 rounded-full -mr-10 -mt-10"></div>
-          <div className="relative z-10">
-            <div className="text-3xl font-bold text-yellow-400">{dashboardStats.pendientes}</div>
-            <div className="text-sm text-slate-400 mt-1">⏳ Pendientes</div>
-          </div>
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 p-3 shadow-lg border border-slate-700">
+          <div className="text-2xl font-bold text-red-400">{dashboardStats.sinCobertura}</div>
+          <div className="text-xs text-slate-400">❌ Sin cobertura</div>
         </div>
 
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 p-4 shadow-lg border border-slate-700">
-          <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-500/10 rounded-full -mr-10 -mt-10"></div>
-          <div className="relative z-10">
-            <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-bold text-emerald-400">{dashboardStats.cargadoAuto + dashboardStats.cargadoManual}</span>
-              <span className="text-lg text-slate-500">/ {dashboardStats.conCobertura}</span>
-            </div>
-            <div className="text-sm text-slate-400 mt-1">✅ Completados</div>
-            <div className="mt-2 text-xs text-slate-500">
-              Auto: {dashboardStats.cargadoAuto} | Manual: {dashboardStats.cargadoManual} | ⚠️ Dropear: {dashboardStats.aDropear}
-            </div>
-          </div>
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 p-3 shadow-lg border border-slate-700">
+          <div className="text-2xl font-bold text-yellow-400">{dashboardStats.pendientes}</div>
+          <div className="text-xs text-slate-400">⏳ Pendientes</div>
+        </div>
+
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 p-3 shadow-lg border border-slate-700">
+          <div className="text-2xl font-bold text-emerald-400">{dashboardStats.completados}</div>
+          <div className="text-xs text-slate-400">✅ Completados</div>
+          <div className="text-[10px] text-slate-500 mt-1">{dashboardStats.tasaCompletados}%</div>
+        </div>
+
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 p-3 shadow-lg border border-slate-700">
+          <div className="text-2xl font-bold text-orange-400">{dashboardStats.aDropear + dashboardStats.cancelados}</div>
+          <div className="text-xs text-slate-400">⚠️ No procesados</div>
+          <div className="text-[10px] text-slate-500">Dropear: {dashboardStats.aDropear} | Cancel: {dashboardStats.cancelados}</div>
         </div>
       </div>
 
-      {/* Métricas financieras */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-        <div className="rounded-xl bg-slate-800/50 p-3 border border-slate-700/50">
-          <div className="text-xs text-slate-400">💰 Total Ventas</div>
-          <div className="text-base font-bold text-green-400">{nf(dashboardStats.totalVentas)} Gs</div>
+      {/* Métricas financieras y especiales */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="rounded-xl bg-slate-800/50 p-2 border border-slate-700/50">
+          <div className="text-[10px] text-slate-400">💰 Ventas</div>
+          <div className="text-sm font-bold text-green-400">{nf(dashboardStats.totalVentas)} Gs</div>
         </div>
-        <div className="rounded-xl bg-slate-800/50 p-3 border border-slate-700/50">
-          <div className="text-xs text-slate-400">🚚 Delivery</div>
-          <div className="text-base font-bold text-orange-400">{nf(dashboardStats.totalDelivery)} Gs</div>
+        <div className="rounded-xl bg-slate-800/50 p-2 border border-slate-700/50">
+          <div className="text-[10px] text-slate-400">🚚 Delivery</div>
+          <div className="text-sm font-bold text-orange-400">{nf(dashboardStats.totalDelivery)} Gs</div>
         </div>
-        <div className="rounded-xl bg-slate-800/50 p-3 border border-slate-700/50">
-          <div className="text-xs text-slate-400">📦 Costo Productos</div>
-          <div className="text-base font-bold text-purple-400">{nf(dashboardStats.totalCostoProductos)} Gs</div>
+        <div className="rounded-xl bg-slate-800/50 p-2 border border-slate-700/50">
+          <div className="text-[10px] text-slate-400">📦 Costo</div>
+          <div className="text-sm font-bold text-purple-400">{nf(dashboardStats.totalCostoProductos)} Gs</div>
         </div>
-        <div className="rounded-xl bg-emerald-800/20 p-3 border border-emerald-700/50">
-          <div className="text-xs text-slate-400">🏆 Ganancia Neta</div>
-          <div className="text-base font-bold text-emerald-400">{nf(dashboardStats.gananciaNeta)} Gs</div>
+        <div className="rounded-xl bg-emerald-800/20 p-2 border border-emerald-700/50">
+          <div className="text-[10px] text-slate-400">🏆 Ganancia</div>
+          <div className="text-sm font-bold text-emerald-400">{nf(dashboardStats.gananciaNeta)} Gs</div>
+        </div>
+        <div className="rounded-xl bg-blue-800/20 p-2 border border-blue-700/50">
+          <div className="text-[10px] text-slate-400">📬 Interior Pago Ant.</div>
+          <div className="text-sm font-bold text-blue-400">{dashboardStats.interiorPagoAnticipado}</div>
         </div>
       </div>
 
@@ -619,6 +706,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           <button onClick={() => changeFilter("CARGADO")} className={`px-2 py-1 rounded text-xs ${activeFilter === "CARGADO" ? "bg-green-600 text-white" : "text-slate-400"}`}>✅ Auto ({counts.cargado})</button>
           <button onClick={() => changeFilter("CARGADO_MANUAL")} className={`px-2 py-1 rounded text-xs ${activeFilter === "CARGADO_MANUAL" ? "bg-emerald-600 text-white" : "text-slate-400"}`}>✍️ Manual ({counts.cargadoManual})</button>
           <button onClick={() => changeFilter("A DROPEAR")} className={`px-2 py-1 rounded text-xs ${activeFilter === "A DROPEAR" ? "bg-yellow-600 text-white" : "text-slate-400"}`}>⚠️ Dropear ({counts.aDropear})</button>
+          <button onClick={() => changeFilter("CANCELADO")} className={`px-2 py-1 rounded text-xs ${activeFilter === "CANCELADO" ? "bg-red-600 text-white" : "text-slate-400"}`}>❌ Cancelado ({counts.cancelados})</button>
           
           <div className="flex-1"></div>
           
@@ -676,6 +764,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                 const orderDate = getOrderDate(order);
                 const canLoad = status === "CARGAR" && covered && salePrice > 0;
                 const orderNumber = getRowOrderNumber(idx);
+                const isInterior = city.toLowerCase().includes("interior") || city.toLowerCase().includes("pago anticipado");
 
                 return (
                   <tr key={idx} className={getRowClassName(status, covered)}>
@@ -687,9 +776,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                     <td className="px-2 py-2 text-xs font-medium">{order[colKeys.name] || "—"}</td>
                     <td className="px-2 py-2 text-xs">{order[colKeys.phone] || "—"}</td>
                     <td className="px-2 py-2 text-xs">
-                      <div className={covered ? "text-green-400" : "text-red-400"}>
+                      <div className={covered ? "text-green-400" : isInterior ? "text-blue-400" : "text-red-400"}>
                         {city || "—"}
                         {deliveryPrice && <span className="text-[10px] text-slate-400 ml-1">({nf(deliveryPrice)} Gs)</span>}
+                        {isInterior && !deliveryPrice && <span className="text-[10px] text-blue-400 ml-1">(Interior Pago Ant.)</span>}
                       </div>
                     </td>
                     <td className="px-2 py-2 text-xs max-w-[180px] truncate" title={order[colKeys.product] || ""}>
@@ -705,6 +795,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                       >
                         <option value="CARGAR">⏳ Pendiente</option>
                         <option value="A DROPEAR">⚠️ Dropear</option>
+                        <option value="CANCELADO">❌ Cancelado</option>
                         <option value="CARGADO">✅ Auto</option>
                         <option value="CARGADO_MANUAL">✍️ Manual</option>
                       </select>
