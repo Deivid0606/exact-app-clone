@@ -35,59 +35,22 @@ const normalizeText = (text: string): string => {
 
 // LISTA COMPLETA DE CIUDADES CON COBERTURA
 const CITY_COVERAGE_MAP: Record<string, number> = {
-  "altos": 55000,
-  "aregua": 45000,
-  "asuncion": 35000,
-  "atyra": 55000,
-  "benjaminaceval": 60000,
-  "caacupe": 55000,
-  "capiata": 45000,
-  "ciudaddeleste": 45000,
-  "coloniyguazu": 50000,
-  "emboscada": 55000,
-  "eusebioayala": 55000,
-  "fernandodelamora": 35000,
-  "guarambare": 50000,
-  "hernandarias": 50000,
-  "interiorpagoanticipado": 35000,
-  "ita": 55000,
-  "itacurubidelacordillera": 55000,
-  "itaugua": 45000,
-  "jaugustosaldivar": 45000,
-  "juanleonmalloriquin": 60000,
-  "lambare": 35000,
-  "limpio": 40000,
-  "lomagrande": 55000,
-  "luque": 35000,
-  "marianoroquealonso": 40000,
-  "mingaguazu": 50000,
-  "ñemby": 40000,
-  "nemby": 40000,
-  "nuevaitalia": 55000,
-  "paraguari": 55000,
-  "pirayu": 55000,
-  "piribebuy": 55000,
-  "presidentefranco": 50000,
-  "puertopresidentefranco": 50000,
-  "remansito": 60000,
-  "sanalberto": 55000,
-  "santonio": 45000,
-  "sanantonio": 45000,
-  "sanantonioi": 45000,
-  "sanbernardino": 55000,
-  "sanlorenzo": 35000,
-  "santarita": 55000,
-  "tobati": 55000,
-  "villaelsa": 40000,
-  "villaelisa": 40000,
-  "villahayes": 60000,
-  "villarrica": 50000,
-  "villeta": 55000,
-  "villela": 55000,
-  "yaguaron": 55000,
-  "yguazu": 60000,
-  "ypacarai": 55000,
-  "ypane": 45000
+  "altos": 55000, "aregua": 45000, "asuncion": 35000, "atyra": 55000,
+  "benjaminaceval": 60000, "caacupe": 55000, "capiata": 45000, "ciudaddeleste": 45000,
+  "coloniyguazu": 50000, "emboscada": 55000, "eusebioayala": 55000, "fernandodelamora": 35000,
+  "guarambare": 50000, "hernandarias": 50000, "interiorpagoanticipado": 35000, "ita": 55000,
+  "itacurubidelacordillera": 55000, "itaugua": 45000,
+  "jaugustosaldivar": 45000, "jaugustosaldívar": 45000, "jagugustosaldivar": 45000,
+  "jagugustosaldívar": 45000, "jagustosaldivar": 45000, "augustosaldivar": 45000, "saldivar": 45000,
+  "juanleonmalloriquin": 60000, "lambare": 35000, "limpio": 40000, "lomagrande": 55000,
+  "luque": 35000, "marianoroquealonso": 40000, "mingaguazu": 50000, "ñemby": 40000, "nemby": 40000,
+  "nuevaitalia": 55000, "paraguari": 55000, "pirayu": 55000, "piribebuy": 55000,
+  "presidentefranco": 50000, "puertopresidentefranco": 50000, "remansito": 60000, "sanalberto": 55000,
+  "santonio": 45000, "sanantonio": 45000, "sanantonioi": 45000, "santoni": 45000,
+  "sanbernardino": 55000, "sanlorenzo": 35000, "santarita": 55000, "tobati": 55000,
+  "villaelsa": 40000, "villaelisa": 40000, "villahayes": 60000, "villarrica": 50000,
+  "villeta": 55000, "villela": 55000, "yaguaron": 55000, "yguazu": 60000,
+  "ypacarai": 55000, "ypane": 45000
 };
 
 const hasCoverage = (cityName: string): boolean => {
@@ -95,6 +58,7 @@ const hasCoverage = (cityName: string): boolean => {
   const normalized = normalizeText(cityName);
   if (normalized.includes("interior") || normalized.includes("pagoanticipado")) return true;
   if (normalized.includes("villaelsa") || normalized.includes("villaelisa")) return true;
+  if (normalized.includes("augusto") || (normalized.includes("saldivar") && normalized.length < 20)) return true;
   return CITY_COVERAGE_MAP.hasOwnProperty(normalized);
 };
 
@@ -102,6 +66,7 @@ const getCityDeliveryPrice = (cityName: string): number | null => {
   if (!cityName) return null;
   const normalized = normalizeText(cityName);
   if (normalized.includes("interior") || normalized.includes("pagoanticipado")) return 35000;
+  if (normalized.includes("augusto") || (normalized.includes("saldivar") && normalized.length < 20)) return 45000;
   return CITY_COVERAGE_MAP[normalized] || null;
 };
 
@@ -456,7 +421,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return {
       totalPedidos, conCobertura, sinCobertura, pendientes, cargadoAuto, cargadoManual, aDropear, cancelados,
       totalVentas, totalDelivery, totalCostoProductos, gananciaNeta, completados,
-      tasaCobertura: totalPedidos > 0 ? Math.round((conCobertura / totalPedidos) * 100) : 0,
     };
   }, [sheetOrders, colKeys, matchProduct, getRowStatus]);
 
@@ -530,71 +494,71 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   }
 
   return (
-    <div className="space-y-2">
-      {/* Dashboard Compacto - SIN ESPACIOS */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-1.5">
+    <div className="h-full flex flex-col space-y-1.5">
+      {/* Dashboard Compacto */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-1 flex-shrink-0">
         <div className="bg-slate-800/50 rounded p-1.5 text-center border border-slate-700">
-          <div className="text-lg font-bold text-blue-400">{dashboardStats.totalPedidos}</div>
+          <div className="text-base font-bold text-blue-400">{dashboardStats.totalPedidos}</div>
           <div className="text-[9px] text-slate-400">Total Pedidos</div>
         </div>
         <div className="bg-slate-800/50 rounded p-1.5 text-center border border-slate-700">
-          <div className="text-lg font-bold text-green-400">{dashboardStats.conCobertura}</div>
+          <div className="text-base font-bold text-green-400">{dashboardStats.conCobertura}</div>
           <div className="text-[9px] text-slate-400">Con cobertura</div>
         </div>
         <div className="bg-slate-800/50 rounded p-1.5 text-center border border-slate-700">
-          <div className="text-lg font-bold text-red-400">{dashboardStats.sinCobertura}</div>
+          <div className="text-base font-bold text-red-400">{dashboardStats.sinCobertura}</div>
           <div className="text-[9px] text-slate-400">Sin cobertura</div>
         </div>
         <div className="bg-slate-800/50 rounded p-1.5 text-center border border-slate-700">
-          <div className="text-lg font-bold text-yellow-400">{dashboardStats.pendientes}</div>
+          <div className="text-base font-bold text-yellow-400">{dashboardStats.pendientes}</div>
           <div className="text-[9px] text-slate-400">Pendientes</div>
         </div>
         <div className="bg-slate-800/50 rounded p-1.5 text-center border border-slate-700">
-          <div className="text-lg font-bold text-emerald-400">{dashboardStats.completados}</div>
+          <div className="text-base font-bold text-emerald-400">{dashboardStats.completados}</div>
           <div className="text-[9px] text-slate-400">Completados</div>
         </div>
         <div className="bg-slate-800/50 rounded p-1.5 text-center border border-slate-700">
-          <div className="text-lg font-bold text-orange-400">{dashboardStats.aDropear + dashboardStats.cancelados}</div>
+          <div className="text-base font-bold text-orange-400">{dashboardStats.aDropear + dashboardStats.cancelados}</div>
           <div className="text-[9px] text-slate-400">No procesados</div>
         </div>
       </div>
 
-      {/* Métricas financieras compactas */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-1.5">
+      {/* Métricas financieras */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-1 flex-shrink-0">
         <div className="bg-slate-800/30 rounded p-1.5">
           <div className="text-[9px] text-slate-400">💰 Ventas</div>
-          <div className="text-xs font-bold text-green-400">{nf(dashboardStats.totalVentas)} Gs</div>
+          <div className="text-[11px] font-bold text-green-400">{nf(dashboardStats.totalVentas)} Gs</div>
         </div>
         <div className="bg-slate-800/30 rounded p-1.5">
           <div className="text-[9px] text-slate-400">🚚 Delivery</div>
-          <div className="text-xs font-bold text-orange-400">{nf(dashboardStats.totalDelivery)} Gs</div>
+          <div className="text-[11px] font-bold text-orange-400">{nf(dashboardStats.totalDelivery)} Gs</div>
         </div>
         <div className="bg-slate-800/30 rounded p-1.5">
           <div className="text-[9px] text-slate-400">📦 Costo</div>
-          <div className="text-xs font-bold text-purple-400">{nf(dashboardStats.totalCostoProductos)} Gs</div>
+          <div className="text-[11px] font-bold text-purple-400">{nf(dashboardStats.totalCostoProductos)} Gs</div>
         </div>
         <div className="bg-emerald-800/20 rounded p-1.5 border border-emerald-700/30">
           <div className="text-[9px] text-slate-400">🏆 Ganancia</div>
-          <div className="text-xs font-bold text-emerald-400">{nf(dashboardStats.gananciaNeta)} Gs</div>
+          <div className="text-[11px] font-bold text-emerald-400">{nf(dashboardStats.gananciaNeta)} Gs</div>
         </div>
       </div>
 
-      {/* Controles - SIN espacios */}
-      <div className="flex flex-wrap gap-1.5 pt-1">
-        <button className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 rounded transition" onClick={() => readSheet()} disabled={loading}>
+      {/* Controles */}
+      <div className="flex flex-wrap gap-1 flex-shrink-0">
+        <button className="px-2 py-0.5 text-[11px] bg-blue-600 hover:bg-blue-700 rounded transition" onClick={() => readSheet()} disabled={loading}>
           {loading ? "Leyendo..." : "📊 Leer Sheet"}
         </button>
-        <button className="px-2 py-1 text-xs bg-emerald-600 hover:bg-emerald-700 rounded transition" onClick={handleBulkLoad}>
+        <button className="px-2 py-0.5 text-[11px] bg-emerald-600 hover:bg-emerald-700 rounded transition" onClick={handleBulkLoad}>
           🚀 Cargar todos
         </button>
-        <button className={`px-2 py-1 text-xs rounded transition ${autoLoad ? "bg-green-600" : "bg-slate-700"}`} onClick={toggleAutoLoad}>
+        <button className={`px-2 py-0.5 text-[11px] rounded transition ${autoLoad ? "bg-green-600" : "bg-slate-700"}`} onClick={toggleAutoLoad}>
           {autoLoad ? "🤖 Auto ON" : "🤖 Auto OFF"}
         </button>
-        {lastSync && <span className="text-[10px] text-slate-500 self-center">🔄 {lastSync.toLocaleTimeString("es-PY")}</span>}
+        {lastSync && <span className="text-[9px] text-slate-500 self-center">🔄 {lastSync.toLocaleTimeString("es-PY")}</span>}
       </div>
 
-      {/* Filtros - SIN espacios */}
-      <div className="flex flex-wrap gap-1">
+      {/* Filtros */}
+      <div className="flex flex-wrap gap-0.5 flex-shrink-0">
         <button onClick={() => changeFilter("TODOS")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "TODOS" ? "bg-slate-700 text-white" : "text-slate-400"}`}>📋 Todos ({counts.total})</button>
         <button onClick={() => changeFilter("CARGAR")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "CARGAR" ? "bg-blue-600 text-white" : "text-slate-400"}`}>⏳ Pendientes ({counts.cargar})</button>
         <button onClick={() => changeFilter("CARGADO")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "CARGADO" ? "bg-green-600 text-white" : "text-slate-400"}`}>✅ Auto ({counts.cargado})</button>
@@ -612,14 +576,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       </div>
 
       {/* Buscador compacto */}
-      <div className="flex gap-1">
+      <div className="flex gap-1 flex-shrink-0">
         <div className="flex gap-0.5">
           <button onClick={() => setSearchType("product")} className={`px-1.5 py-0.5 rounded text-[10px] ${searchType === "product" ? "bg-blue-600" : "bg-slate-800"}`}>🏷️ Producto</button>
           <button onClick={() => setSearchType("city")} className={`px-1.5 py-0.5 rounded text-[10px] ${searchType === "city" ? "bg-blue-600" : "bg-slate-800"}`}>📍 Ciudad</button>
           <button onClick={() => setSearchType("all")} className={`px-1.5 py-0.5 rounded text-[10px] ${searchType === "all" ? "bg-blue-600" : "bg-slate-800"}`}>🔍 Todo</button>
         </div>
         <input
-          className="flex-1 bg-slate-800 rounded px-2 py-1 text-xs border border-slate-700 focus:outline-none focus:border-blue-500"
+          className="flex-1 bg-slate-800 rounded px-2 py-0.5 text-[11px] border border-slate-700 focus:outline-none focus:border-blue-500"
           placeholder={searchType === "product" ? "Buscar producto..." : searchType === "city" ? "Buscar ciudad..." : "Buscar en todos los campos..."}
           value={searchType === "product" ? productSearch : searchType === "city" ? cityFilter : search}
           onChange={(e) => {
@@ -630,12 +594,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         />
       </div>
 
-      <div className="text-[10px] text-slate-500">Mostrando {filteredOrders.length} de {sheetOrders.length} filas</div>
+      <div className="text-[9px] text-slate-500 flex-shrink-0">Mostrando {filteredOrders.length} de {sheetOrders.length} filas</div>
 
-      {/* Tabla compacta */}
-      <div className="overflow-x-auto max-h-[500px] overflow-y-auto rounded border border-slate-800">
+      {/* Tabla - OCUPA TODO EL ESPACIO RESTANTE */}
+      <div className="flex-1 min-h-0 overflow-auto rounded border border-slate-800">
         <table className="w-full text-xs">
-          <thead className="bg-slate-800 sticky top-0">
+          <thead className="bg-slate-800 sticky top-0 z-10">
             <tr className="border-b border-slate-700">
               <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">#</th>
               <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">ID</th>
@@ -668,7 +632,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                     {orderNumber ? <span className="text-green-400">{orderNumber}</span> : <span className="text-slate-600">—</span>}
                   </td>
                   <td className="px-1.5 py-1 text-[10px]">{orderDate}</td>
-                  <td className="px-1.5 py-1 text-[10px] font-medium">{order[colKeys.name]?.substring(0, 20) || "—"}</td>
+                  <td className="px-1.5 py-1 text-[10px] font-medium truncate max-w-[100px]" title={order[colKeys.name] || ""}>
+                    {order[colKeys.name]?.substring(0, 20) || "—"}
+                  </td>
                   <td className="px-1.5 py-1 text-[10px]">{order[colKeys.phone]?.substring(0, 15) || "—"}</td>
                   <td className="px-1.5 py-1 text-[10px]">
                     <div className={covered ? "text-green-400" : "text-red-400"}>
