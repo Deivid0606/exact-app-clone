@@ -161,7 +161,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [autoLoad, setAutoLoad] = useState<boolean>(() => localStorage.getItem(AUTO_LOAD_KEY) === "true");
   const [activeFilter, setActiveFilter] = useState<FilterType>(() => {
     const saved = localStorage.getItem(ACTIVE_FILTER_KEY) as FilterType;
-    return saved || "CARGAR";
+    return saved || "CARGAR"; // Por defecto "Pendientes"
   });
   const [searchType, setSearchType] = useState<"all" | "product" | "city">("product");
   const [productSearch, setProductSearch] = useState("");
@@ -380,49 +380,45 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return String(dateValue).split(' ')[0];
   };
 
-  // Estadísticas
+  // Estadísticas simplificadas para el dashboard
   const dashboardStats = useMemo(() => {
-    let conCobertura = 0, sinCobertura = 0;
-    let pendientes = 0, cargadoAuto = 0, cargadoManual = 0, aDropear = 0, cancelados = 0;
-    let totalVentas = 0, totalDelivery = 0, totalCostoProductos = 0;
+    let pendientesConCobertura = 0;
+    let pendientesSinCobertura = 0;
+    let cargados = 0; // Auto + Manual
+    let dropeados = 0;
+    let cancelados = 0;
     
     sheetOrders.forEach((order, idx) => {
       const city = order[colKeys.city] || "";
       const covered = hasCoverage(city);
       const status = getRowStatus(idx);
-      const salePrice = getAmountFromRow(order, colKeys.amount);
-      const deliveryPrice = getCityDeliveryPrice(city) || 0;
-      const productName = order[colKeys.product] || "";
-      const matched = matchProduct(productName);
-      const productCost = matched?.provider_price_gs || 0;
       
-      if (covered) {
-        conCobertura++;
-        if (status === "CARGAR") {
-          pendientes++;
-          totalVentas += salePrice;
-          totalDelivery += deliveryPrice;
-          totalCostoProductos += productCost;
+      if (status === "CARGAR") {
+        if (covered) {
+          pendientesConCobertura++;
+        } else {
+          pendientesSinCobertura++;
         }
-      } else {
-        sinCobertura++;
+      } else if (status === "CARGADO" || status === "CARGADO_MANUAL") {
+        cargados++;
+      } else if (status === "A DROPEAR") {
+        dropeados++;
+      } else if (status === "CANCELADO") {
+        cancelados++;
       }
-      
-      if (status === "CARGADO") cargadoAuto++;
-      else if (status === "CARGADO_MANUAL") cargadoManual++;
-      else if (status === "A DROPEAR") aDropear++;
-      else if (status === "CANCELADO") cancelados++;
     });
     
-    const gananciaNeta = totalVentas - totalDelivery - totalCostoProductos;
     const totalPedidos = sheetOrders.length;
-    const completados = cargadoAuto + cargadoManual;
     
     return {
-      totalPedidos, conCobertura, sinCobertura, pendientes, cargadoAuto, cargadoManual, aDropear, cancelados,
-      totalVentas, totalDelivery, totalCostoProductos, gananciaNeta, completados,
+      pendientesConCobertura,
+      pendientesSinCobertura,
+      cargados,
+      dropeados,
+      cancelados,
+      totalPedidos,
     };
-  }, [sheetOrders, colKeys, matchProduct, getRowStatus]);
+  }, [sheetOrders, colKeys, getRowStatus]);
 
   const filterByProduct = (order: SheetOrder, term: string) => {
     if (!term.trim()) return true;
@@ -443,10 +439,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         const covered = hasCoverage(city);
         
         if (activeFilter === "CARGAR" && (status !== "CARGAR" || !covered)) return false;
-        if (activeFilter === "CARGADO" && status !== "CARGADO") return false;
-        if (activeFilter === "CARGADO_MANUAL" && status !== "CARGADO_MANUAL") return false;
+        if (activeFilter === "CARGADO" && status !== "CARGADO" && status !== "CARGADO_MANUAL") return false;
         if (activeFilter === "A DROPEAR" && status !== "A DROPEAR") return false;
         if (activeFilter === "CANCELADO" && status !== "CANCELADO") return false;
+        if (activeFilter === "TODOS") return true;
         
         if (coverageFilter !== "all") {
           if (coverageFilter === "covered" && !covered) return false;
@@ -465,18 +461,29 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   }, [sheetOrders, activeFilter, search, productSearch, cityFilter, searchType, coverageFilter, colKeys, getRowStatus]);
 
   const counts = useMemo(() => {
-    let cargar = 0, cargado = 0, cargadoManual = 0, aDropear = 0, cancelados = 0;
+    let cargarConCobertura = 0;
+    let cargados = 0;
+    let aDropear = 0;
+    let cancelados = 0;
+    
     sheetOrders.forEach((order, idx) => {
       const status = getRowStatus(idx);
       const city = order[colKeys.city] || "";
       const covered = hasCoverage(city);
-      if (status === "CARGAR" && covered) cargar++;
-      else if (status === "CARGADO") cargado++;
-      else if (status === "CARGADO_MANUAL") cargadoManual++;
+      
+      if (status === "CARGAR" && covered) cargarConCobertura++;
+      else if (status === "CARGADO" || status === "CARGADO_MANUAL") cargados++;
       else if (status === "A DROPEAR") aDropear++;
       else if (status === "CANCELADO") cancelados++;
     });
-    return { cargar, cargado, cargadoManual, aDropear, cancelados, total: sheetOrders.length };
+    
+    return { 
+      cargarConCobertura, 
+      cargados, 
+      aDropear, 
+      cancelados, 
+      total: sheetOrders.length 
+    };
   }, [sheetOrders, colKeys, getRowStatus]);
 
   const changeFilter = (filter: FilterType) => setActiveFilter(filter);
@@ -485,7 +492,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     if (status === "CARGADO" || status === "CARGADO_MANUAL") return "bg-green-500/5";
     if (status === "A DROPEAR") return "bg-yellow-500/5";
     if (status === "CANCELADO") return "bg-red-500/5";
-    if (!hasCoverageCity) return "bg-orange-500/5";
+    if (!hasCoverageCity && status === "CARGAR") return "bg-orange-500/5";
     return "hover:bg-slate-800/30";
   };
 
@@ -495,51 +502,31 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
   return (
     <div className="h-full flex flex-col space-y-1.5">
-      {/* Dashboard Compacto */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-1 flex-shrink-0">
-        <div className="bg-slate-800/50 rounded p-1.5 text-center border border-slate-700">
-          <div className="text-base font-bold text-blue-400">{dashboardStats.totalPedidos}</div>
+      {/* Dashboard Simplificado - 6 métricas */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-1 flex-shrink-0">
+        <div className="bg-blue-500/10 rounded p-1.5 text-center border border-blue-500/20">
+          <div className="text-sm font-bold text-blue-400">{dashboardStats.pendientesConCobertura}</div>
+          <div className="text-[9px] text-slate-400">Pendientes con cobertura</div>
+        </div>
+        <div className="bg-orange-500/10 rounded p-1.5 text-center border border-orange-500/20">
+          <div className="text-sm font-bold text-orange-400">{dashboardStats.pendientesSinCobertura}</div>
+          <div className="text-[9px] text-slate-400">Pendientes sin cobertura</div>
+        </div>
+        <div className="bg-green-500/10 rounded p-1.5 text-center border border-green-500/20">
+          <div className="text-sm font-bold text-green-400">{dashboardStats.cargados}</div>
+          <div className="text-[9px] text-slate-400">Cargados (Auto/Manual)</div>
+        </div>
+        <div className="bg-yellow-500/10 rounded p-1.5 text-center border border-yellow-500/20">
+          <div className="text-sm font-bold text-yellow-400">{dashboardStats.dropeados}</div>
+          <div className="text-[9px] text-slate-400">Dropeados</div>
+        </div>
+        <div className="bg-red-500/10 rounded p-1.5 text-center border border-red-500/20">
+          <div className="text-sm font-bold text-red-400">{dashboardStats.cancelados}</div>
+          <div className="text-[9px] text-slate-400">Cancelados</div>
+        </div>
+        <div className="bg-purple-500/10 rounded p-1.5 text-center border border-purple-500/20">
+          <div className="text-sm font-bold text-purple-400">{dashboardStats.totalPedidos}</div>
           <div className="text-[9px] text-slate-400">Total Pedidos</div>
-        </div>
-        <div className="bg-slate-800/50 rounded p-1.5 text-center border border-slate-700">
-          <div className="text-base font-bold text-green-400">{dashboardStats.conCobertura}</div>
-          <div className="text-[9px] text-slate-400">Con cobertura</div>
-        </div>
-        <div className="bg-slate-800/50 rounded p-1.5 text-center border border-slate-700">
-          <div className="text-base font-bold text-red-400">{dashboardStats.sinCobertura}</div>
-          <div className="text-[9px] text-slate-400">Sin cobertura</div>
-        </div>
-        <div className="bg-slate-800/50 rounded p-1.5 text-center border border-slate-700">
-          <div className="text-base font-bold text-yellow-400">{dashboardStats.pendientes}</div>
-          <div className="text-[9px] text-slate-400">Pendientes</div>
-        </div>
-        <div className="bg-slate-800/50 rounded p-1.5 text-center border border-slate-700">
-          <div className="text-base font-bold text-emerald-400">{dashboardStats.completados}</div>
-          <div className="text-[9px] text-slate-400">Completados</div>
-        </div>
-        <div className="bg-slate-800/50 rounded p-1.5 text-center border border-slate-700">
-          <div className="text-base font-bold text-orange-400">{dashboardStats.aDropear + dashboardStats.cancelados}</div>
-          <div className="text-[9px] text-slate-400">No procesados</div>
-        </div>
-      </div>
-
-      {/* Métricas financieras */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-1 flex-shrink-0">
-        <div className="bg-slate-800/30 rounded p-1.5">
-          <div className="text-[9px] text-slate-400">💰 Ventas</div>
-          <div className="text-[11px] font-bold text-green-400">{nf(dashboardStats.totalVentas)} Gs</div>
-        </div>
-        <div className="bg-slate-800/30 rounded p-1.5">
-          <div className="text-[9px] text-slate-400">🚚 Delivery</div>
-          <div className="text-[11px] font-bold text-orange-400">{nf(dashboardStats.totalDelivery)} Gs</div>
-        </div>
-        <div className="bg-slate-800/30 rounded p-1.5">
-          <div className="text-[9px] text-slate-400">📦 Costo</div>
-          <div className="text-[11px] font-bold text-purple-400">{nf(dashboardStats.totalCostoProductos)} Gs</div>
-        </div>
-        <div className="bg-emerald-800/20 rounded p-1.5 border border-emerald-700/30">
-          <div className="text-[9px] text-slate-400">🏆 Ganancia</div>
-          <div className="text-[11px] font-bold text-emerald-400">{nf(dashboardStats.gananciaNeta)} Gs</div>
         </div>
       </div>
 
@@ -560,9 +547,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       {/* Filtros */}
       <div className="flex flex-wrap gap-0.5 flex-shrink-0">
         <button onClick={() => changeFilter("TODOS")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "TODOS" ? "bg-slate-700 text-white" : "text-slate-400"}`}>📋 Todos ({counts.total})</button>
-        <button onClick={() => changeFilter("CARGAR")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "CARGAR" ? "bg-blue-600 text-white" : "text-slate-400"}`}>⏳ Pendientes ({counts.cargar})</button>
-        <button onClick={() => changeFilter("CARGADO")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "CARGADO" ? "bg-green-600 text-white" : "text-slate-400"}`}>✅ Auto ({counts.cargado})</button>
-        <button onClick={() => changeFilter("CARGADO_MANUAL")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "CARGADO_MANUAL" ? "bg-emerald-600 text-white" : "text-slate-400"}`}>✍️ Manual ({counts.cargadoManual})</button>
+        <button onClick={() => changeFilter("CARGAR")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "CARGAR" ? "bg-blue-600 text-white" : "text-slate-400"}`}>⏳ Pendientes ({counts.cargarConCobertura})</button>
+        <button onClick={() => changeFilter("CARGADO")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "CARGADO" ? "bg-green-600 text-white" : "text-slate-400"}`}>✅ Cargados ({counts.cargados})</button>
         <button onClick={() => changeFilter("A DROPEAR")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "A DROPEAR" ? "bg-yellow-600 text-white" : "text-slate-400"}`}>⚠️ Dropear ({counts.aDropear})</button>
         <button onClick={() => changeFilter("CANCELADO")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "CANCELADO" ? "bg-red-600 text-white" : "text-slate-400"}`}>❌ Cancelado ({counts.cancelados})</button>
         
@@ -596,7 +582,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
       <div className="text-[9px] text-slate-500 flex-shrink-0">Mostrando {filteredOrders.length} de {sheetOrders.length} filas</div>
 
-      {/* Tabla - OCUPA TODO EL ESPACIO RESTANTE */}
+      {/* Tabla */}
       <div className="flex-1 min-h-0 overflow-auto rounded border border-slate-800">
         <table className="w-full text-xs">
           <thead className="bg-slate-800 sticky top-0 z-10">
