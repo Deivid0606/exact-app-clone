@@ -21,25 +21,115 @@ function extractPhoneNumber(value: any): string {
   return phone;
 }
 
+// Normalización: elimina acentos, mayúsculas, espacios, guiones
 const normalizeText = (text: string): string => {
   if (!text) return "";
   return text
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]/g, "");
+    .replace(/[^a-z0-9]/g, "")
+    .trim();
 };
 
-// LISTA EXACTA DE CIUDADES CON COBERTURA (SOLO ESTAS)
-const COVERAGE_CITIES: string[] = [
-  "altos", "aregua", "asuncion", "atyra", "benjaminaceval", "caacupe", "capiata",
-  "ciudaddeleste", "coloniyguazu", "emboscada", "eusebioayala", "fernandodelamora",
-  "guarambare", "hernandarias", "interiorpagoanticipado", "ita", "itacurubidelacordillera",
-  "itaugua", "jaugustosaldívar", "juanleonmalloriquin", "lambare", "limpio", "lomagrande",
-  "luque", "marianoroquealonso", "mingaguazu", "ñemby", "nuevaitalia", "paraguari",
-  "pirayu", "piribebuy", "presidentefranco", "puertopdtefranco", "remansito", "sanalberto",
-  "santonio", "sanbernardino", "sanlorenzo", "santarita", "tobati", "villaelsa", "villahayes",
-  "villarrica", "villeta", "yaguaron", "yguazu", "ypacarai", "ypane"
+// LISTA COMPLETA DE CIUDADES CON COBERTURA (TODAS LAS VARIANTES)
+const COVERAGE_CITIES_NORMALIZED: string[] = [
+  // Altos
+  "altos",
+  // Areguá
+  "aregua", "aregua",
+  // Asunción
+  "asuncion",
+  // Atyrá
+  "atyra",
+  // Benjamín Aceval
+  "benjaminaceval",
+  // Caacupé
+  "caacupe",
+  // Capiatá
+  "capiata",
+  // Ciudad del Este
+  "ciudaddeleste",
+  // Colonia Yguazú
+  "coloniyguazu",
+  // Emboscada
+  "emboscada",
+  // Eusebio Ayala
+  "eusebioayala",
+  // Fernando de la Mora
+  "fernandodelamora",
+  // Guarambaré
+  "guarambare",
+  // Hernandarias
+  "hernandarias",
+  // INTERIOR PAGO ANTICIPADO
+  "interiorpagoanticipado",
+  // Itá
+  "ita",
+  // Itacurubí de la Cordillera
+  "itacurubidelacordillera",
+  // Itauguá
+  "itaugua",
+  // J. Augusto Saldívar
+  "jaugustosaldívar",
+  // Juan León Mallorquín
+  "juanleonmallorquin",
+  // Lambaré
+  "lambare",
+  // Limpio
+  "limpio",
+  // Loma Grande
+  "lomagrande",
+  // Luque
+  "luque",
+  // Mariano Roque Alonso
+  "marianoroquealonso",
+  // Minga Guazú
+  "mingaguazu",
+  // Ñemby
+  "ñemby", "nemby",
+  // Nueva Italia
+  "nuevaitalia",
+  // Paraguarí
+  "paraguari",
+  // Pirayú
+  "pirayu",
+  // Piribebuy
+  "piribebuy",
+  // Presidente Franco
+  "presidentefranco",
+  // Puerto Presidente Franco
+  "puertopresidentefranco", "puertopdtefranco",
+  // Remansito
+  "remansito",
+  // San Alberto
+  "sanalberto",
+  // San Antonio
+  "santonio", "santoni", "sanantonioi",
+  // San Bernardino
+  "sanbernardino",
+  // San Lorenzo
+  "sanlorenzo",
+  // Santa Rita
+  "santarita",
+  // Tobatí
+  "tobati",
+  // Villa Elisa
+  "villaelsa",
+  // Villa Hayes
+  "villahayes",
+  // Villarrica
+  "villarrica",
+  // Villeta
+  "villeta",
+  // Yaguarón
+  "yaguaron",
+  // Yguazú
+  "yguazu",
+  // Ypacaraí
+  "ypacarai",
+  // Ypané
+  "ypane"
 ];
 
 // Precios de delivery
@@ -49,36 +139,28 @@ const CITY_DELIVERY_PRICES: Record<string, number> = {
   "coloniyguazu": 50000, "emboscada": 55000, "eusebioayala": 55000, "fernandodelamora": 35000,
   "guarambare": 50000, "hernandarias": 50000, "interiorpagoanticipado": 35000, "ita": 55000,
   "itacurubidelacordillera": 55000, "itaugua": 45000, "jaugustosaldívar": 45000,
-  "juanleonmalloriquin": 60000, "lambare": 35000, "limpio": 40000, "lomagrande": 55000,
+  "juanleonmallorquin": 60000, "lambare": 35000, "limpio": 40000, "lomagrande": 55000,
   "luque": 35000, "marianoroquealonso": 40000, "mingaguazu": 50000, "ñemby": 40000,
-  "nuevaitalia": 55000, "paraguari": 55000, "pirayu": 55000, "piribebuy": 55000,
-  "presidentefranco": 50000, "puertopdtefranco": 50000, "remansito": 60000, "sanalberto": 55000,
-  "santonio": 45000, "sanbernardino": 55000, "sanlorenzo": 35000, "santarita": 55000,
-  "tobati": 55000, "villaelsa": 40000, "villahayes": 60000, "villarrica": 50000,
-  "villeta": 55000, "yaguaron": 55000, "yguazu": 60000, "ypacarai": 55000, "ypane": 45000
+  "nemby": 40000, "nuevaitalia": 55000, "paraguari": 55000, "pirayu": 55000,
+  "piribebuy": 55000, "presidentefranco": 50000, "puertopresidentefranco": 50000,
+  "puertopdtefranco": 50000, "remansito": 60000, "sanalberto": 55000, "santonio": 45000,
+  "sanantonioi": 45000, "santoni": 45000, "sanbernardino": 55000, "sanlorenzo": 35000,
+  "santarita": 55000, "tobati": 55000, "villaelsa": 40000, "villahayes": 60000,
+  "villarrica": 50000, "villeta": 55000, "yaguaron": 55000, "yguazu": 60000,
+  "ypacarai": 55000, "ypane": 45000
 };
 
-// Función ESTRICTA para verificar cobertura (SOLO coincidencia exacta o muy cercana)
+// Función ESTRICTA para verificar cobertura
 const hasCoverage = (cityName: string): boolean => {
   if (!cityName) return false;
   
   const normalizedInput = normalizeText(cityName);
   
-  // 1. Coincidencia exacta
-  if (COVERAGE_CITIES.includes(normalizedInput)) {
-    return true;
-  }
-  
-  // 2. Para casos como "J. Augusto Saldívar" -> "jaugustosaldívar"
-  for (const coverageCity of COVERAGE_CITIES) {
-    // Si la ciudad del sheet está contenida en la de cobertura
-    if (coverageCity.includes(normalizedInput) && normalizedInput.length >= 5) {
-      return true;
-    }
-    // Si la ciudad de cobertura está contenida en la del sheet
-    if (normalizedInput.includes(coverageCity) && coverageCity.length >= 5) {
-      return true;
-    }
+  // Coincidencia exacta o parcial
+  for (const coverageCity of COVERAGE_CITIES_NORMALIZED) {
+    if (normalizedInput === coverageCity) return true;
+    if (coverageCity.includes(normalizedInput) && normalizedInput.length >= 4) return true;
+    if (normalizedInput.includes(coverageCity) && coverageCity.length >= 4) return true;
   }
   
   return false;
@@ -95,14 +177,11 @@ const getCityDeliveryPrice = (cityName: string): number | null => {
     return CITY_DELIVERY_PRICES[normalizedInput];
   }
   
-  // Búsqueda flexible pero controlada
+  // Búsqueda flexible
   for (const [key, price] of Object.entries(CITY_DELIVERY_PRICES)) {
-    if (key.includes(normalizedInput) && normalizedInput.length >= 5) {
-      return price;
-    }
-    if (normalizedInput.includes(key) && key.length >= 5) {
-      return price;
-    }
+    if (key === normalizedInput) return price;
+    if (key.includes(normalizedInput) && normalizedInput.length >= 4) return price;
+    if (normalizedInput.includes(key) && key.length >= 4) return price;
   }
   
   return null;
@@ -195,7 +274,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [loadingStatuses, setLoadingStatuses] = useState(true);
   const [products, setProducts] = useState<any[]>([]);
   const [rowStatuses, setRowStatuses] = useState<Record<string, OrderStatus>>({});
-  const [rowOrderNumbers, setRowOrderNumbers] = useState<Record<string, string>>({}); // NUEVO: guardar ID de orden
+  const [rowOrderNumbers, setRowOrderNumbers] = useState<Record<string, string>>({});
   const [autoLoad, setAutoLoad] = useState<boolean>(() => localStorage.getItem(AUTO_LOAD_KEY) === "true");
   const [activeFilter, setActiveFilter] = useState<FilterType>(() => {
     const saved = localStorage.getItem(ACTIVE_FILTER_KEY) as FilterType;
@@ -440,7 +519,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return String(dateValue).split(' ')[0];
   };
 
-  // Dashboard SOLO con pedidos en cobertura
+  // Dashboard stats
   const dashboardStats = useMemo(() => {
     let totalVentas = 0, totalDelivery = 0, totalCostoProductos = 0, totalComisiones = 0;
     let pedidosEnCobertura = 0;
