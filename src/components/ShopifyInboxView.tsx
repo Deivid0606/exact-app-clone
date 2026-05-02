@@ -21,7 +21,6 @@ function extractPhoneNumber(value: any): string {
   return phone;
 }
 
-// Normalización: elimina acentos, mayúsculas, espacios, guiones
 const normalizeText = (text: string): string => {
   if (!text) return "";
   return text
@@ -32,104 +31,16 @@ const normalizeText = (text: string): string => {
     .trim();
 };
 
-// LISTA COMPLETA DE CIUDADES CON COBERTURA (TODAS LAS VARIANTES)
+// LISTA EXACTA DE CIUDADES CON COBERTURA
 const COVERAGE_CITIES_NORMALIZED: string[] = [
-  // Altos
-  "altos",
-  // Areguá
-  "aregua", "aregua",
-  // Asunción
-  "asuncion",
-  // Atyrá
-  "atyra",
-  // Benjamín Aceval
-  "benjaminaceval",
-  // Caacupé
-  "caacupe",
-  // Capiatá
-  "capiata",
-  // Ciudad del Este
-  "ciudaddeleste",
-  // Colonia Yguazú
-  "coloniyguazu",
-  // Emboscada
-  "emboscada",
-  // Eusebio Ayala
-  "eusebioayala",
-  // Fernando de la Mora
-  "fernandodelamora",
-  // Guarambaré
-  "guarambare",
-  // Hernandarias
-  "hernandarias",
-  // INTERIOR PAGO ANTICIPADO
-  "interiorpagoanticipado",
-  // Itá
-  "ita",
-  // Itacurubí de la Cordillera
-  "itacurubidelacordillera",
-  // Itauguá
-  "itaugua",
-  // J. Augusto Saldívar
-  "jaugustosaldívar",
-  // Juan León Mallorquín
-  "juanleonmallorquin",
-  // Lambaré
-  "lambare",
-  // Limpio
-  "limpio",
-  // Loma Grande
-  "lomagrande",
-  // Luque
-  "luque",
-  // Mariano Roque Alonso
-  "marianoroquealonso",
-  // Minga Guazú
-  "mingaguazu",
-  // Ñemby
-  "ñemby", "nemby",
-  // Nueva Italia
-  "nuevaitalia",
-  // Paraguarí
-  "paraguari",
-  // Pirayú
-  "pirayu",
-  // Piribebuy
-  "piribebuy",
-  // Presidente Franco
-  "presidentefranco",
-  // Puerto Presidente Franco
-  "puertopresidentefranco", "puertopdtefranco",
-  // Remansito
-  "remansito",
-  // San Alberto
-  "sanalberto",
-  // San Antonio
-  "santonio", "santoni", "sanantonioi",
-  // San Bernardino
-  "sanbernardino",
-  // San Lorenzo
-  "sanlorenzo",
-  // Santa Rita
-  "santarita",
-  // Tobatí
-  "tobati",
-  // Villa Elisa
-  "villaelsa",
-  // Villa Hayes
-  "villahayes",
-  // Villarrica
-  "villarrica",
-  // Villeta
-  "villeta",
-  // Yaguarón
-  "yaguaron",
-  // Yguazú
-  "yguazu",
-  // Ypacaraí
-  "ypacarai",
-  // Ypané
-  "ypane"
+  "altos", "aregua", "asuncion", "atyra", "benjaminaceval", "caacupe", "capiata",
+  "ciudaddeleste", "coloniyguazu", "emboscada", "eusebioayala", "fernandodelamora",
+  "guarambare", "hernandarias", "interiorpagoanticipado", "ita", "itacurubidelacordillera",
+  "itaugua", "jaugustosaldívar", "juanleonmallorquin", "lambare", "limpio", "lomagrande",
+  "luque", "marianoroquealonso", "mingaguazu", "ñemby", "nuevaitalia", "paraguari",
+  "pirayu", "piribebuy", "presidentefranco", "puertopresidentefranco", "remansito",
+  "sanalberto", "santonio", "sanbernardino", "sanlorenzo", "santarita", "tobati",
+  "villaelsa", "villahayes", "villarrica", "villeta", "yaguaron", "yguazu", "ypacarai", "ypane"
 ];
 
 // Precios de delivery
@@ -141,10 +52,9 @@ const CITY_DELIVERY_PRICES: Record<string, number> = {
   "itacurubidelacordillera": 55000, "itaugua": 45000, "jaugustosaldívar": 45000,
   "juanleonmallorquin": 60000, "lambare": 35000, "limpio": 40000, "lomagrande": 55000,
   "luque": 35000, "marianoroquealonso": 40000, "mingaguazu": 50000, "ñemby": 40000,
-  "nemby": 40000, "nuevaitalia": 55000, "paraguari": 55000, "pirayu": 55000,
-  "piribebuy": 55000, "presidentefranco": 50000, "puertopresidentefranco": 50000,
-  "puertopdtefranco": 50000, "remansito": 60000, "sanalberto": 55000, "santonio": 45000,
-  "sanantonioi": 45000, "santoni": 45000, "sanbernardino": 55000, "sanlorenzo": 35000,
+  "nuevaitalia": 55000, "paraguari": 55000, "pirayu": 55000, "piribebuy": 55000,
+  "presidentefranco": 50000, "puertopresidentefranco": 50000, "remansito": 60000,
+  "sanalberto": 55000, "santonio": 45000, "sanbernardino": 55000, "sanlorenzo": 35000,
   "santarita": 55000, "tobati": 55000, "villaelsa": 40000, "villahayes": 60000,
   "villarrica": 50000, "villeta": 55000, "yaguaron": 55000, "yguazu": 60000,
   "ypacarai": 55000, "ypane": 45000
@@ -153,38 +63,14 @@ const CITY_DELIVERY_PRICES: Record<string, number> = {
 // Función ESTRICTA para verificar cobertura
 const hasCoverage = (cityName: string): boolean => {
   if (!cityName) return false;
-  
   const normalizedInput = normalizeText(cityName);
-  
-  // Coincidencia exacta o parcial
-  for (const coverageCity of COVERAGE_CITIES_NORMALIZED) {
-    if (normalizedInput === coverageCity) return true;
-    if (coverageCity.includes(normalizedInput) && normalizedInput.length >= 4) return true;
-    if (normalizedInput.includes(coverageCity) && coverageCity.length >= 4) return true;
-  }
-  
-  return false;
+  return COVERAGE_CITIES_NORMALIZED.includes(normalizedInput);
 };
 
-// Función para obtener precio de delivery
 const getCityDeliveryPrice = (cityName: string): number | null => {
   if (!cityName) return null;
-  
   const normalizedInput = normalizeText(cityName);
-  
-  // Coincidencia exacta
-  if (CITY_DELIVERY_PRICES[normalizedInput]) {
-    return CITY_DELIVERY_PRICES[normalizedInput];
-  }
-  
-  // Búsqueda flexible
-  for (const [key, price] of Object.entries(CITY_DELIVERY_PRICES)) {
-    if (key === normalizedInput) return price;
-    if (key.includes(normalizedInput) && normalizedInput.length >= 4) return price;
-    if (normalizedInput.includes(key) && key.length >= 4) return price;
-  }
-  
-  return null;
+  return CITY_DELIVERY_PRICES[normalizedInput] || null;
 };
 
 function parseQuantity(value: any): number {
@@ -287,6 +173,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
   const [coverageFilter, setCoverageFilter] = useState<"all" | "covered" | "uncovered">("all");
   const [search, setSearch] = useState("");
+  const [selectedChart, setSelectedChart] = useState<"status" | "coverage" | "city">("status");
 
   const autoLoadRef = useRef(autoLoad);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -456,7 +343,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     
     const city = order[colKeys.city] || "";
     const deliveryPrice = getCityDeliveryPrice(city);
-    if (!deliveryPrice) { toast.warning(`⚠️ Ciudad "${city}" sin cobertura de delivery`); return false; }
+    if (!deliveryPrice) { toast.warning(`⚠️ Ciudad "${city}" sin cobertura`); return false; }
     
     const salePrice = getAmountFromRow(order, colKeys.amount);
     if (salePrice === 0) { toast.warning(`⚠️ No se detectó monto`); return false; }
@@ -519,52 +406,104 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return String(dateValue).split(' ')[0];
   };
 
-  // Dashboard stats
+  // ESTADÍSTICAS COMPLETAS PARA DASHBOARD
   const dashboardStats = useMemo(() => {
-    let totalVentas = 0, totalDelivery = 0, totalCostoProductos = 0, totalComisiones = 0;
-    let pedidosEnCobertura = 0;
-    const ciudadesUnicas = new Set<string>();
+    let totalPedidos = sheetOrders.length;
+    let conCobertura = 0;
+    let sinCobertura = 0;
+    let pendientes = 0;
+    let cargadoAuto = 0;
+    let cargadoManual = 0;
+    let aDropear = 0;
+    let totalVentas = 0;
+    let totalDelivery = 0;
+    let totalCostoProductos = 0;
+    let totalComisiones = 0;
+    let gananciaNeta = 0;
+    
+    const ciudadesMap = new Map<string, { count: number; covered: boolean }>();
     
     sheetOrders.forEach((order, idx) => {
-      const city = order[colKeys.city] || "";
-      const deliveryPrice = getCityDeliveryPrice(city);
-      
-      if (!deliveryPrice) return;
-      
+      const city = order[colKeys.city] || "Desconocida";
+      const covered = hasCoverage(city);
       const status = getRowStatus(idx);
-      if (status !== "CARGAR") return;
-      
-      ciudadesUnicas.add(city);
-      pedidosEnCobertura++;
-      
       const salePrice = getAmountFromRow(order, colKeys.amount);
-      if (salePrice > 0) {
-        totalVentas += salePrice;
-        totalDelivery += deliveryPrice;
-        
-        const productName = order[colKeys.product] || "";
-        const matched = matchProduct(productName);
-        const productCost = matched?.provider_price_gs || 0;
-        totalCostoProductos += productCost;
-        
-        const commission = salePrice - (productCost + deliveryPrice);
-        if (commission > 0) totalComisiones += commission;
+      const deliveryPrice = getCityDeliveryPrice(city) || 0;
+      const productName = order[colKeys.product] || "";
+      const matched = matchProduct(productName);
+      const productCost = matched?.provider_price_gs || 0;
+      
+      // Conteo de ciudades
+      const cityData = ciudadesMap.get(city) || { count: 0, covered };
+      cityData.count++;
+      ciudadesMap.set(city, cityData);
+      
+      // Cobertura
+      if (covered) {
+        conCobertura++;
+        if (status === "CARGAR") {
+          pendientes++;
+          totalVentas += salePrice;
+          totalDelivery += deliveryPrice;
+          totalCostoProductos += productCost;
+          const commission = salePrice - (productCost + deliveryPrice);
+          if (commission > 0) totalComisiones += commission;
+        }
+      } else {
+        sinCobertura++;
       }
+      
+      // Estados
+      if (status === "CARGADO") cargadoAuto++;
+      else if (status === "CARGADO_MANUAL") cargadoManual++;
+      else if (status === "A DROPEAR") aDropear++;
     });
     
-    const gananciaNeta = totalVentas - totalDelivery - totalCostoProductos;
+    gananciaNeta = totalVentas - totalDelivery - totalCostoProductos;
+    
+    // Top 5 ciudades
+    const topCiudades = Array.from(ciudadesMap.entries())
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, 5)
+      .map(([name, data]) => ({ name, count: data.count, covered: data.covered }));
     
     return {
-      pedidosEnCobertura,
+      totalPedidos,
+      conCobertura,
+      sinCobertura,
+      pendientes,
+      cargadoAuto,
+      cargadoManual,
+      aDropear,
       totalVentas,
       totalDelivery,
       totalCostoProductos,
       totalComisiones,
       gananciaNeta,
-      ciudadesCubiertas: ciudadesUnicas.size,
-      tasaConversion: sheetOrders.length > 0 ? Math.round((pedidosEnCobertura / sheetOrders.length) * 100) : 0,
+      topCiudades,
+      tasaCobertura: totalPedidos > 0 ? Math.round((conCobertura / totalPedidos) * 100) : 0,
+      tasaCarga: conCobertura > 0 ? Math.round(((cargadoAuto + cargadoManual) / conCobertura) * 100) : 0,
     };
   }, [sheetOrders, colKeys, matchProduct, getRowStatus]);
+
+  // Datos para gráficos
+  const statusChartData = [
+    { name: "Pendientes", value: dashboardStats.pendientes, color: "bg-blue-500" },
+    { name: "Cargado Auto", value: dashboardStats.cargadoAuto, color: "bg-green-500" },
+    { name: "Cargado Manual", value: dashboardStats.cargadoManual, color: "bg-emerald-500" },
+    { name: "A Dropear", value: dashboardStats.aDropear, color: "bg-yellow-500" },
+  ].filter(d => d.value > 0);
+
+  const coverageChartData = [
+    { name: "Con cobertura", value: dashboardStats.conCobertura, color: "bg-green-500" },
+    { name: "Sin cobertura", value: dashboardStats.sinCobertura, color: "bg-red-500" },
+  ].filter(d => d.value > 0);
+
+  const maxChartValue = Math.max(
+    ...statusChartData.map(d => d.value),
+    ...coverageChartData.map(d => d.value),
+    ...dashboardStats.topCiudades.map(c => c.count)
+  );
 
   // Filtros
   const filterByProduct = (order: SheetOrder, term: string) => {
@@ -636,54 +575,131 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
   return (
     <div className="app-card">
-      {/* Dashboard PRO */}
+      {/* Dashboard PRO Interactivo */}
       <div className="mb-6">
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
           <h3 className="text-lg font-extrabold">📦 Shopify Inbox — Lectura de Sheet</h3>
           {lastSync && <span className="text-xs text-muted-foreground">🔄 Última sync: {lastSync.toLocaleTimeString("es-PY")}</span>}
         </div>
         
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3">
-          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-blue-500/20 to-blue-600/5 p-3 border border-blue-500/20">
-            <div className="absolute top-0 right-0 text-4xl opacity-10">📍</div>
-            <div className="text-2xl font-bold text-blue-400">{dashboardStats.pedidosEnCobertura}</div>
-            <div className="text-xs text-muted-foreground">Pedidos con cobertura</div>
+        {/* Tarjetas KPI principales */}
+        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2 mb-4">
+          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-blue-500/20 to-blue-600/5 p-2 border border-blue-500/20">
+            <div className="text-xl font-bold text-blue-400">{dashboardStats.totalPedidos}</div>
+            <div className="text-[10px] text-muted-foreground">Total Pedidos</div>
           </div>
-          
-          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-green-500/20 to-green-600/5 p-3 border border-green-500/20">
-            <div className="absolute top-0 right-0 text-4xl opacity-10">💰</div>
-            <div className="text-lg font-bold text-green-400">{nf(dashboardStats.totalVentas)} Gs</div>
-            <div className="text-xs text-muted-foreground">Total Ventas</div>
+          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-green-500/20 to-green-600/5 p-2 border border-green-500/20">
+            <div className="text-xl font-bold text-green-400">{dashboardStats.conCobertura}</div>
+            <div className="text-[10px] text-muted-foreground">📍 Con cobertura</div>
           </div>
-          
-          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-orange-500/20 to-orange-600/5 p-3 border border-orange-500/20">
-            <div className="absolute top-0 right-0 text-4xl opacity-10">🚚</div>
-            <div className="text-lg font-bold text-orange-400">{nf(dashboardStats.totalDelivery)} Gs</div>
-            <div className="text-xs text-muted-foreground">Total Delivery</div>
+          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-red-500/20 to-red-600/5 p-2 border border-red-500/20">
+            <div className="text-xl font-bold text-red-400">{dashboardStats.sinCobertura}</div>
+            <div className="text-[10px] text-muted-foreground">❌ Sin cobertura</div>
           </div>
-          
-          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-purple-500/20 to-purple-600/5 p-3 border border-purple-500/20">
-            <div className="absolute top-0 right-0 text-4xl opacity-10">📦</div>
-            <div className="text-lg font-bold text-purple-400">{nf(dashboardStats.totalCostoProductos)} Gs</div>
-            <div className="text-xs text-muted-foreground">Costo Productos</div>
+          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-blue-500/20 to-blue-600/5 p-2 border border-blue-500/20">
+            <div className="text-xl font-bold text-blue-400">{dashboardStats.pendientes}</div>
+            <div className="text-[10px] text-muted-foreground">⏳ Pendientes</div>
           </div>
-          
-          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-pink-500/20 to-pink-600/5 p-3 border border-pink-500/20">
-            <div className="absolute top-0 right-0 text-4xl opacity-10">💎</div>
-            <div className="text-lg font-bold text-pink-400">{nf(dashboardStats.totalComisiones)} Gs</div>
-            <div className="text-xs text-muted-foreground">Comisiones</div>
+          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-green-500/20 to-green-600/5 p-2 border border-green-500/20">
+            <div className="text-xl font-bold text-green-400">{dashboardStats.cargadoAuto}</div>
+            <div className="text-[10px] text-muted-foreground">✅ Auto</div>
           </div>
-          
-          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-emerald-500/20 to-emerald-600/5 p-3 border border-emerald-500/20">
-            <div className="absolute top-0 right-0 text-4xl opacity-10">🏆</div>
-            <div className="text-lg font-bold text-emerald-400">{nf(dashboardStats.gananciaNeta)} Gs</div>
-            <div className="text-xs text-muted-foreground">Ganancia Neta</div>
+          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-emerald-500/20 to-emerald-600/5 p-2 border border-emerald-500/20">
+            <div className="text-xl font-bold text-emerald-400">{dashboardStats.cargadoManual}</div>
+            <div className="text-[10px] text-muted-foreground">✍️ Manual</div>
           </div>
-          
-          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-cyan-500/20 to-cyan-600/5 p-3 border border-cyan-500/20">
-            <div className="absolute top-0 right-0 text-4xl opacity-10">📊</div>
-            <div className="text-2xl font-bold text-cyan-400">{dashboardStats.tasaConversion}%</div>
-            <div className="text-xs text-muted-foreground">Tasa conversión</div>
+          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-yellow-500/20 to-yellow-600/5 p-2 border border-yellow-500/20">
+            <div className="text-xl font-bold text-yellow-400">{dashboardStats.aDropear}</div>
+            <div className="text-[10px] text-muted-foreground">⚠️ Dropear</div>
+          </div>
+          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-purple-500/20 to-purple-600/5 p-2 border border-purple-500/20">
+            <div className="text-lg font-bold text-purple-400">{dashboardStats.tasaCobertura}%</div>
+            <div className="text-[10px] text-muted-foreground">Tasa cobertura</div>
+          </div>
+        </div>
+
+        {/* Gráficos interactivos */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+          {/* Gráfico de Estados */}
+          <div className="app-card !p-3">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-sm font-bold">📊 Por Estado</h4>
+              <button onClick={() => setSelectedChart("status")} className="text-[10px] text-muted-foreground hover:text-foreground">Actualizar</button>
+            </div>
+            <div className="space-y-2">
+              {statusChartData.map((item) => (
+                <div key={item.name} className="cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setActiveFilter(item.name === "Pendientes" ? "CARGAR" : item.name === "Cargado Auto" ? "CARGADO" : item.name === "Cargado Manual" ? "CARGADO_MANUAL" : "A DROPEAR")}>
+                  <div className="flex justify-between text-xs mb-0.5">
+                    <span>{item.name}</span>
+                    <span className="font-bold">{item.value}</span>
+                  </div>
+                  <div className="w-full bg-muted rounded-full h-2">
+                    <div className={`${item.color} h-2 rounded-full transition-all duration-500`} style={{ width: `${(item.value / maxChartValue) * 100}%` }} />
+                  </div>
+                </div>
+              ))}
+              {statusChartData.length === 0 && <div className="text-xs text-muted-foreground text-center py-4">No hay datos</div>}
+            </div>
+            <div className="text-[10px] text-muted-foreground mt-2 text-center">Click en barra para filtrar</div>
+          </div>
+
+          {/* Gráfico de Cobertura */}
+          <div className="app-card !p-3">
+            <div className="flex items-center justify-between mb-2">
+              <h4 className="text-sm font-bold">📍 Por Cobertura</h4>
+              <button onClick={() => setSelectedChart("coverage")} className="text-[10px] text-muted-foreground hover:text-foreground">Actualizar</button>
+            </div>
+            <div className="space-y-2">
+              {coverageChartData.map((item) => (
+                <div key={item.name} className="cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setCoverageFilter(item.name === "Con cobertura" ? "covered" : "uncovered")}>
+                  <div className="flex justify-between text-xs mb-0.5">
+                    <span>{item.name}</span>
+                    <span className="font-bold">{item.value}</span>
+                  </div>
+                  <div className="w-full bg-muted rounded-full h-2">
+                    <div className={`${item.color} h-2 rounded-full transition-all duration-500`} style={{ width: `${(item.value / dashboardStats.totalPedidos) * 100}%` }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="text-[10px] text-muted-foreground mt-2 text-center">Click en barra para filtrar</div>
+          </div>
+
+          {/* Top Ciudades */}
+          <div className="app-card !p-3">
+            <h4 className="text-sm font-bold mb-2">🏙️ Top Ciudades</h4>
+            <div className="space-y-2 max-h-[120px] overflow-y-auto">
+              {dashboardStats.topCiudades.map((city, i) => (
+                <div key={city.name} className="flex justify-between items-center text-xs cursor-pointer hover:bg-muted/50 p-1 rounded" onClick={() => { setSearchType("city"); setCityFilter(city.name); }}>
+                  <div className="flex items-center gap-1">
+                    <span className="text-muted-foreground">#{i+1}</span>
+                    <span className={city.covered ? "text-green-400" : "text-red-400"}>{city.name.length > 20 ? city.name.substring(0, 20) + "..." : city.name}</span>
+                  </div>
+                  <span className="font-bold">{city.count}</span>
+                </div>
+              ))}
+            </div>
+            <div className="text-[10px] text-muted-foreground mt-2 text-center">Click en ciudad para buscar</div>
+          </div>
+        </div>
+
+        {/* Métricas financieras */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+          <div className="rounded-xl bg-gradient-to-br from-green-500/10 to-green-600/5 p-2 border border-green-500/20">
+            <div className="text-xs text-muted-foreground">💰 Total Ventas</div>
+            <div className="text-sm font-bold text-green-400">{nf(dashboardStats.totalVentas)} Gs</div>
+          </div>
+          <div className="rounded-xl bg-gradient-to-br from-orange-500/10 to-orange-600/5 p-2 border border-orange-500/20">
+            <div className="text-xs text-muted-foreground">🚚 Delivery</div>
+            <div className="text-sm font-bold text-orange-400">{nf(dashboardStats.totalDelivery)} Gs</div>
+          </div>
+          <div className="rounded-xl bg-gradient-to-br from-purple-500/10 to-purple-600/5 p-2 border border-purple-500/20">
+            <div className="text-xs text-muted-foreground">📦 Costo Productos</div>
+            <div className="text-sm font-bold text-purple-400">{nf(dashboardStats.totalCostoProductos)} Gs</div>
+          </div>
+          <div className="rounded-xl bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 p-2 border border-emerald-500/20">
+            <div className="text-xs text-muted-foreground">🏆 Ganancia Neta</div>
+            <div className="text-sm font-bold text-emerald-400">{nf(dashboardStats.gananciaNeta)} Gs</div>
           </div>
         </div>
       </div>
@@ -703,7 +719,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         </div>
       </div>
 
-      {/* Filtros de estado */}
+      {/* Filtros rápidos */}
       <div className="flex flex-wrap gap-2 mb-4 border-b border-border pb-3">
         <button onClick={() => changeFilter("TODOS")} className={`px-3 py-1.5 rounded-lg text-sm font-medium ${activeFilter === "TODOS" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>📋 Todos ({counts.total})</button>
         <button onClick={() => changeFilter("CARGAR")} className={`px-3 py-1.5 rounded-lg text-sm font-medium ${activeFilter === "CARGAR" ? "bg-blue-500 text-white" : "bg-blue-500/10 text-blue-400"}`}>⏳ Pendientes ({counts.cargar})</button>
@@ -712,15 +728,15 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         <button onClick={() => changeFilter("A DROPEAR")} className={`px-3 py-1.5 rounded-lg text-sm font-medium ${activeFilter === "A DROPEAR" ? "bg-yellow-500 text-white" : "bg-yellow-500/10 text-yellow-400"}`}>⚠️ Dropear ({counts.aDropear})</button>
       </div>
 
-      {/* Filtro de cobertura */}
+      {/* Filtros adicionales */}
       <div className="flex flex-wrap gap-2 mb-3 items-center">
-        <span className="text-xs text-muted-foreground">📍 Filtrar por cobertura:</span>
+        <span className="text-xs text-muted-foreground">📍 Cobertura:</span>
         <button onClick={() => setCoverageFilter("all")} className={`px-2 py-1 rounded text-xs ${coverageFilter === "all" ? "bg-primary" : "bg-muted"}`}>Todas</button>
         <button onClick={() => setCoverageFilter("covered")} className={`px-2 py-1 rounded text-xs ${coverageFilter === "covered" ? "bg-green-500 text-white" : "bg-green-500/10 text-green-400"}`}>✅ Con cobertura</button>
         <button onClick={() => setCoverageFilter("uncovered")} className={`px-2 py-1 rounded text-xs ${coverageFilter === "uncovered" ? "bg-red-500 text-white" : "bg-red-500/10 text-red-400"}`}>❌ Sin cobertura</button>
       </div>
 
-      {/* Búsqueda */}
+      {/* Buscador */}
       <div className="space-y-2 mb-3">
         <div className="flex gap-2 flex-wrap">
           <button onClick={() => setSearchType("product")} className={`px-3 py-1.5 rounded-lg text-sm ${searchType === "product" ? "bg-blue-500 text-white" : "bg-muted"}`}>🏷️ Producto</button>
@@ -729,27 +745,11 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         </div>
         
         {searchType === "product" && (
-          <div className="relative">
-            <input className="app-input w-full" placeholder={`Buscar en ${colKeys.product || "PRODUCTO"}...`} value={productSearch} onChange={(e) => setProductSearch(e.target.value)} />
-            {productSuggestions.length > 0 && (
-              <div className="absolute z-10 mt-1 w-full bg-background border rounded-lg shadow-lg">
-                {productSuggestions.map((s, i) => (<button key={i} className="w-full text-left px-3 py-2 hover:bg-muted text-sm" onClick={() => setProductSearch(s)}>{s}</button>))}
-              </div>
-            )}
-          </div>
+          <input className="app-input w-full" placeholder={`Buscar en ${colKeys.product || "PRODUCTO"}...`} value={productSearch} onChange={(e) => setProductSearch(e.target.value)} />
         )}
-
         {searchType === "city" && (
-          <div className="relative">
-            <input className="app-input w-full" placeholder="Buscar por ciudad..." value={cityFilter} onChange={(e) => setCityFilter(e.target.value)} />
-            {citySuggestions.length > 0 && (
-              <div className="absolute z-10 mt-1 w-full bg-background border rounded-lg shadow-lg">
-                {citySuggestions.map((s, i) => (<button key={i} className="w-full text-left px-3 py-2 hover:bg-muted text-sm" onClick={() => setCityFilter(s)}>📍 {s}</button>))}
-              </div>
-            )}
-          </div>
+          <input className="app-input w-full" placeholder="Buscar por ciudad..." value={cityFilter} onChange={(e) => setCityFilter(e.target.value)} />
         )}
-
         {searchType === "all" && (
           <input className="app-input w-full" placeholder="Buscar en todos los campos..." value={search} onChange={(e) => setSearch(e.target.value)} />
         )}
@@ -762,19 +762,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         <table className="app-table min-w-[1500px]">
           <thead>
             <tr>
-              <th>#</th>
-              <th>ID Pedido</th>
-              <th>Fecha</th>
-              <th>Cliente</th>
-              <th>Teléfono</th>
-              <th>Ciudad</th>
-              <th>Calle</th>
-              <th>Producto</th>
-              <th>Cant</th>
-              <th className="text-right">Venta</th>
-              <th className="text-right">Delivery</th>
-              <th>Estado</th>
-              <th>Acciones</th>
+              <th>#</th><th>ID Pedido</th><th>Fecha</th><th>Cliente</th><th>Teléfono</th><th>Ciudad</th><th>Calle</th><th>Producto</th><th>Cant</th><th className="text-right">Venta</th><th className="text-right">Delivery</th><th>Estado</th><th>Acciones</th>
             </tr>
           </thead>
           <tbody>
@@ -792,11 +780,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                 <tr key={idx} className={getRowClassName(status, covered)}>
                   <td className="text-xs">{idx + 1}</td>
                   <td className="text-xs font-mono font-bold">
-                    {orderNumber ? (
-                      <span className="text-green-400">{orderNumber}</span>
-                    ) : (
-                      <span className="text-muted-foreground">—</span>
-                    )}
+                    {orderNumber ? <span className="text-green-400">{orderNumber}</span> : <span className="text-muted-foreground">—</span>}
                   </td>
                   <td className="text-xs whitespace-nowrap">{orderDate}</td>
                   <td className="text-xs font-medium">{order[colKeys.name] || "—"}</td>
@@ -804,7 +788,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                   <td className={`text-xs ${!covered && city ? "text-red-400 font-semibold" : "text-green-400"}`}>
                     {city || "—"}
                     {deliveryPrice && <span className="text-[10px] ml-1">({nf(deliveryPrice)} Gs)</span>}
-                    {!covered && city && <span className="text-[10px] ml-1">⚠️</span>}
                   </td>
                   <td className="text-xs">{order[colKeys.street] || "—"}</td>
                   <td className="text-xs truncate max-w-[180px]" title={order[colKeys.product] || ""}>
@@ -834,9 +817,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                     <button className="nav-btn !py-1 !px-2 !text-[11px]" onClick={() => handleOpenForm(order, idx)}>
                       📝 Formulario
                     </button>
-                    {status === "CARGAR" && !covered && (
-                      <span className="text-[10px] text-red-400 self-center">🚫 Sin cobertura</span>
-                    )}
                   </td>
                 </tr>
               );
