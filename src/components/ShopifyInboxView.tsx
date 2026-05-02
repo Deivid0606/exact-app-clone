@@ -31,16 +31,104 @@ const normalizeText = (text: string): string => {
     .trim();
 };
 
-// LISTA EXACTA DE CIUDADES CON COBERTURA
+// LISTA COMPLETA DE CIUDADES CON COBERTURA (TODAS LAS VARIANTES NORMALIZADAS)
 const COVERAGE_CITIES_NORMALIZED: string[] = [
-  "altos", "aregua", "asuncion", "atyra", "benjaminaceval", "caacupe", "capiata",
-  "ciudaddeleste", "coloniyguazu", "emboscada", "eusebioayala", "fernandodelamora",
-  "guarambare", "hernandarias", "interiorpagoanticipado", "ita", "itacurubidelacordillera",
-  "itaugua", "jaugustosaldívar", "juanleonmallorquin", "lambare", "limpio", "lomagrande",
-  "luque", "marianoroquealonso", "mingaguazu", "ñemby", "nuevaitalia", "paraguari",
-  "pirayu", "piribebuy", "presidentefranco", "puertopresidentefranco", "remansito",
-  "sanalberto", "santonio", "sanbernardino", "sanlorenzo", "santarita", "tobati",
-  "villaelsa", "villahayes", "villarrica", "villeta", "yaguaron", "yguazu", "ypacarai", "ypane"
+  // Altos
+  "altos",
+  // Areguá
+  "aregua",
+  // Asunción
+  "asuncion",
+  // Atyrá
+  "atyra",
+  // Benjamín Aceval
+  "benjaminaceval",
+  // Caacupé
+  "caacupe",
+  // Capiatá
+  "capiata",
+  // Ciudad del Este
+  "ciudaddeleste",
+  // Colonia Yguazú
+  "coloniyguazu",
+  // Emboscada
+  "emboscada",
+  // Eusebio Ayala
+  "eusebioayala",
+  // Fernando de la Mora
+  "fernandodelamora",
+  // Guarambaré
+  "guarambare",
+  // Hernandarias
+  "hernandarias",
+  // INTERIOR PAGO ANTICIPADO
+  "interiorpagoanticipado",
+  // Itá
+  "ita",
+  // Itacurubí de la Cordillera
+  "itacurubidelacordillera",
+  // Itauguá
+  "itaugua",
+  // J. Augusto Saldívar
+  "jaugustosaldívar",
+  // Juan León Mallorquín
+  "juanleonmallorquin",
+  // Lambaré
+  "lambare",
+  // Limpio
+  "limpio",
+  // Loma Grande
+  "lomagrande",
+  // Luque
+  "luque",
+  // Mariano Roque Alonso
+  "marianoroquealonso",
+  // Minga Guazú
+  "mingaguazu",
+  // Ñemby (con y sin ñ)
+  "ñemby", "nemby",
+  // Nueva Italia
+  "nuevaitalia",
+  // Paraguarí
+  "paraguari",
+  // Pirayú
+  "pirayu",
+  // Piribebuy
+  "piribebuy",
+  // Presidente Franco
+  "presidentefranco",
+  // Puerto Presidente Franco
+  "puertopresidentefranco", "puertopdtefranco",
+  // Remansito
+  "remansito",
+  // San Alberto
+  "sanalberto",
+  // San Antonio
+  "santonio", "sanantonioi",
+  // San Bernardino
+  "sanbernardino",
+  // San Lorenzo
+  "sanlorenzo",
+  // Santa Rita
+  "santarita",
+  // Tobatí
+  "tobati",
+  // Villa Elisa
+  "villaelsa",
+  // Villa Hayes
+  "villahayes",
+  // Villarrica
+  "villarrica",
+  // Villeta
+  "villeta",
+  // Yaguarón
+  "yaguaron",
+  // Yguazú
+  "yguazu",
+  // Ypacaraí
+  "ypacarai",
+  // Ypané
+  "ypane"
 ];
 
 // Precios de delivery
@@ -52,25 +140,38 @@ const CITY_DELIVERY_PRICES: Record<string, number> = {
   "itacurubidelacordillera": 55000, "itaugua": 45000, "jaugustosaldívar": 45000,
   "juanleonmallorquin": 60000, "lambare": 35000, "limpio": 40000, "lomagrande": 55000,
   "luque": 35000, "marianoroquealonso": 40000, "mingaguazu": 50000, "ñemby": 40000,
-  "nuevaitalia": 55000, "paraguari": 55000, "pirayu": 55000, "piribebuy": 55000,
-  "presidentefranco": 50000, "puertopresidentefranco": 50000, "remansito": 60000,
-  "sanalberto": 55000, "santonio": 45000, "sanbernardino": 55000, "sanlorenzo": 35000,
-  "santarita": 55000, "tobati": 55000, "villaelsa": 40000, "villahayes": 60000,
-  "villarrica": 50000, "villeta": 55000, "yaguaron": 55000, "yguazu": 60000,
-  "ypacarai": 55000, "ypane": 45000
+  "nemby": 40000, "nuevaitalia": 55000, "paraguari": 55000, "pirayu": 55000,
+  "piribebuy": 55000, "presidentefranco": 50000, "puertopresidentefranco": 50000,
+  "puertopdtefranco": 50000, "remansito": 60000, "sanalberto": 55000, "santonio": 45000,
+  "sanantonioi": 45000, "sanbernardino": 55000, "sanlorenzo": 35000, "santarita": 55000,
+  "tobati": 55000, "villaelsa": 40000, "villahayes": 60000, "villarrica": 50000,
+  "villeta": 55000, "yaguaron": 55000, "yguazu": 60000, "ypacarai": 55000, "ypane": 45000
 };
 
-// Función ESTRICTA para verificar cobertura
+// Función EXACTA para verificar cobertura
 const hasCoverage = (cityName: string): boolean => {
   if (!cityName) return false;
   const normalizedInput = normalizeText(cityName);
-  return COVERAGE_CITIES_NORMALIZED.includes(normalizedInput);
+  
+  // Verificar si está EXACTAMENTE en la lista
+  for (const coverageCity of COVERAGE_CITIES_NORMALIZED) {
+    if (normalizedInput === coverageCity) {
+      return true;
+    }
+  }
+  
+  // Para casos como "sanantonioi" (con i al final)
+  return false;
 };
 
 const getCityDeliveryPrice = (cityName: string): number | null => {
   if (!cityName) return null;
   const normalizedInput = normalizeText(cityName);
-  return CITY_DELIVERY_PRICES[normalizedInput] || null;
+  
+  for (const [key, price] of Object.entries(CITY_DELIVERY_PRICES)) {
+    if (normalizedInput === key) return price;
+  }
+  return null;
 };
 
 function parseQuantity(value: any): number {
@@ -169,14 +270,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [searchType, setSearchType] = useState<"all" | "product" | "city">("product");
   const [productSearch, setProductSearch] = useState("");
   const [cityFilter, setCityFilter] = useState("");
-  const [productSuggestions, setProductSuggestions] = useState<string[]>([]);
-  const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
   const [coverageFilter, setCoverageFilter] = useState<"all" | "covered" | "uncovered">("all");
   const [search, setSearch] = useState("");
-  const [selectedChart, setSelectedChart] = useState<"status" | "coverage" | "city">("status");
 
   const autoLoadRef = useRef(autoLoad);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Detección de columnas
   const colKeys = useMemo(() => {
@@ -313,21 +410,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     setLoading(false);
   }, [sheetUrl]);
 
-  useEffect(() => {
-    if (productSearch.length > 1 && searchType === "product") {
-      const searchLower = productSearch.toLowerCase();
-      setProductSuggestions(products.filter(p => p.title?.toLowerCase().includes(searchLower)).map(p => p.title).slice(0, 5));
-    } else setProductSuggestions([]);
-  }, [productSearch, products, searchType]);
-
-  useEffect(() => {
-    if (cityFilter.length > 1 && searchType === "city" && colKeys.city) {
-      const uniqueCities = new Set(sheetOrders.map(o => o[colKeys.city]).filter(c => c?.trim()));
-      const searchLower = cityFilter.toLowerCase();
-      setCitySuggestions(Array.from(uniqueCities).filter(c => c.toLowerCase().includes(searchLower)).slice(0, 5));
-    } else setCitySuggestions([]);
-  }, [cityFilter, sheetOrders, colKeys.city, searchType]);
-
   const matchProduct = useCallback((rawName: string) => {
     if (!rawName) return null;
     const cleanName = normalizeText(rawName);
@@ -366,7 +448,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     if (error) { toast.error("Error: " + error.message); return false; }
     
     await setRowStatus(String(idx), newStatus, orderId);
-    toast.success(`✅ Pedido ${orderId} cargado | Comisión: ${nf(commission)} Gs`);
+    toast.success(`✅ Pedido ${orderId} cargado`);
     return true;
   }, [colKeys, matchProduct, myEmail, setRowStatus]);
 
@@ -406,25 +488,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return String(dateValue).split(' ')[0];
   };
 
-  // ESTADÍSTICAS COMPLETAS PARA DASHBOARD
+  // ESTADÍSTICAS
   const dashboardStats = useMemo(() => {
-    let totalPedidos = sheetOrders.length;
-    let conCobertura = 0;
-    let sinCobertura = 0;
-    let pendientes = 0;
-    let cargadoAuto = 0;
-    let cargadoManual = 0;
-    let aDropear = 0;
-    let totalVentas = 0;
-    let totalDelivery = 0;
-    let totalCostoProductos = 0;
-    let totalComisiones = 0;
-    let gananciaNeta = 0;
-    
-    const ciudadesMap = new Map<string, { count: number; covered: boolean }>();
+    let conCobertura = 0, sinCobertura = 0;
+    let pendientes = 0, cargadoAuto = 0, cargadoManual = 0, aDropear = 0;
+    let totalVentas = 0, totalDelivery = 0, totalCostoProductos = 0;
     
     sheetOrders.forEach((order, idx) => {
-      const city = order[colKeys.city] || "Desconocida";
+      const city = order[colKeys.city] || "";
       const covered = hasCoverage(city);
       const status = getRowStatus(idx);
       const salePrice = getAmountFromRow(order, colKeys.amount);
@@ -433,12 +504,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       const matched = matchProduct(productName);
       const productCost = matched?.provider_price_gs || 0;
       
-      // Conteo de ciudades
-      const cityData = ciudadesMap.get(city) || { count: 0, covered };
-      cityData.count++;
-      ciudadesMap.set(city, cityData);
-      
-      // Cobertura
       if (covered) {
         conCobertura++;
         if (status === "CARGAR") {
@@ -446,64 +511,25 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           totalVentas += salePrice;
           totalDelivery += deliveryPrice;
           totalCostoProductos += productCost;
-          const commission = salePrice - (productCost + deliveryPrice);
-          if (commission > 0) totalComisiones += commission;
         }
       } else {
         sinCobertura++;
       }
       
-      // Estados
       if (status === "CARGADO") cargadoAuto++;
       else if (status === "CARGADO_MANUAL") cargadoManual++;
       else if (status === "A DROPEAR") aDropear++;
     });
     
-    gananciaNeta = totalVentas - totalDelivery - totalCostoProductos;
-    
-    // Top 5 ciudades
-    const topCiudades = Array.from(ciudadesMap.entries())
-      .sort((a, b) => b[1].count - a[1].count)
-      .slice(0, 5)
-      .map(([name, data]) => ({ name, count: data.count, covered: data.covered }));
+    const gananciaNeta = totalVentas - totalDelivery - totalCostoProductos;
+    const totalPedidos = sheetOrders.length;
     
     return {
-      totalPedidos,
-      conCobertura,
-      sinCobertura,
-      pendientes,
-      cargadoAuto,
-      cargadoManual,
-      aDropear,
-      totalVentas,
-      totalDelivery,
-      totalCostoProductos,
-      totalComisiones,
-      gananciaNeta,
-      topCiudades,
+      totalPedidos, conCobertura, sinCobertura, pendientes, cargadoAuto, cargadoManual, aDropear,
+      totalVentas, totalDelivery, totalCostoProductos, gananciaNeta,
       tasaCobertura: totalPedidos > 0 ? Math.round((conCobertura / totalPedidos) * 100) : 0,
-      tasaCarga: conCobertura > 0 ? Math.round(((cargadoAuto + cargadoManual) / conCobertura) * 100) : 0,
     };
   }, [sheetOrders, colKeys, matchProduct, getRowStatus]);
-
-  // Datos para gráficos
-  const statusChartData = [
-    { name: "Pendientes", value: dashboardStats.pendientes, color: "bg-blue-500" },
-    { name: "Cargado Auto", value: dashboardStats.cargadoAuto, color: "bg-green-500" },
-    { name: "Cargado Manual", value: dashboardStats.cargadoManual, color: "bg-emerald-500" },
-    { name: "A Dropear", value: dashboardStats.aDropear, color: "bg-yellow-500" },
-  ].filter(d => d.value > 0);
-
-  const coverageChartData = [
-    { name: "Con cobertura", value: dashboardStats.conCobertura, color: "bg-green-500" },
-    { name: "Sin cobertura", value: dashboardStats.sinCobertura, color: "bg-red-500" },
-  ].filter(d => d.value > 0);
-
-  const maxChartValue = Math.max(
-    ...statusChartData.map(d => d.value),
-    ...coverageChartData.map(d => d.value),
-    ...dashboardStats.topCiudades.map(c => c.count)
-  );
 
   // Filtros
   const filterByProduct = (order: SheetOrder, term: string) => {
@@ -551,7 +577,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       const status = getRowStatus(idx);
       const city = order[colKeys.city] || "";
       const covered = hasCoverage(city);
-      
       if (status === "CARGAR" && covered) cargar++;
       else if (status === "CARGADO") cargado++;
       else if (status === "CARGADO_MANUAL") cargadoManual++;
@@ -563,269 +588,228 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const changeFilter = (filter: FilterType) => setActiveFilter(filter);
   
   const getRowClassName = (status: OrderStatus, hasCoverageCity: boolean) => {
-    if (status === "CARGADO" || status === "CARGADO_MANUAL") return "bg-green-500/10";
-    if (status === "A DROPEAR") return "bg-yellow-500/10";
-    if (!hasCoverageCity) return "bg-red-500/5 hover:bg-red-500/10";
-    return "hover:bg-muted/50";
+    if (status === "CARGADO" || status === "CARGADO_MANUAL") return "bg-gradient-to-r from-green-500/10 to-transparent";
+    if (status === "A DROPEAR") return "bg-gradient-to-r from-yellow-500/10 to-transparent";
+    if (!hasCoverageCity) return "bg-gradient-to-r from-red-500/5 to-transparent";
+    return "hover:bg-muted/30";
   };
 
   if (loadingStatuses) {
-    return <div className="app-card"><div className="flex justify-center py-8"><div className="btn-spinner mr-2" />Cargando...</div></div>;
+    return <div className="flex items-center justify-center h-64"><div className="btn-spinner mr-2" />Cargando...</div>;
   }
 
   return (
-    <div className="app-card">
-      {/* Dashboard PRO Interactivo */}
-      <div className="mb-6">
-        <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
-          <h3 className="text-lg font-extrabold">📦 Shopify Inbox — Lectura de Sheet</h3>
-          {lastSync && <span className="text-xs text-muted-foreground">🔄 Última sync: {lastSync.toLocaleTimeString("es-PY")}</span>}
-        </div>
-        
-        {/* Tarjetas KPI principales */}
-        <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2 mb-4">
-          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-blue-500/20 to-blue-600/5 p-2 border border-blue-500/20">
-            <div className="text-xl font-bold text-blue-400">{dashboardStats.totalPedidos}</div>
-            <div className="text-[10px] text-muted-foreground">Total Pedidos</div>
-          </div>
-          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-green-500/20 to-green-600/5 p-2 border border-green-500/20">
-            <div className="text-xl font-bold text-green-400">{dashboardStats.conCobertura}</div>
-            <div className="text-[10px] text-muted-foreground">📍 Con cobertura</div>
-          </div>
-          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-red-500/20 to-red-600/5 p-2 border border-red-500/20">
-            <div className="text-xl font-bold text-red-400">{dashboardStats.sinCobertura}</div>
-            <div className="text-[10px] text-muted-foreground">❌ Sin cobertura</div>
-          </div>
-          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-blue-500/20 to-blue-600/5 p-2 border border-blue-500/20">
-            <div className="text-xl font-bold text-blue-400">{dashboardStats.pendientes}</div>
-            <div className="text-[10px] text-muted-foreground">⏳ Pendientes</div>
-          </div>
-          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-green-500/20 to-green-600/5 p-2 border border-green-500/20">
-            <div className="text-xl font-bold text-green-400">{dashboardStats.cargadoAuto}</div>
-            <div className="text-[10px] text-muted-foreground">✅ Auto</div>
-          </div>
-          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-emerald-500/20 to-emerald-600/5 p-2 border border-emerald-500/20">
-            <div className="text-xl font-bold text-emerald-400">{dashboardStats.cargadoManual}</div>
-            <div className="text-[10px] text-muted-foreground">✍️ Manual</div>
-          </div>
-          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-yellow-500/20 to-yellow-600/5 p-2 border border-yellow-500/20">
-            <div className="text-xl font-bold text-yellow-400">{dashboardStats.aDropear}</div>
-            <div className="text-[10px] text-muted-foreground">⚠️ Dropear</div>
-          </div>
-          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-purple-500/20 to-purple-600/5 p-2 border border-purple-500/20">
-            <div className="text-lg font-bold text-purple-400">{dashboardStats.tasaCobertura}%</div>
-            <div className="text-[10px] text-muted-foreground">Tasa cobertura</div>
+    <div className="space-y-4">
+      {/* DASHBOARD ELEGANTE */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Tarjeta Total Pedidos */}
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 p-4 shadow-lg border border-slate-700">
+          <div className="absolute top-0 right-0 w-20 h-20 bg-blue-500/10 rounded-full -mr-10 -mt-10"></div>
+          <div className="relative z-10">
+            <div className="text-3xl font-bold text-blue-400">{dashboardStats.totalPedidos}</div>
+            <div className="text-sm text-slate-400 mt-1">Total Pedidos</div>
+            <div className="mt-2 text-xs text-slate-500">📦 En el sheet</div>
           </div>
         </div>
 
-        {/* Gráficos interactivos */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
-          {/* Gráfico de Estados */}
-          <div className="app-card !p-3">
-            <div className="flex items-center justify-between mb-2">
-              <h4 className="text-sm font-bold">📊 Por Estado</h4>
-              <button onClick={() => setSelectedChart("status")} className="text-[10px] text-muted-foreground hover:text-foreground">Actualizar</button>
+        {/* Tarjeta Cobertura */}
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 p-4 shadow-lg border border-slate-700">
+          <div className="absolute top-0 right-0 w-20 h-20 bg-green-500/10 rounded-full -mr-10 -mt-10"></div>
+          <div className="relative z-10">
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl font-bold text-green-400">{dashboardStats.conCobertura}</span>
+              <span className="text-lg text-slate-500">/ {dashboardStats.totalPedidos}</span>
             </div>
-            <div className="space-y-2">
-              {statusChartData.map((item) => (
-                <div key={item.name} className="cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setActiveFilter(item.name === "Pendientes" ? "CARGAR" : item.name === "Cargado Auto" ? "CARGADO" : item.name === "Cargado Manual" ? "CARGADO_MANUAL" : "A DROPEAR")}>
-                  <div className="flex justify-between text-xs mb-0.5">
-                    <span>{item.name}</span>
-                    <span className="font-bold">{item.value}</span>
-                  </div>
-                  <div className="w-full bg-muted rounded-full h-2">
-                    <div className={`${item.color} h-2 rounded-full transition-all duration-500`} style={{ width: `${(item.value / maxChartValue) * 100}%` }} />
-                  </div>
-                </div>
-              ))}
-              {statusChartData.length === 0 && <div className="text-xs text-muted-foreground text-center py-4">No hay datos</div>}
+            <div className="text-sm text-slate-400 mt-1">Con cobertura</div>
+            <div className="mt-2">
+              <div className="w-full bg-slate-700 rounded-full h-1.5">
+                <div className="bg-green-500 h-1.5 rounded-full transition-all duration-500" style={{ width: `${dashboardStats.tasaCobertura}%` }} />
+              </div>
+              <div className="text-xs text-slate-500 mt-1">{dashboardStats.tasaCobertura}% del total</div>
             </div>
-            <div className="text-[10px] text-muted-foreground mt-2 text-center">Click en barra para filtrar</div>
-          </div>
-
-          {/* Gráfico de Cobertura */}
-          <div className="app-card !p-3">
-            <div className="flex items-center justify-between mb-2">
-              <h4 className="text-sm font-bold">📍 Por Cobertura</h4>
-              <button onClick={() => setSelectedChart("coverage")} className="text-[10px] text-muted-foreground hover:text-foreground">Actualizar</button>
-            </div>
-            <div className="space-y-2">
-              {coverageChartData.map((item) => (
-                <div key={item.name} className="cursor-pointer hover:opacity-80 transition-opacity" onClick={() => setCoverageFilter(item.name === "Con cobertura" ? "covered" : "uncovered")}>
-                  <div className="flex justify-between text-xs mb-0.5">
-                    <span>{item.name}</span>
-                    <span className="font-bold">{item.value}</span>
-                  </div>
-                  <div className="w-full bg-muted rounded-full h-2">
-                    <div className={`${item.color} h-2 rounded-full transition-all duration-500`} style={{ width: `${(item.value / dashboardStats.totalPedidos) * 100}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-            <div className="text-[10px] text-muted-foreground mt-2 text-center">Click en barra para filtrar</div>
-          </div>
-
-          {/* Top Ciudades */}
-          <div className="app-card !p-3">
-            <h4 className="text-sm font-bold mb-2">🏙️ Top Ciudades</h4>
-            <div className="space-y-2 max-h-[120px] overflow-y-auto">
-              {dashboardStats.topCiudades.map((city, i) => (
-                <div key={city.name} className="flex justify-between items-center text-xs cursor-pointer hover:bg-muted/50 p-1 rounded" onClick={() => { setSearchType("city"); setCityFilter(city.name); }}>
-                  <div className="flex items-center gap-1">
-                    <span className="text-muted-foreground">#{i+1}</span>
-                    <span className={city.covered ? "text-green-400" : "text-red-400"}>{city.name.length > 20 ? city.name.substring(0, 20) + "..." : city.name}</span>
-                  </div>
-                  <span className="font-bold">{city.count}</span>
-                </div>
-              ))}
-            </div>
-            <div className="text-[10px] text-muted-foreground mt-2 text-center">Click en ciudad para buscar</div>
           </div>
         </div>
 
-        {/* Métricas financieras */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-          <div className="rounded-xl bg-gradient-to-br from-green-500/10 to-green-600/5 p-2 border border-green-500/20">
-            <div className="text-xs text-muted-foreground">💰 Total Ventas</div>
-            <div className="text-sm font-bold text-green-400">{nf(dashboardStats.totalVentas)} Gs</div>
+        {/* Tarjeta Pendientes */}
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 p-4 shadow-lg border border-slate-700">
+          <div className="absolute top-0 right-0 w-20 h-20 bg-yellow-500/10 rounded-full -mr-10 -mt-10"></div>
+          <div className="relative z-10">
+            <div className="text-3xl font-bold text-yellow-400">{dashboardStats.pendientes}</div>
+            <div className="text-sm text-slate-400 mt-1">Pendientes de carga</div>
+            <div className="mt-2 text-xs text-slate-500">⏳ Listos para procesar</div>
           </div>
-          <div className="rounded-xl bg-gradient-to-br from-orange-500/10 to-orange-600/5 p-2 border border-orange-500/20">
-            <div className="text-xs text-muted-foreground">🚚 Delivery</div>
-            <div className="text-sm font-bold text-orange-400">{nf(dashboardStats.totalDelivery)} Gs</div>
-          </div>
-          <div className="rounded-xl bg-gradient-to-br from-purple-500/10 to-purple-600/5 p-2 border border-purple-500/20">
-            <div className="text-xs text-muted-foreground">📦 Costo Productos</div>
-            <div className="text-sm font-bold text-purple-400">{nf(dashboardStats.totalCostoProductos)} Gs</div>
-          </div>
-          <div className="rounded-xl bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 p-2 border border-emerald-500/20">
-            <div className="text-xs text-muted-foreground">🏆 Ganancia Neta</div>
-            <div className="text-sm font-bold text-emerald-400">{nf(dashboardStats.gananciaNeta)} Gs</div>
+        </div>
+
+        {/* Tarjeta Completados */}
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 p-4 shadow-lg border border-slate-700">
+          <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-500/10 rounded-full -mr-10 -mt-10"></div>
+          <div className="relative z-10">
+            <div className="flex items-baseline gap-2">
+              <span className="text-3xl font-bold text-emerald-400">{dashboardStats.cargadoAuto + dashboardStats.cargadoManual}</span>
+              <span className="text-lg text-slate-500">/ {dashboardStats.conCobertura}</span>
+            </div>
+            <div className="text-sm text-slate-400 mt-1">Pedidos cargados</div>
+            <div className="mt-2 text-xs text-slate-500">
+              ✅ Auto: {dashboardStats.cargadoAuto} | ✍️ Manual: {dashboardStats.cargadoManual}
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Controles principales */}
-      <div className="app-card !p-4 mb-4">
-        <div className="flex flex-wrap gap-2">
-          <button className="nav-btn active" onClick={() => readSheet()} disabled={loading}>
-            {loading ? "Leyendo..." : "📊 Leer Sheet"}
-          </button>
-          <button className="nav-btn active" onClick={handleBulkLoad} disabled={!sheetOrders.length}>
-            🚀 Cargar todos (solo con cobertura)
-          </button>
-          <button className={`nav-btn ${autoLoad ? "!bg-green-600 !text-white" : ""}`} onClick={toggleAutoLoad}>
-            {autoLoad ? "🤖 Auto-carga ON" : "🤖 Auto-carga OFF"}
-          </button>
+      {/* Fila 2 del Dashboard - Métricas financieras */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 p-3 border border-slate-700/50">
+          <div className="text-xs text-slate-400">💰 Total Ventas</div>
+          <div className="text-lg font-bold text-green-400">{nf(dashboardStats.totalVentas)} Gs</div>
+        </div>
+        <div className="rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 p-3 border border-slate-700/50">
+          <div className="text-xs text-slate-400">🚚 Delivery</div>
+          <div className="text-lg font-bold text-orange-400">{nf(dashboardStats.totalDelivery)} Gs</div>
+        </div>
+        <div className="rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 p-3 border border-slate-700/50">
+          <div className="text-xs text-slate-400">📦 Costo Productos</div>
+          <div className="text-lg font-bold text-purple-400">{nf(dashboardStats.totalCostoProductos)} Gs</div>
+        </div>
+        <div className="rounded-2xl bg-gradient-to-br from-emerald-800/30 to-emerald-900/30 p-3 border border-emerald-700/50">
+          <div className="text-xs text-slate-400">🏆 Ganancia Neta</div>
+          <div className="text-lg font-bold text-emerald-400">{nf(dashboardStats.gananciaNeta)} Gs</div>
         </div>
       </div>
 
-      {/* Filtros rápidos */}
-      <div className="flex flex-wrap gap-2 mb-4 border-b border-border pb-3">
-        <button onClick={() => changeFilter("TODOS")} className={`px-3 py-1.5 rounded-lg text-sm font-medium ${activeFilter === "TODOS" ? "bg-primary text-primary-foreground" : "bg-muted"}`}>📋 Todos ({counts.total})</button>
-        <button onClick={() => changeFilter("CARGAR")} className={`px-3 py-1.5 rounded-lg text-sm font-medium ${activeFilter === "CARGAR" ? "bg-blue-500 text-white" : "bg-blue-500/10 text-blue-400"}`}>⏳ Pendientes ({counts.cargar})</button>
-        <button onClick={() => changeFilter("CARGADO")} className={`px-3 py-1.5 rounded-lg text-sm font-medium ${activeFilter === "CARGADO" ? "bg-green-500 text-white" : "bg-green-500/10 text-green-400"}`}>✅ Auto ({counts.cargado})</button>
-        <button onClick={() => changeFilter("CARGADO_MANUAL")} className={`px-3 py-1.5 rounded-lg text-sm font-medium ${activeFilter === "CARGADO_MANUAL" ? "bg-emerald-500 text-white" : "bg-emerald-500/10 text-emerald-400"}`}>✍️ Manual ({counts.cargadoManual})</button>
-        <button onClick={() => changeFilter("A DROPEAR")} className={`px-3 py-1.5 rounded-lg text-sm font-medium ${activeFilter === "A DROPEAR" ? "bg-yellow-500 text-white" : "bg-yellow-500/10 text-yellow-400"}`}>⚠️ Dropear ({counts.aDropear})</button>
-      </div>
-
-      {/* Filtros adicionales */}
-      <div className="flex flex-wrap gap-2 mb-3 items-center">
-        <span className="text-xs text-muted-foreground">📍 Cobertura:</span>
-        <button onClick={() => setCoverageFilter("all")} className={`px-2 py-1 rounded text-xs ${coverageFilter === "all" ? "bg-primary" : "bg-muted"}`}>Todas</button>
-        <button onClick={() => setCoverageFilter("covered")} className={`px-2 py-1 rounded text-xs ${coverageFilter === "covered" ? "bg-green-500 text-white" : "bg-green-500/10 text-green-400"}`}>✅ Con cobertura</button>
-        <button onClick={() => setCoverageFilter("uncovered")} className={`px-2 py-1 rounded text-xs ${coverageFilter === "uncovered" ? "bg-red-500 text-white" : "bg-red-500/10 text-red-400"}`}>❌ Sin cobertura</button>
-      </div>
-
-      {/* Buscador */}
-      <div className="space-y-2 mb-3">
-        <div className="flex gap-2 flex-wrap">
-          <button onClick={() => setSearchType("product")} className={`px-3 py-1.5 rounded-lg text-sm ${searchType === "product" ? "bg-blue-500 text-white" : "bg-muted"}`}>🏷️ Producto</button>
-          <button onClick={() => setSearchType("city")} className={`px-3 py-1.5 rounded-lg text-sm ${searchType === "city" ? "bg-emerald-500 text-white" : "bg-muted"}`}>📍 Ciudad</button>
-          <button onClick={() => setSearchType("all")} className={`px-3 py-1.5 rounded-lg text-sm ${searchType === "all" ? "bg-primary text-white" : "bg-muted"}`}>🔍 Todo</button>
+      {/* Tabla de Pedidos */}
+      <div className="rounded-2xl bg-slate-900/50 border border-slate-800 overflow-hidden">
+        <div className="p-4 border-b border-slate-800">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="font-bold">📋 Pedidos Shopify + WhatsApp</h3>
+            <div className="flex gap-2">
+              <button className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 rounded-lg transition" onClick={() => readSheet()} disabled={loading}>
+                {loading ? "Leyendo..." : "📊 Leer Sheet"}
+              </button>
+              <button className="px-3 py-1.5 text-sm bg-emerald-600 hover:bg-emerald-700 rounded-lg transition" onClick={handleBulkLoad}>
+                🚀 Cargar todos
+              </button>
+              <button className={`px-3 py-1.5 text-sm rounded-lg transition ${autoLoad ? "bg-green-600" : "bg-slate-700"}`} onClick={toggleAutoLoad}>
+                {autoLoad ? "🤖 Auto ON" : "🤖 Auto OFF"}
+              </button>
+            </div>
+          </div>
+          {lastSync && <div className="text-xs text-slate-500 mt-2">🔄 Última sync: {lastSync.toLocaleTimeString("es-PY")}</div>}
         </div>
-        
-        {searchType === "product" && (
-          <input className="app-input w-full" placeholder={`Buscar en ${colKeys.product || "PRODUCTO"}...`} value={productSearch} onChange={(e) => setProductSearch(e.target.value)} />
-        )}
-        {searchType === "city" && (
-          <input className="app-input w-full" placeholder="Buscar por ciudad..." value={cityFilter} onChange={(e) => setCityFilter(e.target.value)} />
-        )}
-        {searchType === "all" && (
-          <input className="app-input w-full" placeholder="Buscar en todos los campos..." value={search} onChange={(e) => setSearch(e.target.value)} />
-        )}
-      </div>
 
-      <div className="text-xs text-muted-foreground mb-2">Mostrando {filteredOrders.length} de {sheetOrders.length} filas</div>
+        {/* Filtros */}
+        <div className="p-3 border-b border-slate-800 flex flex-wrap gap-2">
+          <button onClick={() => changeFilter("TODOS")} className={`px-3 py-1 rounded-lg text-sm ${activeFilter === "TODOS" ? "bg-slate-700 text-white" : "text-slate-400 hover:text-white"}`}>📋 Todos ({counts.total})</button>
+          <button onClick={() => changeFilter("CARGAR")} className={`px-3 py-1 rounded-lg text-sm ${activeFilter === "CARGAR" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"}`}>⏳ Pendientes ({counts.cargar})</button>
+          <button onClick={() => changeFilter("CARGADO")} className={`px-3 py-1 rounded-lg text-sm ${activeFilter === "CARGADO" ? "bg-green-600 text-white" : "text-slate-400 hover:text-white"}`}>✅ Auto ({counts.cargado})</button>
+          <button onClick={() => changeFilter("CARGADO_MANUAL")} className={`px-3 py-1 rounded-lg text-sm ${activeFilter === "CARGADO_MANUAL" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-white"}`}>✍️ Manual ({counts.cargadoManual})</button>
+          <button onClick={() => changeFilter("A DROPEAR")} className={`px-3 py-1 rounded-lg text-sm ${activeFilter === "A DROPEAR" ? "bg-yellow-600 text-white" : "text-slate-400 hover:text-white"}`}>⚠️ Dropear ({counts.aDropear})</button>
+          
+          <div className="flex-1"></div>
+          
+          <div className="flex gap-2">
+            <button onClick={() => setCoverageFilter("all")} className={`px-2 py-1 rounded text-xs ${coverageFilter === "all" ? "bg-slate-700" : "text-slate-500"}`}>Todas</button>
+            <button onClick={() => setCoverageFilter("covered")} className={`px-2 py-1 rounded text-xs ${coverageFilter === "covered" ? "bg-green-600" : "text-slate-500"}`}>Con cobertura</button>
+            <button onClick={() => setCoverageFilter("uncovered")} className={`px-2 py-1 rounded text-xs ${coverageFilter === "uncovered" ? "bg-red-600" : "text-slate-500"}`}>Sin cobertura</button>
+          </div>
+        </div>
 
-      {/* Tabla */}
-      <div className="overflow-auto">
-        <table className="app-table min-w-[1500px]">
-          <thead>
-            <tr>
-              <th>#</th><th>ID Pedido</th><th>Fecha</th><th>Cliente</th><th>Teléfono</th><th>Ciudad</th><th>Calle</th><th>Producto</th><th>Cant</th><th className="text-right">Venta</th><th className="text-right">Delivery</th><th>Estado</th><th>Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredOrders.map(({ order, idx }) => {
-              const status = getRowStatus(idx);
-              const city = order[colKeys.city] || "";
-              const deliveryPrice = getCityDeliveryPrice(city);
-              const covered = deliveryPrice !== null;
-              const salePrice = getDisplayAmount(order);
-              const orderDate = getOrderDate(order);
-              const canLoad = status === "CARGAR" && covered && salePrice > 0;
-              const orderNumber = getRowOrderNumber(idx);
+        {/* Buscador */}
+        <div className="p-3 border-b border-slate-800 flex flex-wrap gap-2">
+          <div className="flex gap-1">
+            <button onClick={() => setSearchType("product")} className={`px-2 py-1 rounded text-xs ${searchType === "product" ? "bg-blue-600" : "bg-slate-800"}`}>🏷️ Producto</button>
+            <button onClick={() => setSearchType("city")} className={`px-2 py-1 rounded text-xs ${searchType === "city" ? "bg-blue-600" : "bg-slate-800"}`}>📍 Ciudad</button>
+            <button onClick={() => setSearchType("all")} className={`px-2 py-1 rounded text-xs ${searchType === "all" ? "bg-blue-600" : "bg-slate-800"}`}>🔍 Todo</button>
+          </div>
+          <input
+            className="flex-1 bg-slate-800 rounded-lg px-3 py-1.5 text-sm border border-slate-700 focus:outline-none focus:border-blue-500"
+            placeholder={searchType === "product" ? "Buscar producto..." : searchType === "city" ? "Buscar ciudad..." : "Buscar en todos los campos..."}
+            value={searchType === "product" ? productSearch : searchType === "city" ? cityFilter : search}
+            onChange={(e) => {
+              if (searchType === "product") setProductSearch(e.target.value);
+              else if (searchType === "city") setCityFilter(e.target.value);
+              else setSearch(e.target.value);
+            }}
+          />
+        </div>
 
-              return (
-                <tr key={idx} className={getRowClassName(status, covered)}>
-                  <td className="text-xs">{idx + 1}</td>
-                  <td className="text-xs font-mono font-bold">
-                    {orderNumber ? <span className="text-green-400">{orderNumber}</span> : <span className="text-muted-foreground">—</span>}
-                  </td>
-                  <td className="text-xs whitespace-nowrap">{orderDate}</td>
-                  <td className="text-xs font-medium">{order[colKeys.name] || "—"}</td>
-                  <td className="text-xs">{order[colKeys.phone] || "—"}</td>
-                  <td className={`text-xs ${!covered && city ? "text-red-400 font-semibold" : "text-green-400"}`}>
-                    {city || "—"}
-                    {deliveryPrice && <span className="text-[10px] ml-1">({nf(deliveryPrice)} Gs)</span>}
-                  </td>
-                  <td className="text-xs">{order[colKeys.street] || "—"}</td>
-                  <td className="text-xs truncate max-w-[180px]" title={order[colKeys.product] || ""}>
-                    {order[colKeys.product] || "—"}
-                  </td>
-                  <td className="text-xs">{parseQuantity(order[colKeys.qty])}</td>
-                  <td className="text-right text-xs text-green-400">{salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}</td>
-                  <td className="text-right text-xs text-orange-400">{deliveryPrice ? `${nf(deliveryPrice)} Gs` : "—"}</td>
-                  <td className="min-w-[130px]">
-                    <select
-                      className="app-input !py-1 !px-2 !text-[11px] !w-full"
-                      value={status}
-                      onChange={(e) => setRowStatus(String(idx), e.target.value as OrderStatus, orderNumber || undefined)}
-                    >
-                      <option value="CARGAR">⏳ Pendiente</option>
-                      <option value="A DROPEAR">⚠️ A Dropear</option>
-                      <option value="CARGADO">✅ Cargado (Auto)</option>
-                      <option value="CARGADO_MANUAL">✍️ Cargado (Manual)</option>
-                    </select>
-                  </td>
-                  <td className="min-w-[180px] flex gap-1 flex-wrap">
-                    {canLoad && (
-                      <button className="nav-btn active !py-1 !px-2 !text-[11px]" onClick={() => handleDirectSave(order, idx)}>
-                        💰 Cargar
-                      </button>
-                    )}
-                    <button className="nav-btn !py-1 !px-2 !text-[11px]" onClick={() => handleOpenForm(order, idx)}>
-                      📝 Formulario
-                    </button>
-                  </td>
-                </tr>
-              );
-            })}
-            {filteredOrders.length === 0 && (
-              <tr><td colSpan={13} className="text-center text-muted-foreground py-8">No hay pedidos para mostrar</td></tr>
-            )}
-          </tbody>
-        </table>
+        {/* Tabla */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-800/50">
+              <tr>
+                <th className="px-3 py-2 text-left text-xs font-medium text-slate-400">#</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-slate-400">ID Pedido</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-slate-400">Fecha</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-slate-400">Cliente</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-slate-400">Teléfono</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-slate-400">Ciudad</th>
+                <th className="px-3 py-2 text-left text-xs font-medium text-slate-400">Producto</th>
+                <th className="px-3 py-2 text-center text-xs font-medium text-slate-400">Cant</th>
+                <th className="px-3 py-2 text-right text-xs font-medium text-slate-400">Venta</th>
+                <th className="px-3 py-2 text-center text-xs font-medium text-slate-400">Estado</th>
+                <th className="px-3 py-2 text-center text-xs font-medium text-slate-400">Acciones</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800">
+              {filteredOrders.map(({ order, idx }) => {
+                const status = getRowStatus(idx);
+                const city = order[colKeys.city] || "";
+                const covered = hasCoverage(city);
+                const salePrice = getDisplayAmount(order);
+                const orderDate = getOrderDate(order);
+                const canLoad = status === "CARGAR" && covered && salePrice > 0;
+                const orderNumber = getRowOrderNumber(idx);
+
+                return (
+                  <tr key={idx} className={getRowClassName(status, covered)}>
+                    <td className="px-3 py-2 text-xs text-slate-400">{idx + 1}</td>
+                    <td className="px-3 py-2 text-xs font-mono">
+                      {orderNumber ? <span className="text-green-400">{orderNumber}</span> : <span className="text-slate-600">—</span>}
+                    </td>
+                    <td className="px-3 py-2 text-xs">{orderDate}</td>
+                    <td className="px-3 py-2 text-xs font-medium">{order[colKeys.name] || "—"}</td>
+                    <td className="px-3 py-2 text-xs">{order[colKeys.phone] || "—"}</td>
+                    <td className={`px-3 py-2 text-xs ${!covered && city ? "text-red-400" : "text-green-400"}`}>
+                      {city || "—"}
+                    </td>
+                    <td className="px-3 py-2 text-xs max-w-[200px] truncate" title={order[colKeys.product] || ""}>
+                      {order[colKeys.product] || "—"}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-center">{parseQuantity(order[colKeys.qty])}</td>
+                    <td className="px-3 py-2 text-xs text-right text-green-400">{salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}</td>
+                    <td className="px-3 py-2 text-center">
+                      <select
+                        className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-500"
+                        value={status}
+                        onChange={(e) => setRowStatus(String(idx), e.target.value as OrderStatus, orderNumber || undefined)}
+                      >
+                        <option value="CARGAR">⏳ Pendiente</option>
+                        <option value="A DROPEAR">⚠️ Dropear</option>
+                        <option value="CARGADO">✅ Auto</option>
+                        <option value="CARGADO_MANUAL">✍️ Manual</option>
+                      </select>
+                    </td>
+                    <td className="px-3 py-2 text-center">
+                      <div className="flex gap-1 justify-center">
+                        {canLoad && (
+                          <button className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 rounded" onClick={() => handleDirectSave(order, idx)}>
+                            💰
+                          </button>
+                        )}
+                        <button className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 rounded" onClick={() => handleOpenForm(order, idx)}>
+                          📝
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {filteredOrders.length === 0 && (
+                <tr><td colSpan={11} className="text-center py-8 text-slate-500">No hay pedidos para mostrar</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
   );
