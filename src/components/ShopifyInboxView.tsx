@@ -21,157 +21,82 @@ function extractPhoneNumber(value: any): string {
   return phone;
 }
 
-const normalizeText = (text: string): string => {
+// Normalización ESTRICTA - solo elimina acentos y espacios, NO altera palabras
+const strictNormalize = (text: string): string => {
   if (!text) return "";
   return text
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]/g, "")
+    .replace(/\s+/g, "")
     .trim();
 };
 
-// LISTA COMPLETA DE CIUDADES CON COBERTURA (TODAS LAS VARIANTES NORMALIZADAS)
-const COVERAGE_CITIES_NORMALIZED: string[] = [
-  // Altos
-  "altos",
-  // Areguá
-  "aregua",
-  // Asunción
-  "asuncion",
-  // Atyrá
-  "atyra",
-  // Benjamín Aceval
-  "benjaminaceval",
-  // Caacupé
-  "caacupe",
-  // Capiatá
-  "capiata",
-  // Ciudad del Este
-  "ciudaddeleste",
-  // Colonia Yguazú
-  "coloniyguazu",
-  // Emboscada
-  "emboscada",
-  // Eusebio Ayala
-  "eusebioayala",
-  // Fernando de la Mora
-  "fernandodelamora",
-  // Guarambaré
-  "guarambare",
-  // Hernandarias
-  "hernandarias",
-  // INTERIOR PAGO ANTICIPADO
-  "interiorpagoanticipado",
-  // Itá
-  "ita",
-  // Itacurubí de la Cordillera
-  "itacurubidelacordillera",
-  // Itauguá
-  "itaugua",
-  // J. Augusto Saldívar
-  "jaugustosaldívar",
-  // Juan León Mallorquín
-  "juanleonmallorquin",
-  // Lambaré
-  "lambare",
-  // Limpio
-  "limpio",
-  // Loma Grande
-  "lomagrande",
-  // Luque
-  "luque",
-  // Mariano Roque Alonso
-  "marianoroquealonso",
-  // Minga Guazú
-  "mingaguazu",
-  // Ñemby (con y sin ñ)
-  "ñemby", "nemby",
-  // Nueva Italia
-  "nuevaitalia",
-  // Paraguarí
-  "paraguari",
-  // Pirayú
-  "pirayu",
-  // Piribebuy
-  "piribebuy",
-  // Presidente Franco
-  "presidentefranco",
-  // Puerto Presidente Franco
-  "puertopresidentefranco", "puertopdtefranco",
-  // Remansito
-  "remansito",
-  // San Alberto
-  "sanalberto",
-  // San Antonio
-  "santonio", "sanantonioi",
-  // San Bernardino
-  "sanbernardino",
-  // San Lorenzo
-  "sanlorenzo",
-  // Santa Rita
-  "santarita",
-  // Tobatí
-  "tobati",
-  // Villa Elisa
-  "villaelsa",
-  // Villa Hayes
-  "villahayes",
-  // Villarrica
-  "villarrica",
-  // Villeta
-  "villeta",
-  // Yaguarón
-  "yaguaron",
-  // Yguazú
-  "yguazu",
-  // Ypacaraí
-  "ypacarai",
-  // Ypané
-  "ypane"
-];
-
-// Precios de delivery
-const CITY_DELIVERY_PRICES: Record<string, number> = {
-  "altos": 55000, "aregua": 45000, "asuncion": 35000, "atyra": 55000,
-  "benjaminaceval": 60000, "caacupe": 55000, "capiata": 45000, "ciudaddeleste": 45000,
-  "coloniyguazu": 50000, "emboscada": 55000, "eusebioayala": 55000, "fernandodelamora": 35000,
-  "guarambare": 50000, "hernandarias": 50000, "interiorpagoanticipado": 35000, "ita": 55000,
-  "itacurubidelacordillera": 55000, "itaugua": 45000, "jaugustosaldívar": 45000,
-  "juanleonmallorquin": 60000, "lambare": 35000, "limpio": 40000, "lomagrande": 55000,
-  "luque": 35000, "marianoroquealonso": 40000, "mingaguazu": 50000, "ñemby": 40000,
-  "nemby": 40000, "nuevaitalia": 55000, "paraguari": 55000, "pirayu": 55000,
-  "piribebuy": 55000, "presidentefranco": 50000, "puertopresidentefranco": 50000,
-  "puertopdtefranco": 50000, "remansito": 60000, "sanalberto": 55000, "santonio": 45000,
-  "sanantonioi": 45000, "sanbernardino": 55000, "sanlorenzo": 35000, "santarita": 55000,
-  "tobati": 55000, "villaelsa": 40000, "villahayes": 60000, "villarrica": 50000,
-  "villeta": 55000, "yaguaron": 55000, "yguazu": 60000, "ypacarai": 55000, "ypane": 45000
+// LISTA EXACTA DE CIUDADES CON COBERTURA (key normalizada)
+const CITY_COVERAGE_MAP: Record<string, number> = {
+  // Lista completa con todas las variantes
+  "altos": 55000,
+  "aregua": 45000,
+  "asuncion": 35000,
+  "atyra": 55000,
+  "benjaminaceval": 60000,
+  "caacupe": 55000,
+  "capiata": 45000,
+  "ciudaddeleste": 45000,
+  "coloniyguazu": 50000,
+  "emboscada": 55000,
+  "eusebioayala": 55000,
+  "fernandodelamora": 35000,
+  "guarambare": 50000,
+  "hernandarias": 50000,
+  "ita": 55000,
+  "itacurubidelacordillera": 55000,
+  "itaugua": 45000,
+  "jaugustosaldivar": 45000,
+  "juanleonmalloriquin": 60000,
+  "lambare": 35000,
+  "limpio": 40000,
+  "lomagrande": 55000,
+  "luque": 35000,
+  "marianoroquealonso": 40000,
+  "mingaguazu": 50000,
+  "ñemby": 40000,
+  "nemby": 40000,
+  "nuevaitalia": 55000,
+  "paraguari": 55000,
+  "pirayu": 55000,
+  "piribebuy": 55000,
+  "presidentefranco": 50000,
+  "puertopresidentefranco": 50000,
+  "remansito": 60000,
+  "sanalberto": 55000,
+  "santonio": 45000,
+  "sanantonioi": 45000,
+  "sanbernardino": 55000,
+  "sanlorenzo": 35000,
+  "santarita": 55000,
+  "tobati": 55000,
+  "villaelsa": 40000,
+  "villahayes": 60000,
+  "villarrica": 50000,
+  "villeta": 55000,
+  "yaguaron": 55000,
+  "yguazu": 60000,
+  "ypacarai": 55000,
+  "ypane": 45000
 };
 
-// Función EXACTA para verificar cobertura
+// Función ESTRICTA para verificar cobertura - SOLO coincidencia exacta en el mapa
 const hasCoverage = (cityName: string): boolean => {
   if (!cityName) return false;
-  const normalizedInput = normalizeText(cityName);
-  
-  // Verificar si está EXACTAMENTE en la lista
-  for (const coverageCity of COVERAGE_CITIES_NORMALIZED) {
-    if (normalizedInput === coverageCity) {
-      return true;
-    }
-  }
-  
-  // Para casos como "sanantonioi" (con i al final)
-  return false;
+  const normalized = strictNormalize(cityName);
+  return CITY_COVERAGE_MAP.hasOwnProperty(normalized);
 };
 
 const getCityDeliveryPrice = (cityName: string): number | null => {
   if (!cityName) return null;
-  const normalizedInput = normalizeText(cityName);
-  
-  for (const [key, price] of Object.entries(CITY_DELIVERY_PRICES)) {
-    if (normalizedInput === key) return price;
-  }
-  return null;
+  const normalized = strictNormalize(cityName);
+  return CITY_COVERAGE_MAP[normalized] || null;
 };
 
 function parseQuantity(value: any): number {
@@ -280,9 +205,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const h = sheetHeaders;
     const find = (...candidates: string[]) => {
       for (let i = 0; i < h.length; i++) {
-        const normalizedHeader = normalizeText(h[i]);
+        const normalizedHeader = strictNormalize(h[i]);
         for (const candidate of candidates) {
-          const normalizedCandidate = normalizeText(candidate);
+          const normalizedCandidate = strictNormalize(candidate);
           if (normalizedHeader === normalizedCandidate || normalizedHeader.includes(normalizedCandidate)) {
             return h[i];
           }
@@ -412,9 +337,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
   const matchProduct = useCallback((rawName: string) => {
     if (!rawName) return null;
-    const cleanName = normalizeText(rawName);
-    return products.find(p => normalizeText(p.title || "") === cleanName) ||
-           products.find(p => normalizeText(p.title || "").includes(cleanName) || cleanName.includes(normalizeText(p.title || ""))) ||
+    const cleanName = strictNormalize(rawName);
+    return products.find(p => strictNormalize(p.title || "") === cleanName) ||
+           products.find(p => strictNormalize(p.title || "").includes(cleanName) || cleanName.includes(strictNormalize(p.title || ""))) ||
            null;
   }, [products]);
 
@@ -448,7 +373,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     if (error) { toast.error("Error: " + error.message); return false; }
     
     await setRowStatus(String(idx), newStatus, orderId);
-    toast.success(`✅ Pedido ${orderId} cargado`);
+    toast.success(`✅ Pedido ${orderId} cargado | Delivery: ${nf(deliveryPrice)} Gs`);
     return true;
   }, [colKeys, matchProduct, myEmail, setRowStatus]);
 
@@ -488,7 +413,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return String(dateValue).split(' ')[0];
   };
 
-  // ESTADÍSTICAS
+  // Estadísticas
   const dashboardStats = useMemo(() => {
     let conCobertura = 0, sinCobertura = 0;
     let pendientes = 0, cargadoAuto = 0, cargadoManual = 0, aDropear = 0;
@@ -591,7 +516,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     if (status === "CARGADO" || status === "CARGADO_MANUAL") return "bg-gradient-to-r from-green-500/10 to-transparent";
     if (status === "A DROPEAR") return "bg-gradient-to-r from-yellow-500/10 to-transparent";
     if (!hasCoverageCity) return "bg-gradient-to-r from-red-500/5 to-transparent";
-    return "hover:bg-muted/30";
+    return "hover:bg-slate-800/50";
   };
 
   if (loadingStatuses) {
@@ -600,19 +525,16 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
   return (
     <div className="space-y-4">
-      {/* DASHBOARD ELEGANTE */}
+      {/* Dashboard Elegante */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        {/* Tarjeta Total Pedidos */}
         <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 p-4 shadow-lg border border-slate-700">
           <div className="absolute top-0 right-0 w-20 h-20 bg-blue-500/10 rounded-full -mr-10 -mt-10"></div>
           <div className="relative z-10">
             <div className="text-3xl font-bold text-blue-400">{dashboardStats.totalPedidos}</div>
-            <div className="text-sm text-slate-400 mt-1">Total Pedidos</div>
-            <div className="mt-2 text-xs text-slate-500">📦 En el sheet</div>
+            <div className="text-sm text-slate-400 mt-1">📦 Total Pedidos</div>
           </div>
         </div>
 
-        {/* Tarjeta Cobertura */}
         <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 p-4 shadow-lg border border-slate-700">
           <div className="absolute top-0 right-0 w-20 h-20 bg-green-500/10 rounded-full -mr-10 -mt-10"></div>
           <div className="relative z-10">
@@ -620,7 +542,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               <span className="text-3xl font-bold text-green-400">{dashboardStats.conCobertura}</span>
               <span className="text-lg text-slate-500">/ {dashboardStats.totalPedidos}</span>
             </div>
-            <div className="text-sm text-slate-400 mt-1">Con cobertura</div>
+            <div className="text-sm text-slate-400 mt-1">📍 Con cobertura</div>
             <div className="mt-2">
               <div className="w-full bg-slate-700 rounded-full h-1.5">
                 <div className="bg-green-500 h-1.5 rounded-full transition-all duration-500" style={{ width: `${dashboardStats.tasaCobertura}%` }} />
@@ -630,17 +552,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           </div>
         </div>
 
-        {/* Tarjeta Pendientes */}
         <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 p-4 shadow-lg border border-slate-700">
           <div className="absolute top-0 right-0 w-20 h-20 bg-yellow-500/10 rounded-full -mr-10 -mt-10"></div>
           <div className="relative z-10">
             <div className="text-3xl font-bold text-yellow-400">{dashboardStats.pendientes}</div>
-            <div className="text-sm text-slate-400 mt-1">Pendientes de carga</div>
-            <div className="mt-2 text-xs text-slate-500">⏳ Listos para procesar</div>
+            <div className="text-sm text-slate-400 mt-1">⏳ Pendientes</div>
           </div>
         </div>
 
-        {/* Tarjeta Completados */}
         <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-slate-800 to-slate-900 p-4 shadow-lg border border-slate-700">
           <div className="absolute top-0 right-0 w-20 h-20 bg-emerald-500/10 rounded-full -mr-10 -mt-10"></div>
           <div className="relative z-10">
@@ -648,73 +567,70 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               <span className="text-3xl font-bold text-emerald-400">{dashboardStats.cargadoAuto + dashboardStats.cargadoManual}</span>
               <span className="text-lg text-slate-500">/ {dashboardStats.conCobertura}</span>
             </div>
-            <div className="text-sm text-slate-400 mt-1">Pedidos cargados</div>
+            <div className="text-sm text-slate-400 mt-1">✅ Completados</div>
             <div className="mt-2 text-xs text-slate-500">
-              ✅ Auto: {dashboardStats.cargadoAuto} | ✍️ Manual: {dashboardStats.cargadoManual}
+              Auto: {dashboardStats.cargadoAuto} | Manual: {dashboardStats.cargadoManual} | ⚠️ Dropear: {dashboardStats.aDropear}
             </div>
           </div>
         </div>
       </div>
 
-      {/* Fila 2 del Dashboard - Métricas financieras */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 p-3 border border-slate-700/50">
+      {/* Métricas financieras */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+        <div className="rounded-xl bg-slate-800/50 p-3 border border-slate-700/50">
           <div className="text-xs text-slate-400">💰 Total Ventas</div>
-          <div className="text-lg font-bold text-green-400">{nf(dashboardStats.totalVentas)} Gs</div>
+          <div className="text-base font-bold text-green-400">{nf(dashboardStats.totalVentas)} Gs</div>
         </div>
-        <div className="rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 p-3 border border-slate-700/50">
+        <div className="rounded-xl bg-slate-800/50 p-3 border border-slate-700/50">
           <div className="text-xs text-slate-400">🚚 Delivery</div>
-          <div className="text-lg font-bold text-orange-400">{nf(dashboardStats.totalDelivery)} Gs</div>
+          <div className="text-base font-bold text-orange-400">{nf(dashboardStats.totalDelivery)} Gs</div>
         </div>
-        <div className="rounded-2xl bg-gradient-to-br from-slate-800/50 to-slate-900/50 p-3 border border-slate-700/50">
+        <div className="rounded-xl bg-slate-800/50 p-3 border border-slate-700/50">
           <div className="text-xs text-slate-400">📦 Costo Productos</div>
-          <div className="text-lg font-bold text-purple-400">{nf(dashboardStats.totalCostoProductos)} Gs</div>
+          <div className="text-base font-bold text-purple-400">{nf(dashboardStats.totalCostoProductos)} Gs</div>
         </div>
-        <div className="rounded-2xl bg-gradient-to-br from-emerald-800/30 to-emerald-900/30 p-3 border border-emerald-700/50">
+        <div className="rounded-xl bg-emerald-800/20 p-3 border border-emerald-700/50">
           <div className="text-xs text-slate-400">🏆 Ganancia Neta</div>
-          <div className="text-lg font-bold text-emerald-400">{nf(dashboardStats.gananciaNeta)} Gs</div>
+          <div className="text-base font-bold text-emerald-400">{nf(dashboardStats.gananciaNeta)} Gs</div>
         </div>
       </div>
 
-      {/* Tabla de Pedidos */}
-      <div className="rounded-2xl bg-slate-900/50 border border-slate-800 overflow-hidden">
-        <div className="p-4 border-b border-slate-800">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <h3 className="font-bold">📋 Pedidos Shopify + WhatsApp</h3>
-            <div className="flex gap-2">
-              <button className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 rounded-lg transition" onClick={() => readSheet()} disabled={loading}>
-                {loading ? "Leyendo..." : "📊 Leer Sheet"}
-              </button>
-              <button className="px-3 py-1.5 text-sm bg-emerald-600 hover:bg-emerald-700 rounded-lg transition" onClick={handleBulkLoad}>
-                🚀 Cargar todos
-              </button>
-              <button className={`px-3 py-1.5 text-sm rounded-lg transition ${autoLoad ? "bg-green-600" : "bg-slate-700"}`} onClick={toggleAutoLoad}>
-                {autoLoad ? "🤖 Auto ON" : "🤖 Auto OFF"}
-              </button>
-            </div>
+      {/* Controles y tabla */}
+      <div className="rounded-xl bg-slate-900/50 border border-slate-800 overflow-hidden">
+        <div className="p-3 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex gap-2">
+            <button className="px-3 py-1.5 text-sm bg-blue-600 hover:bg-blue-700 rounded-lg transition" onClick={() => readSheet()} disabled={loading}>
+              {loading ? "Leyendo..." : "📊 Leer Sheet"}
+            </button>
+            <button className="px-3 py-1.5 text-sm bg-emerald-600 hover:bg-emerald-700 rounded-lg transition" onClick={handleBulkLoad}>
+              🚀 Cargar todos
+            </button>
+            <button className={`px-3 py-1.5 text-sm rounded-lg transition ${autoLoad ? "bg-green-600" : "bg-slate-700"}`} onClick={toggleAutoLoad}>
+              {autoLoad ? "🤖 Auto ON" : "🤖 Auto OFF"}
+            </button>
           </div>
-          {lastSync && <div className="text-xs text-slate-500 mt-2">🔄 Última sync: {lastSync.toLocaleTimeString("es-PY")}</div>}
+          {lastSync && <div className="text-xs text-slate-500">🔄 {lastSync.toLocaleTimeString("es-PY")}</div>}
         </div>
 
         {/* Filtros */}
-        <div className="p-3 border-b border-slate-800 flex flex-wrap gap-2">
-          <button onClick={() => changeFilter("TODOS")} className={`px-3 py-1 rounded-lg text-sm ${activeFilter === "TODOS" ? "bg-slate-700 text-white" : "text-slate-400 hover:text-white"}`}>📋 Todos ({counts.total})</button>
-          <button onClick={() => changeFilter("CARGAR")} className={`px-3 py-1 rounded-lg text-sm ${activeFilter === "CARGAR" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"}`}>⏳ Pendientes ({counts.cargar})</button>
-          <button onClick={() => changeFilter("CARGADO")} className={`px-3 py-1 rounded-lg text-sm ${activeFilter === "CARGADO" ? "bg-green-600 text-white" : "text-slate-400 hover:text-white"}`}>✅ Auto ({counts.cargado})</button>
-          <button onClick={() => changeFilter("CARGADO_MANUAL")} className={`px-3 py-1 rounded-lg text-sm ${activeFilter === "CARGADO_MANUAL" ? "bg-emerald-600 text-white" : "text-slate-400 hover:text-white"}`}>✍️ Manual ({counts.cargadoManual})</button>
-          <button onClick={() => changeFilter("A DROPEAR")} className={`px-3 py-1 rounded-lg text-sm ${activeFilter === "A DROPEAR" ? "bg-yellow-600 text-white" : "text-slate-400 hover:text-white"}`}>⚠️ Dropear ({counts.aDropear})</button>
+        <div className="p-2 border-b border-slate-800 flex flex-wrap gap-1">
+          <button onClick={() => changeFilter("TODOS")} className={`px-2 py-1 rounded text-xs ${activeFilter === "TODOS" ? "bg-slate-700 text-white" : "text-slate-400"}`}>📋 Todos ({counts.total})</button>
+          <button onClick={() => changeFilter("CARGAR")} className={`px-2 py-1 rounded text-xs ${activeFilter === "CARGAR" ? "bg-blue-600 text-white" : "text-slate-400"}`}>⏳ Pendientes ({counts.cargar})</button>
+          <button onClick={() => changeFilter("CARGADO")} className={`px-2 py-1 rounded text-xs ${activeFilter === "CARGADO" ? "bg-green-600 text-white" : "text-slate-400"}`}>✅ Auto ({counts.cargado})</button>
+          <button onClick={() => changeFilter("CARGADO_MANUAL")} className={`px-2 py-1 rounded text-xs ${activeFilter === "CARGADO_MANUAL" ? "bg-emerald-600 text-white" : "text-slate-400"}`}>✍️ Manual ({counts.cargadoManual})</button>
+          <button onClick={() => changeFilter("A DROPEAR")} className={`px-2 py-1 rounded text-xs ${activeFilter === "A DROPEAR" ? "bg-yellow-600 text-white" : "text-slate-400"}`}>⚠️ Dropear ({counts.aDropear})</button>
           
           <div className="flex-1"></div>
           
-          <div className="flex gap-2">
-            <button onClick={() => setCoverageFilter("all")} className={`px-2 py-1 rounded text-xs ${coverageFilter === "all" ? "bg-slate-700" : "text-slate-500"}`}>Todas</button>
-            <button onClick={() => setCoverageFilter("covered")} className={`px-2 py-1 rounded text-xs ${coverageFilter === "covered" ? "bg-green-600" : "text-slate-500"}`}>Con cobertura</button>
-            <button onClick={() => setCoverageFilter("uncovered")} className={`px-2 py-1 rounded text-xs ${coverageFilter === "uncovered" ? "bg-red-600" : "text-slate-500"}`}>Sin cobertura</button>
+          <div className="flex gap-1">
+            <button onClick={() => setCoverageFilter("all")} className={`px-2 py-1 rounded text-xs ${coverageFilter === "all" ? "bg-slate-700" : "text-slate-500"}`}>🌍 Todas</button>
+            <button onClick={() => setCoverageFilter("covered")} className={`px-2 py-1 rounded text-xs ${coverageFilter === "covered" ? "bg-green-600" : "text-slate-500"}`}>✅ Con cobertura</button>
+            <button onClick={() => setCoverageFilter("uncovered")} className={`px-2 py-1 rounded text-xs ${coverageFilter === "uncovered" ? "bg-red-600" : "text-slate-500"}`}>❌ Sin cobertura</button>
           </div>
         </div>
 
         {/* Buscador */}
-        <div className="p-3 border-b border-slate-800 flex flex-wrap gap-2">
+        <div className="p-2 border-b border-slate-800 flex gap-2">
           <div className="flex gap-1">
             <button onClick={() => setSearchType("product")} className={`px-2 py-1 rounded text-xs ${searchType === "product" ? "bg-blue-600" : "bg-slate-800"}`}>🏷️ Producto</button>
             <button onClick={() => setSearchType("city")} className={`px-2 py-1 rounded text-xs ${searchType === "city" ? "bg-blue-600" : "bg-slate-800"}`}>📍 Ciudad</button>
@@ -733,28 +649,29 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         </div>
 
         {/* Tabla */}
-        <div className="overflow-x-auto">
+        <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
           <table className="w-full text-sm">
-            <thead className="bg-slate-800/50">
+            <thead className="bg-slate-800/50 sticky top-0">
               <tr>
-                <th className="px-3 py-2 text-left text-xs font-medium text-slate-400">#</th>
-                <th className="px-3 py-2 text-left text-xs font-medium text-slate-400">ID Pedido</th>
-                <th className="px-3 py-2 text-left text-xs font-medium text-slate-400">Fecha</th>
-                <th className="px-3 py-2 text-left text-xs font-medium text-slate-400">Cliente</th>
-                <th className="px-3 py-2 text-left text-xs font-medium text-slate-400">Teléfono</th>
-                <th className="px-3 py-2 text-left text-xs font-medium text-slate-400">Ciudad</th>
-                <th className="px-3 py-2 text-left text-xs font-medium text-slate-400">Producto</th>
-                <th className="px-3 py-2 text-center text-xs font-medium text-slate-400">Cant</th>
-                <th className="px-3 py-2 text-right text-xs font-medium text-slate-400">Venta</th>
-                <th className="px-3 py-2 text-center text-xs font-medium text-slate-400">Estado</th>
-                <th className="px-3 py-2 text-center text-xs font-medium text-slate-400">Acciones</th>
+                <th className="px-2 py-2 text-left text-xs font-medium text-slate-400">#</th>
+                <th className="px-2 py-2 text-left text-xs font-medium text-slate-400">ID</th>
+                <th className="px-2 py-2 text-left text-xs font-medium text-slate-400">Fecha</th>
+                <th className="px-2 py-2 text-left text-xs font-medium text-slate-400">Cliente</th>
+                <th className="px-2 py-2 text-left text-xs font-medium text-slate-400">Teléfono</th>
+                <th className="px-2 py-2 text-left text-xs font-medium text-slate-400">Ciudad / Delivery</th>
+                <th className="px-2 py-2 text-left text-xs font-medium text-slate-400">Producto</th>
+                <th className="px-2 py-2 text-center text-xs font-medium text-slate-400">Cant</th>
+                <th className="px-2 py-2 text-right text-xs font-medium text-slate-400">Venta</th>
+                <th className="px-2 py-2 text-center text-xs font-medium text-slate-400">Estado</th>
+                <th className="px-2 py-2 text-center text-xs font-medium text-slate-400">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800">
               {filteredOrders.map(({ order, idx }) => {
                 const status = getRowStatus(idx);
                 const city = order[colKeys.city] || "";
-                const covered = hasCoverage(city);
+                const deliveryPrice = getCityDeliveryPrice(city);
+                const covered = deliveryPrice !== null;
                 const salePrice = getDisplayAmount(order);
                 const orderDate = getOrderDate(order);
                 const canLoad = status === "CARGAR" && covered && salePrice > 0;
@@ -762,22 +679,25 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
                 return (
                   <tr key={idx} className={getRowClassName(status, covered)}>
-                    <td className="px-3 py-2 text-xs text-slate-400">{idx + 1}</td>
-                    <td className="px-3 py-2 text-xs font-mono">
+                    <td className="px-2 py-2 text-xs text-slate-400">{idx + 1}</td>
+                    <td className="px-2 py-2 text-xs font-mono">
                       {orderNumber ? <span className="text-green-400">{orderNumber}</span> : <span className="text-slate-600">—</span>}
                     </td>
-                    <td className="px-3 py-2 text-xs">{orderDate}</td>
-                    <td className="px-3 py-2 text-xs font-medium">{order[colKeys.name] || "—"}</td>
-                    <td className="px-3 py-2 text-xs">{order[colKeys.phone] || "—"}</td>
-                    <td className={`px-3 py-2 text-xs ${!covered && city ? "text-red-400" : "text-green-400"}`}>
-                      {city || "—"}
+                    <td className="px-2 py-2 text-xs">{orderDate}</td>
+                    <td className="px-2 py-2 text-xs font-medium">{order[colKeys.name] || "—"}</td>
+                    <td className="px-2 py-2 text-xs">{order[colKeys.phone] || "—"}</td>
+                    <td className="px-2 py-2 text-xs">
+                      <div className={covered ? "text-green-400" : "text-red-400"}>
+                        {city || "—"}
+                        {deliveryPrice && <span className="text-[10px] text-slate-400 ml-1">({nf(deliveryPrice)} Gs)</span>}
+                      </div>
                     </td>
-                    <td className="px-3 py-2 text-xs max-w-[200px] truncate" title={order[colKeys.product] || ""}>
+                    <td className="px-2 py-2 text-xs max-w-[180px] truncate" title={order[colKeys.product] || ""}>
                       {order[colKeys.product] || "—"}
                     </td>
-                    <td className="px-3 py-2 text-xs text-center">{parseQuantity(order[colKeys.qty])}</td>
-                    <td className="px-3 py-2 text-xs text-right text-green-400">{salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}</td>
-                    <td className="px-3 py-2 text-center">
+                    <td className="px-2 py-2 text-xs text-center">{parseQuantity(order[colKeys.qty])}</td>
+                    <td className="px-2 py-2 text-xs text-right text-green-400">{salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}</td>
+                    <td className="px-2 py-2 text-center">
                       <select
                         className="bg-slate-800 border border-slate-700 rounded px-2 py-1 text-xs focus:outline-none focus:border-blue-500"
                         value={status}
@@ -789,14 +709,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                         <option value="CARGADO_MANUAL">✍️ Manual</option>
                       </select>
                     </td>
-                    <td className="px-3 py-2 text-center">
+                    <td className="px-2 py-2 text-center">
                       <div className="flex gap-1 justify-center">
                         {canLoad && (
-                          <button className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 rounded" onClick={() => handleDirectSave(order, idx)}>
+                          <button className="px-2 py-1 text-xs bg-blue-600 hover:bg-blue-700 rounded" onClick={() => handleDirectSave(order, idx)} title="Cargar pedido">
                             💰
                           </button>
                         )}
-                        <button className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 rounded" onClick={() => handleOpenForm(order, idx)}>
+                        <button className="px-2 py-1 text-xs bg-slate-700 hover:bg-slate-600 rounded" onClick={() => handleOpenForm(order, idx)} title="Abrir formulario">
                           📝
                         </button>
                       </div>
