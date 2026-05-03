@@ -16,7 +16,7 @@ export default function AuthView({ onSuccess }: AuthViewProps) {
   const [regName, setRegName] = useState('');
   const [regEmail, setRegEmail] = useState('');
   const [regPass, setRegPass] = useState('');
-  const [regRole, setRegRole] = useState('VENDEDOR');
+  const [regRole, setRegRole] = useState('seller'); // ✅ CORREGIDO: 'seller' en minúsculas
   const [loading, setLoading] = useState(false);
 
   const handleLogin = async () => {
@@ -194,10 +194,10 @@ export default function AuthView({ onSuccess }: AuthViewProps) {
                       value={regRole}
                       onChange={e => setRegRole(e.target.value)}
                     >
-                      <option value="VENDEDOR" className="bg-black">VENDEDOR</option>
-                      <option value="DELIVERY" className="bg-black">DELIVERY</option>
-                      <option value="DESPACHANTE" className="bg-black">DESPACHANTE</option>
-                      <option value="PROVEEDOR" className="bg-black">PROVEEDOR</option>
+                      <option value="seller" className="bg-black">VENDEDOR</option>
+                      <option value="delivery" className="bg-black">DELIVERY</option>
+                      <option value="despachante" className="bg-black">DESPACHANTE</option>
+                      <option value="proveedor" className="bg-black">PROVEEDOR</option>
                     </select>
                   </div>
                 </div>
