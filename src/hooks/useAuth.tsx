@@ -85,24 +85,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error?.message || null };
   };
 
+  // ✅ FUNCIÓN CORREGIDA: No insertar manualmente en user_roles
   const signUp = async (email: string, password: string, name: string, role: string) => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { name } },
+      options: { 
+        data: { 
+          name,
+          role: role  // El rol se envía en los metadatos
+        } 
+      },
     });
 
     if (error) return { error: error.message };
-
-    if (data.user) {
-      const { error: roleError } = await supabase.from('user_roles').insert({
-        user_id: data.user.id,
-        role: role as any,
-        approved: false,
-      });
-      if (roleError) return { error: roleError.message };
-    }
-
+    
+    // El trigger handle_new_user se encarga de crear el perfil y los roles
+    // No insertar nada manualmente aquí
+    
     return { error: null };
   };
 
