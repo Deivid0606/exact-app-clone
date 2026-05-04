@@ -142,6 +142,7 @@ export default function ChatView() {
   const [text, setText] = useState('');
   const [uploading, setUploading] = useState(false);
   const [showEmojis, setShowEmojis] = useState(false);
+  const [loadingContacts, setLoadingContacts] = useState(false);
 
   const [channelMessages, setChannelMessages] = useState<ChatMessage[]>([]);
   const [selectedPeer, setSelectedPeer] = useState('');
@@ -178,8 +179,8 @@ export default function ChatView() {
 
     contacts.forEach((contact) => {
       map[contact.email.toLowerCase()] = {
-        name: contact.name || contact.email,
-        role: contact.role || '',
+        name: contact.name || contact.email.split('@')[0],
+        role: contact.role || 'USUARIO',
       };
     });
 
@@ -190,7 +191,7 @@ export default function ChatView() {
   const canViewChat = (peerEmail: string): boolean => {
     if (!myEmail || !peerEmail) return false;
     if (isAdminOrDespachante) return true;
-    if (isProvider) return true; // PROVEEDOR puede ver chats con todos
+    if (isProvider) return true;
     if (isSeller) {
       const peer = contacts.find(c => c.email.toLowerCase() === peerEmail.toLowerCase());
       return peer?.role === 'PROVEEDOR';
@@ -202,7 +203,7 @@ export default function ChatView() {
   const canSendToPeer = (peerEmail: string): boolean => {
     if (!myEmail || !peerEmail) return false;
     if (isAdminOrDespachante) return true;
-    if (isProvider) return true; // PROVEEDOR puede escribir a cualquiera
+    if (isProvider) return true;
     if (isSeller) {
       const peer = contacts.find(c => c.email.toLowerCase() === peerEmail.toLowerCase());
       return peer?.role === 'PROVEEDOR';
@@ -212,25 +213,34 @@ export default function ChatView() {
 
   // Todos los contactos disponibles para el usuario actual
   const filteredContacts = useMemo(() => {
-    if (!myRole) return [];
+    if (!myEmail) return [];
+    if (!contacts.length) return [];
+    
+    console.log('🔍 Filtrando contactos - Rol:', myRole);
+    console.log('📇 Contactos totales:', contacts.map(c => ({ email: c.email, role: c.role })));
+    
+    let result: Contact[] = [];
     
     if (isAdminOrDespachante) {
-      return contacts.filter((contact) => contact.email !== myEmail);
-    }
-    
-    if (isProvider) {
-      // Proveedor puede ver todos los contactos
-      return contacts.filter((contact) => contact.email !== myEmail);
-    }
-    
-    if (isSeller) {
-      // Vendedor solo ve proveedores
-      return contacts.filter(
+      result = contacts.filter((contact) => contact.email !== myEmail);
+      console.log('👑 Admin - contactos:', result.length);
+    } else if (isProvider) {
+      result = contacts.filter((contact) => contact.email !== myEmail);
+      console.log('📦 Proveedor - contactos:', result.length);
+    } else if (isSeller) {
+      result = contacts.filter(
         (contact) => contact.email !== myEmail && contact.role === 'PROVEEDOR'
       );
+      console.log('💰 Vendedor - proveedores encontrados:', result.length, result.map(c => c.email));
+    } else {
+      result = contacts.filter((contact) => contact.email !== myEmail);
     }
     
-    return contacts.filter((contact) => contact.email !== myEmail);
+    if (result.length === 0 && isSeller) {
+      console.warn('⚠️ No se encontraron proveedores. Verifica que existan usuarios con role PROVEEDOR');
+    }
+    
+    return result;
   }, [contacts, myEmail, myRole, isAdminOrDespachante, isProvider, isSeller]);
 
   const filterDeletedMessages = (messages: ChatMessage[]): ChatMessage[] => {
@@ -294,24 +304,38 @@ export default function ChatView() {
   };
 
   const loadContacts = async () => {
-    const [profRes, rolesRes] = await Promise.all([
-      supabase.from('profiles').select('email, name, user_id'),
-      supabase.from('user_roles').select('user_id, role'),
-    ]);
+    setLoadingContacts(true);
+    console.log('🔄 Cargando contactos...');
+    
+    try {
+      const [profRes, rolesRes] = await Promise.all([
+        supabase.from('profiles').select('email, name, user_id'),
+        supabase.from('user_roles').select('user_id, role'),
+      ]);
 
-    const roleMap = new Map<string, string>();
+      console.log('📊 Perfiles obtenidos:', profRes.data?.length);
+      console.log('📊 Roles obtenidos:', rolesRes.data?.length);
 
-    (rolesRes.data || []).forEach((role: any) => {
-      roleMap.set(role.user_id, role.role);
-    });
+      const roleMap = new Map<string, string>();
 
-    setContacts(
-      (profRes.data || []).map((person: any) => ({
+      (rolesRes.data || []).forEach((role: any) => {
+        roleMap.set(role.user_id, role.role);
+      });
+
+      const contactList = (profRes.data || []).map((person: any) => ({
         email: person.email,
         name: person.name,
         role: roleMap.get(person.user_id) || null,
-      })),
-    );
+      }));
+
+      console.log('📇 Lista de contactos final:', contactList.map(c => ({ email: c.email, role: c.role })));
+      
+      setContacts(contactList);
+    } catch (err) {
+      console.error('Error cargando contactos:', err);
+    } finally {
+      setLoadingContacts(false);
+    }
   };
 
   const loadChannelMessages = async (channelKey: ChannelKey) => {
@@ -398,7 +422,7 @@ export default function ChatView() {
             }
           ).length;
         } else {
-          peerName = contactMap[peer.toLowerCase()]?.name || peer;
+          peerName = contactMap[peer.toLowerCase()]?.name || peer.split('@')[0];
           
           unread = notDeletedForMe.filter(
             (item: ChatMessage) =>
@@ -514,7 +538,7 @@ export default function ChatView() {
           ).length;
         } else {
           if (!canViewChat(peer)) return;
-          peerName = contactMap[peer.toLowerCase()]?.name || peer;
+          peerName = contactMap[peer.toLowerCase()]?.name || peer.split('@')[0];
           
           unread = notDeletedForMe.filter(
             (item: ChatMessage) =>
@@ -618,6 +642,7 @@ export default function ChatView() {
       return;
     }
     
+    console.log('📨 Seleccionando destinatario:', peer);
     setSelectedPeer(peer);
     loadDmMessages(peer, topicChannel);
   };
@@ -1074,7 +1099,7 @@ export default function ChatView() {
     }
     
     const mine = senderEmail?.toLowerCase() === myEmail.toLowerCase();
-    const senderName = contactMap[senderEmail?.toLowerCase() || '']?.name || senderEmail || 'Usuario';
+    const senderName = contactMap[senderEmail?.toLowerCase() || '']?.name || senderEmail?.split('@')[0] || 'Usuario';
     
     return (
       <div key={message.id} className={`chat-message-row ${mine ? 'mine' : 'theirs'}`}>
