@@ -31,25 +31,49 @@ export default function ClosuresView() {
   });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [totalPedidosAsignados, setTotalPedidosAsignados] = useState(0);
+  const [loadingDeliveries, setLoadingDeliveries] = useState(false);
 
+  // ✅ NUEVA FUNCIÓN: Carga TODOS los deliveries desde profiles (no solo los que tienen pedidos)
   const loadDeliveries = async () => {
-    const { data: ordersData } = await supabase
-      .from('orders')
-      .select('assigned_delivery')
-      .not('assigned_delivery', 'is', null);
-    
-    if (ordersData && ordersData.length > 0) {
-      const uniqueEmails = [...new Set(ordersData.map(o => o.assigned_delivery))];
-      const { data: profilesData } = await supabase
+    setLoadingDeliveries(true);
+    try {
+      // Primero intentar obtener todos los deliveries de la tabla profiles
+      const { data: profilesData, error: profilesError } = await supabase
         .from('profiles')
         .select('email, name')
-        .in('email', uniqueEmails);
+        .eq('role', 'delivery');
+      
+      if (profilesError) throw profilesError;
       
       if (profilesData && profilesData.length > 0) {
         setDeliveries(profilesData);
-      } else {
-        setDeliveries(uniqueEmails.map(email => ({ email, name: email })));
+        return;
       }
+      
+      // Fallback: obtener desde orders
+      const { data: ordersData } = await supabase
+        .from('orders')
+        .select('assigned_delivery')
+        .not('assigned_delivery', 'is', null);
+      
+      if (ordersData && ordersData.length > 0) {
+        const uniqueEmails = [...new Set(ordersData.map(o => o.assigned_delivery))];
+        const { data: fallbackProfiles } = await supabase
+          .from('profiles')
+          .select('email, name')
+          .in('email', uniqueEmails);
+        
+        if (fallbackProfiles && fallbackProfiles.length > 0) {
+          setDeliveries(fallbackProfiles);
+        } else {
+          setDeliveries(uniqueEmails.map(email => ({ email, name: email })));
+        }
+      }
+    } catch (error) {
+      console.error('Error loading deliveries:', error);
+      toast.error('Error al cargar repartidores');
+    } finally {
+      setLoadingDeliveries(false);
     }
   };
 
@@ -65,7 +89,6 @@ export default function ClosuresView() {
         name: s.company_name || s.name || s.email 
       })));
     } else {
-      // Fallback: proveedores desde pedidos
       const { data: ordersData } = await supabase
         .from('orders')
         .select('provider_email')
@@ -85,7 +108,6 @@ export default function ClosuresView() {
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
   }, []);
 
-  // ✅ DETECCIÓN DE DELIVERY - como en el código que funcionaba
   const isDelivery = !isSupplier && !isAdmin && deliveries.some(d => d.email === myEmail);
 
   const loadClosures = async () => {
@@ -324,19 +346,34 @@ export default function ClosuresView() {
         <label className="app-label !mt-0">Hasta</label>
         <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
         
-        {/* FILTRO POR DELIVERY - para PROVEEDOR y ADMIN */}
-        {(isSupplier || isAdmin) && deliveries.length > 0 && (
-          <select className="app-input !w-auto min-w-[280px]" value={filterDelivery} onChange={e => setFilterDelivery(e.target.value)}>
-            <option value="">Todos los repartidores</option>
-            {deliveries.map(d => (
-              <option key={d.email} value={d.email}>
-                {d.name || d.email}
-              </option>
-            ))}
-          </select>
+        {/* FILTRO POR DELIVERY - para PROVEEDOR y ADMIN - AHORA SIEMPRE VISIBLE */}
+        {(isSupplier || isAdmin) && (
+          <div className="flex items-center gap-1">
+            <select className="app-input !w-auto min-w-[280px]" value={filterDelivery} onChange={e => setFilterDelivery(e.target.value)}>
+              <option value="">Todos los repartidores</option>
+              {loadingDeliveries ? (
+                <option value="" disabled>Cargando repartidores...</option>
+              ) : deliveries.length === 0 ? (
+                <option value="" disabled>No hay repartidores disponibles</option>
+              ) : (
+                deliveries.map(d => (
+                  <option key={d.email} value={d.email}>
+                    {d.name || d.email}
+                  </option>
+                ))
+              )}
+            </select>
+            <button 
+              className="nav-btn !bg-gray-500 text-xs !py-1 !px-2"
+              onClick={() => loadDeliveries()}
+              title="Recargar repartidores"
+            >
+              🔄
+            </button>
+          </div>
         )}
 
-        {/* ✅ SELECTOR DE PROVEEDORES - visible para DELIVERY y ADMIN */}
+        {/* SELECTOR DE PROVEEDORES - visible para DELIVERY y ADMIN */}
         {(isDelivery || isAdmin) && suppliers.length > 0 && (
           <select className="app-input !w-auto min-w-[280px]" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
             <option value="">Todos los proveedores</option>
