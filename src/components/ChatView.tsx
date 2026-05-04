@@ -81,7 +81,7 @@ const EMOJIS = ['😀', '😂', '😍', '👍', '🙏', '🔥', '📦', '✅', '
 // Canales públicos (todos ven, no requieren destinatario)
 const PUBLIC_CHANNELS: ChatTab[] = ['general', 'fotos_productos'];
 
-// Canales que son DM encubiertos (requieren destinatario)
+// Canales que son DM (requieren destinatario)
 const DM_CHANNELS: ChatTab[] = [
   'consulta_comisiones',
   'comprobantes_transferencias',
@@ -104,14 +104,9 @@ function inferAttachmentType(message: ChatMessage): Attachment['type'] {
   const name = (message.attachment_name || message.attachment_url || '').toLowerCase();
   const mime = message.attachment_mime || '';
 
-  // Video por extensión o mime
   if (mime.startsWith('video/')) return 'video';
   if (/\.(mp4|webm|mov|avi|mkv|flv|wmv|m4v|mpg|mpeg|3gp)$/.test(name)) return 'video';
-  
-  // Imagen
   if (/\.(png|jpg|jpeg|webp|gif|bmp|svg)$/.test(name)) return 'image';
-  
-  // Audio
   if (/\.(mp3|wav|ogg|webm|m4a|aac)$/.test(name)) return 'audio';
 
   return 'file';
@@ -170,6 +165,8 @@ export default function ChatView() {
   const isPublicChannel = PUBLIC_CHANNELS.includes(tab as ChannelKey);
   const isDMChannel = DM_CHANNELS.includes(tab as ChannelKey);
   const isAdminOrDespachante = myRole === 'ADMIN' || myRole === 'DESPACHANTE';
+  const isProvider = myRole === 'PROVEEDOR';
+  const isSeller = myRole === 'VENDEDOR';
 
   const activeChannel = useMemo(() => {
     if (tab === 'dm') return null;
@@ -189,48 +186,31 @@ export default function ChatView() {
     return map;
   }, [contacts]);
 
-  const canSendToPeer = (peerEmail: string): boolean => {
-    if (!myEmail || !peerEmail) return false;
-    
-    if (isAdminOrDespachante) return true;
-    
-    const peer = contacts.find(c => c.email.toLowerCase() === peerEmail.toLowerCase());
-    if (!peer) return true;
-    
-    const peerRole = peer.role;
-    const myRoleUpper = myRole?.toUpperCase();
-    
-    if (myRoleUpper === 'VENDEDOR') {
-      return peerRole === 'PROVEEDOR';
-    }
-    
-    if (myRoleUpper === 'PROVEEDOR') {
-      return true;
-    }
-    
-    return true;
-  };
-
+  // Permitir que proveedores vean chats con todos
   const canViewChat = (peerEmail: string): boolean => {
     if (!myEmail || !peerEmail) return false;
-    
     if (isAdminOrDespachante) return true;
-    
-    const peer = contacts.find(c => c.email.toLowerCase() === peerEmail.toLowerCase());
-    const peerRole = peer?.role;
-    const myRoleUpper = myRole?.toUpperCase();
-    
-    if (myRoleUpper === 'VENDEDOR') {
-      return peerRole === 'PROVEEDOR';
+    if (isProvider) return true; // PROVEEDOR puede ver chats con todos
+    if (isSeller) {
+      const peer = contacts.find(c => c.email.toLowerCase() === peerEmail.toLowerCase());
+      return peer?.role === 'PROVEEDOR';
     }
-    
-    if (myRoleUpper === 'PROVEEDOR') {
-      return peerRole === 'VENDEDOR' || peerRole === 'PROVEEDOR' || peerRole === 'ADMIN' || peerRole === 'DESPACHANTE';
-    }
-    
     return true;
   };
 
+  // Permitir que proveedores envíen mensajes a todos
+  const canSendToPeer = (peerEmail: string): boolean => {
+    if (!myEmail || !peerEmail) return false;
+    if (isAdminOrDespachante) return true;
+    if (isProvider) return true; // PROVEEDOR puede escribir a cualquiera
+    if (isSeller) {
+      const peer = contacts.find(c => c.email.toLowerCase() === peerEmail.toLowerCase());
+      return peer?.role === 'PROVEEDOR';
+    }
+    return true;
+  };
+
+  // Todos los contactos disponibles para el usuario actual
   const filteredContacts = useMemo(() => {
     if (!myRole) return [];
     
@@ -238,20 +218,20 @@ export default function ChatView() {
       return contacts.filter((contact) => contact.email !== myEmail);
     }
     
-    const myRoleUpper = myRole.toUpperCase();
-    
-    if (myRoleUpper === 'PROVEEDOR') {
+    if (isProvider) {
+      // Proveedor puede ver todos los contactos
       return contacts.filter((contact) => contact.email !== myEmail);
     }
     
-    if (myRoleUpper === 'VENDEDOR') {
+    if (isSeller) {
+      // Vendedor solo ve proveedores
       return contacts.filter(
         (contact) => contact.email !== myEmail && contact.role === 'PROVEEDOR'
       );
     }
     
     return contacts.filter((contact) => contact.email !== myEmail);
-  }, [contacts, myEmail, myRole, isAdminOrDespachante]);
+  }, [contacts, myEmail, myRole, isAdminOrDespachante, isProvider, isSeller]);
 
   const filterDeletedMessages = (messages: ChatMessage[]): ChatMessage[] => {
     if (!myEmail) return messages;
@@ -365,7 +345,7 @@ export default function ChatView() {
       .select('*')
       .eq('topic_channel', channelTab);
 
-    if (!isAdminOrDespachante) {
+    if (!isAdminOrDespachante && !isProvider) {
       query = query.or(`from_email.eq.${myEmail},to_email.eq.${myEmail}`);
     }
 
@@ -398,7 +378,7 @@ export default function ChatView() {
 
       if (!peer) return;
       
-      if (!isAdminOrDespachante && !canViewChat(peer)) return;
+      if (!canViewChat(peer)) return;
 
       if (!threadsMap.has(key)) {
         let peerName: string;
@@ -482,7 +462,7 @@ export default function ChatView() {
       .select('*')
       .eq('topic_channel', 'dm');
 
-    if (!isAdminOrDespachante) {
+    if (!isAdminOrDespachante && !isProvider) {
       query = query.or(`from_email.eq.${myEmail},to_email.eq.${myEmail}`);
     }
 
@@ -562,7 +542,7 @@ export default function ChatView() {
   const loadDmMessages = async (peer: string, topicChannel?: string) => {
     if (!myEmail || !peer) return;
 
-    if (!isAdminOrDespachante && !canViewChat(peer)) {
+    if (!canViewChat(peer)) {
       toast.error('No tenés permiso para ver esta conversación');
       setSelectedPeer('');
       return;
@@ -600,17 +580,16 @@ export default function ChatView() {
     setDmMessages(data || []);
     scrollBottom();
 
-    if (!isAdminOrDespachante) {
-      const unreadMessages = data?.filter(
-        (msg: ChatMessage) => msg.to_email === myEmail && !msg.read_at
-      );
+    // Marcar como leídos
+    const unreadMessages = data?.filter(
+      (msg: ChatMessage) => msg.to_email === myEmail && !msg.read_at
+    );
 
-      if (unreadMessages && unreadMessages.length > 0) {
-        await (supabase as any)
-          .from('chat_dm_messages')
-          .update({ read_at: new Date().toISOString() })
-          .in('id', unreadMessages.map((m: ChatMessage) => m.id));
-      }
+    if (unreadMessages && unreadMessages.length > 0) {
+      await (supabase as any)
+        .from('chat_dm_messages')
+        .update({ read_at: new Date().toISOString() })
+        .in('id', unreadMessages.map((m: ChatMessage) => m.id));
     }
 
     if (channel !== 'dm') {
@@ -1023,7 +1002,6 @@ export default function ChatView() {
 
     const type = inferAttachmentType(message);
 
-    // Video - reproducción directa
     if (type === 'video') {
       return (
         <div className="chat-attachment chat-attachment-video">
@@ -1040,7 +1018,6 @@ export default function ChatView() {
       );
     }
 
-    // Imagen
     if (type === 'image') {
       return (
         <div className="chat-attachment chat-attachment-image">
@@ -1060,7 +1037,6 @@ export default function ChatView() {
       );
     }
 
-    // Audio
     if (type === 'audio') {
       return (
         <div className="chat-attachment chat-attachment-audio">
@@ -1071,7 +1047,6 @@ export default function ChatView() {
       );
     }
 
-    // Archivo genérico
     return (
       <div className="chat-attachment">
         <a
@@ -1086,18 +1061,14 @@ export default function ChatView() {
     );
   };
 
-  // Función para renderizar mensajes - soporta ambos tipos de mensajes
   const renderMessage = (message: ChatMessage) => {
-    // Determinar quién es el remitente según el tipo de canal
     let senderEmail = '';
     let senderRole = '';
     
     if (isPublicChannel) {
-      // Para canales públicos (general, fotos_productos)
       senderEmail = message.sender_email || '';
       senderRole = message.sender_role || '';
     } else {
-      // Para DM y canales con selector
       senderEmail = message.from_email || '';
       senderRole = message.from_role || '';
     }
@@ -1233,9 +1204,15 @@ export default function ChatView() {
         (payload) => {
           const newMessage = payload.new as ChatMessage;
           
-          if (newMessage.to_email === myEmail || newMessage.from_email === myEmail || isAdminOrDespachante) {
-            const msgTopic = newMessage.topic_channel || 'dm';
-            
+          const msgTopic = newMessage.topic_channel || 'dm';
+          
+          // Verificar si el mensaje me concierne
+          const concernsMe = newMessage.to_email === myEmail || 
+                            newMessage.from_email === myEmail || 
+                            isAdminOrDespachante ||
+                            (isProvider && (newMessage.to_email === myEmail || newMessage.from_email === myEmail));
+          
+          if (concernsMe) {
             if (tab === msgTopic || (tab === 'dm' && msgTopic === 'dm')) {
               let shouldUpdate = false;
               
@@ -1250,7 +1227,7 @@ export default function ChatView() {
                 shouldUpdate = (newMessage.from_email === selectedPeer || newMessage.to_email === selectedPeer);
               }
               
-              if (shouldUpdate) {
+              if (shouldUpdate || !selectedPeer) {
                 setDmMessages((prev) => {
                   const exists = prev.some(msg => msg.id === newMessage.id);
                   if (exists) return prev;
@@ -1265,6 +1242,14 @@ export default function ChatView() {
                 loadDMThreads();
               }
             }
+
+            // Marcar como leído inmediatamente si es para mí
+            if (newMessage.to_email === myEmail && !newMessage.read_at) {
+              (supabase as any)
+                .from('chat_dm_messages')
+                .update({ read_at: new Date().toISOString() })
+                .eq('id', newMessage.id);
+            }
           }
         },
       )
@@ -1273,7 +1258,7 @@ export default function ChatView() {
     return () => {
       supabase.removeChannel(channelSubscription);
     };
-  }, [myEmail, tab, selectedPeer, isPublicChannel, isAdminOrDespachante]);
+  }, [myEmail, tab, selectedPeer, isPublicChannel, isAdminOrDespachante, isProvider]);
 
   // Typing presence
   useEffect(() => {
