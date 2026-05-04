@@ -735,7 +735,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                     <tr className="border-b border-slate-700/50">
                       <td className="py-2 text-white font-medium truncate max-w-[200px]" title={productName}>
                         {productName || "—"}
-                       </td>
+                      </td>
                       <td className="py-2 text-center text-white">{quantity}</td>
                       <td className="py-2 text-right text-white">{nf(unitPrice)} Gs</td>
                       <td className="py-2 text-right text-green-400 font-semibold">{nf(salePrice)} Gs</td>
@@ -938,7 +938,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               <th className="px-1.5 py-1.5 text-right text-[10px] font-medium text-slate-400">Venta</th>
               <th className="px-1.5 py-1.5 text-center text-[10px] font-medium text-slate-400">Estado</th>
               <th className="px-1.5 py-1.5 text-center text-[10px] font-medium text-slate-400">Acciones</th>
-             </>
+            </tr>
           </thead>
           <tbody className="divide-y divide-slate-800">
             {filteredOrders.map(({ order, idx }) => {
@@ -1012,12 +1012,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                         Formulario
                       </button>
                     </div>
-                   </td>
-                 </tr>
+                  </td>
+                </tr>
               );
             })}
             {filteredOrders.length === 0 && (
-              <tr><td colSpan={11} className="text-center py-4 text-slate-500 text-[10px]">No hay pedidos para mostrar</td></tr>
+              <tr>
+                <td colSpan={11} className="text-center py-4 text-slate-500 text-[10px]">No hay pedidos para mostrar</td>
+              </tr>
             )}
           </tbody>
         </table>
