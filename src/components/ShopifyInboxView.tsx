@@ -179,6 +179,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [cityFilter, setCityFilter] = useState("");
   const [coverageFilter, setCoverageFilter] = useState<"all" | "covered" | "uncovered">("all");
   const [search, setSearch] = useState("");
+  
+  // Estados para el modal de guía
+  const [selectedOrder, setSelectedOrder] = useState<{ order: SheetOrder; idx: number } | null>(null);
+  const [showGuideModal, setShowGuideModal] = useState(false);
 
   const colKeys = useMemo(() => {
     const h = sheetHeaders;
@@ -196,14 +200,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     };
     
     return {
-      name: find("nombre", "cliente", "customer", "name"),
-      phone: find("telefono", "phone", "tel", "celular", "whatsapp"),
-      street: find("calle", "direccion", "address", "street"),
-      city: find("ciudad", "city", "localidad", "distrito"),
-      product: find("producto", "product", "articulo"),
-      qty: find("cantidad", "qty", "quantity", "unidades"),
-      amount: find("total", "monto", "precio", "importe", "venta"),
-      date: find("fecha", "date"),
+      name: find("nombre", "cliente", "customer", "name", "NOMBRE"),
+      phone: find("telefono", "phone", "tel", "celular", "whatsapp", "Teléfono"),
+      street: find("calle", "direccion", "address", "street", "CALLE"),
+      city: find("ciudad", "city", "localidad", "distrito", "CIUDAD"),
+      product: find("producto", "product", "articulo", "PRODUCTO"),
+      qty: find("cantidad", "qty", "quantity", "unidades", "CANTIDAD"),
+      amount: find("total", "monto", "precio", "importe", "venta", "MONTO"),
+      date: find("fecha", "date", "FECHA"),
     };
   }, [sheetHeaders]);
 
@@ -426,6 +430,26 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return String(dateValue).split(' ')[0];
   };
 
+  // Obtener todos los campos de la fila (para mostrar extras en la guía)
+  const getAllFields = (order: SheetOrder) => {
+    const camposPrincipales = ['FECHA', 'NOMBRE', 'Teléfono', 'CIUDAD', 'PRODUCTO', 'CANTIDAD', 'MONTO', 'REFERENCIA', 'CALLE'];
+    const principales: Record<string, string> = {};
+    const extras: Record<string, string> = {};
+    
+    for (const key in order) {
+      const valor = order[key];
+      if (!valor || valor.trim() === "") continue;
+      
+      if (camposPrincipales.some(campo => campo.toLowerCase() === key.toLowerCase())) {
+        principales[key] = valor;
+      } else {
+        extras[key] = valor;
+      }
+    }
+    
+    return { principales, extras };
+  };
+
   // Dashboard stats corregido
   const dashboardStats = useMemo(() => {
     let pendientesConCobertura = 0;
@@ -499,7 +523,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     };
   }, [sheetOrders, colKeys, getRowStatus]);
 
-  // FILTRO CORREGIDO - La función más importante
+  // FILTRO CORREGIDO
   const filteredOrders = useMemo(() => {
     return sheetOrders
       .map((o, i) => ({ order: o, idx: i }))
@@ -508,9 +532,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         const city = order[colKeys.city] || "";
         const covered = hasCoverage(city);
         
-        // ==========================================
-        // 1. FILTRO POR ESTADO (respetando TODOS)
-        // ==========================================
+        // 1. FILTRO POR ESTADO
         let estadoMatch = true;
         switch(activeFilter) {
           case "CARGAR":
@@ -526,15 +548,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             estadoMatch = status === "CANCELADO";
             break;
           case "TODOS":
-            // TODOS no filtra por estado, muestra cualquier estado
             estadoMatch = true;
             break;
         }
         if (!estadoMatch) return false;
         
-        // ==========================================
         // 2. FILTRO POR COBERTURA
-        // ==========================================
         let coberturaMatch = true;
         switch(coverageFilter) {
           case "covered":
@@ -549,9 +568,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         }
         if (!coberturaMatch) return false;
         
-        // ==========================================
         // 3. FILTRO POR BÚSQUEDA
-        // ==========================================
         if (searchType === "product" && productSearch.trim()) {
           const product = order[colKeys.product] || "";
           return product.toLowerCase().includes(productSearch.toLowerCase());
@@ -579,6 +596,222 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     if (status === "CANCELADO") return "bg-red-500/5";
     if (!hasCoverageCity && status === "CARGAR") return "bg-orange-500/5";
     return "hover:bg-slate-800/30";
+  };
+
+  // Renderizar el modal de guía
+  const renderGuideModal = () => {
+    if (!showGuideModal || !selectedOrder) return null;
+    
+    const { order, idx } = selectedOrder;
+    const status = getRowStatus(idx);
+    const city = order[colKeys.city] || "";
+    const covered = hasCoverage(city);
+    const deliveryPrice = getCityDeliveryPrice(city);
+    const salePrice = getDisplayAmount(order);
+    const productName = order[colKeys.product] || "";
+    const matched = matchProduct(productName);
+    const quantity = parseQuantity(order[colKeys.qty]);
+    const orderNumber = getRowOrderNumber(idx);
+    const { extras } = getAllFields(order);
+    
+    // Calcular total con envío
+    const totalConEnvio = salePrice + (deliveryPrice || 0);
+    
+    // Precio unitario
+    const unitPrice = quantity > 1 ? Math.round(salePrice / quantity) : salePrice;
+    
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => setShowGuideModal(false)}>
+        <div className="bg-slate-900 rounded-xl border border-slate-700 max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
+          
+          {/* HEADER */}
+          <div className="sticky top-0 bg-slate-900 border-b border-slate-700 px-5 py-4 flex justify-between items-center z-10">
+            <div>
+              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                📦 GUÍA DE ENVÍO
+                {orderNumber && (
+                  <span className="text-[10px] font-mono text-green-400 bg-green-500/10 px-2 py-0.5 rounded">
+                    {orderNumber}
+                  </span>
+                )}
+              </h2>
+              <p className="text-[10px] text-slate-400 mt-0.5">
+                Pedido #{idx + 1} - {getOrderDate(order)}
+              </p>
+            </div>
+            <button 
+              onClick={() => setShowGuideModal(false)} 
+              className="text-slate-400 hover:text-white text-3xl leading-none transition-colors"
+            >
+              ×
+            </button>
+          </div>
+          
+          {/* CONTENIDO */}
+          <div className="p-5 space-y-4">
+            
+            {/* SECCIÓN 1: ESTADO Y COBERTURA */}
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
+                <div className="text-[9px] text-slate-400 uppercase tracking-wider">Estado actual</div>
+                <div className="mt-1">
+                  <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold ${
+                    status === "CARGADO" || status === "CARGADO_MANUAL" ? "bg-green-500/20 text-green-400" :
+                    status === "A DROPEAR" ? "bg-yellow-500/20 text-yellow-400" :
+                    status === "CANCELADO" ? "bg-red-500/20 text-red-400" :
+                    "bg-blue-500/20 text-blue-400"
+                  }`}>
+                    {status === "CARGADO" ? "✅ CARGADO AUTOMÁTICO" :
+                     status === "CARGADO_MANUAL" ? "✍️ CARGADO MANUAL" :
+                     status === "A DROPEAR" ? "⚠️ A DROPEAR" :
+                     status === "CANCELADO" ? "❌ CANCELADO" :
+                     "⏳ PENDIENTE"}
+                  </span>
+                </div>
+              </div>
+              <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
+                <div className="text-[9px] text-slate-400 uppercase tracking-wider">Cobertura de envío</div>
+                <div className="mt-1">
+                  {covered ? (
+                    <>
+                      <div className="text-green-400 font-semibold text-sm">✅ CON COBERTURA</div>
+                      {deliveryPrice && (
+                        <div className="text-[10px] text-slate-400 mt-0.5">
+                          Costo delivery: {nf(deliveryPrice)} Gs
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="text-red-400 font-semibold text-sm">❌ SIN COBERTURA</div>
+                  )}
+                </div>
+              </div>
+            </div>
+            
+            {/* SECCIÓN 2: DATOS DEL CLIENTE */}
+            <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
+              <h3 className="text-xs font-bold text-white mb-3 flex items-center gap-2">
+                <span className="text-base">👤</span> DATOS DEL CLIENTE
+              </h3>
+              <div className="grid grid-cols-2 gap-3 text-[12px]">
+                <div className="col-span-2 md:col-span-1">
+                  <div className="text-slate-400 text-[9px] uppercase tracking-wider">Nombre completo</div>
+                  <div className="text-white font-medium mt-0.5">{order[colKeys.name] || "—"}</div>
+                </div>
+                <div className="col-span-2 md:col-span-1">
+                  <div className="text-slate-400 text-[9px] uppercase tracking-wider">Teléfono / WhatsApp</div>
+                  <div className="text-white mt-0.5">{order[colKeys.phone] || "—"}</div>
+                </div>
+                <div className="col-span-2 md:col-span-1">
+                  <div className="text-slate-400 text-[9px] uppercase tracking-wider">Ciudad / Localidad</div>
+                  <div className={`mt-0.5 font-medium ${covered ? "text-green-400" : "text-red-400"}`}>
+                    {order[colKeys.city] || "—"}
+                  </div>
+                </div>
+                <div className="col-span-2 md:col-span-1">
+                  <div className="text-slate-400 text-[9px] uppercase tracking-wider">Calle / Dirección</div>
+                  <div className="text-white mt-0.5">{order[colKeys.street] || "—"}</div>
+                </div>
+              </div>
+            </div>
+            
+            {/* SECCIÓN 3: DETALLE DEL PRODUCTO */}
+            <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
+              <h3 className="text-xs font-bold text-white mb-3 flex items-center gap-2">
+                <span className="text-base">📦</span> DETALLE DEL PRODUCTO
+              </h3>
+              
+              <div className="overflow-x-auto">
+                <table className="w-full text-[12px]">
+                  <thead className="border-b border-slate-700">
+                    <tr className="text-slate-400 text-[9px] uppercase tracking-wider">
+                      <th className="text-left py-1">Producto</th>
+                      <th className="text-center w-16">Cant.</th>
+                      <th className="text-right w-28">Precio Unit.</th>
+                      <th className="text-right w-28">Subtotal</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="border-b border-slate-700/50">
+                      <td className="py-2 text-white font-medium truncate max-w-[200px]" title={productName}>
+                        {productName || "—"}
+                       </td>
+                      <td className="py-2 text-center text-white">{quantity}</td>
+                      <td className="py-2 text-right text-white">{nf(unitPrice)} Gs</td>
+                      <td className="py-2 text-right text-green-400 font-semibold">{nf(salePrice)} Gs</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              
+              {matched && (
+                <div className="mt-2 pt-2 border-t border-slate-700/50 text-[10px] text-slate-400">
+                  <span className="text-slate-500">SKU:</span> {matched.sku || "—"} &nbsp;|&nbsp;
+                  <span className="text-slate-500">Costo proveedor:</span> {nf(matched.provider_price_gs || 0)} Gs
+                </div>
+              )}
+            </div>
+            
+            {/* SECCIÓN 4: RESUMEN DE COSTOS */}
+            <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
+              <h3 className="text-xs font-bold text-white mb-3 flex items-center gap-2">
+                <span className="text-base">💰</span> RESUMEN DE COSTOS
+              </h3>
+              <div className="space-y-2">
+                <div className="flex justify-between text-[12px]">
+                  <span className="text-slate-400">Subtotal productos:</span>
+                  <span className="text-white">{nf(salePrice)} Gs</span>
+                </div>
+                <div className="flex justify-between text-[12px]">
+                  <span className="text-slate-400">Costo de envío:</span>
+                  <span className={deliveryPrice ? "text-orange-400" : "text-slate-500"}>
+                    {deliveryPrice ? nf(deliveryPrice) : "0"} Gs
+                  </span>
+                </div>
+                {matched && (
+                  <div className="flex justify-between text-[12px] pt-1 border-t border-slate-700/50">
+                    <span className="text-slate-400">Comisión del vendedor:</span>
+                    <span className="text-blue-400 font-semibold">{nf(salePrice - (matched.provider_price_gs || 0) - (deliveryPrice || 0))} Gs</span>
+                  </div>
+                )}
+                <div className="flex justify-between text-[14px] pt-2 border-t border-slate-700">
+                  <span className="font-bold text-white">TOTAL A PAGAR:</span>
+                  <span className="font-bold text-green-400 text-base">{nf(totalConEnvio)} Gs</span>
+                </div>
+              </div>
+            </div>
+            
+            {/* SECCIÓN 5: DATOS ADICIONALES DEL SHEET */}
+            {Object.keys(extras).length > 0 && (
+              <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
+                <h3 className="text-xs font-bold text-white mb-3 flex items-center gap-2">
+                  <span className="text-base">📋</span> INFORMACIÓN ADICIONAL
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
+                  {Object.entries(extras).map(([key, value]) => (
+                    <div key={key} className="flex">
+                      <span className="text-slate-400 min-w-[100px]">{key}:</span>
+                      <span className="text-white ml-2 break-all">{value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            
+            {/* PIE DE GUÍA */}
+            <div className="text-center pt-2">
+              <div className="text-[9px] text-slate-500">
+                Esta guía fue generada automáticamente el {new Date().toLocaleString("es-PY")}
+              </div>
+              <div className="text-[8px] text-slate-600 mt-1">
+                Documento válido para entrega - E-commerce DCANP Group
+              </div>
+            </div>
+            
+          </div>
+        </div>
+      </div>
+    );
   };
 
   if (loadingStatuses) {
@@ -705,7 +938,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               <th className="px-1.5 py-1.5 text-right text-[10px] font-medium text-slate-400">Venta</th>
               <th className="px-1.5 py-1.5 text-center text-[10px] font-medium text-slate-400">Estado</th>
               <th className="px-1.5 py-1.5 text-center text-[10px] font-medium text-slate-400">Acciones</th>
-            </tr>
+             </>
           </thead>
           <tbody className="divide-y divide-slate-800">
             {filteredOrders.map(({ order, idx }) => {
@@ -756,16 +989,31 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                   <td className="px-1.5 py-1 text-center">
                     <div className="flex gap-0.5 justify-center">
                       {canLoad && (
-                        <button className="px-1.5 py-0.5 text-[10px] bg-blue-600 hover:bg-blue-700 rounded" onClick={() => handleDirectSave(order, idx)}>
+                        <button 
+                          className="px-1.5 py-0.5 text-[10px] bg-blue-600 hover:bg-blue-700 rounded transition-colors" 
+                          onClick={() => handleDirectSave(order, idx)}
+                        >
                           Cargar
                         </button>
                       )}
-                      <button className="px-1.5 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 rounded" onClick={() => handleOpenForm(order, idx)}>
+                      <button 
+                        className="px-1.5 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 rounded transition-colors" 
+                        onClick={() => {
+                          setSelectedOrder({ order, idx });
+                          setShowGuideModal(true);
+                        }}
+                      >
+                        📄 Guía
+                      </button>
+                      <button 
+                        className="px-1.5 py-0.5 text-[10px] bg-purple-700 hover:bg-purple-600 rounded transition-colors" 
+                        onClick={() => handleOpenForm(order, idx)}
+                      >
                         Formulario
                       </button>
                     </div>
-                  </td>
-                </tr>
+                   </td>
+                 </tr>
               );
             })}
             {filteredOrders.length === 0 && (
@@ -774,6 +1022,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           </tbody>
         </table>
       </div>
+      
+      {/* Modal de guía */}
+      {renderGuideModal()}
     </div>
   );
 }
