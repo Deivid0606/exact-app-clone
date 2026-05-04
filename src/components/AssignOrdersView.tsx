@@ -379,7 +379,7 @@ export default function AssignOrdersView() {
               <th>Estado</th>
               <th>Asignado a</th>
               {(role === 'ADMIN' || role === 'PROVEEDOR') && <th>Acción</th>}
-            </table>
+            </tr>
           </thead>
           <tbody>
             {filtered.map(o => (
