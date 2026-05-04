@@ -89,6 +89,13 @@ const DM_CHANNELS: ChatTab[] = [
   'consultas_estados'
 ];
 
+// LISTA MANUAL DE PROVEEDORES (para vendedores)
+const PROVIDERS_LIST = [
+  { email: 'skylinestore06@gmail.com', name: 'PROVEEDOR SKYLINE', role: 'PROVEEDOR' },
+  { email: 'importadoraaliado@gmail.com', name: 'IMPORTS ALIADEX', role: 'PROVEEDOR' },
+  { email: 'nkshop@gmail.com', name: 'PROVEEDOR NKSHOP', role: 'PROVEEDOR' },
+];
+
 function getAttachmentType(file: File): Attachment['type'] {
   if (file.type.startsWith('image/')) return 'image';
   if (file.type.startsWith('audio/')) return 'audio';
@@ -139,7 +146,6 @@ export default function ChatView() {
   const [text, setText] = useState('');
   const [uploading, setUploading] = useState(false);
   const [showEmojis, setShowEmojis] = useState(false);
-  const [manualPeerEmail, setManualPeerEmail] = useState('');
 
   const [channelMessages, setChannelMessages] = useState<ChatMessage[]>([]);
   const [selectedPeer, setSelectedPeer] = useState('');
@@ -151,6 +157,7 @@ export default function ChatView() {
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   const [recording, setRecording] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
+  const [loadingContacts, setLoadingContacts] = useState(true);
 
   const msgRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -172,48 +179,55 @@ export default function ChatView() {
   }, [channels, tab]);
 
   const contactMap = useMemo(() => {
-    const map: Record<string, { name: string; role: string; email: string }> = {};
+    const map: Record<string, { name: string; role: string }> = {};
 
     contacts.forEach((contact) => {
       map[contact.email.toLowerCase()] = {
         name: contact.name || contact.email.split('@')[0],
-        role: contact.role || 'USUARIO',
-        email: contact.email,
+        role: contact.role || '',
+      };
+    });
+
+    // Agregar proveedores manuales al mapa
+    PROVIDERS_LIST.forEach(provider => {
+      map[provider.email.toLowerCase()] = {
+        name: provider.name,
+        role: provider.role,
       };
     });
 
     return map;
   }, [contacts]);
 
-  // Contactos disponibles para el selector (solo proveedores para vendedores)
+  // Contactos disponibles para el selector
   const availableContacts = useMemo(() => {
-    if (!contacts.length) return [];
-    
-    let filtered = contacts;
-    
     if (isSeller) {
-      // Vendedor solo ve proveedores
-      filtered = contacts.filter(c => c.role === 'PROVEEDOR');
-    } else if (isProvider) {
-      // Proveedor ve todos excepto sí mismo
-      filtered = contacts.filter(c => c.email !== myEmail);
-    } else if (isAdminOrDespachante) {
-      filtered = contacts.filter(c => c.email !== myEmail);
-    } else {
-      filtered = contacts.filter(c => c.email !== myEmail);
+      // Vendedor: mostrar los proveedores de la lista manual
+      const providers = PROVIDERS_LIST.map(p => ({
+        email: p.email,
+        name: p.name,
+        role: p.role,
+      }));
+      console.log('📋 Proveedores disponibles para vendedor:', providers);
+      return providers;
     }
     
-    console.log('📋 Contactos disponibles:', filtered.map(c => ({ email: c.email, role: c.role })));
-    return filtered;
-  }, [contacts, myEmail, isSeller, isProvider, isAdminOrDespachante]);
+    if (isAdminOrDespachante || isProvider) {
+      // Admin, Despachante o Proveedor: todos los contactos
+      return contacts.filter(c => c.email !== myEmail);
+    }
+    
+    return [];
+  }, [contacts, myEmail, isSeller, isAdminOrDespachante, isProvider]);
 
   const canViewChat = (peerEmail: string): boolean => {
     if (!myEmail || !peerEmail) return false;
     if (isAdminOrDespachante) return true;
     if (isProvider) return true;
     if (isSeller) {
-      const peer = contacts.find(c => c.email.toLowerCase() === peerEmail.toLowerCase());
-      return peer?.role === 'PROVEEDOR';
+      // Verificar si el peer es un proveedor (de la lista manual)
+      const isProviderPeer = PROVIDERS_LIST.some(p => p.email.toLowerCase() === peerEmail.toLowerCase());
+      return isProviderPeer;
     }
     return true;
   };
@@ -223,8 +237,8 @@ export default function ChatView() {
     if (isAdminOrDespachante) return true;
     if (isProvider) return true;
     if (isSeller) {
-      const peer = contacts.find(c => c.email.toLowerCase() === peerEmail.toLowerCase());
-      return peer?.role === 'PROVEEDOR';
+      const isProviderPeer = PROVIDERS_LIST.some(p => p.email.toLowerCase() === peerEmail.toLowerCase());
+      return isProviderPeer;
     }
     return true;
   };
@@ -290,6 +304,7 @@ export default function ChatView() {
   };
 
   const loadContacts = async () => {
+    setLoadingContacts(true);
     console.log('🔄 Cargando contactos...');
     
     try {
@@ -297,9 +312,6 @@ export default function ChatView() {
         supabase.from('profiles').select('email, name, user_id'),
         supabase.from('user_roles').select('user_id, role'),
       ]);
-
-      console.log('📊 Perfiles obtenidos:', profRes.data?.length);
-      console.log('📊 Roles obtenidos:', rolesRes.data?.length);
 
       const roleMap = new Map<string, string>();
 
@@ -313,12 +325,11 @@ export default function ChatView() {
         role: roleMap.get(person.user_id) || null,
       }));
 
-      console.log('📇 Lista de contactos final:', contactList.map(c => ({ email: c.email, role: c.role })));
-      
       setContacts(contactList);
     } catch (err) {
       console.error('Error cargando contactos:', err);
-      toast.error('Error al cargar contactos');
+    } finally {
+      setLoadingContacts(false);
     }
   };
 
@@ -601,13 +612,13 @@ export default function ChatView() {
     }
 
     if (channel !== 'dm') {
-      if (!isAdminOrDespachante) {
+      if (!isAdminOrDespachante && !isProvider) {
         const key = threadKey(myEmail, peer);
         markThreadSeenLocal(key, channel);
       }
       await loadChannelThreads(tab);
     } else {
-      if (!isAdminOrDespachante) {
+      if (!isAdminOrDespachante && !isProvider) {
         const key = threadKey(myEmail, peer);
         markThreadSeenLocal(key, 'dm');
       }
@@ -629,31 +640,6 @@ export default function ChatView() {
     console.log('📨 Seleccionando destinatario:', peer);
     setSelectedPeer(peer);
     loadDmMessages(peer, topicChannel);
-  };
-
-  const handleManualPeer = () => {
-    if (!manualPeerEmail.trim()) {
-      toast.error('Ingresá un email de destinatario');
-      return;
-    }
-    
-    const email = manualPeerEmail.trim().toLowerCase();
-    
-    // Verificar si existe en contactos
-    const exists = contacts.some(c => c.email.toLowerCase() === email);
-    
-    if (!exists) {
-      toast.error(`No se encontró el usuario: ${email}`);
-      return;
-    }
-    
-    if (!canSendToPeer(email)) {
-      toast.error('No tenés permiso para escribirle a este destinatario');
-      return;
-    }
-    
-    selectPeer(email, tab === 'dm' ? 'dm' : tab);
-    setManualPeerEmail('');
   };
 
   const handleFileUpload = async (file: File): Promise<Attachment | null> => {
@@ -1391,8 +1377,6 @@ export default function ChatView() {
           {!isPublicChannel && tab !== 'dm' && (
             <div className="chat-dm-selector">
               <label className="chat-label">✏️ Escribir a</label>
-              
-              {/* Selector de destinatario existente */}
               <select
                 value={selectedPeer}
                 onChange={(event) => selectPeer(event.target.value, tab)}
@@ -1406,24 +1390,6 @@ export default function ChatView() {
                   </option>
                 ))}
               </select>
-              
-              {/* Input manual para escribir email directamente */}
-              <div className="chat-manual-peer">
-                <input
-                  type="text"
-                  placeholder="O escribí el email del destinatario"
-                  value={manualPeerEmail}
-                  onChange={(e) => setManualPeerEmail(e.target.value)}
-                  className="chat-manual-input"
-                />
-                <button
-                  type="button"
-                  onClick={handleManualPeer}
-                  className="chat-manual-button"
-                >
-                  Enviar
-                </button>
-              </div>
             </div>
           )}
 
@@ -1444,24 +1410,6 @@ export default function ChatView() {
                     </option>
                   ))}
                 </select>
-                
-                {/* Input manual para escribir email directamente */}
-                <div className="chat-manual-peer">
-                  <input
-                    type="text"
-                    placeholder="O escribí el email del destinatario"
-                    value={manualPeerEmail}
-                    onChange={(e) => setManualPeerEmail(e.target.value)}
-                    className="chat-manual-input"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleManualPeer}
-                    className="chat-manual-button"
-                  >
-                    Enviar
-                  </button>
-                </div>
               </div>
 
               <div className="chat-sidebar-header">
