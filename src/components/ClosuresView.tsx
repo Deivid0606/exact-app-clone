@@ -29,6 +29,7 @@ export default function ClosuresView() {
     return d.toISOString().slice(0, 10);
   });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [filterDateBy, setFilterDateBy] = useState<'assigned_at' | 'created_at'>('assigned_at');
   const [totalPedidosAsignados, setTotalPedidosAsignados] = useState(0);
   const [loadingDeliveries, setLoadingDeliveries] = useState(false);
 
@@ -107,11 +108,18 @@ export default function ClosuresView() {
   const isDelivery = !isSupplier && !isAdmin && deliveries.some(d => d.email === myEmail);
 
   const loadClosures = async () => {
+    // ✅ CORREGIDO: Usar assigned_at para deliveries, created_at para otros
+    let dateField = 'created_at';
+    if (isDelivery) {
+      dateField = 'assigned_at';
+    } else if ((isAdmin || isSupplier) && filterDelivery) {
+      dateField = 'assigned_at';
+    }
+    
     let query = supabase.from('orders').select('*')
-      // ✅ CAMBIADO: usar created_at en lugar de assigned_at
-      .gte('created_at', dateFrom + 'T00:00:00')
-      .lte('created_at', dateTo + 'T23:59:59')
-      .order('created_at', { ascending: false });
+      .gte(dateField, dateFrom + 'T00:00:00')
+      .lte(dateField, dateTo + 'T23:59:59')
+      .order(dateField, { ascending: false });
 
     if (isSupplier) {
       query = query.eq('provider_email', myEmail);
@@ -389,6 +397,12 @@ export default function ClosuresView() {
           <option value="DEVUELTO A DEPÓSITO">DEVUELTO A DEPÓSITO</option>
           <option value="REAGENDADO">REAGENDADO</option>
         </select>
+        
+        <select className="app-input !w-auto" value={filterDateBy} onChange={e => setFilterDateBy(e.target.value as any)}>
+          <option value="assigned_at">📅 Filtrar por fecha de asignación</option>
+          <option value="created_at">📅 Filtrar por fecha de creación</option>
+        </select>
+        
         <button className="nav-btn active" onClick={loadClosures}>Aplicar</button>
       </div>
 
@@ -486,6 +500,7 @@ export default function ClosuresView() {
         <table className="app-table min-w-[1500px]">
           <thead>
             <tr>
+              <th>Fecha Asignación</th>
               <th>Fecha Creación</th>
               <th>ID</th>
               <th>Ciudad</th>
@@ -517,8 +532,11 @@ export default function ClosuresView() {
               return (
                 <tr key={o.id} className={isSettled ? 'opacity-60' : ''}>
                   <td className="text-xs whitespace-nowrap">
+                    {o.assigned_at ? new Date(o.assigned_at).toLocaleDateString('es-PY') : '—'}
+                   </td>
+                  <td className="text-xs whitespace-nowrap">
                     {new Date(o.created_at).toLocaleDateString('es-PY')}
-                  </td>
+                   </td>
                   <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
                   <td className="text-xs">{o.city || '—'}</td>
                   <td className="text-xs">{o.customer_name}</td>
@@ -577,7 +595,7 @@ export default function ClosuresView() {
             })}
             {orders.length === 0 && (
               <tr>
-                <td colSpan={canManageRendicion ? 12 : 11} className="text-center text-muted-foreground py-8">
+                <td colSpan={canManageRendicion ? 13 : 12} className="text-center text-muted-foreground py-8">
                   Sin resultados
                 </td>
               </tr>
