@@ -132,9 +132,6 @@ export default function ChatView() {
   const myRole = profile?.role || '';
   const isApproved = Boolean(profile?.approved);
 
-  const canEditChannelLogo =
-    isApproved && (myRole === 'ADMIN' || myRole === 'PROVEEDOR');
-
   const [tab, setTab] = useState<ChatTab>('general');
   const [channels, setChannels] = useState<ChatChannel[]>(FALLBACK_CHANNELS);
 
@@ -142,7 +139,7 @@ export default function ChatView() {
   const [text, setText] = useState('');
   const [uploading, setUploading] = useState(false);
   const [showEmojis, setShowEmojis] = useState(false);
-  const [loadingContacts, setLoadingContacts] = useState(false);
+  const [manualPeerEmail, setManualPeerEmail] = useState('');
 
   const [channelMessages, setChannelMessages] = useState<ChatMessage[]>([]);
   const [selectedPeer, setSelectedPeer] = useState('');
@@ -175,19 +172,41 @@ export default function ChatView() {
   }, [channels, tab]);
 
   const contactMap = useMemo(() => {
-    const map: Record<string, { name: string; role: string }> = {};
+    const map: Record<string, { name: string; role: string; email: string }> = {};
 
     contacts.forEach((contact) => {
       map[contact.email.toLowerCase()] = {
         name: contact.name || contact.email.split('@')[0],
         role: contact.role || 'USUARIO',
+        email: contact.email,
       };
     });
 
     return map;
   }, [contacts]);
 
-  // Permitir que proveedores vean chats con todos
+  // Contactos disponibles para el selector (solo proveedores para vendedores)
+  const availableContacts = useMemo(() => {
+    if (!contacts.length) return [];
+    
+    let filtered = contacts;
+    
+    if (isSeller) {
+      // Vendedor solo ve proveedores
+      filtered = contacts.filter(c => c.role === 'PROVEEDOR');
+    } else if (isProvider) {
+      // Proveedor ve todos excepto sí mismo
+      filtered = contacts.filter(c => c.email !== myEmail);
+    } else if (isAdminOrDespachante) {
+      filtered = contacts.filter(c => c.email !== myEmail);
+    } else {
+      filtered = contacts.filter(c => c.email !== myEmail);
+    }
+    
+    console.log('📋 Contactos disponibles:', filtered.map(c => ({ email: c.email, role: c.role })));
+    return filtered;
+  }, [contacts, myEmail, isSeller, isProvider, isAdminOrDespachante]);
+
   const canViewChat = (peerEmail: string): boolean => {
     if (!myEmail || !peerEmail) return false;
     if (isAdminOrDespachante) return true;
@@ -199,7 +218,6 @@ export default function ChatView() {
     return true;
   };
 
-  // Permitir que proveedores envíen mensajes a todos
   const canSendToPeer = (peerEmail: string): boolean => {
     if (!myEmail || !peerEmail) return false;
     if (isAdminOrDespachante) return true;
@@ -210,38 +228,6 @@ export default function ChatView() {
     }
     return true;
   };
-
-  // Todos los contactos disponibles para el usuario actual
-  const filteredContacts = useMemo(() => {
-    if (!myEmail) return [];
-    if (!contacts.length) return [];
-    
-    console.log('🔍 Filtrando contactos - Rol:', myRole);
-    console.log('📇 Contactos totales:', contacts.map(c => ({ email: c.email, role: c.role })));
-    
-    let result: Contact[] = [];
-    
-    if (isAdminOrDespachante) {
-      result = contacts.filter((contact) => contact.email !== myEmail);
-      console.log('👑 Admin - contactos:', result.length);
-    } else if (isProvider) {
-      result = contacts.filter((contact) => contact.email !== myEmail);
-      console.log('📦 Proveedor - contactos:', result.length);
-    } else if (isSeller) {
-      result = contacts.filter(
-        (contact) => contact.email !== myEmail && contact.role === 'PROVEEDOR'
-      );
-      console.log('💰 Vendedor - proveedores encontrados:', result.length, result.map(c => c.email));
-    } else {
-      result = contacts.filter((contact) => contact.email !== myEmail);
-    }
-    
-    if (result.length === 0 && isSeller) {
-      console.warn('⚠️ No se encontraron proveedores. Verifica que existan usuarios con role PROVEEDOR');
-    }
-    
-    return result;
-  }, [contacts, myEmail, myRole, isAdminOrDespachante, isProvider, isSeller]);
 
   const filterDeletedMessages = (messages: ChatMessage[]): ChatMessage[] => {
     if (!myEmail) return messages;
@@ -304,7 +290,6 @@ export default function ChatView() {
   };
 
   const loadContacts = async () => {
-    setLoadingContacts(true);
     console.log('🔄 Cargando contactos...');
     
     try {
@@ -333,8 +318,7 @@ export default function ChatView() {
       setContacts(contactList);
     } catch (err) {
       console.error('Error cargando contactos:', err);
-    } finally {
-      setLoadingContacts(false);
+      toast.error('Error al cargar contactos');
     }
   };
 
@@ -647,6 +631,31 @@ export default function ChatView() {
     loadDmMessages(peer, topicChannel);
   };
 
+  const handleManualPeer = () => {
+    if (!manualPeerEmail.trim()) {
+      toast.error('Ingresá un email de destinatario');
+      return;
+    }
+    
+    const email = manualPeerEmail.trim().toLowerCase();
+    
+    // Verificar si existe en contactos
+    const exists = contacts.some(c => c.email.toLowerCase() === email);
+    
+    if (!exists) {
+      toast.error(`No se encontró el usuario: ${email}`);
+      return;
+    }
+    
+    if (!canSendToPeer(email)) {
+      toast.error('No tenés permiso para escribirle a este destinatario');
+      return;
+    }
+    
+    selectPeer(email, tab === 'dm' ? 'dm' : tab);
+    setManualPeerEmail('');
+  };
+
   const handleFileUpload = async (file: File): Promise<Attachment | null> => {
     setUploading(true);
 
@@ -808,7 +817,7 @@ export default function ChatView() {
         scrollBottom();
       }
 
-      toast.success(`Mensaje enviado a ${contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer} en ${activeChannel?.title}`);
+      toast.success(`Mensaje enviado a ${contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer}`);
       setText('');
       setShowEmojis(false);
       await loadChannelThreads(tab);
@@ -1241,7 +1250,7 @@ export default function ChatView() {
             if (tab === msgTopic || (tab === 'dm' && msgTopic === 'dm')) {
               let shouldUpdate = false;
               
-              if (isAdminOrDespachante && selectedPeer) {
+              if ((isAdminOrDespachante || isProvider) && selectedPeer) {
                 if (selectedPeer.includes('|')) {
                   const [email1, email2] = selectedPeer.split('|');
                   shouldUpdate = (newMessage.from_email === email1 || newMessage.from_email === email2);
@@ -1382,19 +1391,39 @@ export default function ChatView() {
           {!isPublicChannel && tab !== 'dm' && (
             <div className="chat-dm-selector">
               <label className="chat-label">✏️ Escribir a</label>
+              
+              {/* Selector de destinatario existente */}
               <select
                 value={selectedPeer}
                 onChange={(event) => selectPeer(event.target.value, tab)}
                 className="chat-select"
               >
                 <option value="">-- Elegir destinatario --</option>
-                {filteredContacts.map((contact) => (
+                {availableContacts.map((contact) => (
                   <option key={contact.email} value={contact.email}>
                     {contact.role ? `${contact.role} · ` : ''}
                     {contact.name || contact.email}
                   </option>
                 ))}
               </select>
+              
+              {/* Input manual para escribir email directamente */}
+              <div className="chat-manual-peer">
+                <input
+                  type="text"
+                  placeholder="O escribí el email del destinatario"
+                  value={manualPeerEmail}
+                  onChange={(e) => setManualPeerEmail(e.target.value)}
+                  className="chat-manual-input"
+                />
+                <button
+                  type="button"
+                  onClick={handleManualPeer}
+                  className="chat-manual-button"
+                >
+                  Enviar
+                </button>
+              </div>
             </div>
           )}
 
@@ -1408,13 +1437,31 @@ export default function ChatView() {
                   className="chat-select"
                 >
                   <option value="">-- Elegir destinatario --</option>
-                  {filteredContacts.map((contact) => (
+                  {availableContacts.map((contact) => (
                     <option key={contact.email} value={contact.email}>
                       {contact.role ? `${contact.role} · ` : ''}
                       {contact.name || contact.email}
                     </option>
                   ))}
                 </select>
+                
+                {/* Input manual para escribir email directamente */}
+                <div className="chat-manual-peer">
+                  <input
+                    type="text"
+                    placeholder="O escribí el email del destinatario"
+                    value={manualPeerEmail}
+                    onChange={(e) => setManualPeerEmail(e.target.value)}
+                    className="chat-manual-input"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleManualPeer}
+                    className="chat-manual-button"
+                  >
+                    Enviar
+                  </button>
+                </div>
               </div>
 
               <div className="chat-sidebar-header">
