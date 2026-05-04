@@ -31,47 +31,25 @@ export default function ClosuresView() {
   });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [totalPedidosAsignados, setTotalPedidosAsignados] = useState(0);
-  const [loadingDeliveries, setLoadingDeliveries] = useState(false);
-  const [loadingOrders, setLoadingOrders] = useState(false);
 
   const loadDeliveries = async () => {
-    setLoadingDeliveries(true);
-    try {
-      const { data: profilesData, error: profilesError } = await supabase
+    const { data: ordersData } = await supabase
+      .from('orders')
+      .select('assigned_delivery')
+      .not('assigned_delivery', 'is', null);
+    
+    if (ordersData && ordersData.length > 0) {
+      const uniqueEmails = [...new Set(ordersData.map(o => o.assigned_delivery))];
+      const { data: profilesData } = await supabase
         .from('profiles')
         .select('email, name')
-        .eq('role', 'delivery');
-      
-      if (profilesError) throw profilesError;
+        .in('email', uniqueEmails);
       
       if (profilesData && profilesData.length > 0) {
         setDeliveries(profilesData);
-        return;
+      } else {
+        setDeliveries(uniqueEmails.map(email => ({ email, name: email })));
       }
-      
-      const { data: ordersData } = await supabase
-        .from('orders')
-        .select('assigned_delivery')
-        .not('assigned_delivery', 'is', null);
-      
-      if (ordersData && ordersData.length > 0) {
-        const uniqueEmails = [...new Set(ordersData.map(o => o.assigned_delivery))];
-        const { data: fallbackProfiles } = await supabase
-          .from('profiles')
-          .select('email, name')
-          .in('email', uniqueEmails);
-        
-        if (fallbackProfiles && fallbackProfiles.length > 0) {
-          setDeliveries(fallbackProfiles);
-        } else {
-          setDeliveries(uniqueEmails.map(email => ({ email, name: email })));
-        }
-      }
-    } catch (error) {
-      console.error('Error loading deliveries:', error);
-      toast.error('Error al cargar repartidores');
-    } finally {
-      setLoadingDeliveries(false);
     }
   };
 
@@ -87,6 +65,7 @@ export default function ClosuresView() {
         name: s.company_name || s.name || s.email 
       })));
     } else {
+      // Fallback: proveedores desde pedidos
       const { data: ordersData } = await supabase
         .from('orders')
         .select('provider_email')
@@ -106,80 +85,59 @@ export default function ClosuresView() {
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
   }, []);
 
+  // ✅ DETECCIÓN DE DELIVERY - como en el código que funcionaba
   const isDelivery = !isSupplier && !isAdmin && deliveries.some(d => d.email === myEmail);
 
   const loadClosures = async () => {
-    setLoadingOrders(true);
-    try {
-      let query = supabase.from('orders').select('*');
+    let query = supabase.from('orders').select('*')
+      .gte('assigned_at', dateFrom + 'T00:00:00')
+      .lte('assigned_at', dateTo + 'T23:59:59')
+      .order('assigned_at', { ascending: false });
 
-      // Usar created_at para filtrar por fecha
-      if (dateFrom && dateTo) {
-        query = query
-          .gte('created_at', dateFrom + 'T00:00:00')
-          .lte('created_at', dateTo + 'T23:59:59');
+    if (isSupplier) {
+      query = query.eq('provider_email', myEmail);
+      if (filterDelivery) {
+        query = query.eq('assigned_delivery', filterDelivery);
       }
-      
-      query = query.order('created_at', { ascending: false });
+    } else if (isDelivery) {
+      query = query.eq('assigned_delivery', myEmail);
+      if (filterSupplier) {
+        query = query.eq('provider_email', filterSupplier);
+      }
+    } else if (isAdmin) {
+      if (filterDelivery) query = query.eq('assigned_delivery', filterDelivery);
+      if (filterSupplier) query = query.eq('provider_email', filterSupplier);
+    }
 
-      if (isSupplier) {
-        query = query.eq('provider_email', myEmail);
-        if (filterDelivery) {
-          query = query.eq('assigned_delivery', filterDelivery);
-        }
-      } else if (isDelivery) {
-        query = query.eq('assigned_delivery', myEmail);
-        if (filterSupplier) {
-          query = query.eq('provider_email', filterSupplier);
-        }
-      } else if (isAdmin) {
-        if (filterDelivery) query = query.eq('assigned_delivery', filterDelivery);
-        if (filterSupplier) query = query.eq('provider_email', filterSupplier);
-      }
+    if (filterType && filterType !== '') {
+      query = query.eq('status', filterType);
+    }
 
-      if (filterType && filterType !== '') {
-        query = query.eq('status', filterType);
-      }
+    const { data } = await query;
+    setOrders(data || []);
+    setTotalPedidosAsignados(data?.length || 0);
 
-      const { data, error } = await query;
-      
-      if (error) throw error;
-      
-      console.log('Pedidos encontrados:', data?.length);
-      setOrders(data || []);
-      setTotalPedidosAsignados(data?.length || 0);
-
-      let deliveryToCheck = '';
-      if (isDelivery) {
-        deliveryToCheck = myEmail;
-      } else if ((isAdmin || isSupplier) && filterDelivery) {
-        deliveryToCheck = filterDelivery;
-      }
-      
-      if (deliveryToCheck) {
-        const { data: rp } = await supabase.from('rendiciones_pagadas').select('*')
-          .eq('delivery_email', deliveryToCheck)
-          .gte('pagado_en', dateFrom + 'T00:00:00')
-          .lte('pagado_en', dateTo + 'T23:59:59')
-          .order('pagado_en', { ascending: false })
-          .limit(1);
-        setRendicionPagada(rp && rp.length > 0 ? { id: rp[0].id, pagado_en: rp[0].pagado_en, nota: rp[0].nota || '', marcado_por: rp[0].marcado_por || '' } : null);
-      } else {
-        setRendicionPagada(null);
-      }
-    } catch (error) {
-      console.error('Error loading closures:', error);
-      toast.error('Error al cargar los pedidos');
-    } finally {
-      setLoadingOrders(false);
+    let deliveryToCheck = '';
+    if (isDelivery) {
+      deliveryToCheck = myEmail;
+    } else if ((isAdmin || isSupplier) && filterDelivery) {
+      deliveryToCheck = filterDelivery;
+    }
+    
+    if (deliveryToCheck) {
+      const { data: rp } = await supabase.from('rendiciones_pagadas').select('*')
+        .eq('delivery_email', deliveryToCheck)
+        .gte('pagado_en', dateFrom + 'T00:00:00')
+        .lte('pagado_en', dateTo + 'T23:59:59')
+        .order('pagado_en', { ascending: false })
+        .limit(1);
+      setRendicionPagada(rp && rp.length > 0 ? { id: rp[0].id, pagado_en: rp[0].pagado_en, nota: rp[0].nota || '', marcado_por: rp[0].marcado_por || '' } : null);
+    } else {
+      setRendicionPagada(null);
     }
   };
 
-  useEffect(() => { 
-    if (dateFrom && dateTo) {
-      loadClosures(); 
-    }
-  }, [filterSupplier, filterDelivery, filterType, dateFrom, dateTo]);
+  useEffect(() => { loadClosures(); }, [filterSupplier, filterDelivery, filterType, dateFrom, dateTo]);
 
   const getFee = (deliveryEmail: string, city: string) => {
     const f = fees.find(f => f.delivery_email?.toLowerCase() === deliveryEmail?.toLowerCase() && f.city?.toLowerCase() === city?.toLowerCase());
@@ -253,10 +211,7 @@ export default function ClosuresView() {
 
   const updateAssignedAt = async (orderId: string, dateVal: string) => {
     if (!dateVal) return;
-    const { error } = await supabase.from('orders').update({ 
-      created_at: dateVal + 'T00:00:00', 
-      updated_at: new Date().toISOString() 
-    }).eq('id', orderId);
+    const { error } = await supabase.from('orders').update({ assigned_at: dateVal + 'T00:00:00', updated_at: new Date().toISOString() }).eq('id', orderId);
     if (error) toast.error(error.message);
     else { toast.success('Fecha actualizada'); loadClosures(); }
   };
@@ -370,33 +325,18 @@ export default function ClosuresView() {
         <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
         
         {/* FILTRO POR DELIVERY - para PROVEEDOR y ADMIN */}
-        {(isSupplier || isAdmin) && (
-          <div className="flex items-center gap-1">
-            <select className="app-input !w-auto min-w-[280px]" value={filterDelivery} onChange={e => setFilterDelivery(e.target.value)}>
-              <option value="">Todos los repartidores</option>
-              {loadingDeliveries ? (
-                <option value="" disabled>Cargando repartidores...</option>
-              ) : deliveries.length === 0 ? (
-                <option value="" disabled>No hay repartidores disponibles</option>
-              ) : (
-                deliveries.map(d => (
-                  <option key={d.email} value={d.email}>
-                    {d.name || d.email}
-                  </option>
-                ))
-              )}
-            </select>
-            <button 
-              className="nav-btn !bg-gray-500 text-xs !py-1 !px-2"
-              onClick={() => loadDeliveries()}
-              title="Recargar repartidores"
-            >
-              🔄
-            </button>
-          </div>
+        {(isSupplier || isAdmin) && deliveries.length > 0 && (
+          <select className="app-input !w-auto min-w-[280px]" value={filterDelivery} onChange={e => setFilterDelivery(e.target.value)}>
+            <option value="">Todos los repartidores</option>
+            {deliveries.map(d => (
+              <option key={d.email} value={d.email}>
+                {d.name || d.email}
+              </option>
+            ))}
+          </select>
         )}
 
-        {/* SELECTOR DE PROVEEDORES - visible para DELIVERY y ADMIN */}
+        {/* ✅ SELECTOR DE PROVEEDORES - visible para DELIVERY y ADMIN */}
         {(isDelivery || isAdmin) && suppliers.length > 0 && (
           <select className="app-input !w-auto min-w-[280px]" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
             <option value="">Todos los proveedores</option>
@@ -418,24 +358,16 @@ export default function ClosuresView() {
           <option value="DEVUELTO A DEPÓSITO">DEVUELTO A DEPÓSITO</option>
           <option value="REAGENDADO">REAGENDADO</option>
         </select>
-        <button className="nav-btn active" onClick={loadClosures} disabled={loadingOrders}>
-          {loadingOrders ? 'Cargando...' : 'Aplicar'}
-        </button>
+        <button className="nav-btn active" onClick={loadClosures}>Aplicar</button>
       </div>
 
-      {/* Resumen de pedidos encontrados */}
-      {(filterDelivery || isDelivery) && (
-        <div className="bg-blue-50 rounded-lg p-3 mb-4 border border-blue-200">
-          <div className="flex justify-between items-center">
-            <div>
-              <span className="text-sm font-bold text-blue-800">
-                📦 Pedidos asignados a {deliveryName || (filterDelivery || (isDelivery ? profile?.name : 'este delivery'))}
-              </span>
-              <p className="text-xs text-blue-600 mt-0.5">
-                Período: {dateFrom} al {dateTo}
-              </p>
-            </div>
-            <span className="text-2xl font-bold text-blue-600">{totalPedidosAsignados}</span>
+      {/* Total de Pedidos Asignados */}
+      {(filterDelivery || isDelivery || isSupplier) && (
+        <div className="grid-kpi mb-4">
+          <div className="kpi-card">
+            <div className="text-xs text-muted-foreground mb-1">📦 Pedidos Asignados</div>
+            <div className="text-[22px] font-extrabold">{totalPedidosAsignados}</div>
+            <div className="text-xs text-muted-foreground">en el período</div>
           </div>
         </div>
       )}
@@ -527,13 +459,9 @@ export default function ClosuresView() {
         <table className="app-table min-w-[1500px]">
           <thead>
             <tr>
-              <th>Fecha Creación</th>
-              <th>ID</th>
-              <th>Ciudad</th>
-              <th>Cliente</th>
+              <th>Asignado</th><th>ID</th><th>Ciudad</th><th>Cliente</th>
               <th>Proveedor</th>
-              <th className="text-right">Total (Gs)</th>
-              <th className="text-right">Tarifa (Gs)</th>
+              <th className="text-right">Total (Gs)</th><th className="text-right">Tarifa (Gs)</th>
               <th className="text-right">Neto (Gs)</th>
               <th>Estado 1</th>
               <th>Estado de retiro</th>
@@ -542,94 +470,93 @@ export default function ClosuresView() {
             </tr>
           </thead>
           <tbody>
-            {loadingOrders ? (
-              <tr>
-                <td colSpan={canManageRendicion ? 12 : 11} className="text-center py-8">
-                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-brand"></div>
-                  <p className="text-sm text-muted-foreground mt-2">Cargando pedidos...</p>
-                </td>
-              </tr>
-            ) : orders.length === 0 ? (
+            {orders.map(o => {
+              const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
+              const net = Number(o.total_gs || 0) - fee;
+              const isSettled = o.delivery_settled;
+              const assignedDate = o.assigned_at ? new Date(o.assigned_at).toISOString().slice(0, 10) : '';
+              
+              const getStatusBadgeClass = (status: string) => {
+                if (status === 'ENTREGADO' || status === 'ENCOMIENDA ENTREGADA') return 'badge-entregado';
+                if (status === 'CANCELADO') return 'badge-cancelado';
+                if (status === 'DEVUELTO A DEPÓSITO') return 'badge-warning';
+                if (status === 'REAGENDADO') return 'badge-info';
+                return 'badge-pendiente';
+              };
+              
+              return (
+                <tr key={o.id} className={isSettled ? 'opacity-60' : ''}>
+                  <td>
+                    {canEditFull ? (
+                      <input type="date" className="app-input !py-1 !px-2 !text-xs !w-[130px]"
+                        value={assignedDate}
+                        onChange={e => updateAssignedAt(o.id, e.target.value)} />
+                    ) : (
+                      <span className="text-xs whitespace-nowrap">{assignedDate ? new Date(o.assigned_at).toLocaleDateString('es-PY') : ''}</span>
+                    )}
+                  </td>
+                  <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
+                  <td className="text-xs">{o.city || '—'}</td>
+                  <td className="text-xs">{o.customer_name}</td>
+                  <td className="text-xs">{o.provider_email || '—'}</td>
+                  <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
+                  <td className="text-right text-xs">{nf(fee)}</td>
+                  <td className="text-right text-xs">{nf(net)}</td>
+                  <td>
+                    {canEditStatus1 ? (
+                      <select 
+                        className="app-input !w-auto !py-1 !px-2 text-xs"
+                        value={o.status || 'PENDIENTE'}
+                        onChange={e => updateStatus1(o.id, e.target.value)}
+                      >
+                        {status1Opts.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    ) : (
+                      <span className={`badge-status ${getStatusBadgeClass(o.status)}`}>{o.status}</span>
+                    )}
+                  </td>
+                  <td>
+                    {canEditFull ? (
+                      <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.estado_retiro || ''}
+                        onChange={e => updateRetiro(o.id, e.target.value)}>
+                        {retiroOpts.map(s => <option key={s} value={s}>{s || '—'}</option>)}
+                      </select>
+                    ) : <span className="text-xs">{o.estado_retiro || '—'}</span>}
+                  </td>
+                  <td>
+                    {canEditFull ? (
+                      <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.status2 || '--'}
+                        onChange={e => updateStatus2(o.id, e.target.value)}>
+                        {state2Opts.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    ) : <span className="text-xs">{o.status2 || '—'}</span>}
+                  </td>
+                  {canManageRendicion && (
+                    <td>
+                      <div className="flex items-center gap-1">
+                        {!isSettled && (o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA') && (
+                          <button
+                            onClick={() => markSingleRendido(o.id)}
+                            className="nav-btn active !py-1 !px-2 text-[11px]"
+                          >
+                            RENDIDO
+                          </button>
+                        )}
+                        {isSettled && (
+                          <span className="text-xs font-bold" style={{ color: '#4ade80' }}>RENDIDO</span>
+                        )}
+                      </div>
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
+            {orders.length === 0 && (
               <tr>
                 <td colSpan={canManageRendicion ? 12 : 11} className="text-center text-muted-foreground py-8">
-                  No hay pedidos asignados en este período
+                  Sin resultados
                 </td>
               </tr>
-            ) : (
-              orders.map(o => {
-                const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
-                const net = Number(o.total_gs || 0) - fee;
-                const isSettled = o.delivery_settled;
-                
-                const getStatusBadgeClass = (status: string) => {
-                  if (status === 'ENTREGADO' || status === 'ENCOMIENDA ENTREGADA') return 'badge-entregado';
-                  if (status === 'CANCELADO') return 'badge-cancelado';
-                  if (status === 'DEVUELTO A DEPÓSITO') return 'badge-warning';
-                  if (status === 'REAGENDADO') return 'badge-info';
-                  return 'badge-pendiente';
-                };
-                
-                return (
-                  <tr key={o.id} className={isSettled ? 'opacity-60' : ''}>
-                    <td className="text-xs whitespace-nowrap">
-                      {new Date(o.created_at).toLocaleDateString('es-PY')}
-                    </td>
-                    <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
-                    <td className="text-xs">{o.city || '—'}</td>
-                    <td className="text-xs">{o.customer_name}</td>
-                    <td className="text-xs">{o.provider_email || '—'}</td>
-                    <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
-                    <td className="text-right text-xs">{nf(fee)}</td>
-                    <td className="text-right text-xs">{nf(net)}</td>
-                    <td>
-                      {canEditStatus1 ? (
-                        <select 
-                          className="app-input !w-auto !py-1 !px-2 text-xs"
-                          value={o.status || 'PENDIENTE'}
-                          onChange={e => updateStatus1(o.id, e.target.value)}
-                        >
-                          {status1Opts.map(s => <option key={s} value={s}>{s}</option>)}
-                        </select>
-                      ) : (
-                        <span className={`badge-status ${getStatusBadgeClass(o.status)}`}>{o.status}</span>
-                      )}
-                    </td>
-                    <td>
-                      {canEditFull ? (
-                        <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.estado_retiro || ''}
-                          onChange={e => updateRetiro(o.id, e.target.value)}>
-                          {retiroOpts.map(s => <option key={s} value={s}>{s || '—'}</option>)}
-                        </select>
-                      ) : <span className="text-xs">{o.estado_retiro || '—'}</span>}
-                    </td>
-                    <td>
-                      {canEditFull ? (
-                        <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.status2 || '--'}
-                          onChange={e => updateStatus2(o.id, e.target.value)}>
-                          {state2Opts.map(s => <option key={s} value={s}>{s}</option>)}
-                        </select>
-                      ) : <span className="text-xs">{o.status2 || '—'}</span>}
-                    </td>
-                    {canManageRendicion && (
-                      <td>
-                        <div className="flex items-center gap-1">
-                          {!isSettled && (o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA') && (
-                            <button
-                              onClick={() => markSingleRendido(o.id)}
-                              className="nav-btn active !py-1 !px-2 text-[11px]"
-                            >
-                              RENDIDO
-                            </button>
-                          )}
-                          {isSettled && (
-                            <span className="text-xs font-bold" style={{ color: '#4ade80' }}>RENDIDO</span>
-                          )}
-                        </div>
-                      </td>
-                    )}
-                  </tr>
-                );
-              })
             )}
           </tbody>
         </table>
