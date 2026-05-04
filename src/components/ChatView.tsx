@@ -63,6 +63,13 @@ type Thread = {
   topicChannel?: string;
 };
 
+type NotificationData = {
+  from: string;
+  fromEmail: string;
+  message: string;
+  topicChannel: string;
+};
+
 const FALLBACK_CHANNELS: ChatChannel[] = [
   { channel_key: 'general', title: 'Chat General', logo_url: null },
   { channel_key: 'consulta_comisiones', title: 'Consulta de comisiones', logo_url: null },
@@ -95,6 +102,9 @@ const PROVIDERS_LIST = [
   { email: 'importadoraaliado@gmail.com', name: 'IMPORTS ALIADEX', role: 'PROVEEDOR' },
   { email: 'nkshop@gmail.com', name: 'PROVEEDOR NKSHOP', role: 'PROVEEDOR' },
 ];
+
+// Clave para guardar preferencia de notificaciones
+const NOTIFICATIONS_ENABLED_KEY = 'chat_notifications_enabled';
 
 function getAttachmentType(file: File): Attachment['type'] {
   if (file.type.startsWith('image/')) return 'image';
@@ -159,6 +169,16 @@ export default function ChatView() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
   const [loadingContacts, setLoadingContacts] = useState(true);
 
+  // ========== NOTIFICACIONES ==========
+  const [notification, setNotification] = useState<NotificationData | null>(null);
+  const [isPageVisible, setIsPageVisible] = useState(true);
+  const [notificationsEnabled, setNotificationsEnabled] = useState<boolean>(() => {
+    const saved = localStorage.getItem(NOTIFICATIONS_ENABLED_KEY);
+    return saved === null ? true : saved === 'true';
+  });
+  const [notificationPermission, setNotificationPermission] = useState(false);
+  const originalTitleRef = useRef(document.title);
+
   const msgRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const logoInputRef = useRef<HTMLInputElement | null>(null);
@@ -166,6 +186,7 @@ export default function ChatView() {
   const audioChunksRef = useRef<Blob[]>([]);
   const typingTimeoutRef = useRef<number | null>(null);
   const typingChannelRef = useRef<any>(null);
+  const notificationTimeoutRef = useRef<number | null>(null);
 
   const isPublicChannel = PUBLIC_CHANNELS.includes(tab as ChannelKey);
   const isDMChannel = DM_CHANNELS.includes(tab as ChannelKey);
@@ -282,6 +303,65 @@ export default function ChatView() {
     if (!myEmail) return;
     localStorage.setItem(getLastSeenThreadKey(threadKeyValue, topicChannel), new Date().toISOString());
   };
+
+  // ========== FUNCIONES DE NOTIFICACIÓN ==========
+  const showNotification = (from: string, fromEmail: string, messageText: string, topicChannel: string) => {
+    if (!notificationsEnabled) return;
+    
+    const isCurrentChat = selectedPeer === fromEmail && tab === topicChannel;
+    const isPageVisibleAndChatOpen = isPageVisible && isCurrentChat;
+    
+    if (isPageVisibleAndChatOpen) return;
+    
+    const senderName = contactMap[fromEmail.toLowerCase()]?.name || from;
+    const messagePreview = messageText || (messageText === '' ? '📎 Archivo adjunto' : 'Mensaje');
+    
+    // Cambiar título de la pestaña
+    document.title = `📩 Nuevo mensaje de ${senderName}`;
+    if (notificationTimeoutRef.current) clearTimeout(notificationTimeoutRef.current);
+    notificationTimeoutRef.current = window.setTimeout(() => {
+      document.title = originalTitleRef.current;
+    }, 5000);
+    
+    // Mostrar burbuja flotante
+    setNotification({
+      from: senderName,
+      fromEmail: fromEmail,
+      message: messagePreview.length > 60 ? messagePreview.substring(0, 60) + '...' : messagePreview,
+      topicChannel: topicChannel,
+    });
+    
+    // Mostrar notificación del sistema
+    if (notificationPermission && !isPageVisible) {
+      new Notification(`💬 Nuevo mensaje de ${senderName}`, {
+        body: messagePreview,
+        icon: '/favicon.ico',
+        silent: false,
+      });
+    }
+    
+    // Auto-ocultar burbuja después de 6 segundos
+    setTimeout(() => {
+      setNotification(null);
+    }, 6000);
+  };
+
+  const handleNotificationClick = (notif: NotificationData) => {
+    // Cambiar a la conversación correcta
+    setTab(notif.topicChannel === 'dm' ? 'dm' : notif.topicChannel as ChatTab);
+    setSelectedPeer(notif.fromEmail);
+    loadDmMessages(notif.fromEmail, notif.topicChannel);
+    setNotification(null);
+  };
+
+  const toggleNotifications = () => {
+    const newValue = !notificationsEnabled;
+    setNotificationsEnabled(newValue);
+    localStorage.setItem(NOTIFICATIONS_ENABLED_KEY, String(newValue));
+    toast.info(newValue ? '🔔 Notificaciones activadas' : '🔕 Notificaciones desactivadas');
+  };
+
+  // ========== FIN NOTIFICACIONES ==========
 
   const loadChannels = async () => {
     const { data, error } = await (supabase as any)
@@ -1146,6 +1226,36 @@ export default function ChatView() {
     );
   };
 
+  // ========== EFECTOS ==========
+
+  // Detectar visibilidad de la pestaña
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      setIsPageVisible(!document.hidden);
+      if (!document.hidden) {
+        // Restaurar título original cuando la pestaña se vuelve visible
+        document.title = originalTitleRef.current;
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
+
+  // Pedir permiso para notificaciones del sistema
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().then(permission => {
+        setNotificationPermission(permission === 'granted');
+      });
+    } else if ('Notification' in window && Notification.permission === 'granted') {
+      setNotificationPermission(true);
+    }
+  }, []);
+
   // Efecto inicial
   useEffect(() => {
     loadChannels();
@@ -1184,7 +1294,7 @@ export default function ChatView() {
     }
   }, [selectedPeer, tab]);
 
-  // Suscripción en tiempo real
+  // Suscripción en tiempo real con NOTIFICACIONES
   useEffect(() => {
     if (!myEmail) return;
 
@@ -1232,6 +1342,14 @@ export default function ChatView() {
                             (isProvider && (newMessage.to_email === myEmail || newMessage.from_email === myEmail));
           
           if (concernsMe) {
+            // 🔔 MOSTRAR NOTIFICACIÓN si no fui yo quien envió el mensaje
+            if (newMessage.from_email !== myEmail && notificationsEnabled) {
+              const senderName = contactMap[newMessage.from_email?.toLowerCase() || '']?.name || newMessage.from_email || 'Alguien';
+              const messagePreview = newMessage.message_text || (newMessage.attachment_url ? '📎 Archivo adjunto' : 'Mensaje');
+              
+              showNotification(senderName, newMessage.from_email || '', messagePreview || '', msgTopic);
+            }
+            
             if (tab === msgTopic || (tab === 'dm' && msgTopic === 'dm')) {
               let shouldUpdate = false;
               
@@ -1262,12 +1380,15 @@ export default function ChatView() {
               }
             }
 
-            // Marcar como leído inmediatamente si es para mí
+            // Marcar como leído inmediatamente si es para mí y estoy viendo la conversación
             if (newMessage.to_email === myEmail && !newMessage.read_at) {
-              (supabase as any)
-                .from('chat_dm_messages')
-                .update({ read_at: new Date().toISOString() })
-                .eq('id', newMessage.id);
+              const isCurrentChat = selectedPeer === newMessage.from_email && tab === msgTopic;
+              if (isCurrentChat && isPageVisible) {
+                (supabase as any)
+                  .from('chat_dm_messages')
+                  .update({ read_at: new Date().toISOString() })
+                  .eq('id', newMessage.id);
+              }
             }
           }
         },
@@ -1277,7 +1398,7 @@ export default function ChatView() {
     return () => {
       supabase.removeChannel(channelSubscription);
     };
-  }, [myEmail, tab, selectedPeer, isPublicChannel, isAdminOrDespachante, isProvider]);
+  }, [myEmail, tab, selectedPeer, isPublicChannel, isAdminOrDespachante, isProvider, notificationsEnabled, isPageVisible]);
 
   // Typing presence
   useEffect(() => {
@@ -1334,82 +1455,118 @@ export default function ChatView() {
     );
   }
 
-  return (
-    <div className="chat-view">
-      <div className="chat-header">
-        <h2>Chat</h2>
+  // Componente de burbuja de notificación
+  const NotificationBubble = () => {
+    if (!notification) return null;
+    
+    return (
+      <div 
+        className="fixed bottom-5 right-5 z-50 animate-in slide-in-from-right duration-300 cursor-pointer"
+        onClick={() => handleNotificationClick(notification)}
+      >
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 rounded-xl shadow-2xl p-3 max-w-sm border border-blue-400/30 hover:scale-105 transition-transform">
+          <div className="flex items-start gap-2">
+            <div className="flex-shrink-0">
+              <div className="w-10 h-10 rounded-full bg-blue-400/20 flex items-center justify-center text-xl">
+                💬
+              </div>
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-white truncate">
+                  {notification.from}
+                </p>
+                <button 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setNotification(null);
+                  }}
+                  className="text-white/50 hover:text-white text-xs ml-2 transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+              <p className="text-xs text-blue-100 mt-0.5 truncate">
+                {notification.message}
+              </p>
+              <p className="text-[10px] text-blue-200/70 mt-1 flex items-center gap-1">
+                <span>🔔</span> Haz clic para ver
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
+    );
+  };
 
-      <div className="chat-tabs">
-        {channels.map((channel) => (
+  return (
+    <>
+      <NotificationBubble />
+      
+      <div className="chat-view">
+        <div className="chat-header">
+          <h2>Chat</h2>
+          {/* Campanita para activar/desactivar notificaciones */}
           <button
-            key={channel.channel_key}
+            onClick={toggleNotifications}
+            className={`chat-notification-toggle ${notificationsEnabled ? 'active' : 'inactive'}`}
+            title={notificationsEnabled ? 'Desactivar notificaciones' : 'Activar notificaciones'}
+          >
+            {notificationsEnabled ? '🔔' : '🔕'}
+          </button>
+        </div>
+
+        <div className="chat-tabs">
+          {channels.map((channel) => (
+            <button
+              key={channel.channel_key}
+              type="button"
+              onClick={() => {
+                setTab(channel.channel_key);
+                setSelectedPeer('');
+              }}
+              className={`chat-tab ${tab === channel.channel_key ? 'active' : ''}`}
+            >
+              <span className="chat-tab-avatar">
+                {channel.logo_url ? (
+                  <img src={channel.logo_url} alt={channel.title} className="w-6 h-6 rounded-full object-cover" />
+                ) : (
+                  <span>💬</span>
+                )}
+              </span>
+
+              <span className="chat-tab-title">{channel.title}</span>
+
+              {PUBLIC_CHANNELS.includes(channel.channel_key) && !!unreadByChannel[channel.channel_key] && (
+                <span className="chat-unread-badge">
+                  {unreadByChannel[channel.channel_key]}
+                </span>
+              )}
+            </button>
+          ))}
+
+          <button
             type="button"
             onClick={() => {
-              setTab(channel.channel_key);
+              setTab('dm');
               setSelectedPeer('');
             }}
-            className={`chat-tab ${tab === channel.channel_key ? 'active' : ''}`}
+            className={`chat-tab ${tab === 'dm' ? 'active' : ''}`}
           >
-            <span className="chat-tab-avatar">
-              {channel.logo_url ? (
-                <img src={channel.logo_url} alt={channel.title} className="w-6 h-6 rounded-full object-cover" />
-              ) : (
-                <span>💬</span>
-              )}
-            </span>
-
-            <span className="chat-tab-title">{channel.title}</span>
-
-            {PUBLIC_CHANNELS.includes(channel.channel_key) && !!unreadByChannel[channel.channel_key] && (
-              <span className="chat-unread-badge">
-                {unreadByChannel[channel.channel_key]}
-              </span>
-            )}
+            <span className="chat-tab-avatar">📩</span>
+            <span className="chat-tab-title">Mensajes Directos</span>
           </button>
-        ))}
+        </div>
 
-        <button
-          type="button"
-          onClick={() => {
-            setTab('dm');
-            setSelectedPeer('');
-          }}
-          className={`chat-tab ${tab === 'dm' ? 'active' : ''}`}
-        >
-          <span className="chat-tab-avatar">📩</span>
-          <span className="chat-tab-title">Mensajes Directos</span>
-        </button>
-      </div>
-
-      <div className="chat-layout">
-        <aside className="chat-sidebar">
-          {!isPublicChannel && tab !== 'dm' && (
-            <div className="chat-dm-selector">
-              <label className="chat-label">✏️ Escribir a</label>
-              <select
-                value={selectedPeer}
-                onChange={(event) => selectPeer(event.target.value, tab)}
-                className="chat-select"
-              >
-                <option value="">-- Elegir destinatario --</option>
-                {availableContacts.map((contact) => (
-                  <option key={contact.email} value={contact.email}>
-                    {contact.role ? `${contact.role} · ` : ''}
-                    {contact.name || contact.email}
-                  </option>
-                ))}
-              </select>
-            </div>
-          )}
-
-          {tab === 'dm' && (
-            <>
+        {/* Resto del contenido igual... */}
+        <div className="chat-layout">
+          <aside className="chat-sidebar">
+            {!isPublicChannel && tab !== 'dm' && (
               <div className="chat-dm-selector">
                 <label className="chat-label">✏️ Escribir a</label>
                 <select
                   value={selectedPeer}
-                  onChange={(event) => selectPeer(event.target.value, 'dm')}
+                  onChange={(event) => selectPeer(event.target.value, tab)}
                   className="chat-select"
                 >
                   <option value="">-- Elegir destinatario --</option>
@@ -1421,148 +1578,188 @@ export default function ChatView() {
                   ))}
                 </select>
               </div>
+            )}
 
-              <div className="chat-sidebar-header">
-                <strong>📋 Conversaciones</strong>
-                <button type="button" onClick={loadDMThreads} title="Actualizar">
-                  ↻
-                </button>
-              </div>
-
-              <div className="chat-thread-list">
-                {threads.map((thread) => (
-                  <button
-                    key={thread.key}
-                    type="button"
-                    onClick={() => selectPeer(thread.peer, 'dm')}
-                    className={`chat-thread ${selectedPeer === thread.peer ? 'active' : ''}`}
-                  >
-                    <div className="chat-thread-top">
-                      <strong>{thread.peerName}</strong>
-                      <span>{formatTime(thread.lastTime)}</span>
-                    </div>
-                    <div className="chat-thread-bottom">
-                      <span className="chat-thread-message">{thread.lastMsg}</span>
-                      {!!thread.unread && (
-                        <span className="chat-unread-badge">{thread.unread}</span>
-                      )}
-                    </div>
-                  </button>
-                ))}
-
-                {threads.length === 0 && (
-                  <p className="chat-empty-small">Sin conversaciones aún</p>
-                )}
-              </div>
-            </>
-          )}
-
-          {isDMChannel && (
-            <>
-              <div className="chat-sidebar-header">
-                <strong>📋 Conversaciones en {activeChannel?.title}</strong>
-                <button 
-                  type="button" 
-                  onClick={async () => {
-                    await loadChannelThreads(tab);
-                    if (selectedPeer) {
-                      await loadDmMessages(selectedPeer, tab);
-                    }
-                  }} 
-                  title="Actualizar"
-                >
-                  ↻
-                </button>
-              </div>
-
-              <div className="chat-thread-list">
-                {channelThreads.map((thread) => (
-                  <button
-                    key={thread.key}
-                    type="button"
-                    onClick={async () => {
-                      setSelectedPeer(thread.peer);
-                      await loadDmMessages(thread.peer, tab);
-                    }}
-                    className={`chat-thread ${selectedPeer === thread.peer ? 'active' : ''}`}
-                  >
-                    <div className="chat-thread-top">
-                      <strong>{thread.peerName}</strong>
-                      <span>{formatTime(thread.lastTime)}</span>
-                    </div>
-                    <div className="chat-thread-bottom">
-                      <span className="chat-thread-message">{thread.lastMsg}</span>
-                      {!!thread.unread && (
-                        <span className="chat-unread-badge">{thread.unread}</span>
-                      )}
-                    </div>
-                  </button>
-                ))}
-
-                {channelThreads.length === 0 && (
-                  <p className="chat-empty-small">
-                    No hay conversaciones aún. Selecciona un destinatario arriba para comenzar.
-                  </p>
-                )}
-              </div>
-            </>
-          )}
-
-          {isPublicChannel && (
-            <>
-              <div className="chat-sidebar-header">
-                <strong>ℹ️ Información</strong>
-              </div>
-
-              <div className="chat-channel-profile">
-                <div className="chat-channel-logo">
-                  {activeChannel?.logo_url ? (
-                    <img src={activeChannel.logo_url} alt={activeChannel.title} className="w-12 h-12 rounded-full object-cover" />
-                  ) : (
-                    <span className="text-2xl">💬</span>
-                  )}
-
-                  {canEditChannelLogo && (
-                    <button
-                      type="button"
-                      className="chat-logo-edit"
-                      onClick={() => logoInputRef.current?.click()}
-                      title="Cambiar logo de esta pestaña"
-                      disabled={uploading}
-                    >
-                      📷
-                    </button>
-                  )}
-                </div>
-
-                <div>
-                  <span className="chat-current-label">Canal activo</span>
-                  <strong>{activeChannel?.title}</strong>
-                  <p className="chat-channel-description">
-                    {activeChannel?.channel_key === 'general' 
-                      ? '💬 Todos los usuarios pueden ver y escribir aquí' 
-                      : '📸 Todos los usuarios pueden ver y compartir fotos de productos aquí'}
-                  </p>
-                </div>
-              </div>
-
-              <input
-                ref={logoInputRef}
-                type="file"
-                accept="image/*"
-                hidden
-                onChange={handleLogoUpload}
-              />
-            </>
-          )}
-        </aside>
-
-        <section className="chat-main">
-          <div className="chat-current-header">
-            {tab === 'dm' ? (
+            {tab === 'dm' && (
               <>
-                <span className="chat-current-label">💬 Chat con</span>
+                <div className="chat-dm-selector">
+                  <label className="chat-label">✏️ Escribir a</label>
+                  <select
+                    value={selectedPeer}
+                    onChange={(event) => selectPeer(event.target.value, 'dm')}
+                    className="chat-select"
+                  >
+                    <option value="">-- Elegir destinatario --</option>
+                    {availableContacts.map((contact) => (
+                      <option key={contact.email} value={contact.email}>
+                        {contact.role ? `${contact.role} · ` : ''}
+                        {contact.name || contact.email}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="chat-sidebar-header">
+                  <strong>📋 Conversaciones</strong>
+                  <button type="button" onClick={loadDMThreads} title="Actualizar">
+                    ↻
+                  </button>
+                </div>
+
+                <div className="chat-thread-list">
+                  {threads.map((thread) => (
+                    <button
+                      key={thread.key}
+                      type="button"
+                      onClick={() => selectPeer(thread.peer, 'dm')}
+                      className={`chat-thread ${selectedPeer === thread.peer ? 'active' : ''}`}
+                    >
+                      <div className="chat-thread-top">
+                        <strong>{thread.peerName}</strong>
+                        <span>{formatTime(thread.lastTime)}</span>
+                      </div>
+                      <div className="chat-thread-bottom">
+                        <span className="chat-thread-message">{thread.lastMsg}</span>
+                        {!!thread.unread && (
+                          <span className="chat-unread-badge">{thread.unread}</span>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+
+                  {threads.length === 0 && (
+                    <p className="chat-empty-small">Sin conversaciones aún</p>
+                  )}
+                </div>
+              </>
+            )}
+
+            {isDMChannel && (
+              <>
+                <div className="chat-sidebar-header">
+                  <strong>📋 Conversaciones en {activeChannel?.title}</strong>
+                  <button 
+                    type="button" 
+                    onClick={async () => {
+                      await loadChannelThreads(tab);
+                      if (selectedPeer) {
+                        await loadDmMessages(selectedPeer, tab);
+                      }
+                    }} 
+                    title="Actualizar"
+                  >
+                    ↻
+                  </button>
+                </div>
+
+                <div className="chat-thread-list">
+                  {channelThreads.map((thread) => (
+                    <button
+                      key={thread.key}
+                      type="button"
+                      onClick={async () => {
+                        setSelectedPeer(thread.peer);
+                        await loadDmMessages(thread.peer, tab);
+                      }}
+                      className={`chat-thread ${selectedPeer === thread.peer ? 'active' : ''}`}
+                    >
+                      <div className="chat-thread-top">
+                        <strong>{thread.peerName}</strong>
+                        <span>{formatTime(thread.lastTime)}</span>
+                      </div>
+                      <div className="chat-thread-bottom">
+                        <span className="chat-thread-message">{thread.lastMsg}</span>
+                        {!!thread.unread && (
+                          <span className="chat-unread-badge">{thread.unread}</span>
+                        )}
+                      </div>
+                    </button>
+                  ))}
+
+                  {channelThreads.length === 0 && (
+                    <p className="chat-empty-small">
+                      No hay conversaciones aún. Selecciona un destinatario arriba para comenzar.
+                    </p>
+                  )}
+                </div>
+              </>
+            )}
+
+            {isPublicChannel && (
+              <>
+                <div className="chat-sidebar-header">
+                  <strong>ℹ️ Información</strong>
+                </div>
+
+                <div className="chat-channel-profile">
+                  <div className="chat-channel-logo">
+                    {activeChannel?.logo_url ? (
+                      <img src={activeChannel.logo_url} alt={activeChannel.title} className="w-12 h-12 rounded-full object-cover" />
+                    ) : (
+                      <span className="text-2xl">💬</span>
+                    )}
+
+                    {canEditChannelLogo && (
+                      <button
+                        type="button"
+                        className="chat-logo-edit"
+                        onClick={() => logoInputRef.current?.click()}
+                        title="Cambiar logo de esta pestaña"
+                        disabled={uploading}
+                      >
+                        📷
+                      </button>
+                    )}
+                  </div>
+
+                  <div>
+                    <span className="chat-current-label">Canal activo</span>
+                    <strong>{activeChannel?.title}</strong>
+                    <p className="chat-channel-description">
+                      {activeChannel?.channel_key === 'general' 
+                        ? '💬 Todos los usuarios pueden ver y escribir aquí' 
+                        : '📸 Todos los usuarios pueden ver y compartir fotos de productos aquí'}
+                    </p>
+                  </div>
+                </div>
+
+                <input
+                  ref={logoInputRef}
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={handleLogoUpload}
+                />
+              </>
+            )}
+          </aside>
+
+          <section className="chat-main">
+            <div className="chat-current-header">
+              {tab === 'dm' ? (
+                <>
+                  <span className="chat-current-label">💬 Chat con</span>
+                  <div className="chat-current-title">
+                    <strong>
+                      {selectedPeer
+                        ? isAdminOrDespachante && selectedPeer.includes('|')
+                          ? selectedPeer.split('|').map(email => contactMap[email.toLowerCase()]?.name || email).join(' ↔ ')
+                          : contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer
+                        : 'Seleccione un destinatario'}
+                    </strong>
+                    {selectedPeer && !selectedPeer.includes('|') && contactMap[selectedPeer.toLowerCase()]?.role && (
+                      <span className="chat-role">{contactMap[selectedPeer.toLowerCase()].role}</span>
+                    )}
+                  </div>
+                </>
+              ) : isPublicChannel ? (
                 <div className="chat-current-title">
+                  <span className="chat-current-label">📢 Chat público</span>
+                  <strong>{activeChannel?.title}</strong>
+                </div>
+              ) : (
+                <div className="chat-current-title">
+                  <span className="chat-current-label">📌 {activeChannel?.title} - Conversación con</span>
                   <strong>
                     {selectedPeer
                       ? isAdminOrDespachante && selectedPeer.includes('|')
@@ -1574,171 +1771,209 @@ export default function ChatView() {
                     <span className="chat-role">{contactMap[selectedPeer.toLowerCase()].role}</span>
                   )}
                 </div>
-              </>
-            ) : isPublicChannel ? (
-              <div className="chat-current-title">
-                <span className="chat-current-label">📢 Chat público</span>
-                <strong>{activeChannel?.title}</strong>
-              </div>
-            ) : (
-              <div className="chat-current-title">
-                <span className="chat-current-label">📌 {activeChannel?.title} - Conversación con</span>
-                <strong>
-                  {selectedPeer
-                    ? isAdminOrDespachante && selectedPeer.includes('|')
-                      ? selectedPeer.split('|').map(email => contactMap[email.toLowerCase()]?.name || email).join(' ↔ ')
-                      : contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer
-                    : 'Seleccione un destinatario'}
-                </strong>
-                {selectedPeer && !selectedPeer.includes('|') && contactMap[selectedPeer.toLowerCase()]?.role && (
-                  <span className="chat-role">{contactMap[selectedPeer.toLowerCase()].role}</span>
-                )}
-              </div>
-            )}
-          </div>
+              )}
+            </div>
 
-          <div ref={msgRef} className="chat-messages">
-            {isPublicChannel && messages.length === 0 && (
-              <div className="chat-empty">✨ Sin mensajes aún. ¡Escribí el primero!</div>
-            )}
+            <div ref={msgRef} className="chat-messages">
+              {isPublicChannel && messages.length === 0 && (
+                <div className="chat-empty">✨ Sin mensajes aún. ¡Escribí el primero!</div>
+              )}
 
-            {isPublicChannel && messages.length > 0 && (
-              <div className="chat-messages-list">
-                {messages.map(renderMessage)}
-              </div>
-            )}
+              {isPublicChannel && messages.length > 0 && (
+                <div className="chat-messages-list">
+                  {messages.map(renderMessage)}
+                </div>
+              )}
 
-            {isDMChannel && !selectedPeer && (
-              <div className="chat-empty">
-                👋 Selecciona un destinatario arriba para comenzar a conversar
-              </div>
-            )}
+              {isDMChannel && !selectedPeer && (
+                <div className="chat-empty">
+                  👋 Selecciona un destinatario arriba para comenzar a conversar
+                </div>
+              )}
 
-            {isDMChannel && selectedPeer && dmMessages.length === 0 && (
-              <div className="chat-empty">
-                💬 Sin mensajes aún con {selectedPeer.includes('|') 
-                  ? selectedPeer.split('|').map(email => contactMap[email.toLowerCase()]?.name || email).join(' y ')
-                  : contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer}. ¡Envía tu primer mensaje!
-              </div>
-            )}
+              {isDMChannel && selectedPeer && dmMessages.length === 0 && (
+                <div className="chat-empty">
+                  💬 Sin mensajes aún con {selectedPeer.includes('|') 
+                    ? selectedPeer.split('|').map(email => contactMap[email.toLowerCase()]?.name || email).join(' y ')
+                    : contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer}. ¡Envía tu primer mensaje!
+                </div>
+              )}
 
-            {isDMChannel && selectedPeer && dmMessages.length > 0 && (
-              <div className="chat-messages-list">
-                {dmMessages.map(renderMessage)}
-              </div>
-            )}
+              {isDMChannel && selectedPeer && dmMessages.length > 0 && (
+                <div className="chat-messages-list">
+                  {dmMessages.map(renderMessage)}
+                </div>
+              )}
 
-            {tab === 'dm' && !selectedPeer && (
-              <div className="chat-empty">
-                👋 Selecciona un destinatario o una conversación existente
-              </div>
-            )}
+              {tab === 'dm' && !selectedPeer && (
+                <div className="chat-empty">
+                  👋 Selecciona un destinatario o una conversación existente
+                </div>
+              )}
 
-            {tab === 'dm' && selectedPeer && dmMessages.length === 0 && (
-              <div className="chat-empty">
-                💬 Sin mensajes aún con {selectedPeer.includes('|')
-                  ? selectedPeer.split('|').map(email => contactMap[email.toLowerCase()]?.name || email).join(' y ')
-                  : contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer}
-              </div>
-            )}
+              {tab === 'dm' && selectedPeer && dmMessages.length === 0 && (
+                <div className="chat-empty">
+                  💬 Sin mensajes aún con {selectedPeer.includes('|')
+                    ? selectedPeer.split('|').map(email => contactMap[email.toLowerCase()]?.name || email).join(' y ')
+                    : contactMap[selectedPeer.toLowerCase()]?.name || selectedPeer}
+                </div>
+              )}
 
-            {tab === 'dm' && selectedPeer && dmMessages.length > 0 && (
-              <div className="chat-messages-list">
-                {dmMessages.map(renderMessage)}
-              </div>
-            )}
+              {tab === 'dm' && selectedPeer && dmMessages.length > 0 && (
+                <div className="chat-messages-list">
+                  {dmMessages.map(renderMessage)}
+                </div>
+              )}
 
-            {typingUsers.length > 0 && (
-              <div className="chat-typing">
-                {typingUsers.join(', ')} está escribiendo...
-              </div>
-            )}
-          </div>
-
-          <div className="chat-composer">
-            <input ref={fileInputRef} type="file" hidden onChange={handleFileInput} accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt" />
-
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              title="Adjuntar archivo (imagen, video, audio)"
-              className="chat-icon-button"
-            >
-              {uploading ? '⏳' : '📎'}
-            </button>
-
-            <button
-              type="button"
-              onClick={startRecording}
-              disabled={uploading}
-              title={recording ? 'Detener audio' : 'Grabar audio'}
-              className={`chat-icon-button ${recording ? 'recording' : ''}`}
-            >
-              {recording ? '⏹️' : '🎙️'}
-            </button>
-
-            <div className="chat-emoji-wrap">
-              <button
-                type="button"
-                onClick={() => setShowEmojis((value) => !value)}
-                title="Emojis"
-                className="chat-icon-button"
-              >
-                😊
-              </button>
-
-              {showEmojis && (
-                <div className="chat-emoji-panel">
-                  {EMOJIS.map((emoji) => (
-                    <button
-                      key={emoji}
-                      type="button"
-                      onClick={() => setText((prev) => `${prev}${emoji}`)}
-                    >
-                      {emoji}
-                    </button>
-                  ))}
+              {typingUsers.length > 0 && (
+                <div className="chat-typing">
+                  {typingUsers.join(', ')} está escribiendo...
                 </div>
               )}
             </div>
 
-            <input
-              value={text}
-              placeholder={
-                isPublicChannel 
-                  ? "✏️ Escribí tu mensaje público..." 
-                  : (!selectedPeer && (isDMChannel || tab === 'dm')
-                      ? "🔒 Selecciona un destinatario primero"
-                      : "✏️ Escribí tu mensaje...")
-              }
-              onChange={(event) => trackTyping(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') {
-                  event.preventDefault();
-                  send();
-                }
-              }}
-              disabled={(isDMChannel || tab === 'dm') && !selectedPeer}
-              className="chat-input"
-            />
+            <div className="chat-composer">
+              <input ref={fileInputRef} type="file" hidden onChange={handleFileInput} accept="image/*,video/*,audio/*,application/pdf,.doc,.docx,.xls,.xlsx,.txt" />
 
-            <button
-              type="button"
-              onClick={send}
-              disabled={
-                uploading || 
-                recording || 
-                !text.trim() || 
-                ((isDMChannel || tab === 'dm') && !selectedPeer)
-              }
-              className="chat-send-button"
-            >
-              Enviar
-            </button>
-          </div>
-        </section>
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                title="Adjuntar archivo (imagen, video, audio)"
+                className="chat-icon-button"
+              >
+                {uploading ? '⏳' : '📎'}
+              </button>
+
+              <button
+                type="button"
+                onClick={startRecording}
+                disabled={uploading}
+                title={recording ? 'Detener audio' : 'Grabar audio'}
+                className={`chat-icon-button ${recording ? 'recording' : ''}`}
+              >
+                {recording ? '⏹️' : '🎙️'}
+              </button>
+
+              <div className="chat-emoji-wrap">
+                <button
+                  type="button"
+                  onClick={() => setShowEmojis((value) => !value)}
+                  title="Emojis"
+                  className="chat-icon-button"
+                >
+                  😊
+                </button>
+
+                {showEmojis && (
+                  <div className="chat-emoji-panel">
+                    {EMOJIS.map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => setText((prev) => `${prev}${emoji}`)}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <input
+                value={text}
+                placeholder={
+                  isPublicChannel 
+                    ? "✏️ Escribí tu mensaje público..." 
+                    : (!selectedPeer && (isDMChannel || tab === 'dm')
+                        ? "🔒 Selecciona un destinatario primero"
+                        : "✏️ Escribí tu mensaje...")
+                }
+                onChange={(event) => trackTyping(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    send();
+                  }
+                }}
+                disabled={(isDMChannel || tab === 'dm') && !selectedPeer}
+                className="chat-input"
+              />
+
+              <button
+                type="button"
+                onClick={send}
+                disabled={
+                  uploading || 
+                  recording || 
+                  !text.trim() || 
+                  ((isDMChannel || tab === 'dm') && !selectedPeer)
+                }
+                className="chat-send-button"
+              >
+                Enviar
+              </button>
+            </div>
+          </section>
+        </div>
       </div>
-    </div>
+
+      <style>{`
+        .chat-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          margin-bottom: 1rem;
+        }
+        
+        .chat-notification-toggle {
+          background: none;
+          border: none;
+          font-size: 1.25rem;
+          cursor: pointer;
+          padding: 0.5rem;
+          border-radius: 9999px;
+          transition: all 0.2s;
+          width: 36px;
+          height: 36px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        
+        .chat-notification-toggle.active {
+          background: rgba(59, 130, 246, 0.2);
+          color: #3b82f6;
+        }
+        
+        .chat-notification-toggle.inactive {
+          background: rgba(100, 116, 139, 0.2);
+          color: #64748b;
+        }
+        
+        .chat-notification-toggle:hover {
+          transform: scale(1.05);
+        }
+        
+        @keyframes slide-in-right {
+          from {
+            transform: translateX(100%);
+            opacity: 0;
+          }
+          to {
+            transform: translateX(0);
+            opacity: 1;
+          }
+        }
+        
+        .animate-in {
+          animation: slide-in-right 0.3s ease-out;
+        }
+        
+        .slide-in-from-right {
+          animation: slide-in-right 0.3s ease-out;
+        }
+      `}</style>
+    </>
   );
 }
