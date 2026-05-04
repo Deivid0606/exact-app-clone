@@ -113,13 +113,14 @@ export default function ClosuresView() {
     try {
       let query = supabase.from('orders').select('*');
 
+      // Usar created_at para filtrar por fecha
       if (dateFrom && dateTo) {
         query = query
-          .gte('assigned_at', dateFrom + 'T00:00:00')
-          .lte('assigned_at', dateTo + 'T23:59:59');
+          .gte('created_at', dateFrom + 'T00:00:00')
+          .lte('created_at', dateTo + 'T23:59:59');
       }
       
-      query = query.order('assigned_at', { ascending: false });
+      query = query.order('created_at', { ascending: false });
 
       if (isSupplier) {
         query = query.eq('provider_email', myEmail);
@@ -144,6 +145,7 @@ export default function ClosuresView() {
       
       if (error) throw error;
       
+      console.log('Pedidos encontrados:', data?.length);
       setOrders(data || []);
       setTotalPedidosAsignados(data?.length || 0);
 
@@ -252,7 +254,7 @@ export default function ClosuresView() {
   const updateAssignedAt = async (orderId: string, dateVal: string) => {
     if (!dateVal) return;
     const { error } = await supabase.from('orders').update({ 
-      assigned_at: dateVal + 'T00:00:00', 
+      created_at: dateVal + 'T00:00:00', 
       updated_at: new Date().toISOString() 
     }).eq('id', orderId);
     if (error) toast.error(error.message);
@@ -525,7 +527,7 @@ export default function ClosuresView() {
         <table className="app-table min-w-[1500px]">
           <thead>
             <tr>
-              <th>Asignado</th>
+              <th>Fecha Creación</th>
               <th>ID</th>
               <th>Ciudad</th>
               <th>Cliente</th>
@@ -558,7 +560,6 @@ export default function ClosuresView() {
                 const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
                 const net = Number(o.total_gs || 0) - fee;
                 const isSettled = o.delivery_settled;
-                const assignedDate = o.assigned_at ? new Date(o.assigned_at).toISOString().slice(0, 10) : '';
                 
                 const getStatusBadgeClass = (status: string) => {
                   if (status === 'ENTREGADO' || status === 'ENCOMIENDA ENTREGADA') return 'badge-entregado';
@@ -570,14 +571,8 @@ export default function ClosuresView() {
                 
                 return (
                   <tr key={o.id} className={isSettled ? 'opacity-60' : ''}>
-                    <td>
-                      {canEditFull ? (
-                        <input type="date" className="app-input !py-1 !px-2 !text-xs !w-[130px]"
-                          value={assignedDate}
-                          onChange={e => updateAssignedAt(o.id, e.target.value)} />
-                      ) : (
-                        <span className="text-xs whitespace-nowrap">{assignedDate ? new Date(o.assigned_at).toLocaleDateString('es-PY') : ''}</span>
-                      )}
+                    <td className="text-xs whitespace-nowrap">
+                      {new Date(o.created_at).toLocaleDateString('es-PY')}
                     </td>
                     <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
                     <td className="text-xs">{o.city || '—'}</td>
