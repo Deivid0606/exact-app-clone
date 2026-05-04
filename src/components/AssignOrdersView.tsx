@@ -26,14 +26,22 @@ export default function AssignOrdersView() {
   }, [role]);
 
   const load = async () => {
-    let query = supabase.from('orders').select('*')
-      .gte(filterBy, dateFrom + 'T00:00:00')
-      .lte(filterBy, dateTo + 'T23:59:59')
-      .order(filterBy, { ascending: false }).limit(500);
+    let query = supabase.from('orders').select('*');
     
-    // Si es delivery, solo ver pedidos no asignados o los suyos
+    // Si es delivery, NO aplicar filtros de fecha → ver todos sus pedidos (asignados a él o sin asignar)
     if (role === 'DELIVERY') {
-      query = query.or(`assigned_delivery.is.null,assigned_delivery.eq.${profile?.email}`);
+      query = query
+        .or(`assigned_delivery.is.null,assigned_delivery.eq.${profile?.email}`)
+        .order('created_at', { ascending: false })
+        .limit(500);
+    } 
+    // Si es ADMIN o PROVEEDOR, mantener filtro de fechas
+    else {
+      query = query
+        .gte(filterBy, dateFrom + 'T00:00:00')
+        .lte(filterBy, dateTo + 'T23:59:59')
+        .order(filterBy, { ascending: false })
+        .limit(500);
     }
     
     const { data } = await query;
@@ -42,7 +50,10 @@ export default function AssignOrdersView() {
     setSelected(new Set());
   };
 
-  useEffect(() => { load(); }, [filterBy]);
+  // Recargar cuando cambie el filtro, el rol o el email del delivery
+  useEffect(() => { 
+    load(); 
+  }, [filterBy, role, profile?.email]);
 
   const filtered = orders.filter(o => {
     if (!search) return true;
@@ -237,22 +248,37 @@ export default function AssignOrdersView() {
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Asignar Pedidos</h3>
 
-      <div className="flex flex-wrap gap-2 mb-3">
-        <label className="app-label !mt-0">Desde</label>
-        <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-        <label className="app-label !mt-0">Hasta</label>
-        <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
-        
-        {/* Selector para elegir filtrar por fecha de venta o asignación */}
-        <select className="app-input !w-auto" value={filterBy} onChange={e => setFilterBy(e.target.value as any)}>
-          <option value="created_at">📅 Fecha de venta</option>
-          <option value="assigned_at">🚚 Fecha de asignación</option>
-        </select>
-        
-        <input className="app-input flex-1 min-w-[200px]" placeholder="🔎 Buscar cliente, ID, ciudad..."
-          value={search} onChange={e => setSearch(e.target.value)} />
-        <button className="nav-btn active" onClick={load}>Filtrar</button>
-      </div>
+      {/* Filtros de fecha - SOLO visibles para ADMIN/PROVEEDOR */}
+      {(role === 'ADMIN' || role === 'PROVEEDOR') && (
+        <div className="flex flex-wrap gap-2 mb-3">
+          <label className="app-label !mt-0">Desde</label>
+          <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+          <label className="app-label !mt-0">Hasta</label>
+          <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+          
+          {/* Selector para elegir filtrar por fecha de venta o asignación */}
+          <select className="app-input !w-auto" value={filterBy} onChange={e => setFilterBy(e.target.value as any)}>
+            <option value="created_at">📅 Fecha de venta</option>
+            <option value="assigned_at">🚚 Fecha de asignación</option>
+          </select>
+          
+          <input className="app-input flex-1 min-w-[200px]" placeholder="🔎 Buscar cliente, ID, ciudad..."
+            value={search} onChange={e => setSearch(e.target.value)} />
+          <button className="nav-btn active" onClick={load}>Filtrar</button>
+        </div>
+      )}
+
+      {/* Para DELIVERY: solo mostrar búsqueda, sin filtros de fecha */}
+      {role === 'DELIVERY' && (
+        <div className="flex flex-wrap gap-2 mb-3">
+          <input className="app-input flex-1 min-w-[200px]" placeholder="🔎 Buscar cliente, ID, ciudad..."
+            value={search} onChange={e => setSearch(e.target.value)} />
+          <button className="nav-btn active" onClick={load}>Actualizar</button>
+          <div className="text-xs text-muted-foreground self-center ml-auto">
+            Mostrando todos los pedidos asignados a vos o sin asignar
+          </div>
+        </div>
+      )}
 
       {/* Sección para ADMIN/PROVEEDOR */}
       {(role === 'ADMIN' || role === 'PROVEEDOR') && (
@@ -346,14 +372,14 @@ export default function AssignOrdersView() {
                   />
                 </th>
               )}
-              <th>{filterBy === 'created_at' ? 'Fecha venta' : 'Fecha asignación'}</th>
+              <th>Fecha</th>
               <th>ID</th>
               <th>Ciudad</th>
               <th>Cliente</th>
               <th>Estado</th>
               <th>Asignado a</th>
               {(role === 'ADMIN' || role === 'PROVEEDOR') && <th>Acción</th>}
-            </tr>
+            </table>
           </thead>
           <tbody>
             {filtered.map(o => (
@@ -370,11 +396,7 @@ export default function AssignOrdersView() {
                   </td>
                 )}
                 <td className="text-xs whitespace-nowrap">
-                  {filterBy === 'created_at' 
-                    ? new Date(o.created_at).toLocaleDateString('es-PY')
-                    : o.assigned_at 
-                      ? new Date(o.assigned_at).toLocaleDateString('es-PY')
-                      : '—'}
+                  {new Date(o.created_at).toLocaleDateString('es-PY')}
                 </td>
                 <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
                 <td className="text-xs">{o.city}</td>
