@@ -127,54 +127,25 @@ const getAmountFromRow = (order: SheetOrder, amountColumn: string): number => {
   return 0;
 };
 
-// FUNCIÓN CORREGIDA - Genera ID único verificando en la base de datos
+// FUNCIÓN CORREGIDA - Usa timestamp + random para garantizar unicidad
 const generateUniqueOrderId = async (): Promise<string> => {
-  let attempts = 0;
-  const maxAttempts = 10;
+  const timestamp = Date.now();
+  const random = Math.floor(Math.random() * 10000);
+  const newOrderNumber = `SHOPIFY${timestamp}${random}`;
   
-  while (attempts < maxAttempts) {
-    try {
-      // Obtener el último número de orden
-      const { data: lastOrder, error: fetchError } = await supabase
-        .from('orders')
-        .select('order_number')
-        .order('created_at', { ascending: false })
-        .limit(1);
-      
-      if (fetchError) throw fetchError;
-      
-      let nextNumber = 1;
-      if (lastOrder && lastOrder.length > 0 && lastOrder[0].order_number) {
-        const match = lastOrder[0].order_number.match(/SHOPIFY(\d+)/);
-        if (match) {
-          nextNumber = parseInt(match[1], 10) + 1;
-        }
-      }
-      
-      const newOrderNumber = `SHOPIFY${String(nextNumber).padStart(3, '0')}`;
-      
-      // Verificar que no exista
-      const { data: existing, error: checkError } = await supabase
-        .from('orders')
-        .select('order_number')
-        .eq('order_number', newOrderNumber)
-        .maybeSingle();
-      
-      if (checkError) throw checkError;
-      
-      if (!existing) {
-        return newOrderNumber;
-      }
-      
-      attempts++;
-    } catch (err) {
-      console.error("Error generando ID:", err);
-      attempts++;
-    }
+  // Verificar que no exista (por si acaso)
+  const { data: existing } = await supabase
+    .from('orders')
+    .select('order_number')
+    .eq('order_number', newOrderNumber)
+    .maybeSingle();
+  
+  if (!existing) {
+    return newOrderNumber;
   }
   
-  // Fallback: usar timestamp
-  return `SHOPIFY${Date.now()}`;
+  // Si existe (casi imposible), recursivo con nuevo random
+  return generateUniqueOrderId();
 };
 
 interface ShopifyInboxProps {
@@ -371,7 +342,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       return false; 
     }
     
-    // Usar la función mejorada para generar ID único
+    // Generar ID único con timestamp + random
     const orderId = await generateUniqueOrderId();
     const newStatus: OrderStatus = source === "auto" ? "CARGADO" : "CARGADO_MANUAL";
     const productCost = matched.provider_price_gs || 0;
@@ -403,7 +374,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     
     const { error } = await supabase.from("orders").insert(payload);
     if (error) { 
-      toast.error("Error: " + error.message); 
+      toast.error("Error al guardar: " + error.message); 
+      console.error("Error detallado:", error);
       return false; 
     }
     
