@@ -426,7 +426,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return String(dateValue).split(' ')[0];
   };
 
-  // Estadísticas simplificadas
+  // Dashboard stats corregido
   const dashboardStats = useMemo(() => {
     let pendientesConCobertura = 0;
     let pendientesSinCobertura = 0;
@@ -454,60 +454,20 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       }
     });
     
-    const totalPedidos = sheetOrders.length;
-    
     return {
       pendientesConCobertura,
       pendientesSinCobertura,
       cargados,
       dropeados,
       cancelados,
-      totalPedidos,
+      totalPedidos: sheetOrders.length,
     };
   }, [sheetOrders, colKeys, getRowStatus]);
 
-  const filterByProduct = (order: SheetOrder, term: string) => {
-    if (!term.trim()) return true;
-    return (order[colKeys.product] || "").toLowerCase().includes(term.toLowerCase());
-  };
-
-  const filterByCity = (order: SheetOrder, term: string) => {
-    if (!term.trim()) return true;
-    return (order[colKeys.city] || "").toLowerCase().includes(term.toLowerCase());
-  };
-
-  const filteredOrders = useMemo(() => {
-    return sheetOrders
-      .map((o, i) => ({ order: o, idx: i }))
-      .filter(({ order, idx }) => {
-        const status = getRowStatus(idx);
-        const city = order[colKeys.city] || "";
-        const covered = hasCoverage(city);
-        
-        if (activeFilter === "CARGAR" && (status !== "CARGAR" || !covered)) return false;
-        if (activeFilter === "CARGADO" && status !== "CARGADO" && status !== "CARGADO_MANUAL") return false;
-        if (activeFilter === "A DROPEAR" && status !== "A DROPEAR") return false;
-        if (activeFilter === "CANCELADO" && status !== "CANCELADO") return false;
-        if (activeFilter === "TODOS") return true;
-        
-        if (coverageFilter !== "all") {
-          if (coverageFilter === "covered" && !covered) return false;
-          if (coverageFilter === "uncovered" && covered) return false;
-        }
-        
-        if (searchType === "product" && productSearch) return filterByProduct(order, productSearch);
-        if (searchType === "city" && cityFilter) return filterByCity(order, cityFilter);
-        if (searchType === "all" && search) {
-          const vals = Object.values(order).join(" ").toLowerCase();
-          if (!vals.includes(search.toLowerCase())) return false;
-        }
-        
-        return true;
-      });
-  }, [sheetOrders, activeFilter, search, productSearch, cityFilter, searchType, coverageFilter, colKeys, getRowStatus]);
-
+  // Counts corregido para los botones
   const counts = useMemo(() => {
     let cargarConCobertura = 0;
+    let cargarSinCobertura = 0;
     let cargados = 0;
     let aDropear = 0;
     let cancelados = 0;
@@ -517,20 +477,99 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       const city = order[colKeys.city] || "";
       const covered = hasCoverage(city);
       
-      if (status === "CARGAR" && covered) cargarConCobertura++;
-      else if (status === "CARGADO" || status === "CARGADO_MANUAL") cargados++;
-      else if (status === "A DROPEAR") aDropear++;
-      else if (status === "CANCELADO") cancelados++;
+      if (status === "CARGAR") {
+        if (covered) cargarConCobertura++;
+        else cargarSinCobertura++;
+      } else if (status === "CARGADO" || status === "CARGADO_MANUAL") {
+        cargados++;
+      } else if (status === "A DROPEAR") {
+        aDropear++;
+      } else if (status === "CANCELADO") {
+        cancelados++;
+      }
     });
     
     return { 
       cargarConCobertura, 
+      cargarSinCobertura,
       cargados, 
       aDropear, 
       cancelados, 
       total: sheetOrders.length 
     };
   }, [sheetOrders, colKeys, getRowStatus]);
+
+  // FILTRO CORREGIDO - La función más importante
+  const filteredOrders = useMemo(() => {
+    return sheetOrders
+      .map((o, i) => ({ order: o, idx: i }))
+      .filter(({ order, idx }) => {
+        const status = getRowStatus(idx);
+        const city = order[colKeys.city] || "";
+        const covered = hasCoverage(city);
+        
+        // ==========================================
+        // 1. FILTRO POR ESTADO (respetando TODOS)
+        // ==========================================
+        let estadoMatch = true;
+        switch(activeFilter) {
+          case "CARGAR":
+            estadoMatch = status === "CARGAR";
+            break;
+          case "CARGADO":
+            estadoMatch = status === "CARGADO" || status === "CARGADO_MANUAL";
+            break;
+          case "A DROPEAR":
+            estadoMatch = status === "A DROPEAR";
+            break;
+          case "CANCELADO":
+            estadoMatch = status === "CANCELADO";
+            break;
+          case "TODOS":
+            // TODOS no filtra por estado, muestra cualquier estado
+            estadoMatch = true;
+            break;
+        }
+        if (!estadoMatch) return false;
+        
+        // ==========================================
+        // 2. FILTRO POR COBERTURA
+        // ==========================================
+        let coberturaMatch = true;
+        switch(coverageFilter) {
+          case "covered":
+            coberturaMatch = covered === true;
+            break;
+          case "uncovered":
+            coberturaMatch = covered === false;
+            break;
+          case "all":
+            coberturaMatch = true;
+            break;
+        }
+        if (!coberturaMatch) return false;
+        
+        // ==========================================
+        // 3. FILTRO POR BÚSQUEDA
+        // ==========================================
+        if (searchType === "product" && productSearch.trim()) {
+          const product = order[colKeys.product] || "";
+          return product.toLowerCase().includes(productSearch.toLowerCase());
+        }
+        
+        if (searchType === "city" && cityFilter.trim()) {
+          const cityName = order[colKeys.city] || "";
+          return cityName.toLowerCase().includes(cityFilter.toLowerCase());
+        }
+        
+        if (searchType === "all" && search.trim()) {
+          const allText = Object.values(order).join(" ").toLowerCase();
+          return allText.includes(search.toLowerCase());
+        }
+        
+        return true;
+      });
+  }, [sheetOrders, activeFilter, search, productSearch, cityFilter, searchType, coverageFilter, colKeys, getRowStatus]);
 
   const changeFilter = (filter: FilterType) => setActiveFilter(filter);
   
@@ -592,27 +631,49 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
       {/* Filtros */}
       <div className="flex flex-wrap gap-0.5 flex-shrink-0">
-        <button onClick={() => changeFilter("TODOS")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "TODOS" ? "bg-slate-700 text-white" : "text-slate-400"}`}>📋 Todos ({counts.total})</button>
-        <button onClick={() => changeFilter("CARGAR")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "CARGAR" ? "bg-blue-600 text-white" : "text-slate-400"}`}>⏳ Pendientes ({counts.cargarConCobertura})</button>
-        <button onClick={() => changeFilter("CARGADO")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "CARGADO" ? "bg-green-600 text-white" : "text-slate-400"}`}>✅ Cargados ({counts.cargados})</button>
-        <button onClick={() => changeFilter("A DROPEAR")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "A DROPEAR" ? "bg-yellow-600 text-white" : "text-slate-400"}`}>⚠️ Dropear ({counts.aDropear})</button>
-        <button onClick={() => changeFilter("CANCELADO")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "CANCELADO" ? "bg-red-600 text-white" : "text-slate-400"}`}>❌ Cancelado ({counts.cancelados})</button>
+        <button onClick={() => changeFilter("TODOS")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "TODOS" ? "bg-slate-700 text-white" : "text-slate-400"}`}>
+          📋 Todos ({counts.total})
+        </button>
+        <button onClick={() => changeFilter("CARGAR")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "CARGAR" ? "bg-blue-600 text-white" : "text-slate-400"}`}>
+          ⏳ Pendientes ({counts.cargarConCobertura})
+        </button>
+        <button onClick={() => changeFilter("CARGADO")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "CARGADO" ? "bg-green-600 text-white" : "text-slate-400"}`}>
+          ✅ Cargados ({counts.cargados})
+        </button>
+        <button onClick={() => changeFilter("A DROPEAR")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "A DROPEAR" ? "bg-yellow-600 text-white" : "text-slate-400"}`}>
+          ⚠️ Dropear ({counts.aDropear})
+        </button>
+        <button onClick={() => changeFilter("CANCELADO")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "CANCELADO" ? "bg-red-600 text-white" : "text-slate-400"}`}>
+          ❌ Cancelado ({counts.cancelados})
+        </button>
         
         <div className="flex-1"></div>
         
         <div className="flex gap-0.5">
-          <button onClick={() => setCoverageFilter("all")} className={`px-1.5 py-0.5 rounded text-[10px] ${coverageFilter === "all" ? "bg-slate-700" : "text-slate-500"}`}>🌍 Todas</button>
-          <button onClick={() => setCoverageFilter("covered")} className={`px-1.5 py-0.5 rounded text-[10px] ${coverageFilter === "covered" ? "bg-green-600" : "text-slate-500"}`}>✅ Con cobertura</button>
-          <button onClick={() => setCoverageFilter("uncovered")} className={`px-1.5 py-0.5 rounded text-[10px] ${coverageFilter === "uncovered" ? "bg-red-600" : "text-slate-500"}`}>❌ Sin cobertura</button>
+          <button onClick={() => setCoverageFilter("all")} className={`px-1.5 py-0.5 rounded text-[10px] ${coverageFilter === "all" ? "bg-slate-700" : "text-slate-500"}`}>
+            🌍 Todas
+          </button>
+          <button onClick={() => setCoverageFilter("covered")} className={`px-1.5 py-0.5 rounded text-[10px] ${coverageFilter === "covered" ? "bg-green-600" : "text-slate-500"}`}>
+            ✅ Con cobertura ({counts.cargarConCobertura})
+          </button>
+          <button onClick={() => setCoverageFilter("uncovered")} className={`px-1.5 py-0.5 rounded text-[10px] ${coverageFilter === "uncovered" ? "bg-red-600" : "text-slate-500"}`}>
+            ❌ Sin cobertura ({counts.cargarSinCobertura})
+          </button>
         </div>
       </div>
 
       {/* Buscador */}
       <div className="flex gap-1 flex-shrink-0">
         <div className="flex gap-0.5">
-          <button onClick={() => setSearchType("product")} className={`px-1.5 py-0.5 rounded text-[10px] ${searchType === "product" ? "bg-blue-600" : "bg-slate-800"}`}>🏷️ Producto</button>
-          <button onClick={() => setSearchType("city")} className={`px-1.5 py-0.5 rounded text-[10px] ${searchType === "city" ? "bg-blue-600" : "bg-slate-800"}`}>📍 Ciudad</button>
-          <button onClick={() => setSearchType("all")} className={`px-1.5 py-0.5 rounded text-[10px] ${searchType === "all" ? "bg-blue-600" : "bg-slate-800"}`}>🔍 Todo</button>
+          <button onClick={() => setSearchType("product")} className={`px-1.5 py-0.5 rounded text-[10px] ${searchType === "product" ? "bg-blue-600" : "bg-slate-800"}`}>
+            🏷️ Producto
+          </button>
+          <button onClick={() => setSearchType("city")} className={`px-1.5 py-0.5 rounded text-[10px] ${searchType === "city" ? "bg-blue-600" : "bg-slate-800"}`}>
+            📍 Ciudad
+          </button>
+          <button onClick={() => setSearchType("all")} className={`px-1.5 py-0.5 rounded text-[10px] ${searchType === "all" ? "bg-blue-600" : "bg-slate-800"}`}>
+            🔍 Todo
+          </button>
         </div>
         <input
           className="flex-1 bg-slate-800 rounded px-2 py-0.5 text-[11px] border border-slate-700 focus:outline-none focus:border-blue-500"
