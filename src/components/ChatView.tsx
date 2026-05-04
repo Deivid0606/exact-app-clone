@@ -172,6 +172,9 @@ export default function ChatView() {
   const isAdminOrDespachante = myRole === 'ADMIN' || myRole === 'DESPACHANTE';
   const isProvider = myRole === 'PROVEEDOR';
   const isSeller = myRole === 'VENDEDOR';
+  
+  // Definir canEditChannelLogo
+  const canEditChannelLogo = isApproved && (myRole === 'ADMIN' || myRole === 'PROVEEDOR');
 
   const activeChannel = useMemo(() => {
     if (tab === 'dm') return null;
@@ -208,7 +211,6 @@ export default function ChatView() {
         name: p.name,
         role: p.role,
       }));
-      console.log('📋 Proveedores disponibles para vendedor:', providers);
       return providers;
     }
     
@@ -225,7 +227,6 @@ export default function ChatView() {
     if (isAdminOrDespachante) return true;
     if (isProvider) return true;
     if (isSeller) {
-      // Verificar si el peer es un proveedor (de la lista manual)
       const isProviderPeer = PROVIDERS_LIST.some(p => p.email.toLowerCase() === peerEmail.toLowerCase());
       return isProviderPeer;
     }
@@ -305,7 +306,6 @@ export default function ChatView() {
 
   const loadContacts = async () => {
     setLoadingContacts(true);
-    console.log('🔄 Cargando contactos...');
     
     try {
       const [profRes, rolesRes] = await Promise.all([
@@ -637,7 +637,6 @@ export default function ChatView() {
       return;
     }
     
-    console.log('📨 Seleccionando destinatario:', peer);
     setSelectedPeer(peer);
     loadDmMessages(peer, topicChannel);
   };
@@ -1324,6 +1323,17 @@ export default function ChatView() {
     };
   }, [myEmail, tab, selectedPeer, isDMChannel]);
 
+  if (loadingContacts) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto mb-2"></div>
+          <p className="text-slate-400">Cargando chat...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="chat-view">
       <div className="chat-header">
@@ -1343,7 +1353,7 @@ export default function ChatView() {
           >
             <span className="chat-tab-avatar">
               {channel.logo_url ? (
-                <img src={channel.logo_url} alt={channel.title} />
+                <img src={channel.logo_url} alt={channel.title} className="w-6 h-6 rounded-full object-cover" />
               ) : (
                 <span>💬</span>
               )}
@@ -1507,9 +1517,9 @@ export default function ChatView() {
               <div className="chat-channel-profile">
                 <div className="chat-channel-logo">
                   {activeChannel?.logo_url ? (
-                    <img src={activeChannel.logo_url} alt={activeChannel.title} />
+                    <img src={activeChannel.logo_url} alt={activeChannel.title} className="w-12 h-12 rounded-full object-cover" />
                   ) : (
-                    <span>💬</span>
+                    <span className="text-2xl">💬</span>
                   )}
 
                   {canEditChannelLogo && (
