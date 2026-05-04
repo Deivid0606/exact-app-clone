@@ -32,11 +32,11 @@ export default function ClosuresView() {
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [totalPedidosAsignados, setTotalPedidosAsignados] = useState(0);
   const [loadingDeliveries, setLoadingDeliveries] = useState(false);
+  const [loadingOrders, setLoadingOrders] = useState(false);
 
   const loadDeliveries = async () => {
     setLoadingDeliveries(true);
     try {
-      // Primero, obtener todos los deliveries de la tabla profiles
       const { data: profilesData, error: profilesError } = await supabase
         .from('profiles')
         .select('email, name')
@@ -49,7 +49,6 @@ export default function ClosuresView() {
         return;
       }
       
-      // Fallback: obtener desde orders
       const { data: ordersData } = await supabase
         .from('orders')
         .select('assigned_delivery')
@@ -88,7 +87,6 @@ export default function ClosuresView() {
         name: s.company_name || s.name || s.email 
       })));
     } else {
-      // Fallback: proveedores desde pedidos
       const { data: ordersData } = await supabase
         .from('orders')
         .select('provider_email')
@@ -108,59 +106,79 @@ export default function ClosuresView() {
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
   }, []);
 
-  // ✅ DETECCIÓN DE DELIVERY
   const isDelivery = !isSupplier && !isAdmin && deliveries.some(d => d.email === myEmail);
 
   const loadClosures = async () => {
-    let query = supabase.from('orders').select('*')
-      .gte('assigned_at', dateFrom + 'T00:00:00')
-      .lte('assigned_at', dateTo + 'T23:59:59')
-      .order('assigned_at', { ascending: false });
+    setLoadingOrders(true);
+    try {
+      let query = supabase.from('orders').select('*');
 
-    if (isSupplier) {
-      query = query.eq('provider_email', myEmail);
-      if (filterDelivery) {
-        query = query.eq('assigned_delivery', filterDelivery);
+      // IMPORTANTE: Filtrar por assigned_at SOLO si hay fechas válidas
+      if (dateFrom && dateTo) {
+        query = query
+          .gte('assigned_at', dateFrom + 'T00:00:00')
+          .lte('assigned_at', dateTo + 'T23:59:59');
       }
-    } else if (isDelivery) {
-      query = query.eq('assigned_delivery', myEmail);
-      if (filterSupplier) {
-        query = query.eq('provider_email', filterSupplier);
+      
+      query = query.order('assigned_at', { ascending: false });
+
+      if (isSupplier) {
+        query = query.eq('provider_email', myEmail);
+        if (filterDelivery) {
+          query = query.eq('assigned_delivery', filterDelivery);
+        }
+      } else if (isDelivery) {
+        query = query.eq('assigned_delivery', myEmail);
+        if (filterSupplier) {
+          query = query.eq('provider_email', filterSupplier);
+        }
+      } else if (isAdmin) {
+        if (filterDelivery) query = query.eq('assigned_delivery', filterDelivery);
+        if (filterSupplier) query = query.eq('provider_email', filterSupplier);
       }
-    } else if (isAdmin) {
-      if (filterDelivery) query = query.eq('assigned_delivery', filterDelivery);
-      if (filterSupplier) query = query.eq('provider_email', filterSupplier);
-    }
 
-    if (filterType && filterType !== '') {
-      query = query.eq('status', filterType);
-    }
+      if (filterType && filterType !== '') {
+        query = query.eq('status', filterType);
+      }
 
-    const { data } = await query;
-    setOrders(data || []);
-    setTotalPedidosAsignados(data?.length || 0);
+      const { data, error } = await query;
+      
+      if (error) throw error;
+      
+      setOrders(data || []);
+      setTotalPedidosAsignados(data?.length || 0);
 
-    let deliveryToCheck = '';
-    if (isDelivery) {
-      deliveryToCheck = myEmail;
-    } else if ((isAdmin || isSupplier) && filterDelivery) {
-      deliveryToCheck = filterDelivery;
-    }
-    
-    if (deliveryToCheck) {
-      const { data: rp } = await supabase.from('rendiciones_pagadas').select('*')
-        .eq('delivery_email', deliveryToCheck)
-        .gte('pagado_en', dateFrom + 'T00:00:00')
-        .lte('pagado_en', dateTo + 'T23:59:59')
-        .order('pagado_en', { ascending: false })
-        .limit(1);
-      setRendicionPagada(rp && rp.length > 0 ? { id: rp[0].id, pagado_en: rp[0].pagado_en, nota: rp[0].nota || '', marcado_por: rp[0].marcado_por || '' } : null);
-    } else {
-      setRendicionPagada(null);
+      let deliveryToCheck = '';
+      if (isDelivery) {
+        deliveryToCheck = myEmail;
+      } else if ((isAdmin || isSupplier) && filterDelivery) {
+        deliveryToCheck = filterDelivery;
+      }
+      
+      if (deliveryToCheck) {
+        const { data: rp } = await supabase.from('rendiciones_pagadas').select('*')
+          .eq('delivery_email', deliveryToCheck)
+          .gte('pagado_en', dateFrom + 'T00:00:00')
+          .lte('pagado_en', dateTo + 'T23:59:59')
+          .order('pagado_en', { ascending: false })
+          .limit(1);
+        setRendicionPagada(rp && rp.length > 0 ? { id: rp[0].id, pagado_en: rp[0].pagado_en, nota: rp[0].nota || '', marcado_por: rp[0].marcado_por || '' } : null);
+      } else {
+        setRendicionPagada(null);
+      }
+    } catch (error) {
+      console.error('Error loading closures:', error);
+      toast.error('Error al cargar los pedidos');
+    } finally {
+      setLoadingOrders(false);
     }
   };
 
-  useEffect(() => { loadClosures(); }, [filterSupplier, filterDelivery, filterType, dateFrom, dateTo]);
+  useEffect(() => { 
+    if (dateFrom && dateTo) {
+      loadClosures(); 
+    }
+  }, [filterSupplier, filterDelivery, filterType, dateFrom, dateTo]);
 
   const getFee = (deliveryEmail: string, city: string) => {
     const f = fees.find(f => f.delivery_email?.toLowerCase() === deliveryEmail?.toLowerCase() && f.city?.toLowerCase() === city?.toLowerCase());
@@ -234,7 +252,10 @@ export default function ClosuresView() {
 
   const updateAssignedAt = async (orderId: string, dateVal: string) => {
     if (!dateVal) return;
-    const { error } = await supabase.from('orders').update({ assigned_at: dateVal + 'T00:00:00', updated_at: new Date().toISOString() }).eq('id', orderId);
+    const { error } = await supabase.from('orders').update({ 
+      assigned_at: dateVal + 'T00:00:00', 
+      updated_at: new Date().toISOString() 
+    }).eq('id', orderId);
     if (error) toast.error(error.message);
     else { toast.success('Fecha actualizada'); loadClosures(); }
   };
@@ -396,16 +417,24 @@ export default function ClosuresView() {
           <option value="DEVUELTO A DEPÓSITO">DEVUELTO A DEPÓSITO</option>
           <option value="REAGENDADO">REAGENDADO</option>
         </select>
-        <button className="nav-btn active" onClick={loadClosures}>Aplicar</button>
+        <button className="nav-btn active" onClick={loadClosures} disabled={loadingOrders}>
+          {loadingOrders ? 'Cargando...' : 'Aplicar'}
+        </button>
       </div>
 
-      {/* Total de Pedidos Asignados */}
-      {(filterDelivery || isDelivery || isSupplier) && (
-        <div className="grid-kpi mb-4">
-          <div className="kpi-card">
-            <div className="text-xs text-muted-foreground mb-1">📦 Pedidos Asignados</div>
-            <div className="text-[22px] font-extrabold">{totalPedidosAsignados}</div>
-            <div className="text-xs text-muted-foreground">en el período</div>
+      {/* Resumen de pedidos encontrados */}
+      {(filterDelivery || isDelivery) && (
+        <div className="bg-blue-50 rounded-lg p-3 mb-4 border border-blue-200">
+          <div className="flex justify-between items-center">
+            <div>
+              <span className="text-sm font-bold text-blue-800">
+                📦 Pedidos asignados a {deliveryName || (filterDelivery || (isDelivery ? profile?.name : 'este delivery'))}
+              </span>
+              <p className="text-xs text-blue-600 mt-0.5">
+                Período: {dateFrom} al {dateTo}
+              </p>
+            </div>
+            <span className="text-2xl font-bold text-blue-600">{totalPedidosAsignados}</span>
           </div>
         </div>
       )}
@@ -508,7 +537,14 @@ export default function ClosuresView() {
             </tr>
           </thead>
           <tbody>
-            {orders.map(o => {
+            {loadingOrders ? (
+              <tr>
+                <td colSpan={canManageRendicion ? 12 : 11} className="text-center py-8">
+                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-brand"></div>
+                  <p className="text-sm text-muted-foreground mt-2">Cargando pedidos...</p>
+                </td>
+              </tr>
+            ) : orders.map(o => {
               const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
               const net = Number(o.total_gs || 0) - fee;
               const isSettled = o.delivery_settled;
@@ -540,7 +576,7 @@ export default function ClosuresView() {
                   <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
                   <td className="text-right text-xs">{nf(fee)}</td>
                   <td className="text-right text-xs">{nf(net)}</td>
-                  <td>
+                  <tr>
                     {canEditStatus1 ? (
                       <select 
                         className="app-input !w-auto !py-1 !px-2 text-xs"
@@ -589,10 +625,10 @@ export default function ClosuresView() {
                 </tr>
               );
             })}
-            {orders.length === 0 && (
+            {!loadingOrders && orders.length === 0 && (
               <tr>
                 <td colSpan={canManageRendicion ? 12 : 11} className="text-center text-muted-foreground py-8">
-                  Sin resultados
+                  No hay pedidos asignados en este período
                 </td>
               </tr>
             )}
