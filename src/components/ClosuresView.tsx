@@ -10,7 +10,6 @@ export default function ClosuresView() {
   const myEmail = profile?.email || '';
   const myRole = profile?.role || '';
   
-  // ========== DETECCIÓN DE ROL ==========
   const isSupplier = myRole === 'PROVEEDOR';
   const isAdmin = myRole === 'ADMIN';
   
@@ -33,11 +32,9 @@ export default function ClosuresView() {
   const [totalPedidosAsignados, setTotalPedidosAsignados] = useState(0);
   const [loadingDeliveries, setLoadingDeliveries] = useState(false);
 
-  // ✅ NUEVA FUNCIÓN: Carga TODOS los deliveries desde profiles (no solo los que tienen pedidos)
   const loadDeliveries = async () => {
     setLoadingDeliveries(true);
     try {
-      // Primero intentar obtener todos los deliveries de la tabla profiles
       const { data: profilesData, error: profilesError } = await supabase
         .from('profiles')
         .select('email, name')
@@ -50,7 +47,6 @@ export default function ClosuresView() {
         return;
       }
       
-      // Fallback: obtener desde orders
       const { data: ordersData } = await supabase
         .from('orders')
         .select('assigned_delivery')
@@ -112,9 +108,10 @@ export default function ClosuresView() {
 
   const loadClosures = async () => {
     let query = supabase.from('orders').select('*')
-      .gte('assigned_at', dateFrom + 'T00:00:00')
-      .lte('assigned_at', dateTo + 'T23:59:59')
-      .order('assigned_at', { ascending: false });
+      // ✅ CAMBIADO: usar created_at en lugar de assigned_at
+      .gte('created_at', dateFrom + 'T00:00:00')
+      .lte('created_at', dateTo + 'T23:59:59')
+      .order('created_at', { ascending: false });
 
     if (isSupplier) {
       query = query.eq('provider_email', myEmail);
@@ -339,14 +336,12 @@ export default function ClosuresView() {
         </div>
       )}
 
-      {/* ========== FILTROS ========== */}
       <div className="flex flex-wrap gap-2 mb-3">
         <label className="app-label !mt-0">Desde</label>
         <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
         <label className="app-label !mt-0">Hasta</label>
         <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
         
-        {/* FILTRO POR DELIVERY - para PROVEEDOR y ADMIN - AHORA SIEMPRE VISIBLE */}
         {(isSupplier || isAdmin) && (
           <div className="flex items-center gap-1">
             <select className="app-input !w-auto min-w-[280px]" value={filterDelivery} onChange={e => setFilterDelivery(e.target.value)}>
@@ -373,7 +368,6 @@ export default function ClosuresView() {
           </div>
         )}
 
-        {/* SELECTOR DE PROVEEDORES - visible para DELIVERY y ADMIN */}
         {(isDelivery || isAdmin) && suppliers.length > 0 && (
           <select className="app-input !w-auto min-w-[280px]" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
             <option value="">Todos los proveedores</option>
@@ -398,18 +392,16 @@ export default function ClosuresView() {
         <button className="nav-btn active" onClick={loadClosures}>Aplicar</button>
       </div>
 
-      {/* Total de Pedidos Asignados */}
       {(filterDelivery || isDelivery || isSupplier) && (
         <div className="grid-kpi mb-4">
           <div className="kpi-card">
-            <div className="text-xs text-muted-foreground mb-1">📦 Pedidos Asignados</div>
+            <div className="text-xs text-muted-foreground mb-1">📦 Pedidos</div>
             <div className="text-[22px] font-extrabold">{totalPedidosAsignados}</div>
             <div className="text-xs text-muted-foreground">en el período</div>
           </div>
         </div>
       )}
 
-      {/* Control de Rendición */}
       {canViewRendicion && delivered.length > 0 && (
         <div className="app-card !p-4 mb-4 border-l-4 border-l-[hsl(var(--primary))]">
           <h4 className="font-extrabold mb-3">📋 Control de Rendición</h4>
@@ -481,7 +473,6 @@ export default function ClosuresView() {
 
       <p className="chip mb-3 text-[10px]">Los KPIs se calculan <strong>solo</strong> con Estado 1 = ENTREGADO.</p>
 
-      {/* KPIs */}
       <div className="grid-kpi mb-4">
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">ENTREGADOS</div><div className="text-[22px] font-extrabold">{kpis.entregados}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.entregadosRev)}</div></div>
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">ENCOMIENDAS</div><div className="text-[22px] font-extrabold">{kpis.encomiendas}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.encomiendaRev)}</div></div>
@@ -491,14 +482,17 @@ export default function ClosuresView() {
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Ya rendidos</div><div className="text-[22px] font-extrabold" style={{ color: '#4ade80' }}>{kpis.rendidos}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.montoRendido)}</div></div>
       </div>
 
-      {/* Tabla de pedidos */}
       <div className="overflow-auto">
         <table className="app-table min-w-[1500px]">
           <thead>
             <tr>
-              <th>Asignado</th><th>ID</th><th>Ciudad</th><th>Cliente</th>
+              <th>Fecha Creación</th>
+              <th>ID</th>
+              <th>Ciudad</th>
+              <th>Cliente</th>
               <th>Proveedor</th>
-              <th className="text-right">Total (Gs)</th><th className="text-right">Tarifa (Gs)</th>
+              <th className="text-right">Total (Gs)</th>
+              <th className="text-right">Tarifa (Gs)</th>
               <th className="text-right">Neto (Gs)</th>
               <th>Estado 1</th>
               <th>Estado de retiro</th>
@@ -511,7 +505,6 @@ export default function ClosuresView() {
               const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
               const net = Number(o.total_gs || 0) - fee;
               const isSettled = o.delivery_settled;
-              const assignedDate = o.assigned_at ? new Date(o.assigned_at).toISOString().slice(0, 10) : '';
               
               const getStatusBadgeClass = (status: string) => {
                 if (status === 'ENTREGADO' || status === 'ENCOMIENDA ENTREGADA') return 'badge-entregado';
@@ -523,14 +516,8 @@ export default function ClosuresView() {
               
               return (
                 <tr key={o.id} className={isSettled ? 'opacity-60' : ''}>
-                  <td>
-                    {canEditFull ? (
-                      <input type="date" className="app-input !py-1 !px-2 !text-xs !w-[130px]"
-                        value={assignedDate}
-                        onChange={e => updateAssignedAt(o.id, e.target.value)} />
-                    ) : (
-                      <span className="text-xs whitespace-nowrap">{assignedDate ? new Date(o.assigned_at).toLocaleDateString('es-PY') : ''}</span>
-                    )}
+                  <td className="text-xs whitespace-nowrap">
+                    {new Date(o.created_at).toLocaleDateString('es-PY')}
                   </td>
                   <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
                   <td className="text-xs">{o.city || '—'}</td>
