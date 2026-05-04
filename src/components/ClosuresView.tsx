@@ -113,7 +113,6 @@ export default function ClosuresView() {
     try {
       let query = supabase.from('orders').select('*');
 
-      // IMPORTANTE: Filtrar por assigned_at SOLO si hay fechas válidas
       if (dateFrom && dateTo) {
         query = query
           .gte('assigned_at', dateFrom + 'T00:00:00')
@@ -526,9 +525,13 @@ export default function ClosuresView() {
         <table className="app-table min-w-[1500px]">
           <thead>
             <tr>
-              <th>Asignado</th><th>ID</th><th>Ciudad</th><th>Cliente</th>
+              <th>Asignado</th>
+              <th>ID</th>
+              <th>Ciudad</th>
+              <th>Cliente</th>
               <th>Proveedor</th>
-              <th className="text-right">Total (Gs)</th><th className="text-right">Tarifa (Gs)</th>
+              <th className="text-right">Total (Gs)</th>
+              <th className="text-right">Tarifa (Gs)</th>
               <th className="text-right">Neto (Gs)</th>
               <th>Estado 1</th>
               <th>Estado de retiro</th>
@@ -544,93 +547,94 @@ export default function ClosuresView() {
                   <p className="text-sm text-muted-foreground mt-2">Cargando pedidos...</p>
                 </td>
               </tr>
-            ) : orders.map(o => {
-              const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
-              const net = Number(o.total_gs || 0) - fee;
-              const isSettled = o.delivery_settled;
-              const assignedDate = o.assigned_at ? new Date(o.assigned_at).toISOString().slice(0, 10) : '';
-              
-              const getStatusBadgeClass = (status: string) => {
-                if (status === 'ENTREGADO' || status === 'ENCOMIENDA ENTREGADA') return 'badge-entregado';
-                if (status === 'CANCELADO') return 'badge-cancelado';
-                if (status === 'DEVUELTO A DEPÓSITO') return 'badge-warning';
-                if (status === 'REAGENDADO') return 'badge-info';
-                return 'badge-pendiente';
-              };
-              
-              return (
-                <tr key={o.id} className={isSettled ? 'opacity-60' : ''}>
-                  <td>
-                    {canEditFull ? (
-                      <input type="date" className="app-input !py-1 !px-2 !text-xs !w-[130px]"
-                        value={assignedDate}
-                        onChange={e => updateAssignedAt(o.id, e.target.value)} />
-                    ) : (
-                      <span className="text-xs whitespace-nowrap">{assignedDate ? new Date(o.assigned_at).toLocaleDateString('es-PY') : ''}</span>
-                    )}
-                  </td>
-                  <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
-                  <td className="text-xs">{o.city || '—'}</td>
-                  <td className="text-xs">{o.customer_name}</td>
-                  <td className="text-xs">{o.provider_email || '—'}</td>
-                  <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
-                  <td className="text-right text-xs">{nf(fee)}</td>
-                  <td className="text-right text-xs">{nf(net)}</td>
-                  <tr>
-                    {canEditStatus1 ? (
-                      <select 
-                        className="app-input !w-auto !py-1 !px-2 text-xs"
-                        value={o.status || 'PENDIENTE'}
-                        onChange={e => updateStatus1(o.id, e.target.value)}
-                      >
-                        {status1Opts.map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    ) : (
-                      <span className={`badge-status ${getStatusBadgeClass(o.status)}`}>{o.status}</span>
-                    )}
-                  </td>
-                  <td>
-                    {canEditFull ? (
-                      <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.estado_retiro || ''}
-                        onChange={e => updateRetiro(o.id, e.target.value)}>
-                        {retiroOpts.map(s => <option key={s} value={s}>{s || '—'}</option>)}
-                      </select>
-                    ) : <span className="text-xs">{o.estado_retiro || '—'}</span>}
-                  </td>
-                  <td>
-                    {canEditFull ? (
-                      <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.status2 || '--'}
-                        onChange={e => updateStatus2(o.id, e.target.value)}>
-                        {state2Opts.map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    ) : <span className="text-xs">{o.status2 || '—'}</span>}
-                  </td>
-                  {canManageRendicion && (
-                    <td>
-                      <div className="flex items-center gap-1">
-                        {!isSettled && (o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA') && (
-                          <button
-                            onClick={() => markSingleRendido(o.id)}
-                            className="nav-btn active !py-1 !px-2 text-[11px]"
-                          >
-                            RENDIDO
-                          </button>
-                        )}
-                        {isSettled && (
-                          <span className="text-xs font-bold" style={{ color: '#4ade80' }}>RENDIDO</span>
-                        )}
-                      </div>
-                    </td>
-                  )}
-                </tr>
-              );
-            })}
-            {!loadingOrders && orders.length === 0 && (
+            ) : orders.length === 0 ? (
               <tr>
                 <td colSpan={canManageRendicion ? 12 : 11} className="text-center text-muted-foreground py-8">
                   No hay pedidos asignados en este período
                 </td>
               </tr>
+            ) : (
+              orders.map(o => {
+                const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
+                const net = Number(o.total_gs || 0) - fee;
+                const isSettled = o.delivery_settled;
+                const assignedDate = o.assigned_at ? new Date(o.assigned_at).toISOString().slice(0, 10) : '';
+                
+                const getStatusBadgeClass = (status: string) => {
+                  if (status === 'ENTREGADO' || status === 'ENCOMIENDA ENTREGADA') return 'badge-entregado';
+                  if (status === 'CANCELADO') return 'badge-cancelado';
+                  if (status === 'DEVUELTO A DEPÓSITO') return 'badge-warning';
+                  if (status === 'REAGENDADO') return 'badge-info';
+                  return 'badge-pendiente';
+                };
+                
+                return (
+                  <tr key={o.id} className={isSettled ? 'opacity-60' : ''}>
+                    <td>
+                      {canEditFull ? (
+                        <input type="date" className="app-input !py-1 !px-2 !text-xs !w-[130px]"
+                          value={assignedDate}
+                          onChange={e => updateAssignedAt(o.id, e.target.value)} />
+                      ) : (
+                        <span className="text-xs whitespace-nowrap">{assignedDate ? new Date(o.assigned_at).toLocaleDateString('es-PY') : ''}</span>
+                      )}
+                    </td>
+                    <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
+                    <td className="text-xs">{o.city || '—'}</td>
+                    <td className="text-xs">{o.customer_name}</td>
+                    <td className="text-xs">{o.provider_email || '—'}</td>
+                    <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
+                    <td className="text-right text-xs">{nf(fee)}</td>
+                    <td className="text-right text-xs">{nf(net)}</td>
+                    <td>
+                      {canEditStatus1 ? (
+                        <select 
+                          className="app-input !w-auto !py-1 !px-2 text-xs"
+                          value={o.status || 'PENDIENTE'}
+                          onChange={e => updateStatus1(o.id, e.target.value)}
+                        >
+                          {status1Opts.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      ) : (
+                        <span className={`badge-status ${getStatusBadgeClass(o.status)}`}>{o.status}</span>
+                      )}
+                    </td>
+                    <td>
+                      {canEditFull ? (
+                        <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.estado_retiro || ''}
+                          onChange={e => updateRetiro(o.id, e.target.value)}>
+                          {retiroOpts.map(s => <option key={s} value={s}>{s || '—'}</option>)}
+                        </select>
+                      ) : <span className="text-xs">{o.estado_retiro || '—'}</span>}
+                    </td>
+                    <td>
+                      {canEditFull ? (
+                        <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.status2 || '--'}
+                          onChange={e => updateStatus2(o.id, e.target.value)}>
+                          {state2Opts.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      ) : <span className="text-xs">{o.status2 || '—'}</span>}
+                    </td>
+                    {canManageRendicion && (
+                      <td>
+                        <div className="flex items-center gap-1">
+                          {!isSettled && (o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA') && (
+                            <button
+                              onClick={() => markSingleRendido(o.id)}
+                              className="nav-btn active !py-1 !px-2 text-[11px]"
+                            >
+                              RENDIDO
+                            </button>
+                          )}
+                          {isSettled && (
+                            <span className="text-xs font-bold" style={{ color: '#4ade80' }}>RENDIDO</span>
+                          )}
+                        </div>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
