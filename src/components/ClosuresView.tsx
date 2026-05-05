@@ -32,6 +32,7 @@ export default function ClosuresView() {
   const [filterDateBy, setFilterDateBy] = useState<'assigned_at' | 'created_at'>('assigned_at');
   const [totalPedidosAsignados, setTotalPedidosAsignados] = useState(0);
   const [loadingDeliveries, setLoadingDeliveries] = useState(false);
+  const [editingDateId, setEditingDateId] = useState<string | null>(null);
 
   const loadDeliveries = async () => {
     setLoadingDeliveries(true);
@@ -108,7 +109,6 @@ export default function ClosuresView() {
   const isDelivery = !isSupplier && !isAdmin && deliveries.some(d => d.email === myEmail);
 
   const loadClosures = async () => {
-    // ✅ CORREGIDO: Usar assigned_at para deliveries, created_at para otros
     let dateField = 'created_at';
     if (isDelivery) {
       dateField = 'assigned_at';
@@ -236,11 +236,25 @@ export default function ClosuresView() {
     else { toast.success('Estado de retiro actualizado'); loadClosures(); }
   };
 
-  const updateAssignedAt = async (orderId: string, dateVal: string) => {
-    if (!dateVal) return;
-    const { error } = await supabase.from('orders').update({ assigned_at: dateVal + 'T00:00:00', updated_at: new Date().toISOString() }).eq('id', orderId);
-    if (error) toast.error(error.message);
-    else { toast.success('Fecha actualizada'); loadClosures(); }
+  const handleDateChange = async (orderId: string, newDate: string) => {
+    if (!newDate) return;
+    
+    const { error } = await supabase
+      .from('orders')
+      .update({ 
+        assigned_at: newDate + 'T00:00:00', 
+        updated_at: new Date().toISOString() 
+      })
+      .eq('id', orderId);
+      
+    if (error) {
+      toast.error(error.message);
+    } else {
+      toast.success('Fecha actualizada');
+      loadClosures();
+    }
+    
+    setEditingDateId(null);
   };
 
   const markSingleRendido = async (orderId: string) => {
@@ -532,11 +546,33 @@ export default function ClosuresView() {
               return (
                 <tr key={o.id} className={isSettled ? 'opacity-60' : ''}>
                   <td className="text-xs whitespace-nowrap">
-                    {o.assigned_at ? new Date(o.assigned_at).toLocaleDateString('es-PY') : '—'}
-                   </td>
+                    {editingDateId === o.id ? (
+                      <input
+                        type="date"
+                        className="app-input !py-0 !px-1 text-xs w-auto"
+                        defaultValue={o.assigned_at ? new Date(o.assigned_at).toISOString().slice(0, 10) : ''}
+                        onBlur={(e) => handleDateChange(o.id, e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleDateChange(o.id, (e.target as HTMLInputElement).value);
+                          }
+                        }}
+                        autoFocus
+                      />
+                    ) : (
+                      <span 
+                        className="cursor-pointer hover:text-primary transition-colors inline-block min-w-[80px]"
+                        onClick={() => setEditingDateId(o.id)}
+                        title="Click para editar fecha"
+                      >
+                        {o.assigned_at ? new Date(o.assigned_at).toLocaleDateString('es-PY') : '—'}
+                        <span className="ml-1 text-xs opacity-50">📅</span>
+                      </span>
+                    )}
+                  </td>
                   <td className="text-xs whitespace-nowrap">
                     {new Date(o.created_at).toLocaleDateString('es-PY')}
-                   </td>
+                  </td>
                   <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
                   <td className="text-xs">{o.city || '—'}</td>
                   <td className="text-xs">{o.customer_name}</td>
