@@ -546,29 +546,34 @@ export default function ClosuresView() {
               return (
                 <tr key={o.id} className={isSettled ? 'opacity-60' : ''}>
                   <td className="text-xs whitespace-nowrap">
-                    {editingDateId === o.id ? (
-                      <input
-                        type="date"
-                        className="app-input !py-0 !px-1 text-xs w-auto"
-                        defaultValue={o.assigned_at ? new Date(o.assigned_at).toISOString().slice(0, 10) : ''}
-                        onBlur={(e) => handleDateChange(o.id, e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            handleDateChange(o.id, (e.target as HTMLInputElement).value);
-                          }
-                        }}
-                        autoFocus
-                      />
-                    ) : (
-                      <span 
-                        className="cursor-pointer hover:text-primary transition-colors inline-block min-w-[80px]"
-                        onClick={() => setEditingDateId(o.id)}
-                        title="Click para editar fecha"
-                      >
+                    <div className="flex items-center gap-1">
+                      <span>
                         {o.assigned_at ? new Date(o.assigned_at).toLocaleDateString('es-PY') : '—'}
-                        <span className="ml-1 text-xs opacity-50">📅</span>
                       </span>
-                    )}
+                      {editingDateId === o.id ? (
+                        <input
+                          type="date"
+                          className="app-input !py-0 !px-1 text-xs w-auto"
+                          defaultValue={o.assigned_at ? new Date(o.assigned_at).toISOString().slice(0, 10) : ''}
+                          onBlur={(e) => handleDateChange(o.id, e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              handleDateChange(o.id, (e.target as HTMLInputElement).value);
+                            }
+                          }}
+                          autoFocus
+                        />
+                      ) : (
+                        <button
+                          onClick={() => setEditingDateId(o.id)}
+                          className="text-xs opacity-60 hover:opacity-100 transition-opacity"
+                          title="Cambiar fecha"
+                          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}
+                        >
+                          📅
+                        </button>
+                      )}
+                    </div>
                   </td>
                   <td className="text-xs whitespace-nowrap">
                     {new Date(o.created_at).toLocaleDateString('es-PY')}
