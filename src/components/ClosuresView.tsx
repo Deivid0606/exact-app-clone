@@ -22,6 +22,7 @@ export default function ClosuresView() {
   const [filterDelivery, setFilterDelivery] = useState('');
   const [filterSupplier, setFilterSupplier] = useState('');
   const [filterType, setFilterType] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
   const [rendicionNote, setRendicionNote] = useState('');
   const [rendicionPagada, setRendicionPagada] = useState<{ id: string; pagado_en: string; nota: string; marcado_por: string } | null>(null);
   const [dateFrom, setDateFrom] = useState(() => {
@@ -166,24 +167,40 @@ export default function ClosuresView() {
 
   useEffect(() => { loadClosures(); }, [filterSupplier, filterDelivery, filterType, dateFrom, dateTo]);
 
+  // Filtrar órdenes por búsqueda
+  const filteredOrders = useMemo(() => {
+    if (!searchTerm.trim()) return orders;
+    
+    const term = searchTerm.toLowerCase().trim();
+    return orders.filter(order => {
+      return (
+        (order.customer_name && order.customer_name.toLowerCase().includes(term)) ||
+        (order.customer_phone && order.customer_phone.toLowerCase().includes(term)) ||
+        (order.order_number && order.order_number.toLowerCase().includes(term)) ||
+        (order.id && order.id.toLowerCase().includes(term)) ||
+        (order.city && order.city.toLowerCase().includes(term))
+      );
+    });
+  }, [orders, searchTerm]);
+
   const getFee = (deliveryEmail: string, city: string) => {
     const f = fees.find(f => f.delivery_email?.toLowerCase() === deliveryEmail?.toLowerCase() && f.city?.toLowerCase() === city?.toLowerCase());
     return Number(f?.fee_gs || 0);
   };
 
-  const delivered = useMemo(() => orders.filter(o => o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA'), [orders]);
+  const delivered = useMemo(() => filteredOrders.filter(o => o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA'), [filteredOrders]);
   const rendidos = useMemo(() => delivered.filter(o => o.delivery_settled), [delivered]);
   const noRendidos = useMemo(() => delivered.filter(o => !o.delivery_settled), [delivered]);
 
   const kpis = useMemo(() => {
-    const entregados = orders.filter(o => o.status === 'ENTREGADO');
-    const encomiendas = orders.filter(o => o.status === 'ENCOMIENDA ENTREGADA');
+    const entregados = filteredOrders.filter(o => o.status === 'ENTREGADO');
+    const encomiendas = filteredOrders.filter(o => o.status === 'ENCOMIENDA ENTREGADA');
     return {
       entregados: entregados.length,
       entregadosRev: entregados.reduce((s, o) => s + Number(o.total_gs || 0), 0),
       encomiendas: encomiendas.length,
       encomiendaRev: encomiendas.reduce((s, o) => s + Number(o.total_gs || 0), 0),
-      deliveryFee: orders.reduce((s, o) => {
+      deliveryFee: filteredOrders.reduce((s, o) => {
         const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
         return s + fee;
       }, 0),
@@ -192,7 +209,7 @@ export default function ClosuresView() {
       montoRendido: rendidos.reduce((s, o) => s + Number(o.total_gs || 0), 0),
       montoPendiente: noRendidos.reduce((s, o) => s + Number(o.total_gs || 0), 0),
     };
-  }, [orders, rendidos, noRendidos]);
+  }, [filteredOrders, rendidos, noRendidos]);
 
   const netRendir = kpis.entregadosRev + kpis.encomiendaRev - kpis.deliveryFee;
   const totalAPagar = useMemo(() => {
@@ -420,11 +437,40 @@ export default function ClosuresView() {
         <button className="nav-btn active" onClick={loadClosures}>Aplicar</button>
       </div>
 
+      {/* Barra de búsqueda */}
+      <div className="mb-4">
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="🔍 Buscar por nombre, teléfono, ID o ciudad..."
+            className="app-input w-full pl-10"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+          <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground">
+            🔍
+          </span>
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm('')}
+              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+        {searchTerm && (
+          <p className="text-xs text-muted-foreground mt-1">
+            Mostrando {filteredOrders.length} de {orders.length} pedidos
+          </p>
+        )}
+      </div>
+
       {(filterDelivery || isDelivery || isSupplier) && (
         <div className="grid-kpi mb-4">
           <div className="kpi-card">
             <div className="text-xs text-muted-foreground mb-1">📦 Pedidos</div>
-            <div className="text-[22px] font-extrabold">{totalPedidosAsignados}</div>
+            <div className="text-[22px] font-extrabold">{filteredOrders.length}</div>
             <div className="text-xs text-muted-foreground">en el período</div>
           </div>
         </div>
@@ -519,6 +565,7 @@ export default function ClosuresView() {
               <th>ID</th>
               <th>Ciudad</th>
               <th>Cliente</th>
+              <th>Teléfono</th>
               <th>Proveedor</th>
               <th className="text-right">Total (Gs)</th>
               <th className="text-right">Tarifa (Gs)</th>
@@ -530,7 +577,7 @@ export default function ClosuresView() {
             </tr>
           </thead>
           <tbody>
-            {orders.map(o => {
+            {filteredOrders.map(o => {
               const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
               const net = Number(o.total_gs || 0) - fee;
               const isSettled = o.delivery_settled;
@@ -581,6 +628,7 @@ export default function ClosuresView() {
                   <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
                   <td className="text-xs">{o.city || '—'}</td>
                   <td className="text-xs">{o.customer_name}</td>
+                  <td className="text-xs">{o.customer_phone || '—'}</td>
                   <td className="text-xs">{o.provider_email || '—'}</td>
                   <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
                   <td className="text-right text-xs">{nf(fee)}</td>
@@ -605,7 +653,7 @@ export default function ClosuresView() {
                         {retiroOpts.map(s => <option key={s} value={s}>{s || '—'}</option>)}
                       </select>
                     ) : <span className="text-xs">{o.estado_retiro || '—'}</span>}
-                  </td>
+                   </td>
                   <td>
                     {canEditFull ? (
                       <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.status2 || '--'}
@@ -613,7 +661,7 @@ export default function ClosuresView() {
                         {state2Opts.map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
                     ) : <span className="text-xs">{o.status2 || '—'}</span>}
-                  </td>
+                   </td>
                   {canManageRendicion && (
                     <td>
                       <div className="flex items-center gap-1">
@@ -634,10 +682,10 @@ export default function ClosuresView() {
                 </tr>
               );
             })}
-            {orders.length === 0 && (
+            {filteredOrders.length === 0 && (
               <tr>
-                <td colSpan={canManageRendicion ? 13 : 12} className="text-center text-muted-foreground py-8">
-                  Sin resultados
+                <td colSpan={canManageRendicion ? 14 : 13} className="text-center text-muted-foreground py-8">
+                  {searchTerm ? 'No se encontraron resultados para tu búsqueda' : 'Sin resultados'}
                 </td>
               </tr>
             )}
