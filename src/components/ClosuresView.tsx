@@ -437,35 +437,6 @@ export default function ClosuresView() {
         <button className="nav-btn active" onClick={loadClosures}>Aplicar</button>
       </div>
 
-      {/* Barra de búsqueda */}
-      <div className="mb-4">
-        <div className="relative">
-          <input
-            type="text"
-            placeholder="🔍 Buscar por nombre, teléfono, ID o ciudad..."
-            className="app-input w-full pl-10"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-          <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground">
-            🔍
-          </span>
-          {searchTerm && (
-            <button
-              onClick={() => setSearchTerm('')}
-              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground"
-            >
-              ✕
-            </button>
-          )}
-        </div>
-        {searchTerm && (
-          <p className="text-xs text-muted-foreground mt-1">
-            Mostrando {filteredOrders.length} de {orders.length} pedidos
-          </p>
-        )}
-      </div>
-
       {(filterDelivery || isDelivery || isSupplier) && (
         <div className="grid-kpi mb-4">
           <div className="kpi-card">
@@ -556,6 +527,35 @@ export default function ClosuresView() {
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Ya rendidos</div><div className="text-[22px] font-extrabold" style={{ color: '#4ade80' }}>{kpis.rendidos}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.montoRendido)}</div></div>
       </div>
 
+      {/* Barra de búsqueda */}
+      <div className="mb-4">
+        <div className="relative">
+          <input
+            type="text"
+            placeholder="🔍 Buscar por nombre, teléfono, ID o ciudad..."
+            className="app-input w-full pl-10"
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+          />
+          <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground">
+            🔍
+          </span>
+          {searchTerm && (
+            <button
+              onClick={() => setSearchTerm('')}
+              className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+        {searchTerm && (
+          <p className="text-xs text-muted-foreground mt-1">
+            Mostrando {filteredOrders.length} de {orders.length} pedidos
+          </p>
+        )}
+      </div>
+
       <div className="overflow-auto">
         <table className="app-table min-w-[1500px]">
           <thead>
@@ -633,7 +633,7 @@ export default function ClosuresView() {
                   <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
                   <td className="text-right text-xs">{nf(fee)}</td>
                   <td className="text-right text-xs">{nf(net)}</td>
-                  <td>
+                  <tr>
                     {canEditStatus1 ? (
                       <select 
                         className="app-input !w-auto !py-1 !px-2 text-xs"
@@ -646,7 +646,7 @@ export default function ClosuresView() {
                       <span className={`badge-status ${getStatusBadgeClass(o.status)}`}>{o.status}</span>
                     )}
                   </td>
-                  <td>
+                  <tr>
                     {canEditFull ? (
                       <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.estado_retiro || ''}
                         onChange={e => updateRetiro(o.id, e.target.value)}>
@@ -654,14 +654,14 @@ export default function ClosuresView() {
                       </select>
                     ) : <span className="text-xs">{o.estado_retiro || '—'}</span>}
                    </td>
-                  <td>
+                  <tr>
                     {canEditFull ? (
                       <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.status2 || '--'}
                         onChange={e => updateStatus2(o.id, e.target.value)}>
                         {state2Opts.map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
                     ) : <span className="text-xs">{o.status2 || '—'}</span>}
-                   </td>
+                    </td>
                   {canManageRendicion && (
                     <td>
                       <div className="flex items-center gap-1">
