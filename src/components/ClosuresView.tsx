@@ -12,6 +12,8 @@ export default function ClosuresView() {
   
   const isSupplier = myRole === 'PROVEEDOR';
   const isAdmin = myRole === 'ADMIN';
+  const isVendedor = myRole === 'VENDEDOR';
+  const isDelivery = myRole === 'DELIVERY';
   
   const [orders, setOrders] = useState<any[]>([]);
   const [deliveries, setDeliveries] = useState<any[]>([]);
@@ -107,14 +109,14 @@ export default function ClosuresView() {
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
   }, []);
 
-  const isDelivery = !isSupplier && !isAdmin && deliveries.some(d => d.email === myEmail);
-
   const loadClosures = async () => {
-    let dateField = 'created_at';
+    // Determinar campo de fecha según rol y selector
+    let dateField = filterDateBy;
+    
     if (isDelivery) {
       dateField = 'assigned_at';
-    } else if ((isAdmin || isSupplier) && filterDelivery) {
-      dateField = 'assigned_at';
+    } else if (isVendedor || isSupplier) {
+      dateField = 'created_at';
     }
     
     let query = supabase.from('orders').select('*')
@@ -122,10 +124,19 @@ export default function ClosuresView() {
       .lte(dateField, dateTo + 'T23:59:59')
       .order(dateField, { ascending: false });
 
+    // Aplicar filtros según rol
     if (isSupplier) {
       query = query.eq('provider_email', myEmail);
       if (filterDelivery) {
         query = query.eq('assigned_delivery', filterDelivery);
+      }
+    } else if (isVendedor) {
+      query = query.eq('created_by', myEmail);
+      if (filterDelivery) {
+        query = query.eq('assigned_delivery', filterDelivery);
+      }
+      if (filterSupplier) {
+        query = query.eq('provider_email', filterSupplier);
       }
     } else if (isDelivery) {
       query = query.eq('assigned_delivery', myEmail);
@@ -165,7 +176,7 @@ export default function ClosuresView() {
     }
   };
 
-  useEffect(() => { loadClosures(); }, [filterSupplier, filterDelivery, filterType, dateFrom, dateTo]);
+  useEffect(() => { loadClosures(); }, [filterSupplier, filterDelivery, filterType, dateFrom, dateTo, filterDateBy]);
 
   const filteredOrders = useMemo(() => {
     if (!searchTerm.trim()) return orders;
@@ -352,7 +363,7 @@ export default function ClosuresView() {
   const allRendered = noRendidos.length === 0 && delivered.length > 0;
   
   const canEditFull = isAdmin || isSupplier;
-  const canEditStatus1 = isAdmin || isSupplier || isDelivery;
+  const canEditStatus1 = isAdmin || isSupplier || isDelivery || isVendedor;
   const canManageRendicion = isAdmin || isSupplier;
   const canViewRendicion = isAdmin || isSupplier || isDelivery;
 
@@ -371,6 +382,13 @@ export default function ClosuresView() {
         <div className="mb-3">
           <span className="badge-status badge-entregado">✏️ PROVEEDOR/ADMIN: edición completa</span>
           <p className="text-xs text-muted-foreground mt-1">Podés actualizar estados, fechas, ciudades y gestionar rendiciones.</p>
+        </div>
+      )}
+
+      {isVendedor && (
+        <div className="mb-3">
+          <span className="badge-status badge-entregado">✏️ VENDEDOR: solo podés ver tus pedidos</span>
+          <p className="text-xs text-muted-foreground mt-1">Podés filtrar por fecha, estado y proveedor. Todos los pedidos que ves son los que vos creaste.</p>
         </div>
       )}
 
@@ -406,7 +424,7 @@ export default function ClosuresView() {
           </div>
         )}
 
-        {(isDelivery || isAdmin) && suppliers.length > 0 && (
+        {(isVendedor || isDelivery || isAdmin) && suppliers.length > 0 && (
           <select className="app-input !w-auto min-w-[280px]" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
             <option value="">Todos los proveedores</option>
             {suppliers.map(s => (
@@ -428,15 +446,17 @@ export default function ClosuresView() {
           <option value="REAGENDADO">REAGENDADO</option>
         </select>
         
-        <select className="app-input !w-auto" value={filterDateBy} onChange={e => setFilterDateBy(e.target.value as any)}>
-          <option value="assigned_at">📅 Filtrar por fecha de asignación</option>
-          <option value="created_at">📅 Filtrar por fecha de creación</option>
-        </select>
+        {!isVendedor && !isSupplier && (
+          <select className="app-input !w-auto" value={filterDateBy} onChange={e => setFilterDateBy(e.target.value as any)}>
+            <option value="assigned_at">📅 Filtrar por fecha de asignación</option>
+            <option value="created_at">📅 Filtrar por fecha de creación</option>
+          </select>
+        )}
         
         <button className="nav-btn active" onClick={loadClosures}>Aplicar</button>
       </div>
 
-      {(filterDelivery || isDelivery || isSupplier) && (
+      {(filterDelivery || isDelivery || isSupplier || isVendedor) && (
         <div className="grid-kpi mb-4">
           <div className="kpi-card">
             <div className="text-xs text-muted-foreground mb-1">📦 Pedidos</div>
@@ -596,7 +616,7 @@ export default function ClosuresView() {
                       <span>
                         {o.assigned_at ? new Date(o.assigned_at).toLocaleDateString('es-PY') : '—'}
                       </span>
-                      {editingDateId === o.id ? (
+                      {canEditFull && editingDateId === o.id ? (
                         <input
                           type="date"
                           className="app-input !py-0 !px-1 text-xs w-auto"
@@ -610,14 +630,16 @@ export default function ClosuresView() {
                           autoFocus
                         />
                       ) : (
-                        <button
-                          onClick={() => setEditingDateId(o.id)}
-                          className="text-xs opacity-60 hover:opacity-100 transition-opacity"
-                          title="Cambiar fecha"
-                          style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}
-                        >
-                          📅
-                        </button>
+                        canEditFull && (
+                          <button
+                            onClick={() => setEditingDateId(o.id)}
+                            className="text-xs opacity-60 hover:opacity-100 transition-opacity"
+                            title="Cambiar fecha"
+                            style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '2px' }}
+                          >
+                            📅
+                          </button>
+                        )
                       )}
                     </div>
                   </td>
@@ -638,6 +660,7 @@ export default function ClosuresView() {
                         className="app-input !w-auto !py-1 !px-2 text-xs"
                         value={o.status || 'PENDIENTE'}
                         onChange={e => updateStatus1(o.id, e.target.value)}
+                        disabled={isVendedor}
                       >
                         {status1Opts.map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
@@ -684,7 +707,7 @@ export default function ClosuresView() {
             {filteredOrders.length === 0 && (
               <tr>
                 <td colSpan={canManageRendicion ? 14 : 13} className="text-center text-muted-foreground py-8">
-                  {searchTerm ? 'No se encontraron resultados para tu búsqueda' : 'Sin resultados'}
+                  {searchTerm ? 'No se encontraron resultados para tu búsqueda' : 'Sin resultados en este período'}
                 </td>
               </tr>
             )}
