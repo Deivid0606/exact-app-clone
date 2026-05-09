@@ -263,6 +263,207 @@ const getOrderAmount = (order: any, fallbackPrice: number) =>
     ]) || fallbackPrice || 0
   );
 
+// Componente de galería de imágenes profesional
+const ProductImageGallery = ({ 
+  images, 
+  title, 
+  onViewFullscreen,
+  currentIndex = 0,
+  onIndexChange 
+}: { 
+  images: string[]; 
+  title: string;
+  onViewFullscreen: (url: string) => void;
+  currentIndex: number;
+  onIndexChange: (index: number) => void;
+}) => {
+  const [isHovered, setIsHovered] = useState(false);
+  
+  if (!images.length) {
+    return (
+      <div className="w-full h-full bg-gradient-to-br from-secondary/50 to-secondary/30 flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-4xl mb-2">📷</div>
+          <div className="text-[10px] text-muted-foreground">Sin imagen</div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div 
+      className="relative w-full h-full group"
+      onMouseEnter={() => setIsHovered(true)}
+      onMouseLeave={() => setIsHovered(false)}
+    >
+      <div 
+        className="w-full h-full flex items-center justify-center cursor-pointer bg-gradient-to-br from-background/50 to-background/30"
+        onClick={() => onViewFullscreen(images[currentIndex])}
+      >
+        <img 
+          src={images[currentIndex]} 
+          alt={title}
+          className="max-w-full max-h-full object-contain p-3 transition-transform duration-300 group-hover:scale-105"
+          loading="lazy"
+        />
+      </div>
+
+      {images.length > 1 && (
+        <div className="absolute bottom-2 right-2 bg-black/60 backdrop-blur-sm text-white text-[10px] px-2 py-1 rounded-full font-mono">
+          {currentIndex + 1} / {images.length}
+        </div>
+      )}
+
+      {images.length > 1 && isHovered && (
+        <>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onIndexChange((currentIndex - 1 + images.length) % images.length);
+            }}
+            className="absolute left-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/50 backdrop-blur-sm text-white flex items-center justify-center hover:bg-black/70 transition-all opacity-0 group-hover:opacity-100"
+          >
+            ◀
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onIndexChange((currentIndex + 1) % images.length);
+            }}
+            className="absolute right-2 top-1/2 -translate-y-1/2 w-8 h-8 rounded-full bg-black/50 backdrop-blur-sm text-white flex items-center justify-center hover:bg-black/70 transition-all opacity-0 group-hover:opacity-100"
+          >
+            ▶
+          </button>
+        </>
+      )}
+
+      {images.length > 1 && isHovered && (
+        <div className="absolute bottom-16 left-1/2 -translate-x-1/2 flex gap-1.5 bg-black/50 backdrop-blur-sm px-2 py-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-all duration-200">
+          {images.map((img, idx) => (
+            <div
+              key={idx}
+              onClick={(e) => {
+                e.stopPropagation();
+                onIndexChange(idx);
+              }}
+              className={`w-8 h-8 rounded-md overflow-hidden cursor-pointer transition-all ${
+                idx === currentIndex 
+                  ? 'ring-2 ring-white scale-110' 
+                  : 'opacity-60 hover:opacity-100'
+              }`}
+            >
+              <img src={img} alt="" className="w-full h-full object-cover" />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// Modal de pantalla completa para imágenes
+const ImageFullscreenModal = ({ 
+  images, 
+  initialIndex,
+  title,
+  onClose 
+}: { 
+  images: string[]; 
+  initialIndex: number;
+  title: string;
+  onClose: () => void;
+}) => {
+  const [currentIndex, setCurrentIndex] = useState(initialIndex);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'ArrowLeft') {
+        setCurrentIndex((prev) => (prev - 1 + images.length) % images.length);
+      } else if (e.key === 'ArrowRight') {
+        setCurrentIndex((prev) => (prev + 1) % images.length);
+      } else if (e.key === 'Escape') {
+        onClose();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [images.length, onClose]);
+
+  return createPortal(
+    <div
+      className="fixed inset-0 bg-black/95 z-[9999] flex items-center justify-center"
+      onClick={onClose}
+    >
+      <div className="relative w-full h-full flex flex-col items-center justify-center" onClick={(e) => e.stopPropagation()}>
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 z-20 w-10 h-10 rounded-full bg-white/10 backdrop-blur-sm text-white flex items-center justify-center hover:bg-white/20 transition-all"
+        >
+          ✕
+        </button>
+
+        <div className="absolute top-4 left-4 z-20 text-white bg-black/50 backdrop-blur-sm px-4 py-2 rounded-lg">
+          <h3 className="text-sm font-bold">{title}</h3>
+          <p className="text-xs opacity-75">{currentIndex + 1} / {images.length}</p>
+        </div>
+
+        <div className="relative w-full h-full flex items-center justify-center p-8">
+          <img
+            src={images[currentIndex]}
+            alt={`${title} - ${currentIndex + 1}`}
+            className="max-w-full max-h-[85vh] object-contain"
+          />
+        </div>
+
+        {images.length > 1 && (
+          <>
+            <button
+              onClick={() => setCurrentIndex((prev) => (prev - 1 + images.length) % images.length)}
+              className="absolute left-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 backdrop-blur-sm text-white flex items-center justify-center hover:bg-white/20 transition-all text-2xl"
+            >
+              ◀
+            </button>
+            <button
+              onClick={() => setCurrentIndex((prev) => (prev + 1) % images.length)}
+              className="absolute right-4 top-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-white/10 backdrop-blur-sm text-white flex items-center justify-center hover:bg-white/20 transition-all text-2xl"
+            >
+              ▶
+            </button>
+
+            <div className="absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 bg-black/50 backdrop-blur-sm px-3 py-2 rounded-full">
+              {images.map((img, idx) => (
+                <div
+                  key={idx}
+                  onClick={() => setCurrentIndex(idx)}
+                  className={`w-12 h-12 rounded-lg overflow-hidden cursor-pointer transition-all ${
+                    idx === currentIndex 
+                      ? 'ring-2 ring-white scale-110' 
+                      : 'opacity-50 hover:opacity-100'
+                  }`}
+                >
+                  <img src={img} alt="" className="w-full h-full object-cover" />
+                </div>
+              ))}
+            </div>
+
+            <a
+              href={images[currentIndex]}
+              download
+              target="_blank"
+              rel="noopener noreferrer"
+              className="absolute bottom-4 right-4 z-20 w-10 h-10 rounded-full bg-white/10 backdrop-blur-sm text-white flex items-center justify-center hover:bg-white/20 transition-all"
+            >
+              ⬇
+            </a>
+          </>
+        )}
+      </div>
+    </div>,
+    document.body
+  );
+};
+
 export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: string) => void }) {
   const { profile } = useAuth();
 
@@ -284,7 +485,10 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
   const [selectedProvider, setSelectedProvider] = useState<string>('todos');
   const [selectedProductId, setSelectedProductId] = useState<string>('todos');
   
-  // Ad spend states - mejorados
+  // Estado para ocultar/mostrar sección superior
+  const [showTopSection, setShowTopSection] = useState(true);
+  
+  // Ad spend states
   const [adSpendFromDate, setAdSpendFromDate] = useState(todayPY());
   const [adSpendToDate, setAdSpendToDate] = useState(todayPY());
   const [adAmount, setAdAmount] = useState<number>(0);
@@ -295,7 +499,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
   const [editProduct, setEditProduct] = useState<(Product & { isNew?: boolean }) | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [imgIndex, setImgIndex] = useState<Record<string, number>>({});
-  const [viewingImage, setViewingImage] = useState<{ url: string; title: string } | null>(null);
+  const [viewingImage, setViewingImage] = useState<{ url: string; title: string; index?: number } | null>(null);
   const [metricsByProduct, setMetricsByProduct] = useState<Record<string, ProductMetrics>>({});
   const [adSpends, setAdSpends] = useState<AdSpend[]>([]);
 
@@ -396,7 +600,6 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
   }, [role, myEmail]);
 
   const visibleProductIds = useMemo(() => products.map((p) => p.id), [products]);
-  const visibleSkus = useMemo(() => products.map((p) => p.sku).filter(Boolean) as string[], [products]);
 
   const loadAdSpends = useCallback(async () => {
     if (!myEmail || !adSpendFromDate || !adSpendToDate) return;
@@ -918,6 +1121,20 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
   const canLoadOrder = ['seller', 'despachante', 'delivery'].includes(role);
   const canSeeMoney = ['admin', 'provider', 'seller', 'despachante'].includes(role);
 
+  // Colores suaves para proveedores
+  const softColors = [
+    'from-blue-500/5 to-blue-600/5 border-blue-200/30',
+    'from-emerald-500/5 to-emerald-600/5 border-emerald-200/30',
+    'from-purple-500/5 to-purple-600/5 border-purple-200/30',
+    'from-amber-500/5 to-amber-600/5 border-amber-200/30',
+    'from-rose-500/5 to-rose-600/5 border-rose-200/30',
+    'from-cyan-500/5 to-cyan-600/5 border-cyan-200/30',
+    'from-indigo-500/5 to-indigo-600/5 border-indigo-200/30',
+    'from-teal-500/5 to-teal-600/5 border-teal-200/30',
+    'from-orange-500/5 to-orange-600/5 border-orange-200/30',
+    'from-pink-500/5 to-pink-600/5 border-pink-200/30',
+  ];
+
   return (
     <div className="app-card space-y-6">
       {/* Header */}
@@ -942,266 +1159,258 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
           >
             ☰ Vista Compacta
           </button>
+          <button
+            className={`nav-btn !px-4 !py-2.5 !text-sm ${showTopSection ? 'active' : ''}`}
+            onClick={() => setShowTopSection(!showTopSection)}
+          >
+            {showTopSection ? '🔽 Ocultar panel' : '🔼 Mostrar panel'}
+          </button>
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <div className="rounded-2xl border border-border bg-gradient-to-br from-secondary/80 to-secondary/40 p-5">
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-bold">Facturación real</div>
-          <div className="font-black text-2xl mt-2">{nf(totals.realRevenue)} Gs</div>
-          <div className="text-xs text-muted-foreground mt-1">Solo pedidos entregados</div>
-        </div>
+      {/* Sección superior ocultable */}
+      {showTopSection && (
+        <>
+          {/* KPI Cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="rounded-2xl border border-border bg-gradient-to-br from-secondary/80 to-secondary/40 p-5">
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-bold">Facturación real</div>
+              <div className="font-black text-2xl mt-2">{nf(totals.realRevenue)} Gs</div>
+              <div className="text-xs text-muted-foreground mt-1">Solo pedidos entregados</div>
+            </div>
 
-        <div className="rounded-2xl border border-border bg-gradient-to-br from-secondary/80 to-secondary/40 p-5">
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-bold">Ganancia bruta</div>
-          <div className="font-black text-2xl mt-2">{nf(totals.grossProfit)} Gs</div>
-          <div className="text-xs text-muted-foreground mt-1">Facturación real - costo</div>
-        </div>
+            <div className="rounded-2xl border border-border bg-gradient-to-br from-secondary/80 to-secondary/40 p-5">
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-bold">Ganancia bruta</div>
+              <div className="font-black text-2xl mt-2">{nf(totals.grossProfit)} Gs</div>
+              <div className="text-xs text-muted-foreground mt-1">Facturación real - costo</div>
+            </div>
 
-        <div className="rounded-2xl border border-border bg-gradient-to-br from-secondary/80 to-secondary/40 p-5">
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-bold">Publicidad total</div>
-          <div className="font-black text-2xl mt-2">{nf(totals.totalAdSpend)} Gs</div>
-          <div className="text-xs text-muted-foreground mt-1">Global + productos</div>
-        </div>
+            <div className="rounded-2xl border border-border bg-gradient-to-br from-secondary/80 to-secondary/40 p-5">
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-bold">Publicidad total</div>
+              <div className="font-black text-2xl mt-2">{nf(totals.totalAdSpend)} Gs</div>
+              <div className="text-xs text-muted-foreground mt-1">Global + productos</div>
+            </div>
 
-        <div className={`rounded-2xl border p-5 ${totals.netProfit >= 0 ? 'border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 to-emerald-500/5' : 'border-red-500/30 bg-gradient-to-br from-red-500/10 to-red-500/5'}`}>
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-bold">Ganancia neta</div>
-          <div className={`font-black text-2xl mt-2 ${totals.netProfit >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{nf(totals.netProfit)} Gs</div>
-          <div className="text-xs text-muted-foreground mt-1">Bruta - publicidad</div>
-        </div>
-      </div>
-
-      {/* Filtros y Métricas */}
-      <div className="rounded-2xl border border-border bg-background/60 p-5 space-y-4">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <div className="font-extrabold text-base">Filtros de métricas</div>
-            <div className="text-xs text-muted-foreground">Seleccioná el período para calcular ventas, entregas y ganancias</div>
-          </div>
-          {metricsLoading && <span className="chip text-xs">🔄 Actualizando métricas...</span>}
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-          <div>
-            <label className="app-label text-xs">Desde</label>
-            <input type="date" className="app-input" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+            <div className={`rounded-2xl border p-5 ${totals.netProfit >= 0 ? 'border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 to-emerald-500/5' : 'border-red-500/30 bg-gradient-to-br from-red-500/10 to-red-500/5'}`}>
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-bold">Ganancia neta</div>
+              <div className={`font-black text-2xl mt-2 ${totals.netProfit >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{nf(totals.netProfit)} Gs</div>
+              <div className="text-xs text-muted-foreground mt-1">Bruta - publicidad</div>
+            </div>
           </div>
 
-          <div>
-            <label className="app-label text-xs">Hasta</label>
-            <input type="date" className="app-input" value={toDate} onChange={(e) => setToDate(e.target.value)} />
-          </div>
-
-          <div>
-            <label className="app-label text-xs">Proveedor</label>
-            <select
-              className="app-input"
-              value={selectedProvider}
-              onChange={(e) => {
-                setSelectedProvider(e.target.value);
-                setSelectedProductId('todos');
-              }}
-            >
-              <option value="todos">Todos los proveedores</option>
-              {providerOptions.map(([email, name]) => (
-                <option key={email} value={email}>{name}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="app-label text-xs">Producto</label>
-            <select className="app-input" value={selectedProductId} onChange={(e) => setSelectedProductId(e.target.value)}>
-              <option value="todos">Todos los productos</option>
-              {productOptions.map((p) => (
-                <option key={p.id} value={p.id}>{p.title}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="app-label text-xs">Ordenar por</label>
-            <select className="app-input" value={sortMode} onChange={(e) => setSortMode(e.target.value as SortMode)}>
-              <option value="recientes">📅 Más recientes</option>
-              <option value="mas_vendidos">🏆 Más vendidos</option>
-              <option value="mas_entregados">🚚 Más entregados</option>
-              <option value="mayor_facturacion">💰 Mayor facturación</option>
-              <option value="mayor_ganancia">📈 Mayor ganancia</option>
-              <option value="stock_bajo">⚠️ Stock bajo</option>
-            </select>
-          </div>
-        </div>
-
-        <div>
-          <label className="app-label text-xs">Buscar producto</label>
-          <input
-            className="app-input"
-            placeholder="Nombre, SKU o proveedor..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-      </div>
-
-      {/* Gasto Publicitario - Mejorado */}
-      <div className="rounded-2xl border border-border bg-gradient-to-br from-secondary/40 to-secondary/20 p-5 space-y-5">
-        <div className="flex items-center justify-between flex-wrap gap-3">
-          <div>
-            <div className="font-extrabold text-base">💰 Registrar Gasto Publicitario</div>
-            <div className="text-xs text-muted-foreground">Podés asignar el gasto a un período específico (desde - hasta) y asociarlo a un producto o dejarlo global</div>
-          </div>
-          <div className="flex gap-2">
-            <span className="chip text-xs bg-primary/20">Total: {nf(totals.totalAdSpend)} Gs</span>
-            <span className="chip text-xs">Global: {nf(generalAdSpend)} Gs</span>
-            <span className="chip text-xs">Productos: {nf(totalProductAdSpend)} Gs</span>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Formulario de gasto */}
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
+          {/* Filtros y Métricas */}
+          <div className="rounded-2xl border border-border bg-background/60 p-5 space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-3">
               <div>
-                <label className="app-label text-xs">📅 Gasto desde</label>
-                <input 
-                  type="date" 
-                  className="app-input" 
-                  value={adSpendFromDate} 
-                  onChange={(e) => setAdSpendFromDate(e.target.value)} 
-                />
+                <div className="font-extrabold text-base">Filtros de métricas</div>
+                <div className="text-xs text-muted-foreground">Seleccioná el período para calcular ventas, entregas y ganancias</div>
               </div>
+              {metricsLoading && <span className="chip text-xs">🔄 Actualizando métricas...</span>}
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
               <div>
-                <label className="app-label text-xs">📅 Gasto hasta</label>
-                <input 
-                  type="date" 
-                  className="app-input" 
-                  value={adSpendToDate} 
-                  onChange={(e) => setAdSpendToDate(e.target.value)} 
-                />
+                <label className="app-label text-xs">Desde</label>
+                <input type="date" className="app-input" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+              </div>
+
+              <div>
+                <label className="app-label text-xs">Hasta</label>
+                <input type="date" className="app-input" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+              </div>
+
+              <div>
+                <label className="app-label text-xs">Proveedor</label>
+                <select
+                  className="app-input"
+                  value={selectedProvider}
+                  onChange={(e) => {
+                    setSelectedProvider(e.target.value);
+                    setSelectedProductId('todos');
+                  }}
+                >
+                  <option value="todos">Todos los proveedores</option>
+                  {providerOptions.map(([email, name]) => (
+                    <option key={email} value={email}>{name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="app-label text-xs">Producto</label>
+                <select className="app-input" value={selectedProductId} onChange={(e) => setSelectedProductId(e.target.value)}>
+                  <option value="todos">Todos los productos</option>
+                  {productOptions.map((p) => (
+                    <option key={p.id} value={p.id}>{p.title}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="app-label text-xs">Ordenar por</label>
+                <select className="app-input" value={sortMode} onChange={(e) => setSortMode(e.target.value as SortMode)}>
+                  <option value="recientes">📅 Más recientes</option>
+                  <option value="mas_vendidos">🏆 Más vendidos</option>
+                  <option value="mas_entregados">🚚 Más entregados</option>
+                  <option value="mayor_facturacion">💰 Mayor facturación</option>
+                  <option value="mayor_ganancia">📈 Mayor ganancia</option>
+                  <option value="stock_bajo">⚠️ Stock bajo</option>
+                </select>
               </div>
             </div>
 
             <div>
-              <label className="app-label text-xs">🎯 Asignar gasto a</label>
-              <div className="flex gap-3 mt-1">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    value="global"
-                    checked={adTargetType === 'global'}
-                    onChange={(e) => {
-                      setAdTargetType(e.target.value as 'global' | 'producto');
-                      if (e.target.value === 'global') setAdTargetProductId('');
-                    }}
-                    className="w-4 h-4"
-                  />
-                  <span className="text-sm">Global / General</span>
-                </label>
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input
-                    type="radio"
-                    value="producto"
-                    checked={adTargetType === 'producto'}
-                    onChange={(e) => setAdTargetType(e.target.value as 'global' | 'producto')}
-                    className="w-4 h-4"
-                  />
-                  <span className="text-sm">Producto específico</span>
-                </label>
-              </div>
+              <label className="app-label text-xs">Buscar producto</label>
+              <input
+                className="app-input"
+                placeholder="Nombre, SKU o proveedor..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
             </div>
-
-            {adTargetType === 'producto' && (
-              <div>
-                <label className="app-label text-xs">📦 Seleccionar producto</label>
-                <select 
-                  className="app-input" 
-                  value={adTargetProductId} 
-                  onChange={(e) => setAdTargetProductId(e.target.value)}
-                >
-                  <option value="">-- Elegir producto --</option>
-                  {productOptions.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.title} {p.sku ? `· ${p.sku}` : ''}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="app-label text-xs">💵 Monto (Gs)</label>
-                <input
-                  type="number"
-                  className="app-input font-mono"
-                  value={adAmount || ''}
-                  onChange={(e) => setAdAmount(Number(e.target.value))}
-                  placeholder="Ej: 50000"
-                />
-              </div>
-              <div>
-                <label className="app-label text-xs">📝 Nota / Plataforma</label>
-                <input
-                  className="app-input"
-                  value={adNote}
-                  onChange={(e) => setAdNote(e.target.value)}
-                  placeholder="Facebook, TikTok, Google..."
-                />
-              </div>
-            </div>
-
-            <button className="nav-btn active w-full py-3 text-sm font-bold" onClick={saveAdSpend}>
-              💾 Guardar gasto publicitario
-            </button>
           </div>
 
-          {/* Lista de gastos */}
-          <div className="space-y-3">
-            <div className="font-bold text-sm flex items-center gap-2">
-              📋 Últimos gastos registrados
-              <span className="chip text-xs">{adSpends.length} gastos</span>
+          {/* Gasto Publicitario */}
+          <div className="rounded-2xl border border-border bg-gradient-to-br from-secondary/40 to-secondary/20 p-5 space-y-5">
+            <div className="flex items-center justify-between flex-wrap gap-3">
+              <div>
+                <div className="font-extrabold text-base">💰 Registrar Gasto Publicitario</div>
+                <div className="text-xs text-muted-foreground">Podés asignar el gasto a un período específico (desde - hasta) y asociarlo a un producto o dejarlo global</div>
+              </div>
+              <div className="flex gap-2">
+                <span className="chip text-xs bg-primary/20">Total: {nf(totals.totalAdSpend)} Gs</span>
+                <span className="chip text-xs">Global: {nf(generalAdSpend)} Gs</span>
+                <span className="chip text-xs">Productos: {nf(totalProductAdSpend)} Gs</span>
+              </div>
             </div>
-            
-            <div className="space-y-2 max-h-[320px] overflow-y-auto pr-2 custom-scrollbar">
-              {adSpends.length > 0 ? (
-                adSpends.map((s) => {
-                  const product = products.find((p) => p.id === s.product_id);
-                  return (
-                    <div key={s.id} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-background/80 p-3 hover:shadow-md transition-all group">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-xs font-bold">
-                            {product ? `📦 ${product.title}` : '🌍 Gasto Global'}
-                          </span>
-                          {product && <span className="chip text-[10px]">{product.sku}</span>}
-                        </div>
-                        <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
-                          <span>📅 {s.spend_date}</span>
-                          {s.note && <span>📌 {s.note}</span>}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-black text-sm font-mono">{nf(s.amount_gs)} Gs</span>
-                        <button 
-                          className="opacity-0 group-hover:opacity-100 transition-opacity nav-btn !px-2 !py-1 !text-xs" 
-                          onClick={() => deleteAdSpend(s.id)}
-                        >
-                          🗑️
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="text-center py-8 text-muted-foreground text-sm">
-                  No hay gastos registrados en el período seleccionado
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="app-label text-xs">📅 Gasto desde</label>
+                    <input type="date" className="app-input" value={adSpendFromDate} onChange={(e) => setAdSpendFromDate(e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="app-label text-xs">📅 Gasto hasta</label>
+                    <input type="date" className="app-input" value={adSpendToDate} onChange={(e) => setAdSpendToDate(e.target.value)} />
+                  </div>
                 </div>
-              )}
+
+                <div>
+                  <label className="app-label text-xs">🎯 Asignar gasto a</label>
+                  <div className="flex gap-3 mt-1">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        value="global"
+                        checked={adTargetType === 'global'}
+                        onChange={(e) => {
+                          setAdTargetType(e.target.value as 'global' | 'producto');
+                          if (e.target.value === 'global') setAdTargetProductId('');
+                        }}
+                        className="w-4 h-4"
+                      />
+                      <span className="text-sm">Global / General</span>
+                    </label>
+                    <label className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="radio"
+                        value="producto"
+                        checked={adTargetType === 'producto'}
+                        onChange={(e) => setAdTargetType(e.target.value as 'global' | 'producto')}
+                        className="w-4 h-4"
+                      />
+                      <span className="text-sm">Producto específico</span>
+                    </label>
+                  </div>
+                </div>
+
+                {adTargetType === 'producto' && (
+                  <div>
+                    <label className="app-label text-xs">📦 Seleccionar producto</label>
+                    <select className="app-input" value={adTargetProductId} onChange={(e) => setAdTargetProductId(e.target.value)}>
+                      <option value="">-- Elegir producto --</option>
+                      {productOptions.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.title} {p.sku ? `· ${p.sku}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="app-label text-xs">💵 Monto (Gs)</label>
+                    <input
+                      type="number"
+                      className="app-input font-mono"
+                      value={adAmount || ''}
+                      onChange={(e) => setAdAmount(Number(e.target.value))}
+                      placeholder="Ej: 50000"
+                    />
+                  </div>
+                  <div>
+                    <label className="app-label text-xs">📝 Nota / Plataforma</label>
+                    <input
+                      className="app-input"
+                      value={adNote}
+                      onChange={(e) => setAdNote(e.target.value)}
+                      placeholder="Facebook, TikTok, Google..."
+                    />
+                  </div>
+                </div>
+
+                <button className="nav-btn active w-full py-3 text-sm font-bold" onClick={saveAdSpend}>
+                  💾 Guardar gasto publicitario
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <div className="font-bold text-sm flex items-center gap-2">
+                  📋 Últimos gastos registrados
+                  <span className="chip text-xs">{adSpends.length} gastos</span>
+                </div>
+                
+                <div className="space-y-2 max-h-[320px] overflow-y-auto pr-2">
+                  {adSpends.length > 0 ? (
+                    adSpends.map((s) => {
+                      const product = products.find((p) => p.id === s.product_id);
+                      return (
+                        <div key={s.id} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-background/80 p-3 hover:shadow-md transition-all group">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs font-bold">
+                                {product ? `📦 ${product.title}` : '🌍 Gasto Global'}
+                              </span>
+                              {product && <span className="chip text-[10px]">{product.sku}</span>}
+                            </div>
+                            <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                              <span>📅 {s.spend_date}</span>
+                              {s.note && <span>📌 {s.note}</span>}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-black text-sm font-mono">{nf(s.amount_gs)} Gs</span>
+                            <button className="opacity-0 group-hover:opacity-100 transition-opacity nav-btn !px-2 !py-1 !text-xs" onClick={() => deleteAdSpend(s.id)}>
+                              🗑️
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground text-sm">
+                      No hay gastos registrados en el período seleccionado
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      </div>
+        </>
+      )}
 
       {/* Tabs y acciones */}
       <div className="flex flex-wrap gap-3 items-center justify-between">
@@ -1239,103 +1448,138 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
         </div>
       )}
 
-      {grouped.map((group) => (
-        <div key={group.email || group.name} className="space-y-4">
-          {/* Header del proveedor */}
-          <div className="flex flex-col lg:flex-row lg:items-center gap-4 p-4 rounded-2xl border border-border bg-gradient-to-r from-secondary/70 to-secondary/30">
-            <div className="flex items-center gap-4 flex-1 min-w-0">
-              {group.logo ? (
-                <img
-                  src={group.logo}
-                  alt={group.name}
-                  className="w-12 h-12 rounded-full object-cover border-2 border-border"
-                />
-              ) : (
-                <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center font-bold text-base text-primary">
-                  {getInitials(group.name)}
-                </div>
-              )}
-
-              <div className="flex-1 min-w-0">
-                <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-bold">
-                  Proveedor
-                </div>
-                <div className="font-extrabold text-base truncate">{group.name}</div>
-                <div className="text-xs text-muted-foreground truncate">{group.email}</div>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2 flex-1">
-              <div className="text-center">
-                <div className="font-black text-sm">{group.items.length}</div>
-                <div className="text-[10px] text-muted-foreground">Productos</div>
-              </div>
-              <div className="text-center">
-                <div className="font-black text-sm">{group.totals.sold}</div>
-                <div className="text-[10px] text-muted-foreground">Vendidos</div>
-              </div>
-              <div className="text-center">
-                <div className="font-black text-sm">{group.totals.delivered}</div>
-                <div className="text-[10px] text-muted-foreground">Entregados</div>
-              </div>
-              <div className="text-center">
-                <div className="font-black text-sm">{group.totals.deliveryRate}%</div>
-                <div className="text-[10px] text-muted-foreground">Entrega</div>
-              </div>
-              {canSeeMoney && (
-                <>
-                  <div className="text-center">
-                    <div className="font-black text-sm">{nf(group.totals.realRevenue)}</div>
-                    <div className="text-[10px] text-muted-foreground">Facturación</div>
+      {grouped.map((group, groupIndex) => {
+        const colorIndex = groupIndex % softColors.length;
+        const headerColor = softColors[colorIndex];
+        
+        return (
+          <div key={group.email || group.name} className="space-y-4">
+            {/* Header del proveedor */}
+            <div className={`flex flex-col lg:flex-row lg:items-center gap-4 p-4 rounded-2xl border bg-gradient-to-r ${headerColor} backdrop-blur-sm transition-all hover:shadow-md`}>
+              <div className="flex items-center gap-4 flex-1 min-w-0">
+                {group.logo && group.logo.trim() !== '' ? (
+                  <div className="w-14 h-14 rounded-full bg-white/10 backdrop-blur-sm p-0.5 border-2 border-border shadow-md flex-shrink-0">
+                    <img
+                      src={group.logo}
+                      alt={group.name}
+                      className="w-full h-full rounded-full object-cover"
+                      onError={(e) => {
+                        e.currentTarget.style.display = 'none';
+                        const parent = e.currentTarget.parentElement;
+                        if (parent) {
+                          const initialsDiv = document.createElement('div');
+                          initialsDiv.className = 'w-14 h-14 rounded-full bg-gradient-to-br from-primary/30 to-primary/20 flex items-center justify-center font-bold text-base text-primary';
+                          initialsDiv.textContent = getInitials(group.name);
+                          parent.appendChild(initialsDiv);
+                        }
+                      }}
+                    />
                   </div>
-                  <div className="text-center">
-                    <div className={`font-black text-sm ${group.totals.netProfit >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
-                      {nf(group.totals.netProfit)}
+                ) : (
+                  <div className="w-14 h-14 rounded-full bg-gradient-to-br from-primary/30 to-primary/20 flex items-center justify-center font-bold text-base text-primary shadow-md flex-shrink-0">
+                    {getInitials(group.name)}
+                  </div>
+                )}
+
+                <div className="flex-1 min-w-0">
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-bold flex items-center gap-2">
+                    <span>Proveedor</span>
+                    <span className="w-1.5 h-1.5 rounded-full bg-current opacity-50"></span>
+                  </div>
+                  <div className="font-extrabold text-lg truncate">{group.name}</div>
+                  <div className="text-xs text-muted-foreground truncate flex items-center gap-2 mt-0.5">
+                    <span>📧 {group.email}</span>
+                    {group.phone && <span>📱 {group.phone}</span>}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2 flex-1">
+                <div className="text-center bg-background/50 rounded-lg p-2">
+                  <div className="font-black text-sm">{group.items.length}</div>
+                  <div className="text-[10px] text-muted-foreground">Productos</div>
+                </div>
+                <div className="text-center bg-background/50 rounded-lg p-2">
+                  <div className="font-black text-sm">{group.totals.sold}</div>
+                  <div className="text-[10px] text-muted-foreground">Vendidos</div>
+                </div>
+                <div className="text-center bg-background/50 rounded-lg p-2">
+                  <div className="font-black text-sm">{group.totals.delivered}</div>
+                  <div className="text-[10px] text-muted-foreground">Entregados</div>
+                </div>
+                <div className="text-center bg-background/50 rounded-lg p-2">
+                  <div className="font-black text-sm">{group.totals.deliveryRate}%</div>
+                  <div className="text-[10px] text-muted-foreground">Entrega</div>
+                </div>
+                {canSeeMoney && (
+                  <>
+                    <div className="text-center bg-background/50 rounded-lg p-2">
+                      <div className="font-black text-sm">{nf(group.totals.realRevenue)}</div>
+                      <div className="text-[10px] text-muted-foreground">Facturación</div>
                     </div>
-                    <div className="text-[10px] text-muted-foreground">Ganancia neta</div>
-                  </div>
-                </>
+                    <div className="text-center bg-background/50 rounded-lg p-2">
+                      <div className={`font-black text-sm ${group.totals.netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {nf(group.totals.netProfit)}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground">Ganancia neta</div>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {group.phone && canLoadOrder && (
+                <a
+                  href={`https://wa.me/${group.phone.replace(/[^0-9]/g, '')}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-2 nav-btn !px-4 !py-2.5 text-sm font-bold text-[#25D366] hover:!bg-[#25D366]/10 transition-all"
+                >
+                  <span>💬</span> WhatsApp
+                </a>
               )}
             </div>
 
-            {group.phone && canLoadOrder && (
-              <a
-                href={`https://wa.me/${group.phone.replace(/[^0-9]/g, '')}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center justify-center gap-2 nav-btn !px-4 !py-2.5 text-sm font-bold text-[#25D366] hover:!bg-[#25D366]/10"
-              >
-                <span>💬</span> WhatsApp
-              </a>
-            )}
-          </div>
+            <div className={`h-px bg-gradient-to-r ${headerColor.split(' ')[0]} from-${headerColor.split(' ')[0].split('/')[0]}/30 to-transparent ml-4`}></div>
 
-          {/* Lista de productos del proveedor */}
-          <div className={viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5' : 'space-y-3'}>
-            {group.items.map((p) => {
-              const images = getImages(p);
-              const mainImg = images[imgIndex[p.id] || 0] || '';
-              const isFav = userFavorites.has(p.id);
-              const gainUnit = Number(p.provider_price_gs || 0) - Number(p.real_cost_gs || 0);
-              const isExpanded = expandedId === p.id;
-              const m = metricsByProduct[p.id] || emptyMetrics;
-              const productAdSpend = getProductAdSpend(p.id);
-              const netProfit = m.gross_profit_gs - productAdSpend;
-              const cancelRate = m.sold_count > 0 ? Math.round((m.cancelled_count / m.sold_count) * 100) : 0;
-              const deliveryRate = m.sold_count > 0 ? Math.round((m.delivered_count / m.sold_count) * 100) : 0;
-              const stockCritical = Number(p.stock || 0) <= 3;
-              const topProduct = m.delivered_count >= 10 && deliveryRate >= 70;
+            <div className={viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5' : 'space-y-3'}>
+              {group.items.map((p) => {
+                const images = getImages(p);
+                const mainImg = images[imgIndex[p.id] || 0] || '';
+                const isFav = userFavorites.has(p.id);
+                const gainUnit = Number(p.provider_price_gs || 0) - Number(p.real_cost_gs || 0);
+                const isExpanded = expandedId === p.id;
+                const m = metricsByProduct[p.id] || emptyMetrics;
+                const productAdSpend = getProductAdSpend(p.id);
+                const netProfit = m.gross_profit_gs - productAdSpend;
+                const cancelRate = m.sold_count > 0 ? Math.round((m.cancelled_count / m.sold_count) * 100) : 0;
+                const deliveryRate = m.sold_count > 0 ? Math.round((m.delivered_count / m.sold_count) * 100) : 0;
+                const stockCritical = Number(p.stock || 0) <= 3;
+                const topProduct = m.delivered_count >= 10 && deliveryRate >= 70;
 
-              // Vista compacta
-              if (viewMode === 'compact') {
-                return (
-                  <div
-                    key={p.id}
-                    className="bg-secondary border border-border rounded-xl p-3 flex flex-col md:flex-row gap-3 md:items-center hover:shadow-md transition-all group"
-                  >
-                    <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <div className="w-14 h-14 rounded-lg bg-background border border-border overflow-hidden flex items-center justify-center shrink-0">
-                        {mainImg ? <img src={mainImg} alt={p.title} className="w-full h-full object-contain p-1" /> : <span className="text-[10px] text-muted-foreground">Sin img</span>}
+                if (viewMode === 'compact') {
+                  return (
+                    <div
+                      key={p.id}
+                      className="bg-secondary border border-border rounded-xl p-3 flex flex-col md:flex-row gap-3 md:items-center hover:shadow-md transition-all group"
+                    >
+                      <div 
+                        className="w-16 h-16 rounded-xl bg-gradient-to-br from-background to-secondary/30 border border-border overflow-hidden flex items-center justify-center shrink-0 cursor-pointer relative group"
+                        onClick={() => mainImg && setViewingImage({ url: mainImg, title: p.title, index: 0 })}
+                      >
+                        {mainImg ? (
+                          <>
+                            <img src={mainImg} alt={p.title} className="w-full h-full object-contain p-1 transition-transform group-hover:scale-110" />
+                            {images.length > 1 && (
+                              <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <span className="text-white text-[10px] font-bold bg-black/60 px-1.5 py-0.5 rounded-full">
+                                  +{images.length}
+                                </span>
+                              </div>
+                            )}
+                          </>
+                        ) : (
+                          <span className="text-[10px] text-muted-foreground text-center px-1">Sin img</span>
+                        )}
                       </div>
                       <div className="min-w-0 flex-1">
                         <div className="text-[10px] uppercase text-muted-foreground font-bold">SKU: {p.sku || '—'}</div>
@@ -1346,201 +1590,182 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                           {isPrivateProduct(p) && <span className="chip text-[10px]">🔒 Privado</span>}
                         </div>
                       </div>
+
+                      <div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-center">
+                        <div><div className="font-black text-sm">{m.sold_count}</div><div className="text-[10px] text-muted-foreground">Vend.</div></div>
+                        <div><div className="font-black text-sm">{m.delivered_count}</div><div className="text-[10px] text-muted-foreground">Ent.</div></div>
+                        <div><div className="font-black text-sm">{deliveryRate}%</div><div className="text-[10px] text-muted-foreground">Efic.</div></div>
+                        {canSeeMoney && (
+                          <>
+                            <div><div className="font-black text-sm">{nf(productAdSpend)}</div><div className="text-[10px] text-muted-foreground">Ads</div></div>
+                            <div><div className={`font-black text-sm ${netProfit >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{nf(netProfit)}</div><div className="text-[10px] text-muted-foreground">Neto</div></div>
+                          </>
+                        )}
+                      </div>
+
+                      <div className="flex gap-1 justify-end">
+                        <button className="nav-btn !px-2 !py-1 text-sm" onClick={() => toggleFavorite(p.id)}>{isFav ? '★' : '☆'}</button>
+                        {canEdit && <button className="nav-btn !px-2 !py-1 text-sm" onClick={() => openEdit(p)}>✏️</button>}
+                        {canLoadOrder && p.sku && <button className="nav-btn active !px-2 !py-1 text-sm" onClick={() => onLoadProduct?.(p.sku!)}>➕</button>}
+                      </div>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div
+                    key={p.id}
+                    className="bg-secondary border border-border rounded-2xl overflow-hidden flex flex-col transition-all duration-200 hover:-translate-y-1 hover:shadow-xl relative group"
+                  >
+                    <div className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${headerColor.split(' ')[0]} ${headerColor.split(' ')[1]} z-10`} />
+
+                    <div
+                      className="relative w-full h-56 overflow-hidden bg-gradient-to-br from-background to-secondary/20 border-b border-border cursor-pointer"
+                      onClick={() => setExpandedId(isExpanded ? null : p.id)}
+                    >
+                      <ProductImageGallery
+                        images={images}
+                        title={p.title}
+                        onViewFullscreen={(url) => setViewingImage({ url, title: p.title, index: 0 })}
+                        currentIndex={imgIndex[p.id] || 0}
+                        onIndexChange={(idx) => setImgIndex((prev) => ({ ...prev, [p.id]: idx }))}
+                      />
+
+                      <div className="absolute top-2 left-2 flex flex-col gap-1 z-10">
+                        {stockCritical && <span className="chip text-[10px] bg-red-500/20 border-red-500/40 backdrop-blur-sm">⚠️ Stock bajo</span>}
+                        {topProduct && <span className="chip text-[10px] bg-emerald-500/20 border-emerald-500/40 backdrop-blur-sm">🔥 Top ventas</span>}
+                        {isPrivateProduct(p) && <span className="chip text-[10px] backdrop-blur-sm">🔒 Privado</span>}
+                      </div>
+
+                      <button
+                        className="absolute top-2 right-2 z-20 w-8 h-8 rounded-full bg-background/80 backdrop-blur-sm flex items-center justify-center text-lg border border-border hover:scale-110 transition-transform"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleFavorite(p.id);
+                        }}
+                      >
+                        {isFav ? '★' : '☆'}
+                      </button>
                     </div>
 
-                    <div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-center">
-                      <div><div className="font-black text-sm">{m.sold_count}</div><div className="text-[10px] text-muted-foreground">Vend.</div></div>
-                      <div><div className="font-black text-sm">{m.delivered_count}</div><div className="text-[10px] text-muted-foreground">Ent.</div></div>
-                      <div><div className="font-black text-sm">{deliveryRate}%</div><div className="text-[10px] text-muted-foreground">Efic.</div></div>
+                    <div
+                      className="p-4 flex flex-col gap-3 flex-grow cursor-pointer"
+                      onClick={() => setExpandedId(isExpanded ? null : p.id)}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                          SKU: {p.sku || '—'}
+                        </div>
+                        <span className="chip text-[10px]">✅ {deliveryRate}% entrega</span>
+                      </div>
+                      
+                      <div className="font-extrabold text-base leading-tight line-clamp-2">{p.title}</div>
+
+                      {p.description && !isExpanded && (
+                        <div className="text-xs text-muted-foreground line-clamp-2">{p.description}</div>
+                      )}
+
+                      {isExpanded && p.description && (
+                        <div className="text-xs text-muted-foreground whitespace-pre-wrap">{p.description}</div>
+                      )}
+
+                      <div className="grid grid-cols-3 gap-2 mt-1">
+                        <div className="rounded-xl bg-background/70 border border-border p-2 text-center">
+                          <div className="font-black text-sm">{m.sold_count}</div>
+                          <div className="text-[9px] text-muted-foreground">Vendidos</div>
+                        </div>
+                        <div className="rounded-xl bg-background/70 border border-border p-2 text-center">
+                          <div className="font-black text-sm">{m.delivered_count}</div>
+                          <div className="text-[9px] text-muted-foreground">Entregados</div>
+                        </div>
+                        <div className="rounded-xl bg-background/70 border border-border p-2 text-center">
+                          <div className="font-black text-sm">{m.cancelled_count}</div>
+                          <div className="text-[9px] text-muted-foreground">Cancelados</div>
+                        </div>
+                      </div>
+
                       {canSeeMoney && (
-                        <>
-                          <div><div className="font-black text-sm">{nf(productAdSpend)}</div><div className="text-[10px] text-muted-foreground">Ads</div></div>
-                          <div><div className={`font-black text-sm ${netProfit >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{nf(netProfit)}</div><div className="text-[10px] text-muted-foreground">Neto</div></div>
-                        </>
+                        <div className="rounded-xl border border-border bg-background/70 p-3 space-y-1">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Facturación real</span>
+                            <b className="font-mono">{nf(m.real_revenue_gs)} Gs</b>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Gasto publicitario</span>
+                            <b className="font-mono">{nf(productAdSpend)} Gs</b>
+                          </div>
+                          <div className="flex justify-between text-sm pt-1 border-t border-border">
+                            <span className="font-bold">Ganancia neta</span>
+                            <b className={`font-mono ${netProfit >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{nf(netProfit)} Gs</b>
+                          </div>
+                        </div>
+                      )}
+
+                      {isExpanded && (
+                        <div className="rounded-xl border border-border bg-background/70 p-2 grid grid-cols-2 gap-1 text-[10px] text-muted-foreground">
+                          <div>Cancelación: <b>{cancelRate}%</b></div>
+                          <div>Facturación bruta: <b>{nf(m.gross_revenue_gs)} Gs</b></div>
+                          <div>Stock actual: <b>{p.stock ?? 0}</b></div>
+                          {canSeeRealCost && <div>Stock real: <b>{p.real_stock ?? 0}</b></div>}
+                          <div>Precio venta: <b>{nf(Number(p.provider_price_gs || 0))} Gs</b></div>
+                          {canSeeRealCost && <div>Ganancia/unidad: <b>{nf(gainUnit)} Gs</b></div>}
+                        </div>
                       )}
                     </div>
 
-                    <div className="flex gap-1 justify-end">
-                      <button className="nav-btn !px-2 !py-1 text-sm" onClick={() => toggleFavorite(p.id)}>{isFav ? '★' : '☆'}</button>
-                      {canEdit && <button className="nav-btn !px-2 !py-1 text-sm" onClick={() => openEdit(p)}>✏️</button>}
-                      {canLoadOrder && p.sku && <button className="nav-btn active !px-2 !py-1 text-sm" onClick={() => onLoadProduct?.(p.sku!)}>➕</button>}
+                    <div className="flex justify-between items-center px-4 py-3 border-t border-border bg-background/80">
+                      <div>
+                        <span className="font-extrabold text-base font-mono">{nf(Number(p.provider_price_gs || 0))} Gs</span>
+                        {canSeeRealCost && (
+                          <div className="text-[10px] text-muted-foreground">Ganancia: {nf(gainUnit)} Gs/unidad</div>
+                        )}
+                      </div>
+
+                      <div className="flex gap-1.5">
+                        {mainImg && (
+                          <button
+                            className="nav-btn !px-2.5 !py-1.5 text-xs"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setViewingImage({ url: mainImg, title: p.title, index: 0 });
+                            }}
+                          >
+                            👁️ Ver
+                          </button>
+                        )}
+
+                        {canEdit && (
+                          <button
+                            className="nav-btn !px-2.5 !py-1.5 text-xs"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openEdit(p);
+                            }}
+                          >
+                            ✏️ Editar
+                          </button>
+                        )}
+
+                        {canLoadOrder && p.sku && (
+                          <button
+                            className="nav-btn active !px-2.5 !py-1.5 text-xs"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onLoadProduct?.(p.sku!);
+                            }}
+                          >
+                            ➕ Cargar pedido
+                          </button>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
-              }
-
-              // Vista grid
-              return (
-                <div
-                  key={p.id}
-                  className="bg-secondary border border-border rounded-2xl overflow-hidden flex flex-col transition-all duration-200 hover:-translate-y-1 hover:shadow-xl relative group"
-                >
-                  <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-primary/70 to-primary/40 z-10" />
-
-                  <div
-                    className="relative w-full h-48 overflow-hidden bg-background border-b border-border flex items-center justify-center cursor-pointer"
-                    onClick={() => setExpandedId(isExpanded ? null : p.id)}
-                  >
-                    {mainImg ? (
-                      <img src={mainImg} alt={p.title} className="max-w-full max-h-full object-contain p-2 transition-transform group-hover:scale-105" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center text-muted-foreground text-sm">
-                        Sin imagen
-                      </div>
-                    )}
-
-                    <div className="absolute top-2 left-2 flex flex-col gap-1">
-                      {stockCritical && <span className="chip text-[10px] bg-red-500/20 border-red-500/40">⚠️ Stock bajo</span>}
-                      {topProduct && <span className="chip text-[10px] bg-emerald-500/20 border-emerald-500/40">🔥 Top ventas</span>}
-                      {isPrivateProduct(p) && <span className="chip text-[10px]">🔒 Privado</span>}
-                    </div>
-
-                    <button
-                      className="absolute top-2 right-2 z-20 w-8 h-8 rounded-full bg-background/90 backdrop-blur-sm flex items-center justify-center text-lg border border-border hover:scale-110 transition-transform"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleFavorite(p.id);
-                      }}
-                    >
-                      {isFav ? '★' : '☆'}
-                    </button>
-                  </div>
-
-                  {images.length > 1 && (
-                    <div className="flex gap-1.5 px-2 py-2 border-b border-border bg-background/50">
-                      {images.map((url, i) => (
-                        <img
-                          key={i}
-                          src={url}
-                          alt=""
-                          className={`w-10 h-10 rounded-md object-cover cursor-pointer border-2 transition-all ${
-                            (imgIndex[p.id] || 0) === i
-                              ? 'border-primary'
-                              : 'border-border opacity-60 hover:opacity-100'
-                          }`}
-                          onClick={() => setImgIndex((prev) => ({ ...prev, [p.id]: i }))}
-                        />
-                      ))}
-                    </div>
-                  )}
-
-                  <div
-                    className="p-4 flex flex-col gap-3 flex-grow cursor-pointer"
-                    onClick={() => setExpandedId(isExpanded ? null : p.id)}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
-                        SKU: {p.sku || '—'}
-                      </div>
-                      <span className="chip text-[10px]">✅ {deliveryRate}% entrega</span>
-                    </div>
-                    
-                    <div className="font-extrabold text-base leading-tight line-clamp-2">{p.title}</div>
-
-                    {p.description && !isExpanded && (
-                      <div className="text-xs text-muted-foreground line-clamp-2">{p.description}</div>
-                    )}
-
-                    {isExpanded && p.description && (
-                      <div className="text-xs text-muted-foreground whitespace-pre-wrap">{p.description}</div>
-                    )}
-
-                    <div className="grid grid-cols-3 gap-2 mt-1">
-                      <div className="rounded-xl bg-background/70 border border-border p-2 text-center">
-                        <div className="font-black text-sm">{m.sold_count}</div>
-                        <div className="text-[9px] text-muted-foreground">Vendidos</div>
-                      </div>
-                      <div className="rounded-xl bg-background/70 border border-border p-2 text-center">
-                        <div className="font-black text-sm">{m.delivered_count}</div>
-                        <div className="text-[9px] text-muted-foreground">Entregados</div>
-                      </div>
-                      <div className="rounded-xl bg-background/70 border border-border p-2 text-center">
-                        <div className="font-black text-sm">{m.cancelled_count}</div>
-                        <div className="text-[9px] text-muted-foreground">Cancelados</div>
-                      </div>
-                    </div>
-
-                    {canSeeMoney && (
-                      <div className="rounded-xl border border-border bg-background/70 p-3 space-y-1">
-                        <div className="flex justify-between text-xs">
-                          <span className="text-muted-foreground">Facturación real</span>
-                          <b className="font-mono">{nf(m.real_revenue_gs)} Gs</b>
-                        </div>
-                        <div className="flex justify-between text-xs">
-                          <span className="text-muted-foreground">Gasto publicitario</span>
-                          <b className="font-mono">{nf(productAdSpend)} Gs</b>
-                        </div>
-                        <div className="flex justify-between text-sm pt-1 border-t border-border">
-                          <span className="font-bold">Ganancia neta</span>
-                          <b className={`font-mono ${netProfit >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{nf(netProfit)} Gs</b>
-                        </div>
-                      </div>
-                    )}
-
-                    {isExpanded && (
-                      <div className="rounded-xl border border-border bg-background/70 p-2 grid grid-cols-2 gap-1 text-[10px] text-muted-foreground">
-                        <div>Cancelación: <b>{cancelRate}%</b></div>
-                        <div>Facturación bruta: <b>{nf(m.gross_revenue_gs)} Gs</b></div>
-                        <div>Stock actual: <b>{p.stock ?? 0}</b></div>
-                        {canSeeRealCost && <div>Stock real: <b>{p.real_stock ?? 0}</b></div>}
-                        <div>Precio venta: <b>{nf(Number(p.provider_price_gs || 0))} Gs</b></div>
-                        {canSeeRealCost && <div>Ganancia/unidad: <b>{nf(gainUnit)} Gs</b></div>}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="flex justify-between items-center px-4 py-3 border-t border-border bg-background/80">
-                    <div>
-                      <span className="font-extrabold text-base font-mono">{nf(Number(p.provider_price_gs || 0))} Gs</span>
-                      {canSeeRealCost && (
-                        <div className="text-[10px] text-muted-foreground">Ganancia: {nf(gainUnit)} Gs/unidad</div>
-                      )}
-                    </div>
-
-                    <div className="flex gap-1.5">
-                      {mainImg && (
-                        <button
-                          className="nav-btn !px-2.5 !py-1.5 text-xs"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setViewingImage({ url: mainImg, title: p.title });
-                          }}
-                        >
-                          👁️ Ver
-                        </button>
-                      )}
-
-                      {canEdit && (
-                        <button
-                          className="nav-btn !px-2.5 !py-1.5 text-xs"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            openEdit(p);
-                          }}
-                        >
-                          ✏️ Editar
-                        </button>
-                      )}
-
-                      {canLoadOrder && p.sku && (
-                        <button
-                          className="nav-btn active !px-2.5 !py-1.5 text-xs"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onLoadProduct?.(p.sku!);
-                          }}
-                        >
-                          ➕ Cargar pedido
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+              })}
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
 
       {filtered.length === 0 && !loading && (
         <div className="text-center py-16">
@@ -1550,7 +1775,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
         </div>
       )}
 
-      {/* Modales - mantener igual */}
+      {/* Modal de edición */}
       {editProduct &&
         createPortal(
           <div
@@ -1709,43 +1934,15 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
           document.body
         )}
 
-      {viewingImage &&
-        createPortal(
-          <div
-            className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4"
-            onClick={() => setViewingImage(null)}
-          >
-            <div
-              className="relative max-w-4xl max-h-[90vh] flex flex-col items-center gap-4"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <img
-                src={viewingImage.url}
-                alt={viewingImage.title}
-                className="max-w-full max-h-[75vh] object-contain rounded-xl shadow-2xl"
-              />
-              <div className="flex gap-3 items-center">
-                <span className="text-white font-bold text-sm">{viewingImage.title}</span>
-                <a
-                  href={viewingImage.url}
-                  download
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="nav-btn active !px-4 !py-2 !text-xs"
-                >
-                  ⬇ Descargar
-                </a>
-                <button
-                  className="nav-btn !px-4 !py-2 !text-xs"
-                  onClick={() => setViewingImage(null)}
-                >
-                  Cerrar
-                </button>
-              </div>
-            </div>
-          </div>,
-          document.body
-        )}
+      {/* Modal de imagen fullscreen */}
+      {viewingImage && (
+        <ImageFullscreenModal
+          images={getImages(products.find(p => p.title === viewingImage.title) || products[0])}
+          initialIndex={viewingImage.index || 0}
+          title={viewingImage.title}
+          onClose={() => setViewingImage(null)}
+        />
+      )}
     </div>
   );
 }
