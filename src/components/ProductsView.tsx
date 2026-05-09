@@ -504,6 +504,13 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
   const [adSpends, setAdSpends] = useState<AdSpend[]>([]);
   const [syncingStock, setSyncingStock] = useState(false);
 
+  // Permisos para ver stock real
+  const canSeeRealStock = ['admin', 'provider', 'despachante'].includes(role);
+  const canEdit = ['admin', 'provider', 'despachante'].includes(role);
+  const canSeeRealCost = ['admin', 'provider'].includes(role);
+  const canLoadOrder = ['seller', 'despachante', 'delivery'].includes(role);
+  const canSeeMoney = ['admin', 'provider', 'seller', 'despachante'].includes(role);
+
   const loadFavorites = useCallback(async () => {
     if (!myEmail) return;
 
@@ -1297,11 +1304,6 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
     }
   };
 
-  const canEdit = ['admin', 'provider', 'despachante'].includes(role);
-  const canSeeRealCost = ['admin', 'provider'].includes(role);
-  const canLoadOrder = ['seller', 'despachante', 'delivery'].includes(role);
-  const canSeeMoney = ['admin', 'provider', 'seller', 'despachante'].includes(role);
-
   // Colores suaves para proveedores
   const softColors = [
     'from-blue-500/5 to-blue-600/5 border-blue-200/30',
@@ -1346,13 +1348,15 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
           >
             {showTopSection ? '🔽 Ocultar panel' : '🔼 Mostrar panel'}
           </button>
-          <button
-            className={`nav-btn !px-4 !py-2.5 !text-sm ${syncingStock ? 'opacity-50' : ''}`}
-            onClick={syncStockFromOrders}
-            disabled={syncingStock}
-          >
-            {syncingStock ? '🔄 Sincronizando...' : '🔄 Sincronizar stock'}
-          </button>
+          {canSeeRealStock && (
+            <button
+              className={`nav-btn !px-4 !py-2.5 !text-sm ${syncingStock ? 'opacity-50' : ''}`}
+              onClick={syncStockFromOrders}
+              disabled={syncingStock}
+            >
+              {syncingStock ? '🔄 Sincronizando...' : '🔄 Sincronizar stock'}
+            </button>
+          )}
         </div>
       </div>
 
@@ -1777,9 +1781,11 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                           <span className="text-[10px] bg-background/50 px-1.5 py-0.5 rounded">
                             Stock: <b className={stockCritical ? 'text-red-500' : ''}>{p.stock || 0}</b>
                           </span>
-                          <span className="text-[10px] bg-background/50 px-1.5 py-0.5 rounded">
-                            Real: <b className={realStockCritical ? 'text-red-500' : ''}>{p.real_stock || 0}</b>
-                          </span>
+                          {canSeeRealStock && (
+                            <span className="text-[10px] bg-background/50 px-1.5 py-0.5 rounded">
+                              Real: <b className={realStockCritical ? 'text-red-500' : ''}>{p.real_stock || 0}</b>
+                            </span>
+                          )}
                         </div>
                         <div className="flex flex-wrap gap-1 mt-1">
                           {stockCritical && <span className="chip text-[10px] bg-red-500/15">⚠️ Stock bajo</span>}
@@ -1866,12 +1872,14 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                             {p.stock || 0}
                           </div>
                         </div>
-                        <div className="flex-1 rounded-lg bg-background/50 border border-border p-1.5 text-center">
-                          <div className="text-[9px] text-muted-foreground">Stock Real</div>
-                          <div className={`font-black text-sm ${realStockCritical ? 'text-red-500' : ''}`}>
-                            {p.real_stock || 0}
+                        {canSeeRealStock && (
+                          <div className="flex-1 rounded-lg bg-background/50 border border-border p-1.5 text-center">
+                            <div className="text-[9px] text-muted-foreground">Stock Real</div>
+                            <div className={`font-black text-sm ${realStockCritical ? 'text-red-500' : ''}`}>
+                              {p.real_stock || 0}
+                            </div>
                           </div>
-                        </div>
+                        )}
                       </div>
 
                       {p.description && !isExpanded && (
@@ -1919,7 +1927,9 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                           <div>Cancelación: <b>{cancelRate}%</b></div>
                           <div>Facturación bruta: <b>{nf(m.gross_revenue_gs)} Gs</b></div>
                           <div>Stock actual: <b className={stockCritical ? 'text-red-500' : ''}>{p.stock ?? 0}</b></div>
-                          <div>Stock real: <b className={realStockCritical ? 'text-red-500' : ''}>{p.real_stock ?? 0}</b></div>
+                          {canSeeRealStock && (
+                            <div>Stock real: <b className={realStockCritical ? 'text-red-500' : ''}>{p.real_stock ?? 0}</b></div>
+                          )}
                           <div>Precio venta: <b>{nf(Number(p.provider_price_gs || 0))} Gs</b></div>
                           {canSeeRealCost && <div>Ganancia/unidad: <b>{nf(gainUnit)} Gs</b></div>}
                         </div>
@@ -2056,17 +2066,19 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                   />
                 </div>
 
-                <div>
-                  <label className="app-label">Stock real</label>
-                  <input
-                    type="number"
-                    className="app-input"
-                    value={editProduct.real_stock || 0}
-                    onChange={(e) =>
-                      setEditProduct({ ...editProduct, real_stock: Number(e.target.value) })
-                    }
-                  />
-                </div>
+                {canSeeRealStock && (
+                  <div>
+                    <label className="app-label">Stock real</label>
+                    <input
+                      type="number"
+                      className="app-input"
+                      value={editProduct.real_stock || 0}
+                      onChange={(e) =>
+                        setEditProduct({ ...editProduct, real_stock: Number(e.target.value) })
+                      }
+                    />
+                  </div>
+                )}
 
                 <ImageUploadField
                   label="Imagen 1"
