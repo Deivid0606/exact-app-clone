@@ -1636,6 +1636,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
           </div>,
           document.body
         )}
+      </div>
     </div>
   );
 }
