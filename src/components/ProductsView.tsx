@@ -502,6 +502,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
   const [viewingImage, setViewingImage] = useState<{ url: string; title: string; index?: number } | null>(null);
   const [metricsByProduct, setMetricsByProduct] = useState<Record<string, ProductMetrics>>({});
   const [adSpends, setAdSpends] = useState<AdSpend[]>([]);
+  const [syncingStock, setSyncingStock] = useState(false);
 
   const loadFavorites = useCallback(async () => {
     if (!myEmail) return;
@@ -745,6 +746,186 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
       setMetricsLoading(false);
     }
   }, [role, myEmail, visibleProductIds.length, fromDate, toDate, products, selectedProvider, selectedProductId]);
+
+  // Función para sincronizar stock desde órdenes entregadas
+  const syncStockFromOrders = useCallback(async () => {
+    if (!products.length) return;
+    
+    setSyncingStock(true);
+    const toastId = toast.loading('Sincronizando stocks desde órdenes entregadas...');
+    let updatedCount = 0;
+    let errorCount = 0;
+    
+    for (const product of products) {
+      try {
+        // Obtener todas las órdenes ENTREGADAS de este producto
+        const { data, error } = await supabase
+          .from('orders')
+          .select('quantity, status')
+          .eq('product_id', product.id);
+        
+        if (error) {
+          errorCount++;
+          continue;
+        }
+        
+        // Sumar cantidades de órdenes entregadas
+        const deliveredQty = (data || [])
+          .filter(order => isDeliveredStatus(order.status))
+          .reduce((sum, order) => sum + getOrderQuantity(order), 0);
+        
+        // Calcular stocks basados en stock original - entregados
+        const syncedStock = Math.max(0, deliveredQty);
+        
+        // Actualizar en Supabase solo si es necesario
+        if (syncedStock !== (product.stock || 0)) {
+          const { error: updateError } = await supabase
+            .from('products')
+            .update({ 
+              stock: syncedStock,
+              real_stock: syncedStock 
+            })
+            .eq('id', product.id);
+          
+          if (!updateError) {
+            updatedCount++;
+            // Actualizar estado local
+            setProducts(prev => prev.map(p => 
+              p.id === product.id 
+                ? { ...p, stock: syncedStock, real_stock: syncedStock }
+                : p
+            ));
+          } else {
+            errorCount++;
+          }
+        }
+      } catch (err) {
+        errorCount++;
+      }
+    }
+    
+    toast.dismiss(toastId);
+    if (errorCount > 0) {
+      toast.warning(`✅ Sincronizados ${updatedCount} productos, ⚠️ ${errorCount} errores`);
+    } else {
+      toast.success(`✅ Sincronizados ${updatedCount} productos correctamente`);
+    }
+    setSyncingStock(false);
+  }, [products]);
+
+  // Listener para actualizar stock y real_stock automáticamente cuando un pedido cambia a ENTREGADO
+  useEffect(() => {
+    if (!role || !myEmail) return;
+
+    const channel = supabase
+      .channel('orders-stock-updates')
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'orders',
+        },
+        async (payload) => {
+          const oldOrder = payload.old;
+          const newOrder = payload.new;
+          
+          const wasDelivered = isDeliveredStatus(oldOrder?.status);
+          const isNowDelivered = isDeliveredStatus(newOrder?.status);
+          
+          // Solo cuando cambia de NO entregado a ENTREGADO
+          if (!wasDelivered && isNowDelivered) {
+            const orderSku = getOrderSku(newOrder);
+            const orderProductId = getOrderProductId(newOrder);
+            const quantity = getOrderQuantity(newOrder);
+            
+            // Buscar el producto por ID o SKU
+            let product = products.find(p => p.id === orderProductId);
+            if (!product && orderSku) {
+              product = products.find(p => p.sku === orderSku);
+            }
+            
+            if (product) {
+              // Calcular nuevos stocks (nunca negativos)
+              const newStock = Math.max(0, (product.stock || 0) - quantity);
+              const newRealStock = Math.max(0, (product.real_stock || 0) - quantity);
+              
+              // Actualizar en Supabase
+              const { error } = await supabase
+                .from('products')
+                .update({
+                  stock: newStock,
+                  real_stock: newRealStock
+                })
+                .eq('id', product.id);
+                
+              if (!error) {
+                // Actualizar estado local
+                setProducts(prev => prev.map(p => 
+                  p.id === product.id 
+                    ? { ...p, stock: newStock, real_stock: newRealStock }
+                    : p
+                ));
+                
+                // Notificar al usuario
+                toast.success(
+                  `✅ Stock actualizado por entrega\n` +
+                  `📦 ${product.title}\n` +
+                  `➖ ${quantity} unidad(es) entregadas\n` +
+                  `📊 Stock: ${newStock} | Real: ${newRealStock}`
+                );
+              } else {
+                console.error('Error actualizando stock:', error);
+                toast.error('Error al actualizar el stock');
+              }
+            }
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'orders',
+        },
+        async (payload) => {
+          const newOrder = payload.new;
+          const isDelivered = isDeliveredStatus(newOrder?.status);
+          
+          // Si se crea una orden directamente con estado entregado
+          if (isDelivered) {
+            const orderSku = getOrderSku(newOrder);
+            const quantity = getOrderQuantity(newOrder);
+            const product = products.find(p => p.sku === orderSku);
+            
+            if (product) {
+              const newStock = Math.max(0, (product.stock || 0) - quantity);
+              const newRealStock = Math.max(0, (product.real_stock || 0) - quantity);
+              
+              const { error } = await supabase
+                .from('products')
+                .update({ stock: newStock, real_stock: newRealStock })
+                .eq('id', product.id);
+              
+              if (!error) {
+                setProducts(prev => prev.map(p => 
+                  p.id === product.id 
+                    ? { ...p, stock: newStock, real_stock: newRealStock }
+                    : p
+                ));
+                toast.success(`📦 Stock actualizado: -${quantity} de ${product.title}`);
+              }
+            }
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [role, myEmail, products]);
 
   useEffect(() => {
     load();
@@ -1165,6 +1346,13 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
           >
             {showTopSection ? '🔽 Ocultar panel' : '🔼 Mostrar panel'}
           </button>
+          <button
+            className={`nav-btn !px-4 !py-2.5 !text-sm ${syncingStock ? 'opacity-50' : ''}`}
+            onClick={syncStockFromOrders}
+            disabled={syncingStock}
+          >
+            {syncingStock ? '🔄 Sincronizando...' : '🔄 Sincronizar stock'}
+          </button>
         </div>
       </div>
 
@@ -1554,6 +1742,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                 const cancelRate = m.sold_count > 0 ? Math.round((m.cancelled_count / m.sold_count) * 100) : 0;
                 const deliveryRate = m.sold_count > 0 ? Math.round((m.delivered_count / m.sold_count) * 100) : 0;
                 const stockCritical = Number(p.stock || 0) <= 3;
+                const realStockCritical = Number(p.real_stock || 0) <= 3;
                 const topProduct = m.delivered_count >= 10 && deliveryRate >= 70;
 
                 if (viewMode === 'compact') {
@@ -1584,6 +1773,14 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                       <div className="min-w-0 flex-1">
                         <div className="text-[10px] uppercase text-muted-foreground font-bold">SKU: {p.sku || '—'}</div>
                         <div className="font-extrabold text-sm truncate">{p.title}</div>
+                        <div className="flex gap-2 mt-1">
+                          <span className="text-[10px] bg-background/50 px-1.5 py-0.5 rounded">
+                            Stock: <b className={stockCritical ? 'text-red-500' : ''}>{p.stock || 0}</b>
+                          </span>
+                          <span className="text-[10px] bg-background/50 px-1.5 py-0.5 rounded">
+                            Real: <b className={realStockCritical ? 'text-red-500' : ''}>{p.real_stock || 0}</b>
+                          </span>
+                        </div>
                         <div className="flex flex-wrap gap-1 mt-1">
                           {stockCritical && <span className="chip text-[10px] bg-red-500/15">⚠️ Stock bajo</span>}
                           {topProduct && <span className="chip text-[10px] bg-emerald-500/15">🔥 Top ventas</span>}
@@ -1661,6 +1858,22 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                       
                       <div className="font-extrabold text-base leading-tight line-clamp-2">{p.title}</div>
 
+                      {/* Indicadores de stock en vista grid */}
+                      <div className="flex gap-2">
+                        <div className="flex-1 rounded-lg bg-background/50 border border-border p-1.5 text-center">
+                          <div className="text-[9px] text-muted-foreground">Stock</div>
+                          <div className={`font-black text-sm ${stockCritical ? 'text-red-500' : ''}`}>
+                            {p.stock || 0}
+                          </div>
+                        </div>
+                        <div className="flex-1 rounded-lg bg-background/50 border border-border p-1.5 text-center">
+                          <div className="text-[9px] text-muted-foreground">Stock Real</div>
+                          <div className={`font-black text-sm ${realStockCritical ? 'text-red-500' : ''}`}>
+                            {p.real_stock || 0}
+                          </div>
+                        </div>
+                      </div>
+
                       {p.description && !isExpanded && (
                         <div className="text-xs text-muted-foreground line-clamp-2">{p.description}</div>
                       )}
@@ -1705,8 +1918,8 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                         <div className="rounded-xl border border-border bg-background/70 p-2 grid grid-cols-2 gap-1 text-[10px] text-muted-foreground">
                           <div>Cancelación: <b>{cancelRate}%</b></div>
                           <div>Facturación bruta: <b>{nf(m.gross_revenue_gs)} Gs</b></div>
-                          <div>Stock actual: <b>{p.stock ?? 0}</b></div>
-                          {canSeeRealCost && <div>Stock real: <b>{p.real_stock ?? 0}</b></div>}
+                          <div>Stock actual: <b className={stockCritical ? 'text-red-500' : ''}>{p.stock ?? 0}</b></div>
+                          <div>Stock real: <b className={realStockCritical ? 'text-red-500' : ''}>{p.real_stock ?? 0}</b></div>
                           <div>Precio venta: <b>{nf(Number(p.provider_price_gs || 0))} Gs</b></div>
                           {canSeeRealCost && <div>Ganancia/unidad: <b>{nf(gainUnit)} Gs</b></div>}
                         </div>
