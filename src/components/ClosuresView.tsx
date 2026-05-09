@@ -5,6 +5,19 @@ import { toast } from 'sonner';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
+const formatDatePY = (dateValue?: string | null) => {
+  if (!dateValue) return '—';
+  const onlyDate = dateValue.slice(0, 10);
+  const [year, month, day] = onlyDate.split('-');
+  if (!year || !month || !day) return '—';
+  return `${day}/${month}/${year}`;
+};
+
+const dateInputValue = (dateValue?: string | null) => {
+  if (!dateValue) return '';
+  return dateValue.slice(0, 10);
+};
+
 export default function ClosuresView() {
   const { profile } = useAuth();
   const myEmail = profile?.email || '';
@@ -110,7 +123,6 @@ export default function ClosuresView() {
   }, []);
 
   const loadClosures = async () => {
-    // Determinar campo de fecha según rol y selector
     let dateField = filterDateBy;
     
     if (isDelivery) {
@@ -124,7 +136,6 @@ export default function ClosuresView() {
       .lte(dateField, dateTo + 'T23:59:59')
       .order(dateField, { ascending: false });
 
-    // Aplicar filtros según rol
     if (isSupplier) {
       query = query.eq('provider_email', myEmail);
       if (filterDelivery) {
@@ -265,23 +276,33 @@ export default function ClosuresView() {
 
   const handleDateChange = async (orderId: string, newDate: string) => {
     if (!newDate) return;
+
+    const newAssignedAt = `${newDate}T12:00:00`;
+
+    setOrders(prev =>
+      prev.map(o =>
+        o.id === orderId
+          ? { ...o, assigned_at: newAssignedAt, updated_at: new Date().toISOString() }
+          : o
+      )
+    );
+
+    setEditingDateId(null);
     
     const { error } = await supabase
       .from('orders')
       .update({ 
-        assigned_at: newDate + 'T00:00:00', 
+        assigned_at: newAssignedAt, 
         updated_at: new Date().toISOString() 
       })
       .eq('id', orderId);
       
     if (error) {
       toast.error(error.message);
+      loadClosures();
     } else {
       toast.success('Fecha actualizada');
-      loadClosures();
     }
-    
-    setEditingDateId(null);
   };
 
   const markSingleRendido = async (orderId: string) => {
@@ -546,7 +567,6 @@ export default function ClosuresView() {
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Ya rendidos</div><div className="text-[22px] font-extrabold" style={{ color: '#4ade80' }}>{kpis.rendidos}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.montoRendido)}</div></div>
       </div>
 
-      {/* Barra de búsqueda */}
       <div className="mb-4">
         <div className="relative">
           <input
@@ -614,17 +634,18 @@ export default function ClosuresView() {
                   <td className="text-xs whitespace-nowrap">
                     <div className="flex items-center gap-1">
                       <span>
-                        {o.assigned_at ? new Date(o.assigned_at).toLocaleDateString('es-PY') : '—'}
+                        {formatDatePY(o.assigned_at)}
                       </span>
                       {canEditFull && editingDateId === o.id ? (
                         <input
                           type="date"
                           className="app-input !py-0 !px-1 text-xs w-auto"
-                          defaultValue={o.assigned_at ? new Date(o.assigned_at).toISOString().slice(0, 10) : ''}
-                          onBlur={(e) => handleDateChange(o.id, e.target.value)}
+                          defaultValue={dateInputValue(o.assigned_at)}
+                          onChange={(e) => handleDateChange(o.id, e.target.value)}
+                          onBlur={() => setEditingDateId(null)}
                           onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              handleDateChange(o.id, (e.target as HTMLInputElement).value);
+                            if (e.key === 'Escape') {
+                              setEditingDateId(null);
                             }
                           }}
                           autoFocus
@@ -644,7 +665,7 @@ export default function ClosuresView() {
                     </div>
                   </td>
                   <td className="text-xs whitespace-nowrap">
-                    {new Date(o.created_at).toLocaleDateString('es-PY')}
+                    {formatDatePY(o.created_at)}
                   </td>
                   <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
                   <td className="text-xs">{o.city || '—'}</td>
