@@ -967,86 +967,83 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[1.35fr_1fr] gap-4">
+        <div className="grid grid-cols-1 xl:grid-cols-[1.35fr_1fr] gap-4">
         <div className="rounded-2xl border border-border bg-background/60 p-4 space-y-3">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div>
-            <div className="font-extrabold text-sm">Filtros y rentabilidad</div>
-            <div className="text-[11px] text-muted-foreground">Seleccioná fechas para calcular ventas, entregas y ganancias.</div>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div>
+              <div className="font-extrabold text-sm">Filtros y rentabilidad</div>
+              <div className="text-[11px] text-muted-foreground">Seleccioná fechas para calcular ventas, entregas y ganancias.</div>
+            </div>
+            {metricsLoading && <span className="chip text-[10px]">Actualizando métricas...</span>}
           </div>
-          {metricsLoading && <span className="chip text-[10px]">Actualizando métricas...</span>}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div>
+              <label className="app-label">Desde</label>
+              <input type="date" className="app-input" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
+            </div>
+
+            <div>
+              <label className="app-label">Hasta</label>
+              <input type="date" className="app-input" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+            </div>
+
+            <div>
+              <label className="app-label">Proveedor</label>
+              <select
+                className="app-input"
+                value={selectedProvider}
+                onChange={(e) => {
+                  setSelectedProvider(e.target.value);
+                  setSelectedProductId('todos');
+                }}
+              >
+                <option value="todos">Todos</option>
+                {providerOptions.map(([email, name]) => (
+                  <option key={email} value={email}>{name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="app-label">Producto</label>
+              <select className="app-input" value={selectedProductId} onChange={(e) => setSelectedProductId(e.target.value)}>
+                <option value="todos">Todos</option>
+                {productOptions.map((p) => (
+                  <option key={p.id} value={p.id}>{p.title}</option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className="app-label">Ordenar</label>
+              <select className="app-input" value={sortMode} onChange={(e) => setSortMode(e.target.value as SortMode)}>
+                <option value="recientes">Recientes</option>
+                <option value="mas_vendidos">Más vendidos</option>
+                <option value="mas_entregados">Más entregados</option>
+                <option value="mayor_facturacion">Mayor facturación</option>
+                <option value="mayor_ganancia">Mayor ganancia</option>
+                <option value="stock_bajo">Stock bajo</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="app-label">Buscar</label>
+              <input
+                className="app-input"
+                placeholder="Nombre, SKU o proveedor"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+          </div>
         </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2">
-          <div>
-            <label className="app-label">Desde</label>
-            <input type="date" className="app-input" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
-          </div>
-
-          <div>
-            <label className="app-label">Hasta</label>
-            <input type="date" className="app-input" value={toDate} onChange={(e) => setToDate(e.target.value)} />
-          </div>
-
-          <div>
-            <label className="app-label">Proveedor</label>
-            <select
-              className="app-input"
-              value={selectedProvider}
-              onChange={(e) => {
-                setSelectedProvider(e.target.value);
-                setSelectedProductId('todos');
-              }}
-            >
-              <option value="todos">Todos</option>
-              {providerOptions.map(([email, name]) => (
-                <option key={email} value={email}>{name}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="app-label">Producto</label>
-            <select className="app-input" value={selectedProductId} onChange={(e) => setSelectedProductId(e.target.value)}>
-              <option value="todos">Todos</option>
-              {productOptions.map((p) => (
-                <option key={p.id} value={p.id}>{p.title}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="app-label">Ordenar</label>
-            <select className="app-input" value={sortMode} onChange={(e) => setSortMode(e.target.value as SortMode)}>
-              <option value="recientes">Recientes</option>
-              <option value="mas_vendidos">Más vendidos</option>
-              <option value="mas_entregados">Más entregados</option>
-              <option value="mayor_facturacion">Mayor facturación</option>
-              <option value="mayor_ganancia">Mayor ganancia</option>
-              <option value="stock_bajo">Stock bajo</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="app-label">Buscar</label>
-            <input
-              className="app-input"
-              placeholder="Nombre, SKU o proveedor"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </div>
-        </div>
-      </div>
-
-              </div>
 
         <div className="rounded-2xl border border-border bg-secondary/40 p-4 space-y-3">
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <div>
               <div className="font-extrabold text-sm">Gasto publicitario</div>
-              <div className="text-[11px] text-muted-foreground">
-                Guardá un gasto global o asignalo a un producto específico.
-              </div>
+              <div className="text-[11px] text-muted-foreground">Guardá un gasto global o asignalo a un producto específico.</div>
             </div>
             <span className="chip text-[10px]">Total: {nf(totals.totalAdSpend)} Gs</span>
           </div>
@@ -1075,16 +1072,10 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
             {adTargetType === 'producto' && (
               <div className="sm:col-span-2">
                 <label className="app-label">Producto del gasto</label>
-                <select
-                  className="app-input"
-                  value={adTargetProductId}
-                  onChange={(e) => setAdTargetProductId(e.target.value)}
-                >
+                <select className="app-input" value={adTargetProductId} onChange={(e) => setAdTargetProductId(e.target.value)}>
                   <option value="">Seleccionar producto</option>
                   {productOptions.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.title} {p.sku ? `· ${p.sku}` : ''}
-                    </option>
+                    <option key={p.id} value={p.id}>{p.title} {p.sku ? `· ${p.sku}` : ''}</option>
                   ))}
                 </select>
               </div>
@@ -1123,12 +1114,8 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                 return (
                   <div key={s.id} className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background/60 px-3 py-2">
                     <div className="min-w-0">
-                      <div className="text-xs font-bold truncate">
-                        📣 {product ? product.title : 'Gasto global'}
-                      </div>
-                      <div className="text-[10px] text-muted-foreground truncate">
-                        {s.spend_date} · {s.note || 'Sin nota'}
-                      </div>
+                      <div className="text-xs font-bold truncate">📣 {product ? product.title : 'Gasto global'}</div>
+                      <div className="text-[10px] text-muted-foreground truncate">{s.spend_date} · {s.note || 'Sin nota'}</div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       <b className="text-xs">{nf(s.amount_gs)} Gs</b>
