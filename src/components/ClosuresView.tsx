@@ -125,9 +125,9 @@ export default function ClosuresView() {
   const loadClosures = async () => {
     let dateField = filterDateBy;
     
-    if (isDelivery) {
+    if (isDelivery || isSupplier) {
       dateField = 'assigned_at';
-    } else if (isVendedor || isSupplier) {
+    } else if (isVendedor) {
       dateField = 'created_at';
     }
     
