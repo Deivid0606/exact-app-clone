@@ -283,6 +283,10 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
   const [toDate, setToDate] = useState(todayPY());
   const [selectedProvider, setSelectedProvider] = useState<string>('todos');
   const [selectedProductId, setSelectedProductId] = useState<string>('todos');
+  
+  // Ad spend states - mejorados
+  const [adSpendFromDate, setAdSpendFromDate] = useState(todayPY());
+  const [adSpendToDate, setAdSpendToDate] = useState(todayPY());
   const [adAmount, setAdAmount] = useState<number>(0);
   const [adNote, setAdNote] = useState<string>('');
   const [adTargetType, setAdTargetType] = useState<'global' | 'producto'>('global');
@@ -395,14 +399,14 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
   const visibleSkus = useMemo(() => products.map((p) => p.sku).filter(Boolean) as string[], [products]);
 
   const loadAdSpends = useCallback(async () => {
-    if (!myEmail || !fromDate || !toDate) return;
+    if (!myEmail || !adSpendFromDate || !adSpendToDate) return;
 
     try {
       let query = supabase
         .from('ad_spend')
         .select('*')
-        .gte('spend_date', fromDate)
-        .lte('spend_date', toDate)
+        .gte('spend_date', adSpendFromDate)
+        .lte('spend_date', adSpendToDate)
         .order('spend_date', { ascending: false });
 
       if (role !== 'admin') {
@@ -429,7 +433,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
       console.error('Error cargando publicidad:', error);
       toast.error(error?.message || 'No se pudo cargar gasto publicitario');
     }
-  }, [myEmail, role, fromDate, toDate, selectedProvider, selectedProductId]);
+  }, [myEmail, role, adSpendFromDate, adSpendToDate, selectedProvider, selectedProductId]);
 
   const loadMetrics = useCallback(async () => {
     if (!role || !myEmail || visibleProductIds.length === 0 || !fromDate || !toDate) {
@@ -848,8 +852,8 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
       return;
     }
 
-    if (!toDate) {
-      toast.error('Seleccioná una fecha');
+    if (!adSpendToDate) {
+      toast.error('Seleccioná una fecha de gasto');
       return;
     }
 
@@ -863,7 +867,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
       return;
     }
 
-    const spendDate = toDate;
+    const spendDate = adSpendToDate;
     const targetProductId = adTargetType === 'producto' ? adTargetProductId : null;
     const selectedAdProduct = products.find((p) => p.id === targetProductId);
 
@@ -915,274 +919,383 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
   const canSeeMoney = ['admin', 'provider', 'seller', 'despachante'].includes(role);
 
   return (
-    <div className="app-card space-y-4">
-      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+    <div className="app-card space-y-6">
+      {/* Header */}
+      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
         <div>
-          <h3 className="text-xl font-extrabold">Productos</h3>
-          <p className="text-xs text-muted-foreground mt-1">
+          <h3 className="text-2xl font-extrabold tracking-tight">Productos</h3>
+          <p className="text-sm text-muted-foreground mt-1">
             Catálogo con métricas, facturación real y rentabilidad por fechas.
           </p>
         </div>
 
         <div className="flex flex-wrap gap-2">
           <button
-            className={`nav-btn !px-3 !py-2 !text-xs ${viewMode === 'grid' ? 'active' : ''}`}
+            className={`nav-btn !px-4 !py-2.5 !text-sm ${viewMode === 'grid' ? 'active' : ''}`}
             onClick={() => setViewMode('grid')}
           >
-            ▦ Grid
+            ▦ Vista Grid
           </button>
           <button
-            className={`nav-btn !px-3 !py-2 !text-xs ${viewMode === 'compact' ? 'active' : ''}`}
+            className={`nav-btn !px-4 !py-2.5 !text-sm ${viewMode === 'compact' ? 'active' : ''}`}
             onClick={() => setViewMode('compact')}
           >
-            ☰ Compacto
+            ☰ Vista Compacta
           </button>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-        <div className="rounded-2xl border border-border bg-secondary/60 p-4">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Facturación real</div>
-          <div className="font-black text-xl mt-1">{nf(totals.realRevenue)} Gs</div>
-          <div className="text-[10px] text-muted-foreground">Solo pedidos entregados</div>
+      {/* KPI Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="rounded-2xl border border-border bg-gradient-to-br from-secondary/80 to-secondary/40 p-5">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-bold">Facturación real</div>
+          <div className="font-black text-2xl mt-2">{nf(totals.realRevenue)} Gs</div>
+          <div className="text-xs text-muted-foreground mt-1">Solo pedidos entregados</div>
         </div>
 
-        <div className="rounded-2xl border border-border bg-secondary/60 p-4">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Ganancia bruta</div>
-          <div className="font-black text-xl mt-1">{nf(totals.grossProfit)} Gs</div>
-          <div className="text-[10px] text-muted-foreground">Facturación real - costo</div>
+        <div className="rounded-2xl border border-border bg-gradient-to-br from-secondary/80 to-secondary/40 p-5">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-bold">Ganancia bruta</div>
+          <div className="font-black text-2xl mt-2">{nf(totals.grossProfit)} Gs</div>
+          <div className="text-xs text-muted-foreground mt-1">Facturación real - costo</div>
         </div>
 
-        <div className="rounded-2xl border border-border bg-secondary/60 p-4">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Publicidad</div>
-          <div className="font-black text-xl mt-1">{nf(totals.totalAdSpend)} Gs</div>
-          <div className="text-[10px] text-muted-foreground">Global + productos</div>
+        <div className="rounded-2xl border border-border bg-gradient-to-br from-secondary/80 to-secondary/40 p-5">
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-bold">Publicidad total</div>
+          <div className="font-black text-2xl mt-2">{nf(totals.totalAdSpend)} Gs</div>
+          <div className="text-xs text-muted-foreground mt-1">Global + productos</div>
         </div>
 
-        <div className={`rounded-2xl border p-4 ${totals.netProfit >= 0 ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-red-500/30 bg-red-500/10'}`}>
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Ganancia neta</div>
-          <div className="font-black text-xl mt-1">{nf(totals.netProfit)} Gs</div>
-          <div className="text-[10px] text-muted-foreground">Bruta - publicidad</div>
+        <div className={`rounded-2xl border p-5 ${totals.netProfit >= 0 ? 'border-emerald-500/30 bg-gradient-to-br from-emerald-500/10 to-emerald-500/5' : 'border-red-500/30 bg-gradient-to-br from-red-500/10 to-red-500/5'}`}>
+          <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-bold">Ganancia neta</div>
+          <div className={`font-black text-2xl mt-2 ${totals.netProfit >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{nf(totals.netProfit)} Gs</div>
+          <div className="text-xs text-muted-foreground mt-1">Bruta - publicidad</div>
         </div>
       </div>
 
-      <div className="grid grid-cols-1 xl:grid-cols-[1.35fr_1fr] gap-4">
-        <div className="grid grid-cols-1 xl:grid-cols-[1.35fr_1fr] gap-4">
-        <div className="rounded-2xl border border-border bg-background/60 p-4 space-y-3">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <div>
-              <div className="font-extrabold text-sm">Filtros y rentabilidad</div>
-              <div className="text-[11px] text-muted-foreground">Seleccioná fechas para calcular ventas, entregas y ganancias.</div>
-            </div>
-            {metricsLoading && <span className="chip text-[10px]">Actualizando métricas...</span>}
+      {/* Filtros y Métricas */}
+      <div className="rounded-2xl border border-border bg-background/60 p-5 space-y-4">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <div className="font-extrabold text-base">Filtros de métricas</div>
+            <div className="text-xs text-muted-foreground">Seleccioná el período para calcular ventas, entregas y ganancias</div>
+          </div>
+          {metricsLoading && <span className="chip text-xs">🔄 Actualizando métricas...</span>}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+          <div>
+            <label className="app-label text-xs">Desde</label>
+            <input type="date" className="app-input" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            <div>
-              <label className="app-label">Desde</label>
-              <input type="date" className="app-input" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
-            </div>
+          <div>
+            <label className="app-label text-xs">Hasta</label>
+            <input type="date" className="app-input" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+          </div>
 
-            <div>
-              <label className="app-label">Hasta</label>
-              <input type="date" className="app-input" value={toDate} onChange={(e) => setToDate(e.target.value)} />
-            </div>
+          <div>
+            <label className="app-label text-xs">Proveedor</label>
+            <select
+              className="app-input"
+              value={selectedProvider}
+              onChange={(e) => {
+                setSelectedProvider(e.target.value);
+                setSelectedProductId('todos');
+              }}
+            >
+              <option value="todos">Todos los proveedores</option>
+              {providerOptions.map(([email, name]) => (
+                <option key={email} value={email}>{name}</option>
+              ))}
+            </select>
+          </div>
 
-            <div>
-              <label className="app-label">Proveedor</label>
-              <select
-                className="app-input"
-                value={selectedProvider}
-                onChange={(e) => {
-                  setSelectedProvider(e.target.value);
-                  setSelectedProductId('todos');
-                }}
-              >
-                <option value="todos">Todos</option>
-                {providerOptions.map(([email, name]) => (
-                  <option key={email} value={email}>{name}</option>
-                ))}
-              </select>
-            </div>
+          <div>
+            <label className="app-label text-xs">Producto</label>
+            <select className="app-input" value={selectedProductId} onChange={(e) => setSelectedProductId(e.target.value)}>
+              <option value="todos">Todos los productos</option>
+              {productOptions.map((p) => (
+                <option key={p.id} value={p.id}>{p.title}</option>
+              ))}
+            </select>
+          </div>
 
-            <div>
-              <label className="app-label">Producto</label>
-              <select className="app-input" value={selectedProductId} onChange={(e) => setSelectedProductId(e.target.value)}>
-                <option value="todos">Todos</option>
-                {productOptions.map((p) => (
-                  <option key={p.id} value={p.id}>{p.title}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="app-label">Ordenar</label>
-              <select className="app-input" value={sortMode} onChange={(e) => setSortMode(e.target.value as SortMode)}>
-                <option value="recientes">Recientes</option>
-                <option value="mas_vendidos">Más vendidos</option>
-                <option value="mas_entregados">Más entregados</option>
-                <option value="mayor_facturacion">Mayor facturación</option>
-                <option value="mayor_ganancia">Mayor ganancia</option>
-                <option value="stock_bajo">Stock bajo</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="app-label">Buscar</label>
-              <input
-                className="app-input"
-                placeholder="Nombre, SKU o proveedor"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
+          <div>
+            <label className="app-label text-xs">Ordenar por</label>
+            <select className="app-input" value={sortMode} onChange={(e) => setSortMode(e.target.value as SortMode)}>
+              <option value="recientes">📅 Más recientes</option>
+              <option value="mas_vendidos">🏆 Más vendidos</option>
+              <option value="mas_entregados">🚚 Más entregados</option>
+              <option value="mayor_facturacion">💰 Mayor facturación</option>
+              <option value="mayor_ganancia">📈 Mayor ganancia</option>
+              <option value="stock_bajo">⚠️ Stock bajo</option>
+            </select>
           </div>
         </div>
 
-        <div className="rounded-2xl border border-border bg-secondary/40 p-4 space-y-3">
-          <div className="flex items-center justify-between gap-2 flex-wrap">
-            <div>
-              <div className="font-extrabold text-sm">Gasto publicitario</div>
-              <div className="text-[11px] text-muted-foreground">Guardá un gasto global o asignalo a un producto específico.</div>
-            </div>
-            <span className="chip text-[10px]">Total: {nf(totals.totalAdSpend)} Gs</span>
+        <div>
+          <label className="app-label text-xs">Buscar producto</label>
+          <input
+            className="app-input"
+            placeholder="Nombre, SKU o proveedor..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+      </div>
+
+      {/* Gasto Publicitario - Mejorado */}
+      <div className="rounded-2xl border border-border bg-gradient-to-br from-secondary/40 to-secondary/20 p-5 space-y-5">
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <div className="font-extrabold text-base">💰 Registrar Gasto Publicitario</div>
+            <div className="text-xs text-muted-foreground">Podés asignar el gasto a un período específico (desde - hasta) y asociarlo a un producto o dejarlo global</div>
           </div>
+          <div className="flex gap-2">
+            <span className="chip text-xs bg-primary/20">Total: {nf(totals.totalAdSpend)} Gs</span>
+            <span className="chip text-xs">Global: {nf(generalAdSpend)} Gs</span>
+            <span className="chip text-xs">Productos: {nf(totalProductAdSpend)} Gs</span>
+          </div>
+        </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="app-label">Fecha del gasto</label>
-              <input type="date" className="app-input" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Formulario de gasto */}
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="app-label text-xs">📅 Gasto desde</label>
+                <input 
+                  type="date" 
+                  className="app-input" 
+                  value={adSpendFromDate} 
+                  onChange={(e) => setAdSpendFromDate(e.target.value)} 
+                />
+              </div>
+              <div>
+                <label className="app-label text-xs">📅 Gasto hasta</label>
+                <input 
+                  type="date" 
+                  className="app-input" 
+                  value={adSpendToDate} 
+                  onChange={(e) => setAdSpendToDate(e.target.value)} 
+                />
+              </div>
             </div>
 
             <div>
-              <label className="app-label">Asignar a</label>
-              <select
-                className="app-input"
-                value={adTargetType}
-                onChange={(e) => {
-                  setAdTargetType(e.target.value as 'global' | 'producto');
-                  if (e.target.value === 'global') setAdTargetProductId('');
-                }}
-              >
-                <option value="global">Global / general</option>
-                <option value="producto">Producto específico</option>
-              </select>
+              <label className="app-label text-xs">🎯 Asignar gasto a</label>
+              <div className="flex gap-3 mt-1">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    value="global"
+                    checked={adTargetType === 'global'}
+                    onChange={(e) => {
+                      setAdTargetType(e.target.value as 'global' | 'producto');
+                      if (e.target.value === 'global') setAdTargetProductId('');
+                    }}
+                    className="w-4 h-4"
+                  />
+                  <span className="text-sm">Global / General</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    value="producto"
+                    checked={adTargetType === 'producto'}
+                    onChange={(e) => setAdTargetType(e.target.value as 'global' | 'producto')}
+                    className="w-4 h-4"
+                  />
+                  <span className="text-sm">Producto específico</span>
+                </label>
+              </div>
             </div>
 
             {adTargetType === 'producto' && (
-              <div className="sm:col-span-2">
-                <label className="app-label">Producto del gasto</label>
-                <select className="app-input" value={adTargetProductId} onChange={(e) => setAdTargetProductId(e.target.value)}>
-                  <option value="">Seleccionar producto</option>
+              <div>
+                <label className="app-label text-xs">📦 Seleccionar producto</label>
+                <select 
+                  className="app-input" 
+                  value={adTargetProductId} 
+                  onChange={(e) => setAdTargetProductId(e.target.value)}
+                >
+                  <option value="">-- Elegir producto --</option>
                   {productOptions.map((p) => (
-                    <option key={p.id} value={p.id}>{p.title} {p.sku ? `· ${p.sku}` : ''}</option>
+                    <option key={p.id} value={p.id}>
+                      {p.title} {p.sku ? `· ${p.sku}` : ''}
+                    </option>
                   ))}
                 </select>
               </div>
             )}
 
-            <div>
-              <label className="app-label">Monto Gs</label>
-              <input
-                type="number"
-                className="app-input"
-                value={adAmount || ''}
-                onChange={(e) => setAdAmount(Number(e.target.value))}
-                placeholder="Ej: 50000"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="app-label text-xs">💵 Monto (Gs)</label>
+                <input
+                  type="number"
+                  className="app-input font-mono"
+                  value={adAmount || ''}
+                  onChange={(e) => setAdAmount(Number(e.target.value))}
+                  placeholder="Ej: 50000"
+                />
+              </div>
+              <div>
+                <label className="app-label text-xs">📝 Nota / Plataforma</label>
+                <input
+                  className="app-input"
+                  value={adNote}
+                  onChange={(e) => setAdNote(e.target.value)}
+                  placeholder="Facebook, TikTok, Google..."
+                />
+              </div>
             </div>
 
-            <div>
-              <label className="app-label">Nota</label>
-              <input
-                className="app-input"
-                value={adNote}
-                onChange={(e) => setAdNote(e.target.value)}
-                placeholder="Facebook Ads, TikTok, etc."
-              />
-            </div>
-
-            <button className="nav-btn active sm:col-span-2 h-[42px]" onClick={saveAdSpend}>
-              Guardar gasto publicitario
+            <button className="nav-btn active w-full py-3 text-sm font-bold" onClick={saveAdSpend}>
+              💾 Guardar gasto publicitario
             </button>
           </div>
 
-          {adSpends.length > 0 && (
-            <div className="border-t border-border pt-3 space-y-2 max-h-[210px] overflow-auto pr-1">
-              {adSpends.slice(0, 12).map((s) => {
-                const product = products.find((p) => p.id === s.product_id);
-                return (
-                  <div key={s.id} className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background/60 px-3 py-2">
-                    <div className="min-w-0">
-                      <div className="text-xs font-bold truncate">📣 {product ? product.title : 'Gasto global'}</div>
-                      <div className="text-[10px] text-muted-foreground truncate">{s.spend_date} · {s.note || 'Sin nota'}</div>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <b className="text-xs">{nf(s.amount_gs)} Gs</b>
-                      <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={() => deleteAdSpend(s.id)}>×</button>
-                    </div>
-                  </div>
-                );
-              })}
-              {adSpends.length > 12 && <span className="chip text-[10px]">+{adSpends.length - 12} más</span>}
+          {/* Lista de gastos */}
+          <div className="space-y-3">
+            <div className="font-bold text-sm flex items-center gap-2">
+              📋 Últimos gastos registrados
+              <span className="chip text-xs">{adSpends.length} gastos</span>
             </div>
-          )}
+            
+            <div className="space-y-2 max-h-[320px] overflow-y-auto pr-2 custom-scrollbar">
+              {adSpends.length > 0 ? (
+                adSpends.map((s) => {
+                  const product = products.find((p) => p.id === s.product_id);
+                  return (
+                    <div key={s.id} className="flex items-center justify-between gap-3 rounded-xl border border-border bg-background/80 p-3 hover:shadow-md transition-all group">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-xs font-bold">
+                            {product ? `📦 ${product.title}` : '🌍 Gasto Global'}
+                          </span>
+                          {product && <span className="chip text-[10px]">{product.sku}</span>}
+                        </div>
+                        <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                          <span>📅 {s.spend_date}</span>
+                          {s.note && <span>📌 {s.note}</span>}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-black text-sm font-mono">{nf(s.amount_gs)} Gs</span>
+                        <button 
+                          className="opacity-0 group-hover:opacity-100 transition-opacity nav-btn !px-2 !py-1 !text-xs" 
+                          onClick={() => deleteAdSpend(s.id)}
+                        >
+                          🗑️
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="text-center py-8 text-muted-foreground text-sm">
+                  No hay gastos registrados en el período seleccionado
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2 items-center">
-        {(['general', 'favoritos', 'privados'] as Tab[]).map((t) => (
-          <button
-            key={t}
-            className={`nav-btn ${tab === t ? 'active' : ''}`}
-            onClick={() => setTab(t)}
-          >
-            {t === 'general' ? '📦 General' : t === 'favoritos' ? '⭐ Favoritos' : '🔒 Privados'}
-          </button>
-        ))}
+      {/* Tabs y acciones */}
+      <div className="flex flex-wrap gap-3 items-center justify-between">
+        <div className="flex flex-wrap gap-2">
+          {(['general', 'favoritos', 'privados'] as Tab[]).map((t) => (
+            <button
+              key={t}
+              className={`nav-btn px-4 py-2.5 ${tab === t ? 'active' : ''}`}
+              onClick={() => setTab(t)}
+            >
+              {t === 'general' && '📦 Todos los productos'}
+              {t === 'favoritos' && '⭐ Mis favoritos'}
+              {t === 'privados' && '🔒 Productos privados'}
+            </button>
+          ))}
+        </div>
 
-        {canEdit && <button className="nav-btn active" onClick={openAdd}>+ Agregar producto</button>}
-
-        <span className="chip text-[10px]">{filtered.length} productos</span>
-        <span className="chip text-[10px]">Vendidos: {totals.sold}</span>
-        <span className="chip text-[10px]">Entregados: {totals.delivered}</span>
-        <span className="chip text-[10px]">Cancelados: {totals.cancelled}</span>
+        <div className="flex gap-2 items-center">
+          {canEdit && (
+            <button className="nav-btn active px-4 py-2.5" onClick={openAdd}>
+              + Agregar producto
+            </button>
+          )}
+          <span className="chip text-xs px-3 py-1.5">{filtered.length} productos</span>
+          <span className="chip text-xs px-3 py-1.5">📦 {totals.sold} vendidos</span>
+          <span className="chip text-xs px-3 py-1.5">🚚 {totals.delivered} entregados</span>
+        </div>
       </div>
 
-      {loading && <p className="text-muted-foreground text-sm">Cargando...</p>}
+      {/* Lista de productos */}
+      {loading && (
+        <div className="text-center py-12">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <p className="text-muted-foreground text-sm mt-3">Cargando productos...</p>
+        </div>
+      )}
 
       {grouped.map((group) => (
-        <div key={group.email || group.name} className="mb-6">
-          <div className="flex flex-col lg:flex-row lg:items-center gap-3 mb-3 p-3 rounded-2xl border border-border bg-secondary/50">
-            <div className="flex items-center gap-3 flex-1 min-w-0">
+        <div key={group.email || group.name} className="space-y-4">
+          {/* Header del proveedor */}
+          <div className="flex flex-col lg:flex-row lg:items-center gap-4 p-4 rounded-2xl border border-border bg-gradient-to-r from-secondary/70 to-secondary/30">
+            <div className="flex items-center gap-4 flex-1 min-w-0">
               {group.logo ? (
                 <img
                   src={group.logo}
                   alt={group.name}
-                  className="w-11 h-11 rounded-full object-cover border border-border"
+                  className="w-12 h-12 rounded-full object-cover border-2 border-border"
                 />
               ) : (
-                <div className="w-11 h-11 rounded-full bg-primary/20 flex items-center justify-center font-bold text-sm text-primary">
+                <div className="w-12 h-12 rounded-full bg-primary/20 flex items-center justify-center font-bold text-base text-primary">
                   {getInitials(group.name)}
                 </div>
               )}
 
               <div className="flex-1 min-w-0">
-                <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
+                <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-bold">
                   Proveedor
                 </div>
-                <div className="font-extrabold text-sm truncate">{group.name}</div>
-                <div className="text-[10px] text-muted-foreground truncate">{group.email}</div>
+                <div className="font-extrabold text-base truncate">{group.name}</div>
+                <div className="text-xs text-muted-foreground truncate">{group.email}</div>
               </div>
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2 flex-1">
-              <span className="chip text-[10px]">{group.items.length} productos</span>
-              <span className="chip text-[10px]">📦 {group.totals.sold} vendidos</span>
-              <span className="chip text-[10px]">🚚 {group.totals.delivered} entregados</span>
-              <span className="chip text-[10px]">❌ {group.totals.cancelled} cancelados</span>
-              {canSeeMoney && <span className="chip text-[10px]">💰 {nf(group.totals.realRevenue)} Gs</span>}
-              {canSeeMoney && <span className="chip text-[10px]">✅ {nf(group.totals.netProfit)} Gs neto</span>}
+              <div className="text-center">
+                <div className="font-black text-sm">{group.items.length}</div>
+                <div className="text-[10px] text-muted-foreground">Productos</div>
+              </div>
+              <div className="text-center">
+                <div className="font-black text-sm">{group.totals.sold}</div>
+                <div className="text-[10px] text-muted-foreground">Vendidos</div>
+              </div>
+              <div className="text-center">
+                <div className="font-black text-sm">{group.totals.delivered}</div>
+                <div className="text-[10px] text-muted-foreground">Entregados</div>
+              </div>
+              <div className="text-center">
+                <div className="font-black text-sm">{group.totals.deliveryRate}%</div>
+                <div className="text-[10px] text-muted-foreground">Entrega</div>
+              </div>
+              {canSeeMoney && (
+                <>
+                  <div className="text-center">
+                    <div className="font-black text-sm">{nf(group.totals.realRevenue)}</div>
+                    <div className="text-[10px] text-muted-foreground">Facturación</div>
+                  </div>
+                  <div className="text-center">
+                    <div className={`font-black text-sm ${group.totals.netProfit >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>
+                      {nf(group.totals.netProfit)}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground">Ganancia neta</div>
+                  </div>
+                </>
+              )}
             </div>
 
             {group.phone && canLoadOrder && (
@@ -1190,14 +1303,15 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                 href={`https://wa.me/${group.phone.replace(/[^0-9]/g, '')}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="flex items-center justify-center gap-1.5 nav-btn !px-3 !py-2 !text-xs font-bold text-[#25D366] hover:!bg-[#25D366]/10"
+                className="flex items-center justify-center gap-2 nav-btn !px-4 !py-2.5 text-sm font-bold text-[#25D366] hover:!bg-[#25D366]/10"
               >
-                WhatsApp
+                <span>💬</span> WhatsApp
               </a>
             )}
           </div>
 
-          <div className={viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4' : 'space-y-2'}>
+          {/* Lista de productos del proveedor */}
+          <div className={viewMode === 'grid' ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5' : 'space-y-3'}>
             {group.items.map((p) => {
               const images = getImages(p);
               const mainImg = images[imgIndex[p.id] || 0] || '';
@@ -1212,66 +1326,63 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
               const stockCritical = Number(p.stock || 0) <= 3;
               const topProduct = m.delivered_count >= 10 && deliveryRate >= 70;
 
+              // Vista compacta
               if (viewMode === 'compact') {
                 return (
                   <div
                     key={p.id}
-                    className="bg-secondary border border-border rounded-2xl p-3 flex flex-col md:flex-row gap-3 md:items-center hover:shadow-md transition-all"
+                    className="bg-secondary border border-border rounded-xl p-3 flex flex-col md:flex-row gap-3 md:items-center hover:shadow-md transition-all group"
                   >
                     <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <div className="w-16 h-16 rounded-xl bg-background border border-border overflow-hidden flex items-center justify-center shrink-0">
+                      <div className="w-14 h-14 rounded-lg bg-background border border-border overflow-hidden flex items-center justify-center shrink-0">
                         {mainImg ? <img src={mainImg} alt={p.title} className="w-full h-full object-contain p-1" /> : <span className="text-[10px] text-muted-foreground">Sin img</span>}
                       </div>
-                      <div className="min-w-0">
+                      <div className="min-w-0 flex-1">
                         <div className="text-[10px] uppercase text-muted-foreground font-bold">SKU: {p.sku || '—'}</div>
                         <div className="font-extrabold text-sm truncate">{p.title}</div>
                         <div className="flex flex-wrap gap-1 mt-1">
-                          {stockCritical && <span className="chip text-[10px]">⚠️ Stock bajo</span>}
-                          {topProduct && <span className="chip text-[10px]">🔥 Top</span>}
-                          <span className="chip text-[10px]">Stock: {p.stock ?? 0}</span>
+                          {stockCritical && <span className="chip text-[10px] bg-red-500/15">⚠️ Stock bajo</span>}
+                          {topProduct && <span className="chip text-[10px] bg-emerald-500/15">🔥 Top ventas</span>}
+                          {isPrivateProduct(p) && <span className="chip text-[10px]">🔒 Privado</span>}
                         </div>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-center flex-1">
-                      <div><div className="font-black text-sm">{m.sold_count}</div><div className="text-[10px] text-muted-foreground">Vendidos</div></div>
-                      <div><div className="font-black text-sm">{m.delivered_count}</div><div className="text-[10px] text-muted-foreground">Entregados</div></div>
-                      <div><div className="font-black text-sm">{m.cancelled_count}</div><div className="text-[10px] text-muted-foreground">Cancelados</div></div>
-                      <div><div className="font-black text-sm">{m.returned_count}</div><div className="text-[10px] text-muted-foreground">Devueltos</div></div>
-                      <div><div className="font-black text-sm">{m.no_answer_count}</div><div className="text-[10px] text-muted-foreground">No contesta</div></div>
-                      <div><div className="font-black text-sm">{m.billed_count}</div><div className="text-[10px] text-muted-foreground">Facturados</div></div>
+                    <div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-center">
+                      <div><div className="font-black text-sm">{m.sold_count}</div><div className="text-[10px] text-muted-foreground">Vend.</div></div>
+                      <div><div className="font-black text-sm">{m.delivered_count}</div><div className="text-[10px] text-muted-foreground">Ent.</div></div>
+                      <div><div className="font-black text-sm">{deliveryRate}%</div><div className="text-[10px] text-muted-foreground">Efic.</div></div>
+                      {canSeeMoney && (
+                        <>
+                          <div><div className="font-black text-sm">{nf(productAdSpend)}</div><div className="text-[10px] text-muted-foreground">Ads</div></div>
+                          <div><div className={`font-black text-sm ${netProfit >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{nf(netProfit)}</div><div className="text-[10px] text-muted-foreground">Neto</div></div>
+                        </>
+                      )}
                     </div>
 
-                    {canSeeMoney && (
-                      <div className="min-w-[180px]">
-                        <div className="text-[10px] text-muted-foreground">Real: {nf(m.real_revenue_gs)} Gs</div>
-                        <div className="text-[10px] text-muted-foreground">Ads: {nf(productAdSpend)} Gs</div>
-                        <div className={`font-black text-sm ${netProfit >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>Neto: {nf(netProfit)} Gs</div>
-                      </div>
-                    )}
-
                     <div className="flex gap-1 justify-end">
-                      <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={() => toggleFavorite(p.id)}>{isFav ? '★' : '☆'}</button>
-                      {canEdit && <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={() => openEdit(p)}>Editar</button>}
-                      {canLoadOrder && p.sku && <button className="nav-btn active !px-2 !py-1 !text-[10px]" onClick={() => onLoadProduct?.(p.sku!)}>➕ Cargar</button>}
+                      <button className="nav-btn !px-2 !py-1 text-sm" onClick={() => toggleFavorite(p.id)}>{isFav ? '★' : '☆'}</button>
+                      {canEdit && <button className="nav-btn !px-2 !py-1 text-sm" onClick={() => openEdit(p)}>✏️</button>}
+                      {canLoadOrder && p.sku && <button className="nav-btn active !px-2 !py-1 text-sm" onClick={() => onLoadProduct?.(p.sku!)}>➕</button>}
                     </div>
                   </div>
                 );
               }
 
+              // Vista grid
               return (
                 <div
                   key={p.id}
-                  className="bg-secondary border border-border rounded-[18px] overflow-hidden flex flex-col transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg relative group"
+                  className="bg-secondary border border-border rounded-2xl overflow-hidden flex flex-col transition-all duration-200 hover:-translate-y-1 hover:shadow-xl relative group"
                 >
-                  <div className="absolute top-0 left-0 right-0 h-[3px] bg-gradient-to-r from-primary to-primary/60 opacity-85 z-10" />
+                  <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-primary/70 to-primary/40 z-10" />
 
                   <div
-                    className="relative w-full h-[180px] overflow-hidden bg-background border-b border-border flex items-center justify-center cursor-pointer"
+                    className="relative w-full h-48 overflow-hidden bg-background border-b border-border flex items-center justify-center cursor-pointer"
                     onClick={() => setExpandedId(isExpanded ? null : p.id)}
                   >
                     {mainImg ? (
-                      <img src={mainImg} alt={p.title} className="max-w-full max-h-full object-contain p-2" />
+                      <img src={mainImg} alt={p.title} className="max-w-full max-h-full object-contain p-2 transition-transform group-hover:scale-105" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-muted-foreground text-sm">
                         Sin imagen
@@ -1279,13 +1390,13 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                     )}
 
                     <div className="absolute top-2 left-2 flex flex-col gap-1">
-                      {stockCritical && <span className="chip text-[10px] bg-red-500/15 border-red-500/30">⚠️ Stock bajo</span>}
-                      {topProduct && <span className="chip text-[10px] bg-emerald-500/15 border-emerald-500/30">🔥 Top ventas</span>}
+                      {stockCritical && <span className="chip text-[10px] bg-red-500/20 border-red-500/40">⚠️ Stock bajo</span>}
+                      {topProduct && <span className="chip text-[10px] bg-emerald-500/20 border-emerald-500/40">🔥 Top ventas</span>}
                       {isPrivateProduct(p) && <span className="chip text-[10px]">🔒 Privado</span>}
                     </div>
 
                     <button
-                      className="absolute top-2 right-2 z-20 w-8 h-8 rounded-full bg-background/80 flex items-center justify-center text-lg border border-border hover:scale-110 transition-transform"
+                      className="absolute top-2 right-2 z-20 w-8 h-8 rounded-full bg-background/90 backdrop-blur-sm flex items-center justify-center text-lg border border-border hover:scale-110 transition-transform"
                       onClick={(e) => {
                         e.stopPropagation();
                         toggleFavorite(p.id);
@@ -1296,13 +1407,13 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                   </div>
 
                   {images.length > 1 && (
-                    <div className="flex gap-1 px-2 py-1.5 border-b border-border bg-background/50">
+                    <div className="flex gap-1.5 px-2 py-2 border-b border-border bg-background/50">
                       {images.map((url, i) => (
                         <img
                           key={i}
                           src={url}
                           alt=""
-                          className={`w-12 h-12 rounded-lg object-cover cursor-pointer border-2 transition-all ${
+                          className={`w-10 h-10 rounded-md object-cover cursor-pointer border-2 transition-all ${
                             (imgIndex[p.id] || 0) === i
                               ? 'border-primary'
                               : 'border-border opacity-60 hover:opacity-100'
@@ -1314,16 +1425,17 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                   )}
 
                   <div
-                    className="p-3.5 flex flex-col gap-2 flex-grow min-h-[120px] cursor-pointer"
+                    className="p-4 flex flex-col gap-3 flex-grow cursor-pointer"
                     onClick={() => setExpandedId(isExpanded ? null : p.id)}
                   >
                     <div className="flex items-center justify-between gap-2">
-                      <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-bold">
+                      <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">
                         SKU: {p.sku || '—'}
                       </div>
-                      <span className="chip text-[10px]">{deliveryRate}% entrega</span>
+                      <span className="chip text-[10px]">✅ {deliveryRate}% entrega</span>
                     </div>
-                    <div className="font-extrabold text-[17px] leading-tight">{p.title}</div>
+                    
+                    <div className="font-extrabold text-base leading-tight line-clamp-2">{p.title}</div>
 
                     {p.description && !isExpanded && (
                       <div className="text-xs text-muted-foreground line-clamp-2">{p.description}</div>
@@ -1333,7 +1445,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                       <div className="text-xs text-muted-foreground whitespace-pre-wrap">{p.description}</div>
                     )}
 
-                    <div className="grid grid-cols-3 gap-1.5 mt-1">
+                    <div className="grid grid-cols-3 gap-2 mt-1">
                       <div className="rounded-xl bg-background/70 border border-border p-2 text-center">
                         <div className="font-black text-sm">{m.sold_count}</div>
                         <div className="text-[9px] text-muted-foreground">Vendidos</div>
@@ -1346,86 +1458,79 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                         <div className="font-black text-sm">{m.cancelled_count}</div>
                         <div className="text-[9px] text-muted-foreground">Cancelados</div>
                       </div>
-                      <div className="rounded-xl bg-background/70 border border-border p-2 text-center">
-                        <div className="font-black text-sm">{m.returned_count}</div>
-                        <div className="text-[9px] text-muted-foreground">Devueltos</div>
-                      </div>
-                      <div className="rounded-xl bg-background/70 border border-border p-2 text-center">
-                        <div className="font-black text-sm">{m.no_answer_count}</div>
-                        <div className="text-[9px] text-muted-foreground">No contesta</div>
-                      </div>
-                      <div className="rounded-xl bg-background/70 border border-border p-2 text-center">
-                        <div className="font-black text-sm">{m.billed_count}</div>
-                        <div className="text-[9px] text-muted-foreground">Facturados</div>
-                      </div>
                     </div>
 
                     {canSeeMoney && (
-                      <div className="rounded-2xl border border-border bg-background/70 p-2 space-y-1">
-                        <div className="flex justify-between text-[11px]"><span className="text-muted-foreground">Fact. real</span><b>{nf(m.real_revenue_gs)} Gs</b></div>
-                        <div className="flex justify-between text-[11px]"><span className="text-muted-foreground">Costo</span><b>{nf(m.product_cost_gs)} Gs</b></div>
-                        <div className="flex justify-between text-[11px]"><span className="text-muted-foreground">Publicidad</span><b>{nf(productAdSpend)} Gs</b></div>
-                        <div className="flex justify-between text-[12px] pt-1 border-t border-border">
-                          <span className="font-bold">Neto</span>
-                          <b className={netProfit >= 0 ? 'text-emerald-500' : 'text-red-500'}>{nf(netProfit)} Gs</b>
+                      <div className="rounded-xl border border-border bg-background/70 p-3 space-y-1">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-muted-foreground">Facturación real</span>
+                          <b className="font-mono">{nf(m.real_revenue_gs)} Gs</b>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-muted-foreground">Gasto publicitario</span>
+                          <b className="font-mono">{nf(productAdSpend)} Gs</b>
+                        </div>
+                        <div className="flex justify-between text-sm pt-1 border-t border-border">
+                          <span className="font-bold">Ganancia neta</span>
+                          <b className={`font-mono ${netProfit >= 0 ? 'text-emerald-500' : 'text-red-500'}`}>{nf(netProfit)} Gs</b>
                         </div>
                       </div>
                     )}
 
                     {isExpanded && (
-                      <div className="rounded-2xl border border-border bg-background/70 p-2 grid grid-cols-2 gap-1 text-[10px] text-muted-foreground">
+                      <div className="rounded-xl border border-border bg-background/70 p-2 grid grid-cols-2 gap-1 text-[10px] text-muted-foreground">
                         <div>Cancelación: <b>{cancelRate}%</b></div>
-                        <div>Fact. total: <b>{nf(m.gross_revenue_gs)} Gs</b></div>
-                        <div>Stock: <b>{p.stock ?? 0}</b></div>
+                        <div>Facturación bruta: <b>{nf(m.gross_revenue_gs)} Gs</b></div>
+                        <div>Stock actual: <b>{p.stock ?? 0}</b></div>
                         {canSeeRealCost && <div>Stock real: <b>{p.real_stock ?? 0}</b></div>}
-                        <div>Precio: <b>{nf(Number(p.provider_price_gs || 0))} Gs</b></div>
-                        {canSeeRealCost && <div>Gan/u: <b>{nf(gainUnit)} Gs</b></div>}
+                        <div>Precio venta: <b>{nf(Number(p.provider_price_gs || 0))} Gs</b></div>
+                        {canSeeRealCost && <div>Ganancia/unidad: <b>{nf(gainUnit)} Gs</b></div>}
                       </div>
                     )}
                   </div>
 
-                  <div className="flex justify-between items-center px-3.5 py-3 border-t border-border bg-background/80">
+                  <div className="flex justify-between items-center px-4 py-3 border-t border-border bg-background/80">
                     <div>
-                      <span className="font-extrabold text-sm">{nf(Number(p.provider_price_gs || 0))} Gs</span>
+                      <span className="font-extrabold text-base font-mono">{nf(Number(p.provider_price_gs || 0))} Gs</span>
                       {canSeeRealCost && (
-                        <div className="text-[10px] text-muted-foreground">Gan/u: {nf(gainUnit)} Gs</div>
+                        <div className="text-[10px] text-muted-foreground">Ganancia: {nf(gainUnit)} Gs/unidad</div>
                       )}
                     </div>
 
-                    <div className="flex gap-1">
+                    <div className="flex gap-1.5">
                       {mainImg && (
                         <button
-                          className="nav-btn !px-2 !py-1 !text-[10px]"
+                          className="nav-btn !px-2.5 !py-1.5 text-xs"
                           onClick={(e) => {
                             e.stopPropagation();
                             setViewingImage({ url: mainImg, title: p.title });
                           }}
                         >
-                          👁 Ver
+                          👁️ Ver
                         </button>
                       )}
 
                       {canEdit && (
                         <button
-                          className="nav-btn !px-2 !py-1 !text-[10px]"
+                          className="nav-btn !px-2.5 !py-1.5 text-xs"
                           onClick={(e) => {
                             e.stopPropagation();
                             openEdit(p);
                           }}
                         >
-                          Editar
+                          ✏️ Editar
                         </button>
                       )}
 
                       {canLoadOrder && p.sku && (
                         <button
-                          className="nav-btn active !px-2 !py-1 !text-[10px]"
+                          className="nav-btn active !px-2.5 !py-1.5 text-xs"
                           onClick={(e) => {
                             e.stopPropagation();
                             onLoadProduct?.(p.sku!);
                           }}
                         >
-                          ➕ Cargar
+                          ➕ Cargar pedido
                         </button>
                       )}
                     </div>
@@ -1438,9 +1543,14 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
       ))}
 
       {filtered.length === 0 && !loading && (
-        <p className="text-center text-muted-foreground py-8">Sin productos encontrados</p>
+        <div className="text-center py-16">
+          <div className="text-6xl mb-4">📦</div>
+          <p className="text-muted-foreground">No se encontraron productos</p>
+          <p className="text-sm text-muted-foreground mt-1">Probá con otros filtros o agregá un nuevo producto</p>
+        </div>
       )}
 
+      {/* Modales - mantener igual */}
       {editProduct &&
         createPortal(
           <div
@@ -1636,7 +1746,6 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
           </div>,
           document.body
         )}
-      </div>
     </div>
   );
 }
