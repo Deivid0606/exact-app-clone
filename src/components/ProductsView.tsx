@@ -181,6 +181,88 @@ const isBilledStatus = (s: string | null | undefined) => {
   return ['facturado', 'facturada', 'billed', 'invoiced'].includes(v);
 };
 
+const getOrderValue = (order: any, keys: string[]) => {
+  for (const key of keys) {
+    if (order?.[key] !== undefined && order?.[key] !== null && String(order?.[key]).trim() !== '') {
+      return order[key];
+    }
+  }
+  return null;
+};
+
+const getOrderSku = (order: any) =>
+  String(
+    getOrderValue(order, [
+      'sku',
+      'product_sku',
+      'producto_sku',
+      'productSku',
+      'codigo',
+      'codigo_producto',
+      'product_code',
+    ]) || ''
+  ).trim();
+
+const getOrderProductId = (order: any) =>
+  String(
+    getOrderValue(order, [
+      'product_id',
+      'producto_id',
+      'productId',
+      'product',
+    ]) || ''
+  ).trim();
+
+const getOrderStatus = (order: any) =>
+  String(
+    getOrderValue(order, [
+      'status',
+      'order_status',
+      'estado',
+      'estado_pedido',
+      'delivery_status',
+      'shipping_status',
+    ]) || ''
+  ).trim();
+
+const getOrderProviderEmail = (order: any) =>
+  normalizeEmail(
+    getOrderValue(order, [
+      'provider_email',
+      'proveedor_email',
+      'supplier_email',
+      'email_proveedor',
+    ])
+  );
+
+const getOrderSellerEmail = (order: any) =>
+  normalizeEmail(
+    getOrderValue(order, [
+      'seller_email',
+      'vendedor_email',
+      'email_vendedor',
+      'created_by_email',
+      'user_email',
+    ])
+  );
+
+const getOrderQuantity = (order: any) =>
+  Number(getOrderValue(order, ['quantity', 'qty', 'cantidad', 'units', 'unidades']) || 1);
+
+const getOrderAmount = (order: any, fallbackPrice: number) =>
+  Number(
+    getOrderValue(order, [
+      'total_gs',
+      'total_amount_gs',
+      'amount_gs',
+      'total',
+      'monto_total',
+      'precio_total',
+      'price_gs',
+      'precio',
+    ]) || fallbackPrice || 0
+  );
+
 export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: string) => void }) {
   const { profile } = useAuth();
 
@@ -203,7 +285,8 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
   const [selectedProductId, setSelectedProductId] = useState<string>('todos');
   const [adAmount, setAdAmount] = useState<number>(0);
   const [adNote, setAdNote] = useState<string>('');
-  const [adProductMode, setAdProductMode] = useState<'general' | 'producto'>('general');
+  const [adTargetType, setAdTargetType] = useState<'global' | 'producto'>('global');
+  const [adTargetProductId, setAdTargetProductId] = useState<string>('');
   const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
   const [editProduct, setEditProduct] = useState<(Product & { isNew?: boolean }) | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -359,39 +442,18 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
     try {
       const productMapBySku = new Map<string, Product>();
       const productMapById = new Map<string, Product>();
+
       products.forEach((p) => {
-        if (p.sku) productMapBySku.set(String(p.sku), p);
+        if (p.sku) productMapBySku.set(String(p.sku).trim(), p);
         productMapById.set(p.id, p);
       });
 
-      let query = supabase
+      const { data, error } = await supabase
         .from('orders')
         .select('*')
         .gte('created_at', `${fromDate}T00:00:00`)
         .lte('created_at', `${toDate}T23:59:59`);
 
-      if (visibleSkus.length > 0) {
-        query = query.in('sku', visibleSkus);
-      }
-
-      if (role === 'seller') {
-        query = query.eq('seller_email', myEmail);
-      }
-
-      if (role === 'provider') {
-        query = query.eq('provider_email', myEmail);
-      }
-
-      if (selectedProvider !== 'todos') {
-        query = query.eq('provider_email', selectedProvider);
-      }
-
-      if (selectedProductId !== 'todos') {
-        const selectedProduct = productMapById.get(selectedProductId);
-        if (selectedProduct?.sku) query = query.eq('sku', selectedProduct.sku);
-      }
-
-      const { data, error } = await query;
       if (error) throw error;
 
       const next: Record<string, ProductMetrics> = {};
@@ -405,28 +467,46 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
       });
 
       (data || []).forEach((order: any) => {
-        const sku = String(order.sku || '');
-        const product = productMapBySku.get(sku);
+        const orderSku = getOrderSku(order);
+        const orderProductId = getOrderProductId(order);
+        const orderProviderEmail = getOrderProviderEmail(order);
+        const orderSellerEmail = getOrderSellerEmail(order);
+
+        const product =
+          productMapById.get(orderProductId) ||
+          productMapBySku.get(orderSku) ||
+          products.find((p) => String(p.sku || '').trim() === orderSku);
+
         if (!product) return;
+
+        const productProviderEmail = normalizeEmail(product.provider_email);
+
+        if (!canUserSeeProduct(product, role, myEmail)) return;
+
+        if (role === 'provider' && productProviderEmail !== myEmail && orderProviderEmail !== myEmail) return;
+        if (role === 'seller' && orderSellerEmail && orderSellerEmail !== myEmail) return;
+
+        if (selectedProvider !== 'todos' && productProviderEmail !== selectedProvider && orderProviderEmail !== selectedProvider) return;
+        if (selectedProductId !== 'todos' && product.id !== selectedProductId) return;
 
         const m = next[product.id] || {
           ...emptyMetrics,
           product_id: product.id,
-          sku,
+          sku: product.sku || orderSku,
         };
 
-        const qty = Number(order.quantity || order.qty || 1);
-        const saleAmount = Number(
-          order.total_gs ||
-            order.total_amount_gs ||
-            order.amount_gs ||
-            order.price_gs ||
-            product.provider_price_gs ||
-            0
-        );
+        const qty = getOrderQuantity(order);
+        const unitFallbackPrice = Number(product.provider_price_gs || 0) * qty;
+        const saleAmount = getOrderAmount(order, unitFallbackPrice);
         const realCost = Number(product.real_cost_gs || 0) * qty;
-        const status = order.status || order.order_status || order.estado;
-        const billed = Boolean(order.is_billed || order.facturado || isBilledStatus(status));
+        const status = getOrderStatus(order);
+        const billed = Boolean(
+          order.is_billed ||
+            order.facturado ||
+            order.billed ||
+            order.invoiced ||
+            isBilledStatus(status)
+        );
         const delivered = isDeliveredStatus(status);
         const cancelled = isCancelledStatus(status);
         const returned = isReturnedStatus(status);
@@ -453,11 +533,11 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
       setMetricsByProduct(next);
     } catch (error: any) {
       console.error('Error cargando métricas:', error);
-      toast.error(error?.message || 'No se pudieron cargar métricas. Revisá nombres de columnas de orders.');
+      toast.error(error?.message || 'No se pudieron cargar métricas. Revisá la tabla orders.');
     } finally {
       setMetricsLoading(false);
     }
-  }, [role, myEmail, visibleProductIds.length, visibleSkus, fromDate, toDate, products, selectedProvider, selectedProductId]);
+  }, [role, myEmail, visibleProductIds.length, fromDate, toDate, products, selectedProvider, selectedProductId]);
 
   useEffect(() => {
     load();
@@ -768,8 +848,8 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
       return;
     }
 
-    if (!fromDate || !toDate) {
-      toast.error('Seleccioná fechas');
+    if (!toDate) {
+      toast.error('Seleccioná una fecha');
       return;
     }
 
@@ -778,13 +858,19 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
       return;
     }
 
+    if (adTargetType === 'producto' && !adTargetProductId) {
+      toast.error('Seleccioná el producto para asignar el gasto');
+      return;
+    }
+
     const spendDate = toDate;
-    const targetProductId = adProductMode === 'producto' && selectedProductId !== 'todos' ? selectedProductId : null;
-    const selectedProduct = products.find((p) => p.id === targetProductId);
+    const targetProductId = adTargetType === 'producto' ? adTargetProductId : null;
+    const selectedAdProduct = products.find((p) => p.id === targetProductId);
+
     const providerEmail =
       role === 'provider'
         ? myEmail
-        : selectedProduct?.provider_email || (selectedProvider !== 'todos' ? selectedProvider : null);
+        : selectedAdProduct?.provider_email || (selectedProvider !== 'todos' ? selectedProvider : null);
 
     try {
       const { error } = await supabase.from('ad_spend').insert({
@@ -801,6 +887,8 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
       toast.success('Gasto publicitario guardado');
       setAdAmount(0);
       setAdNote('');
+      setAdTargetType('global');
+      setAdTargetProductId('');
       loadAdSpends();
     } catch (error: any) {
       console.error('Error guardando publicidad:', error);
@@ -852,45 +940,34 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
         </div>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-2">
-        <div className="rounded-2xl border border-border bg-secondary/60 p-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+        <div className="rounded-2xl border border-border bg-secondary/60 p-4">
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Facturación real</div>
-          <div className="font-black text-base mt-1">{nf(totals.realRevenue)} Gs</div>
-          <div className="text-[10px] text-muted-foreground">Solo entregados</div>
+          <div className="font-black text-xl mt-1">{nf(totals.realRevenue)} Gs</div>
+          <div className="text-[10px] text-muted-foreground">Solo pedidos entregados</div>
         </div>
 
-        <div className="rounded-2xl border border-border bg-secondary/60 p-3">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Costo</div>
-          <div className="font-black text-base mt-1">{nf(totals.productCost)} Gs</div>
-          <div className="text-[10px] text-muted-foreground">Costo real entregado</div>
-        </div>
-
-        <div className="rounded-2xl border border-border bg-secondary/60 p-3">
+        <div className="rounded-2xl border border-border bg-secondary/60 p-4">
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Ganancia bruta</div>
-          <div className="font-black text-base mt-1">{nf(totals.grossProfit)} Gs</div>
-          <div className="text-[10px] text-muted-foreground">Antes de publicidad</div>
+          <div className="font-black text-xl mt-1">{nf(totals.grossProfit)} Gs</div>
+          <div className="text-[10px] text-muted-foreground">Facturación real - costo</div>
         </div>
 
-        <div className="rounded-2xl border border-border bg-secondary/60 p-3">
+        <div className="rounded-2xl border border-border bg-secondary/60 p-4">
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Publicidad</div>
-          <div className="font-black text-base mt-1">{nf(totals.totalAdSpend)} Gs</div>
-          <div className="text-[10px] text-muted-foreground">General + producto</div>
+          <div className="font-black text-xl mt-1">{nf(totals.totalAdSpend)} Gs</div>
+          <div className="text-[10px] text-muted-foreground">Global + productos</div>
         </div>
 
-        <div className={`rounded-2xl border p-3 ${totals.netProfit >= 0 ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-red-500/30 bg-red-500/10'}`}>
+        <div className={`rounded-2xl border p-4 ${totals.netProfit >= 0 ? 'border-emerald-500/30 bg-emerald-500/10' : 'border-red-500/30 bg-red-500/10'}`}>
           <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Ganancia neta</div>
-          <div className="font-black text-base mt-1">{nf(totals.netProfit)} Gs</div>
+          <div className="font-black text-xl mt-1">{nf(totals.netProfit)} Gs</div>
           <div className="text-[10px] text-muted-foreground">Bruta - publicidad</div>
-        </div>
-
-        <div className="rounded-2xl border border-border bg-secondary/60 p-3">
-          <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-bold">Conversión</div>
-          <div className="font-black text-base mt-1">{totals.deliveryRate}%</div>
-          <div className="text-[10px] text-muted-foreground">{totals.delivered}/{totals.sold} entregados</div>
         </div>
       </div>
 
-      <div className="rounded-2xl border border-border bg-background/60 p-3 space-y-3">
+      <div className="grid grid-cols-1 xl:grid-cols-[1.35fr_1fr] gap-4">
+        <div className="rounded-2xl border border-border bg-background/60 p-4 space-y-3">
         <div className="flex items-center justify-between gap-2 flex-wrap">
           <div>
             <div className="font-extrabold text-sm">Filtros y rentabilidad</div>
@@ -961,66 +1038,109 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
         </div>
       </div>
 
-      <div className="rounded-2xl border border-border bg-secondary/40 p-3 space-y-3">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <div>
-            <div className="font-extrabold text-sm">Gasto publicitario</div>
-            <div className="text-[11px] text-muted-foreground">
-              Se guarda en la fecha Hasta. Podés asociarlo al filtro general o a un producto seleccionado.
+              </div>
+
+        <div className="rounded-2xl border border-border bg-secondary/40 p-4 space-y-3">
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div>
+              <div className="font-extrabold text-sm">Gasto publicitario</div>
+              <div className="text-[11px] text-muted-foreground">
+                Guardá un gasto global o asignalo a un producto específico.
+              </div>
             </div>
+            <span className="chip text-[10px]">Total: {nf(totals.totalAdSpend)} Gs</span>
           </div>
-          <span className="chip text-[10px]">Total período: {nf(totals.totalAdSpend)} Gs</span>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="app-label">Fecha del gasto</label>
+              <input type="date" className="app-input" value={toDate} onChange={(e) => setToDate(e.target.value)} />
+            </div>
+
+            <div>
+              <label className="app-label">Asignar a</label>
+              <select
+                className="app-input"
+                value={adTargetType}
+                onChange={(e) => {
+                  setAdTargetType(e.target.value as 'global' | 'producto');
+                  if (e.target.value === 'global') setAdTargetProductId('');
+                }}
+              >
+                <option value="global">Global / general</option>
+                <option value="producto">Producto específico</option>
+              </select>
+            </div>
+
+            {adTargetType === 'producto' && (
+              <div className="sm:col-span-2">
+                <label className="app-label">Producto del gasto</label>
+                <select
+                  className="app-input"
+                  value={adTargetProductId}
+                  onChange={(e) => setAdTargetProductId(e.target.value)}
+                >
+                  <option value="">Seleccionar producto</option>
+                  {productOptions.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.title} {p.sku ? `· ${p.sku}` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <div>
+              <label className="app-label">Monto Gs</label>
+              <input
+                type="number"
+                className="app-input"
+                value={adAmount || ''}
+                onChange={(e) => setAdAmount(Number(e.target.value))}
+                placeholder="Ej: 50000"
+              />
+            </div>
+
+            <div>
+              <label className="app-label">Nota</label>
+              <input
+                className="app-input"
+                value={adNote}
+                onChange={(e) => setAdNote(e.target.value)}
+                placeholder="Facebook Ads, TikTok, etc."
+              />
+            </div>
+
+            <button className="nav-btn active sm:col-span-2 h-[42px]" onClick={saveAdSpend}>
+              Guardar gasto publicitario
+            </button>
+          </div>
+
+          {adSpends.length > 0 && (
+            <div className="border-t border-border pt-3 space-y-2 max-h-[210px] overflow-auto pr-1">
+              {adSpends.slice(0, 12).map((s) => {
+                const product = products.find((p) => p.id === s.product_id);
+                return (
+                  <div key={s.id} className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background/60 px-3 py-2">
+                    <div className="min-w-0">
+                      <div className="text-xs font-bold truncate">
+                        📣 {product ? product.title : 'Gasto global'}
+                      </div>
+                      <div className="text-[10px] text-muted-foreground truncate">
+                        {s.spend_date} · {s.note || 'Sin nota'}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <b className="text-xs">{nf(s.amount_gs)} Gs</b>
+                      <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={() => deleteAdSpend(s.id)}>×</button>
+                    </div>
+                  </div>
+                );
+              })}
+              {adSpends.length > 12 && <span className="chip text-[10px]">+{adSpends.length - 12} más</span>}
+            </div>
+          )}
         </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-2 items-end">
-          <div>
-            <label className="app-label">Tipo</label>
-            <select className="app-input" value={adProductMode} onChange={(e) => setAdProductMode(e.target.value as any)}>
-              <option value="general">General</option>
-              <option value="producto">Producto seleccionado</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="app-label">Monto Gs</label>
-            <input
-              type="number"
-              className="app-input"
-              value={adAmount || ''}
-              onChange={(e) => setAdAmount(Number(e.target.value))}
-              placeholder="Ej: 50000"
-            />
-          </div>
-
-          <div className="lg:col-span-3">
-            <label className="app-label">Nota</label>
-            <input
-              className="app-input"
-              value={adNote}
-              onChange={(e) => setAdNote(e.target.value)}
-              placeholder="Ej: Facebook Ads / TikTok Ads"
-            />
-          </div>
-
-          <button className="nav-btn active h-[42px]" onClick={saveAdSpend}>
-            Guardar gasto
-          </button>
-        </div>
-
-        {adSpends.length > 0 && (
-          <div className="flex flex-wrap gap-2 pt-1">
-            {adSpends.slice(0, 8).map((s) => {
-              const product = products.find((p) => p.id === s.product_id);
-              return (
-                <span key={s.id} className="chip text-[10px] flex items-center gap-1">
-                  📣 {s.spend_date} · {nf(s.amount_gs)} Gs {product ? `· ${product.title}` : '· General'}
-                  <button className="ml-1 opacity-70 hover:opacity-100" onClick={() => deleteAdSpend(s.id)}>×</button>
-                </span>
-              );
-            })}
-            {adSpends.length > 8 && <span className="chip text-[10px]">+{adSpends.length - 8} más</span>}
-          </div>
-        )}
       </div>
 
       <div className="flex flex-wrap gap-2 items-center">
