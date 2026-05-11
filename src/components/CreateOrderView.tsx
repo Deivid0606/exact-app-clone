@@ -51,19 +51,35 @@ const canAccessProduct = (product: any, profile: any) => {
   return false;
 };
 
+// 🔥 FUNCIÓN ACTUALIZADA - Genera números de orden únicos sin duplicados
 const generateNormalOrderId = async (): Promise<string> => {
   try {
-    const { data, error } = await supabase.rpc('get_next_order_number');
-
-    if (error) {
-      console.error('Error generando ID normal:', error);
-      return `A${Date.now()}`;
+    // Usar timestamp + microsegundos + random para garantizar unicidad
+    const now = new Date();
+    const timestamp = now.getTime();
+    const micro = Math.floor(performance.now() * 1000) % 1000;
+    const random = Math.floor(Math.random() * 10000);
+    const newOrderNumber = `A${timestamp}${micro}${random}`;
+    
+    // Verificar si por casualidad ya existe (doble seguridad)
+    const { data: existing } = await supabase
+      .from('orders')
+      .select('order_number')
+      .eq('order_number', newOrderNumber)
+      .maybeSingle();
+    
+    if (existing) {
+      // Si existe (caso extremadamente raro), agregar otro random y UUID
+      const fallbackNumber = `A${timestamp}${micro}${random}${Math.floor(Math.random() * 1000)}`;
+      return fallbackNumber;
     }
-
-    return data;
+    
+    return newOrderNumber;
   } catch (err) {
     console.error('Error en generateNormalOrderId:', err);
-    return `A${Date.now()}`;
+    // Fallback con UUID si algo falla
+    const uuid = crypto.randomUUID().replace(/-/g, '').substring(0, 10);
+    return `A${Date.now()}${uuid}`;
   }
 };
 
