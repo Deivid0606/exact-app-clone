@@ -226,12 +226,32 @@ export default function OrdersView() {
     const val = newStatus2 === '--' ? null : newStatus2;
     const order = orders.find(o => o.id === orderId);
     const orderNum = order?.order_number || orderId.slice(0, 8);
-    const { error } = await supabase.from('orders').update({ status2: val, updated_at: new Date().toISOString() }).eq('id', orderId);
-    if (error) { toast.error(error.message); return; }
-    toast.success(`Estado 2 → ${newStatus2}`);
-    setAllOrders(prev => prev.map(o => o.id === orderId ? { ...o, status2: val } : o));
-    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status2: val } : o));
-    if (val) postNews(`Pedido ${orderNum} estado 2 → ${val}`, orderNum);
+
+    const updates: any = {
+      status2: val,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { error } = await supabase
+      .from('orders')
+      .update(updates)
+      .eq('id', orderId);
+
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+
+    toast.success(val ? `Estado 2 → ${val}` : 'Guía removida: vuelve a Pedidos con guías');
+
+    setAllOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updates } : o));
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updates } : o));
+
+    if (val) {
+      postNews(`Pedido ${orderNum} estado 2 → ${val}`, orderNum);
+    } else {
+      postNews(`Pedido ${orderNum} quedó sin guía generada por ${myEmail}`, orderNum);
+    }
   };
 
   const handleAssignDelivery = async (orderId: string, deliveryEmail: string) => {
