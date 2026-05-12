@@ -38,14 +38,12 @@ export default function CommissionRequestsView() {
 
   useEffect(() => { load(); }, []);
 
-  // ✅ Carga pedidos RENDIDOS del vendedor
   const loadBalanceOrders = async () => {
     const { data } = await supabase.from('orders').select('*')
       .gte('created_at', newFrom + 'T00:00:00')
       .lte('created_at', newTo + 'T23:59:59')
       .eq('created_by', myEmail);
     
-    // Filtrar SOLO los que tienen status2 = 'RENDIDO'
     const rendidos = (data || []).filter(o => {
       const status2 = (o.status2 || '').toUpperCase().trim();
       return status2 === 'RENDIDO';
@@ -58,7 +56,6 @@ export default function CommissionRequestsView() {
     if (showForm && role === 'VENDEDOR') loadBalanceOrders(); 
   }, [showForm, newFrom, newTo]);
 
-  // Mapeo de proveedores por SKU
   const skuProviderMap = useMemo(() => {
     const map: Record<string, string> = {};
     products.forEach(p => {
@@ -69,11 +66,28 @@ export default function CommissionRequestsView() {
     return map;
   }, [products]);
 
-  // Calcular balances SOLO de pedidos RENDIDOS
   const balances = useMemo(() => {
+    const usedOrderIds = new Set<string>();
+
+    requests.forEach(req => {
+      if (
+        req.vendor_email?.toLowerCase() === myEmail.toLowerCase() &&
+        req.status !== 'RECHAZADO'
+      ) {
+        const metaJson = req.meta_json as any;
+        const orderIds = Array.isArray(metaJson?.order_ids) ? metaJson.order_ids : [];
+
+        orderIds.forEach((orderId: string) => {
+          if (orderId) usedOrderIds.add(orderId);
+        });
+      }
+    });
+
     const providerCommissions: Record<string, { total: number; orderIds: string[] }> = {};
     
     orders.forEach(order => {
+      if (usedOrderIds.has(order.id)) return;
+
       const commission = Number(order.commission_gs || 0);
       if (commission <= 0) return;
       
@@ -90,7 +104,9 @@ export default function CommissionRequestsView() {
       
       if (providerSet.size === 0 && order.provider_emails_list) {
         const emails = order.provider_emails_list.split(',').map((e: string) => e.trim().toLowerCase());
-        emails.forEach(e => providerSet.add(e));
+        emails.forEach(e => {
+          if (e) providerSet.add(e);
+        });
       }
       
       const providersList = Array.from(providerSet);
@@ -102,17 +118,22 @@ export default function CommissionRequestsView() {
         if (!providerCommissions[prov]) {
           providerCommissions[prov] = { total: 0, orderIds: [] };
         }
+
         providerCommissions[prov].total += perProvider;
+
         if (!providerCommissions[prov].orderIds.includes(order.id)) {
           providerCommissions[prov].orderIds.push(order.id);
         }
       });
     });
-    
-    // Calcular lo ya solicitado
+
     const requested: Record<string, number> = {};
+
     requests.forEach(req => {
-      if (req.vendor_email?.toLowerCase() === myEmail.toLowerCase() && req.status !== 'RECHAZADO') {
+      if (
+        req.vendor_email?.toLowerCase() === myEmail.toLowerCase() &&
+        req.status !== 'RECHAZADO'
+      ) {
         const prov = (req.provider_email || '').toLowerCase();
         requested[prov] = (requested[prov] || 0) + Number(req.amount_gs || 0);
       }
@@ -122,7 +143,7 @@ export default function CommissionRequestsView() {
       provider: providerEmail,
       grossRendido: data.total,
       requested: requested[providerEmail] || 0,
-      available: Math.max(0, data.total - (requested[providerEmail] || 0)),
+      available: data.total,
       orderIds: data.orderIds,
     }));
     
@@ -146,9 +167,19 @@ export default function CommissionRequestsView() {
 
   const createRequest = async () => {
     if (!newProvider) { toast.error('Elegí un proveedor'); return; }
+
     const balance = balances.find(b => b.provider === newProvider);
     const available = balance?.available || 0;
-    if (available <= 0) { toast.error('No tenés saldo disponible para este proveedor'); return; }
+
+    if (available <= 0) {
+      toast.error('No tenés saldo disponible para este proveedor');
+      return;
+    }
+
+    if (!balance?.orderIds?.length) {
+      toast.error('No hay pedidos disponibles para solicitar');
+      return;
+    }
 
     const { error } = await supabase.from('commission_requests').insert({
       vendor_email: myEmail,
@@ -159,9 +190,14 @@ export default function CommissionRequestsView() {
       range_to: newTo,
       requested_by: myEmail,
       status: 'PENDIENTE',
-      meta_json: { order_ids: balance?.orderIds || [], gross: balance?.grossRendido || 0 },
+      meta_json: {
+        order_ids: balance.orderIds,
+        gross: balance.grossRendido,
+      },
     });
+
     if (error) { toast.error(error.message); return; }
+
     toast.success(`Solicitud creada por Gs ${nf(available)}`);
     setShowForm(false);
     setNewProvider('');
@@ -201,12 +237,11 @@ export default function CommissionRequestsView() {
       return;
     }
     
-    // ✅ CAMBIO IMPORTANTE: usar commission_paid en lugar de payment_status
     if (orderIds.length > 0) {
       const { error: ordersError } = await supabase
         .from('orders')
         .update({
-          commission_paid: true,  // ← Cambiado de payment_status a commission_paid
+          commission_paid: true,
           paid_at: new Date().toISOString(),
         })
         .in('id', orderIds);
