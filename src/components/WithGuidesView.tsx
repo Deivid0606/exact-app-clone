@@ -22,10 +22,20 @@ export default function WithGuidesView() {
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
 
   const load = async () => {
-    const { data } = await supabase.from('orders').select('*')
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*')
+      .or('status2.is.null,status2.eq.--')
       .gte('created_at', dateFrom + 'T00:00:00')
       .lte('created_at', dateTo + 'T23:59:59')
-      .order('created_at', { ascending: false }).limit(500);
+      .order('created_at', { ascending: false })
+      .limit(2000);
+
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+
     setOrders(data || []);
   };
 
@@ -147,7 +157,6 @@ export default function WithGuidesView() {
     toast.success(`${selected.length} guías copiadas`);
   };
 
-  // 🔥 NUEVA FUNCIÓN: Marcar múltiples pedidos como GUIA GENERADA
   const bulkMarkAsGuiaGenerada = async () => {
     const selected = getSelectedOrders();
     
@@ -159,7 +168,6 @@ export default function WithGuidesView() {
     const toastId = toast.loading(`Actualizando ${selected.length} pedido${selected.length > 1 ? 's' : ''}...`);
     
     try {
-      // Actualizar todos los pedidos seleccionados
       const updates = selected.map(order => 
         supabase.from('orders').update({ 
           status2: 'GUIA GENERADA', 
@@ -175,12 +183,10 @@ export default function WithGuidesView() {
       } else {
         toast.success(`${selected.length} pedido${selected.length > 1 ? 's' : ''} marcado${selected.length > 1 ? 's' : ''} como GUIA GENERADA`, { id: toastId });
         
-        // Actualizar el estado local
         setOrders(prev => prev.map(o => 
           selectedIds.has(o.id) ? { ...o, status2: 'GUIA GENERADA' } : o
         ));
         
-        // Limpiar selección
         setSelectedIds(new Set());
       }
     } catch (error) {
@@ -188,7 +194,6 @@ export default function WithGuidesView() {
     }
   };
 
-  // 🔥 NUEVA FUNCIÓN: Seleccionar todos los pedidos pendientes
   const selectAllPending = () => {
     const allPendingIds = pendingGuides.map(o => o.id);
     if (allPendingIds.length === 0) {
@@ -199,7 +204,6 @@ export default function WithGuidesView() {
     toast.success(`${allPendingIds.length} pedido${allPendingIds.length > 1 ? 's' : ''} pendiente${allPendingIds.length > 1 ? 's' : ''} seleccionado${allPendingIds.length > 1 ? 's' : ''}`);
   };
 
-  // 🔥 NUEVA FUNCIÓN: Limpiar selección
   const clearSelection = () => {
     if (selectedIds.size === 0) return;
     setSelectedIds(new Set());
@@ -309,7 +313,6 @@ export default function WithGuidesView() {
         <label className="app-label !mt-0">Hasta</label>
         <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
         
-        {/* 🔥 FILTRO DE PROVEEDOR - SOLO PARA NO PROVEEDORES */}
         {role !== 'PROVEEDOR' && (
           <>
             <label className="app-label !mt-0">Proveedor</label>
@@ -325,7 +328,6 @@ export default function WithGuidesView() {
         <button className="nav-btn active" onClick={load}>Filtrar</button>
       </div>
 
-      {/* 🔥 NUEVA BARRA DE ACCIONES MASIVAS */}
       {selectedIds.size > 0 && (
         <div className="flex flex-wrap gap-2 mb-3 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
           <div className="text-sm font-bold text-green-400 mr-2 self-center">
@@ -343,7 +345,6 @@ export default function WithGuidesView() {
         </div>
       )}
 
-      {/* 🔥 BOTONES RÁPIDOS */}
       <div className="flex flex-wrap gap-2 mb-3">
         <button className="nav-btn" onClick={selectAllPending} style={{ background: '#3b82f6', color: 'white' }}>
           ☑️ Seleccionar todos pendientes ({pendingGuides.length})
@@ -403,7 +404,6 @@ export default function WithGuidesView() {
         </table>
       </div>
 
-      {/* Guide Modal */}
       {guideText && (
         <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-4" onClick={() => setGuideText('')}>
           <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-lg" onClick={e => e.stopPropagation()}>
