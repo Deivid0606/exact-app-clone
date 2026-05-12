@@ -60,7 +60,6 @@ export default function CommissionsView() {
     }
 
     const { data } = await query;
-    // Filtrar solo los pedidos elegibles (ENTREGADO/ENCOMIENDA ENTREGADA + RENDIDO)
     setOrders((data || []).filter(o => isElegible(o.status, o.status2)));
   };
 
@@ -80,7 +79,6 @@ export default function CommissionsView() {
     return true;
   });
 
-  // ✅ SOLO pedidos elegibles (ENTREGADO/ENCOMIENDA ENTREGADA + RENDIDO) cuentan para "Rendido disponible"
   const providerBalances = useMemo(() => {
     if (role !== 'VENDEDOR') return [];
 
@@ -91,10 +89,33 @@ export default function CommissionsView() {
       }
     });
 
+    const usedOrderIds = new Set<string>();
+    const yaSolicitado: Record<string, number> = {};
+
+    commissionRequests.forEach(req => {
+      if (
+        req.vendor_email?.toLowerCase() === myEmail.toLowerCase() &&
+        (req.status === 'PENDIENTE' || req.status === 'APROBADO')
+      ) {
+        const prov = (req.provider_email || '').toLowerCase();
+
+        yaSolicitado[prov] =
+          (yaSolicitado[prov] || 0) + Number(req.amount_gs || 0);
+
+        const meta = req.meta_json as any;
+        const orderIds = Array.isArray(meta?.order_ids) ? meta.order_ids : [];
+
+        orderIds.forEach((id: string) => {
+          if (id) usedOrderIds.add(id);
+        });
+      }
+    });
+
     const map: Record<string, {
       provider: string;
       totalComision: number;
       rendido: number;
+      disponible: number;
       orderIds: string[];
     }> = {};
 
@@ -102,7 +123,6 @@ export default function CommissionsView() {
       const commission = Number(o.commission_gs || 0);
       if (commission <= 0) return;
 
-      // ✅ Usar isElegible en lugar de solo status2
       const esRendido = isElegible(o.status, o.status2);
 
       const provSet = new Set<string>();
@@ -128,43 +148,42 @@ export default function CommissionsView() {
       
       provSet.forEach(prov => {
         if (!map[prov]) {
-          map[prov] = { provider: prov, totalComision: 0, rendido: 0, orderIds: [] };
+          map[prov] = {
+            provider: prov,
+            totalComision: 0,
+            rendido: 0,
+            disponible: 0,
+            orderIds: [],
+          };
         }
+
         map[prov].totalComision += perProv;
         
-        // ✅ SOLO si es elegible se suma a "rendido"
         if (esRendido) {
           map[prov].rendido += perProv;
-          if (!map[prov].orderIds.includes(o.id)) {
-            map[prov].orderIds.push(o.id);
+
+          if (!usedOrderIds.has(o.id)) {
+            map[prov].disponible += perProv;
+
+            if (!map[prov].orderIds.includes(o.id)) {
+              map[prov].orderIds.push(o.id);
+            }
           }
         }
       });
     });
 
-    const yaSolicitado: Record<string, number> = {};
-    commissionRequests.forEach(req => {
-      if (req.vendor_email?.toLowerCase() === myEmail.toLowerCase() && 
-          (req.status === 'PENDIENTE' || req.status === 'APROBADO')) {
-        const prov = (req.provider_email || '').toLowerCase();
-        yaSolicitado[prov] = (yaSolicitado[prov] || 0) + Number(req.amount_gs || 0);
-      }
-    });
-
     return Object.values(map).map(b => ({
       ...b,
       yaSolicitado: yaSolicitado[b.provider] || 0,
-      disponible: Math.max(0, b.rendido - (yaSolicitado[b.provider] || 0)),
     })).filter(b => b.totalComision > 0);
   }, [filtered, products, commissionRequests, myEmail, role]);
 
-  // ✅ Total de comisiones de pedidos ENTREGADOS (todos los filtrados son elegibles)
   const totalEntregado = filtered.reduce((s, o) => {
     const commission = Number(o.commission_gs || 0);
     return s + (commission > 0 ? commission : 0);
   }, 0);
   
-  // ✅ Total RENDIDO = SOLO pedidos elegibles (ya todos en filtered lo son)
   const totalRendido = filtered.reduce((s, o) => {
     const commission = Number(o.commission_gs || 0);
     if (commission > 0 && isElegible(o.status, o.status2)) {
@@ -189,7 +208,6 @@ export default function CommissionsView() {
   };
 
   const markAllPaid = async () => {
-    // ✅ Usar isElegible en lugar de solo status2
     const pending = filtered.filter(o => !o.commission_paid && isElegible(o.status, o.status2));
     for (const o of pending) {
       await supabase.from('orders').update({ commission_paid: true, paid_at: new Date().toISOString() }).eq('id', o.id);
