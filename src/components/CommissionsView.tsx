@@ -281,7 +281,7 @@ export default function CommissionsView() {
     : totalEntregado;
 
   const saldoDisponible = filterStatus === 'PAGADO'
-    ? 0
+    ? totalSolicitado
     : totalDisponible;
 
   const togglePaid = async (orderId: string, paid: boolean) => {
@@ -362,7 +362,9 @@ export default function CommissionsView() {
         <div className="kpi-card">
           <div className="text-xs text-muted-foreground mb-1">Saldo disponible (Gs)</div>
           <div className="text-[22px] font-extrabold">{nf(saldoDisponible)}</div>
-          <div className="text-[10px] text-muted-foreground">Solo pedidos en estado RENDIDO</div>
+          <div className="text-[10px] text-muted-foreground">
+            {filterStatus === 'PAGADO' ? 'Total ya cobrado' : 'Solo pedidos en estado RENDIDO'}
+          </div>
         </div>
       </div>
 
@@ -412,7 +414,7 @@ export default function CommissionsView() {
                   )}
                   <td className="text-right font-bold">{nf(filterStatus === 'PAGADO' ? totalAprobadoSolicitudes : totalRendido)}</td>
                   <td className="text-right font-bold">{nf(totalSolicitado)}</td>
-                  <td className="text-right font-bold">{nf(saldoDisponible)}</td>
+                  <td className="text-right font-bold">{nf(filterStatus === 'PAGADO' ? 0 : saldoDisponible)}</td>
                 </tr>
               </tfoot>
             </table>
