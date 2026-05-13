@@ -124,6 +124,7 @@ export default function CommissionsView() {
       if (commission <= 0) return;
 
       const esRendido = isElegible(o.status, o.status2);
+      const noPagado = !o.commission_paid;
 
       const provSet = new Set<string>();
       try {
@@ -162,7 +163,7 @@ export default function CommissionsView() {
         if (esRendido) {
           map[prov].rendido += perProv;
 
-          if (!usedOrderIds.has(o.id)) {
+          if (noPagado && !usedOrderIds.has(o.id)) {
             map[prov].disponible += perProv;
 
             if (!map[prov].orderIds.includes(o.id)) {
