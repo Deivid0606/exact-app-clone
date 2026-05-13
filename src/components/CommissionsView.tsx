@@ -350,11 +350,15 @@ export default function CommissionsView() {
           <div className="text-xs text-muted-foreground mb-1">Pedidos filtrados</div>
           <div className="text-[22px] font-extrabold">{filtered.length}</div>
         </div>
-        <div className="kpi-card">
-          <div className="text-xs text-muted-foreground mb-1">Suma comisión neta (Gs)</div>
-          <div className="text-[22px] font-extrabold">{nf(sumaComisionNeta)}</div>
-          <div className="text-[10px] text-muted-foreground">Total comisiones entregadas</div>
-        </div>
+
+        {(role === 'ADMIN' || role === 'PROVEEDOR') && (
+          <div className="kpi-card">
+            <div className="text-xs text-muted-foreground mb-1">Suma comisión neta (Gs)</div>
+            <div className="text-[22px] font-extrabold">{nf(sumaComisionNeta)}</div>
+            <div className="text-[10px] text-muted-foreground">Total comisiones entregadas</div>
+          </div>
+        )}
+
         <div className="kpi-card">
           <div className="text-xs text-muted-foreground mb-1">Saldo disponible (Gs)</div>
           <div className="text-[22px] font-extrabold">{nf(saldoDisponible)}</div>
