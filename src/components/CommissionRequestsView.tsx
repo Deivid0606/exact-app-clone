@@ -5,6 +5,12 @@ import { toast } from 'sonner';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
+const isElegible = (estado1: any, status2: any) => {
+  const e1 = String(estado1 || '').toUpperCase().trim();
+  const s2 = String(status2 || '').toUpperCase().trim();
+  return (e1 === 'ENTREGADO' || e1 === 'ENCOMIENDA ENTREGADA') && s2 === 'RENDIDO';
+};
+
 export default function CommissionRequestsView() {
   const { profile } = useAuth();
   const role = profile?.role || '';
@@ -45,8 +51,7 @@ export default function CommissionRequestsView() {
       .eq('created_by', myEmail);
     
     const rendidos = (data || []).filter(o => {
-      const status2 = (o.status2 || '').toUpperCase().trim();
-      return status2 === 'RENDIDO';
+      return isElegible(o.status, o.status2) && !o.commission_paid;
     });
     
     setOrders(rendidos);
@@ -87,6 +92,8 @@ export default function CommissionRequestsView() {
     
     orders.forEach(order => {
       if (usedOrderIds.has(order.id)) return;
+      if (!isElegible(order.status, order.status2)) return;
+      if (order.commission_paid) return;
 
       const commission = Number(order.commission_gs || 0);
       if (commission <= 0) return;
