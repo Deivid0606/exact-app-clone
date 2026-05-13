@@ -7,8 +7,6 @@ const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
 const normalizar = (v: any) => String(v || '').toUpperCase().trim();
 
-// Suma comisión neta:
-// ENTREGADO / ENCOMIENDA ENTREGADA / GUIA GENERADA + NO PAGADO
 const isComisionNeta = (estado1: any, commissionPaid: any) => {
   const e1 = normalizar(estado1);
   return (
@@ -19,8 +17,6 @@ const isComisionNeta = (estado1: any, commissionPaid: any) => {
   );
 };
 
-// Saldo disponible:
-// ENTREGADO / ENCOMIENDA ENTREGADA + RENDIDO + NO PAGADO
 const isDisponible = (estado1: any, status2: any, commissionPaid: any) => {
   const e1 = normalizar(estado1);
   const s2 = normalizar(status2);
@@ -31,8 +27,6 @@ const isDisponible = (estado1: any, status2: any, commissionPaid: any) => {
   );
 };
 
-// Ya solicitado:
-// ENTREGADO / ENCOMIENDA ENTREGADA + RENDIDO + PAGADO
 const isYaSolicitado = (estado1: any, status2: any, commissionPaid: any) => {
   const e1 = normalizar(estado1);
   const s2 = normalizar(status2);
@@ -43,7 +37,6 @@ const isYaSolicitado = (estado1: any, status2: any, commissionPaid: any) => {
   );
 };
 
-// Para pintar verde las filas rendidas
 const isElegible = (estado1: any, status2: any) => {
   const e1 = normalizar(estado1);
   const s2 = normalizar(status2);
@@ -129,6 +122,41 @@ export default function CommissionsView() {
     return true;
   });
 
+  const approvedRequestsFiltered = commissionRequests.filter(req => {
+    if (req.status !== 'APROBADO') return false;
+
+    if (role === 'VENDEDOR' && req.vendor_email?.toLowerCase() !== myEmail.toLowerCase()) return false;
+    if (role === 'PROVEEDOR' && req.provider_email?.toLowerCase() !== myEmail.toLowerCase()) return false;
+
+    if ((role === 'ADMIN' || role === 'PROVEEDOR') && filterVendor && req.vendor_email?.toLowerCase() !== filterVendor.toLowerCase()) return false;
+    if (role === 'ADMIN' && filterProvider && req.provider_email?.toLowerCase() !== filterProvider.toLowerCase()) return false;
+
+    const rawDate = req.approved_at || req.requested_at;
+    if (!rawDate) return true;
+
+    const d = new Date(rawDate);
+    const from = new Date(dateFrom + 'T00:00:00');
+    const to = new Date(dateTo + 'T23:59:59');
+
+    return d >= from && d <= to;
+  });
+
+  const approvedByProvider = useMemo(() => {
+    const map: Record<string, number> = {};
+
+    approvedRequestsFiltered.forEach(req => {
+      const prov = String(req.provider_email || '').toLowerCase().trim();
+      if (!prov) return;
+      map[prov] = (map[prov] || 0) + Number(req.amount_gs || 0);
+    });
+
+    return map;
+  }, [approvedRequestsFiltered]);
+
+  const totalAprobadoSolicitudes = approvedRequestsFiltered.reduce((s, req) => {
+    return s + Number(req.amount_gs || 0);
+  }, 0);
+
   const providerBalances = useMemo(() => {
     if (role !== 'VENDEDOR') return [];
 
@@ -204,13 +232,28 @@ export default function CommissionsView() {
       });
     });
 
+    Object.entries(approvedByProvider).forEach(([prov, amount]) => {
+      if (!map[prov]) {
+        map[prov] = {
+          provider: prov,
+          totalComision: 0,
+          rendido: 0,
+          disponible: 0,
+          yaSolicitado: 0,
+          orderIds: [],
+        };
+      }
+
+      map[prov].yaSolicitado = amount;
+    });
+
     return Object.values(map).filter(b =>
       b.totalComision > 0 ||
       b.rendido > 0 ||
       b.disponible > 0 ||
       b.yaSolicitado > 0
     );
-  }, [baseFiltered, products, myEmail, role]);
+  }, [baseFiltered, products, myEmail, role, approvedByProvider]);
 
   const totalEntregado = baseFiltered.reduce((s, o) => {
     const commission = Number(o.commission_gs || 0);
@@ -228,11 +271,19 @@ export default function CommissionsView() {
     return s;
   }, 0);
   
-  const totalSolicitado = providerBalances.reduce((s, b) => s + b.yaSolicitado, 0);
+  const totalSolicitado = filterStatus === 'PAGADO'
+    ? totalAprobadoSolicitudes
+    : providerBalances.reduce((s, b) => s + b.yaSolicitado, 0);
+
   const totalDisponible = providerBalances.reduce((s, b) => s + b.disponible, 0);
   
-  const sumaComisionNeta = totalEntregado;
-  const saldoDisponible = totalDisponible;
+  const sumaComisionNeta = filterStatus === 'PAGADO'
+    ? totalAprobadoSolicitudes
+    : totalEntregado;
+
+  const saldoDisponible = filterStatus === 'PAGADO'
+    ? 0
+    : totalDisponible;
 
   const togglePaid = async (orderId: string, paid: boolean) => {
     const { error } = await supabase.from('orders').update({
@@ -332,10 +383,10 @@ export default function CommissionsView() {
                   return (
                     <tr key={b.provider}>
                       <td className="text-xs font-medium">{providerName}</td>
-                      <td className="text-right text-xs">{nf(b.totalComision)}</td>
-                      <td className="text-right text-xs text-green-600">{nf(b.rendido)}</td>
+                      <td className="text-right text-xs">{nf(filterStatus === 'PAGADO' ? b.yaSolicitado : b.totalComision)}</td>
+                      <td className="text-right text-xs text-green-600">{nf(filterStatus === 'PAGADO' ? b.yaSolicitado : b.rendido)}</td>
                       <td className="text-right text-xs text-orange-600">{nf(b.yaSolicitado)}</td>
-                      <td className="text-right text-xs font-bold text-blue-600">{nf(b.disponible)}</td>
+                      <td className="text-right text-xs font-bold text-blue-600">{nf(filterStatus === 'PAGADO' ? 0 : b.disponible)}</td>
                     </tr>
                   );
                 })}
@@ -343,8 +394,8 @@ export default function CommissionsView() {
               <tfoot className="bg-muted/30">
                 <tr>
                   <td className="font-bold">TOTAL</td>
-                  <td className="text-right font-bold">{nf(totalEntregado)}</td>
-                  <td className="text-right font-bold">{nf(totalRendido)}</td>
+                  <td className="text-right font-bold">{nf(sumaComisionNeta)}</td>
+                  <td className="text-right font-bold">{nf(filterStatus === 'PAGADO' ? totalAprobadoSolicitudes : totalRendido)}</td>
                   <td className="text-right font-bold">{nf(totalSolicitado)}</td>
                   <td className="text-right font-bold">{nf(saldoDisponible)}</td>
                 </tr>
