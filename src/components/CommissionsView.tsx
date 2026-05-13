@@ -371,54 +371,96 @@ export default function CommissionsView() {
       {(role === 'VENDEDOR' || role === 'PROVEEDOR' || role === 'ADMIN') && providerBalances.length > 0 && (
         <div className="mb-4">
           <h4 className="font-bold text-sm mb-2">📊 Desglose por Proveedor</h4>
-          <div className="overflow-auto">
-            <table className="app-table text-sm">
-              <thead>
-                <tr className="bg-muted/50">
-                  {(role === 'ADMIN' || role === 'PROVEEDOR') && (
-                    <>
-                      <th className="text-left">Proveedor</th>
-                      <th className="text-right">Comisión total (Gs)</th>
-                    </>
-                  )}
-                  <th className="text-right">Rendido disponible (Gs)</th>
-                  <th className="text-right">Ya solicitado (Gs)</th>
-                  <th className="text-right">Disponible para solicitar (Gs)</th>
-                 </tr>
-              </thead>
-              <tbody>
-                {providerBalances.map(b => {
-                  const providerName = providers.find(p => p.email?.toLowerCase() === b.provider)?.name || b.provider;
-                  return (
-                    <tr key={b.provider}>
-                      {(role === 'ADMIN' || role === 'PROVEEDOR') && (
-                        <>
-                          <td className="text-xs font-medium">{providerName}</td>
-                          <td className="text-right text-xs">{nf(filterStatus === 'PAGADO' ? b.yaSolicitado : b.totalComision)}</td>
-                        </>
-                      )}
-                      <td className="text-right text-xs text-green-600">{nf(filterStatus === 'PAGADO' ? b.yaSolicitado : b.rendido)}</td>
-                      <td className="text-right text-xs text-orange-600">{nf(b.yaSolicitado)}</td>
-                      <td className="text-right text-xs font-bold text-blue-600">{nf(filterStatus === 'PAGADO' ? 0 : b.disponible)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              <tfoot className="bg-muted/30">
-                <tr>
-                  {(role === 'ADMIN' || role === 'PROVEEDOR') && (
-                    <>
-                      <td className="font-bold">TOTAL</td>
-                      <td className="text-right font-bold">{nf(sumaComisionNeta)}</td>
-                    </>
-                  )}
-                  <td className="text-right font-bold">{nf(filterStatus === 'PAGADO' ? totalAprobadoSolicitudes : totalRendido)}</td>
-                  <td className="text-right font-bold">{nf(totalSolicitado)}</td>
-                  <td className="text-right font-bold">{nf(filterStatus === 'PAGADO' ? 0 : saldoDisponible)}</td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
+
+          {role === 'VENDEDOR' ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {providerBalances.map(b => {
+                const providerName = providers.find(p => p.email?.toLowerCase() === b.provider)?.name || b.provider;
+                const rendido = filterStatus === 'PAGADO' ? b.yaSolicitado : b.rendido;
+                const disponible = filterStatus === 'PAGADO' ? 0 : b.disponible;
+
+                return (
+                  <div key={b.provider} className="kpi-card">
+                    <div className="flex items-start justify-between gap-2 mb-3">
+                      <div>
+                        <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Proveedor</div>
+                        <div className="text-sm font-extrabold leading-tight">{providerName}</div>
+                      </div>
+                      <span className={`badge-status ${filterStatus === 'PAGADO' ? 'badge-entregado' : 'badge-pendiente'}`}>
+                        {filterStatus === 'PAGADO' ? 'PAGADO' : 'PENDIENTE'}
+                      </span>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-xs text-muted-foreground">Rendido disponible</span>
+                        <span className="text-sm font-bold text-green-600">Gs {nf(rendido)}</span>
+                      </div>
+
+                      <div className="flex items-center justify-between gap-3">
+                        <span className="text-xs text-muted-foreground">Ya solicitado</span>
+                        <span className="text-sm font-bold text-orange-600">Gs {nf(b.yaSolicitado)}</span>
+                      </div>
+
+                      <div className="pt-2 border-t border-border flex items-center justify-between gap-3">
+                        <span className="text-xs font-bold">Disponible para solicitar</span>
+                        <span className="text-base font-extrabold text-blue-600">Gs {nf(disponible)}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="overflow-auto">
+              <table className="app-table text-sm">
+                <thead>
+                  <tr className="bg-muted/50">
+                    {(role === 'ADMIN' || role === 'PROVEEDOR') && (
+                      <>
+                        <th className="text-left">Proveedor</th>
+                        <th className="text-right">Comisión total (Gs)</th>
+                      </>
+                    )}
+                    <th className="text-right">Rendido disponible (Gs)</th>
+                    <th className="text-right">Ya solicitado (Gs)</th>
+                    <th className="text-right">Disponible para solicitar (Gs)</th>
+                   </tr>
+                </thead>
+                <tbody>
+                  {providerBalances.map(b => {
+                    const providerName = providers.find(p => p.email?.toLowerCase() === b.provider)?.name || b.provider;
+                    return (
+                      <tr key={b.provider}>
+                        {(role === 'ADMIN' || role === 'PROVEEDOR') && (
+                          <>
+                            <td className="text-xs font-medium">{providerName}</td>
+                            <td className="text-right text-xs">{nf(filterStatus === 'PAGADO' ? b.yaSolicitado : b.totalComision)}</td>
+                          </>
+                        )}
+                        <td className="text-right text-xs text-green-600">{nf(filterStatus === 'PAGADO' ? b.yaSolicitado : b.rendido)}</td>
+                        <td className="text-right text-xs text-orange-600">{nf(b.yaSolicitado)}</td>
+                        <td className="text-right text-xs font-bold text-blue-600">{nf(filterStatus === 'PAGADO' ? 0 : b.disponible)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot className="bg-muted/30">
+                  <tr>
+                    {(role === 'ADMIN' || role === 'PROVEEDOR') && (
+                      <>
+                        <td className="font-bold">TOTAL</td>
+                        <td className="text-right font-bold">{nf(sumaComisionNeta)}</td>
+                      </>
+                    )}
+                    <td className="text-right font-bold">{nf(filterStatus === 'PAGADO' ? totalAprobadoSolicitudes : totalRendido)}</td>
+                    <td className="text-right font-bold">{nf(totalSolicitado)}</td>
+                    <td className="text-right font-bold">{nf(filterStatus === 'PAGADO' ? 0 : saldoDisponible)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
