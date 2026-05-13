@@ -51,7 +51,7 @@ export default function CommissionRequestsView() {
       .eq('created_by', myEmail);
     
     const rendidos = (data || []).filter(o => {
-      return isElegible(o.status, o.status2) && !o.commission_paid;
+      return isElegible(o.status, o.status2);
     });
     
     setOrders(rendidos);
@@ -72,28 +72,10 @@ export default function CommissionRequestsView() {
   }, [products]);
 
   const balances = useMemo(() => {
-    const usedOrderIds = new Set<string>();
-
-    requests.forEach(req => {
-      if (
-        req.vendor_email?.toLowerCase() === myEmail.toLowerCase() &&
-        req.status !== 'RECHAZADO'
-      ) {
-        const metaJson = req.meta_json as any;
-        const orderIds = Array.isArray(metaJson?.order_ids) ? metaJson.order_ids : [];
-
-        orderIds.forEach((orderId: string) => {
-          if (orderId) usedOrderIds.add(orderId);
-        });
-      }
-    });
-
-    const providerCommissions: Record<string, { total: number; orderIds: string[] }> = {};
+    const providerCommissions: Record<string, { total: number; requested: number; orderIds: string[] }> = {};
     
     orders.forEach(order => {
-      if (usedOrderIds.has(order.id)) return;
       if (!isElegible(order.status, order.status2)) return;
-      if (order.commission_paid) return;
 
       const commission = Number(order.commission_gs || 0);
       if (commission <= 0) return;
@@ -123,39 +105,31 @@ export default function CommissionRequestsView() {
       
       providersList.forEach(prov => {
         if (!providerCommissions[prov]) {
-          providerCommissions[prov] = { total: 0, orderIds: [] };
+          providerCommissions[prov] = { total: 0, requested: 0, orderIds: [] };
         }
 
-        providerCommissions[prov].total += perProvider;
+        if (order.commission_paid) {
+          providerCommissions[prov].requested += perProvider;
+        } else {
+          providerCommissions[prov].total += perProvider;
 
-        if (!providerCommissions[prov].orderIds.includes(order.id)) {
-          providerCommissions[prov].orderIds.push(order.id);
+          if (!providerCommissions[prov].orderIds.includes(order.id)) {
+            providerCommissions[prov].orderIds.push(order.id);
+          }
         }
       });
     });
 
-    const requested: Record<string, number> = {};
-
-    requests.forEach(req => {
-      if (
-        req.vendor_email?.toLowerCase() === myEmail.toLowerCase() &&
-        req.status !== 'RECHAZADO'
-      ) {
-        const prov = (req.provider_email || '').toLowerCase();
-        requested[prov] = (requested[prov] || 0) + Number(req.amount_gs || 0);
-      }
-    });
-    
     const result = Object.entries(providerCommissions).map(([providerEmail, data]) => ({
       provider: providerEmail,
       grossRendido: data.total,
-      requested: requested[providerEmail] || 0,
+      requested: data.requested,
       available: data.total,
       orderIds: data.orderIds,
     }));
     
     return result;
-  }, [orders, skuProviderMap, requests, myEmail]);
+  }, [orders, skuProviderMap]);
 
   const filtered = requests.filter(r => {
     if (filterStatus && r.status !== filterStatus) return false;
@@ -263,6 +237,7 @@ export default function CommissionRequestsView() {
     }
     
     load();
+    if (showForm && role === 'VENDEDOR') loadBalanceOrders();
   };
 
   const reject = async (id: string) => {
