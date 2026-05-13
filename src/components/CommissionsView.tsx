@@ -5,10 +5,48 @@ import { toast } from 'sonner';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
-// Helper para verificar si un pedido es elegible para comisión
+const normalizar = (v: any) => String(v || '').toUpperCase().trim();
+
+// Suma comisión neta:
+// ENTREGADO / ENCOMIENDA ENTREGADA / GUIA GENERADA + NO PAGADO
+const isComisionNeta = (estado1: any, commissionPaid: any) => {
+  const e1 = normalizar(estado1);
+  return (
+    (e1 === 'ENTREGADO' ||
+      e1 === 'ENCOMIENDA ENTREGADA' ||
+      e1 === 'GUIA GENERADA') &&
+    !commissionPaid
+  );
+};
+
+// Saldo disponible:
+// ENTREGADO / ENCOMIENDA ENTREGADA + RENDIDO + NO PAGADO
+const isDisponible = (estado1: any, status2: any, commissionPaid: any) => {
+  const e1 = normalizar(estado1);
+  const s2 = normalizar(status2);
+  return (
+    (e1 === 'ENTREGADO' || e1 === 'ENCOMIENDA ENTREGADA') &&
+    s2 === 'RENDIDO' &&
+    !commissionPaid
+  );
+};
+
+// Ya solicitado:
+// ENTREGADO / ENCOMIENDA ENTREGADA + RENDIDO + PAGADO
+const isYaSolicitado = (estado1: any, status2: any, commissionPaid: any) => {
+  const e1 = normalizar(estado1);
+  const s2 = normalizar(status2);
+  return (
+    (e1 === 'ENTREGADO' || e1 === 'ENCOMIENDA ENTREGADA') &&
+    s2 === 'RENDIDO' &&
+    !!commissionPaid
+  );
+};
+
+// Para pintar verde las filas rendidas
 const isElegible = (estado1: any, status2: any) => {
-  const e1 = String(estado1 || '').toUpperCase().trim();
-  const s2 = String(status2 || '').toUpperCase().trim();
+  const e1 = normalizar(estado1);
+  const s2 = normalizar(status2);
   return (e1 === 'ENTREGADO' || e1 === 'ENCOMIENDA ENTREGADA') && s2 === 'RENDIDO';
 };
 
@@ -60,14 +98,20 @@ export default function CommissionsView() {
     }
 
     const { data } = await query;
-    setOrders((data || []).filter(o => isElegible(o.status, o.status2)));
+
+    setOrders((data || []).filter(o => {
+      const e1 = normalizar(o.status);
+      return (
+        e1 === 'ENTREGADO' ||
+        e1 === 'ENCOMIENDA ENTREGADA' ||
+        e1 === 'GUIA GENERADA'
+      );
+    }));
   };
 
   useEffect(() => { loadCommissions(); }, [dateFrom, dateTo]);
 
-  const filtered = orders.filter(o => {
-    if (filterStatus === 'PENDIENTE' && o.commission_paid) return false;
-    if (filterStatus === 'PAGADO' && !o.commission_paid) return false;
+  const baseFiltered = orders.filter(o => {
     if (filterVendor && o.created_by?.toLowerCase() !== filterVendor.toLowerCase()) return false;
     if (role === 'ADMIN' && filterProvider && !(o.provider_emails_list || '').toLowerCase().includes(filterProvider.toLowerCase())) return false;
     if (search) {
@@ -76,6 +120,12 @@ export default function CommissionsView() {
         (o.phone || '').includes(q) ||
         (o.order_number || '').toLowerCase().includes(q);
     }
+    return true;
+  });
+
+  const filtered = baseFiltered.filter(o => {
+    if (filterStatus === 'PENDIENTE' && o.commission_paid) return false;
+    if (filterStatus === 'PAGADO' && !o.commission_paid) return false;
     return true;
   });
 
@@ -89,42 +139,18 @@ export default function CommissionsView() {
       }
     });
 
-    const usedOrderIds = new Set<string>();
-    const yaSolicitado: Record<string, number> = {};
-
-    commissionRequests.forEach(req => {
-      if (
-        req.vendor_email?.toLowerCase() === myEmail.toLowerCase() &&
-        (req.status === 'PENDIENTE' || req.status === 'APROBADO')
-      ) {
-        const prov = (req.provider_email || '').toLowerCase();
-
-        yaSolicitado[prov] =
-          (yaSolicitado[prov] || 0) + Number(req.amount_gs || 0);
-
-        const meta = req.meta_json as any;
-        const orderIds = Array.isArray(meta?.order_ids) ? meta.order_ids : [];
-
-        orderIds.forEach((id: string) => {
-          if (id) usedOrderIds.add(id);
-        });
-      }
-    });
-
     const map: Record<string, {
       provider: string;
       totalComision: number;
       rendido: number;
       disponible: number;
+      yaSolicitado: number;
       orderIds: string[];
     }> = {};
 
-    filtered.forEach(o => {
+    baseFiltered.forEach(o => {
       const commission = Number(o.commission_gs || 0);
       if (commission <= 0) return;
-
-      const esRendido = isElegible(o.status, o.status2);
-      const noPagado = !o.commission_paid;
 
       const provSet = new Set<string>();
       try {
@@ -154,40 +180,49 @@ export default function CommissionsView() {
             totalComision: 0,
             rendido: 0,
             disponible: 0,
+            yaSolicitado: 0,
             orderIds: [],
           };
         }
 
-        map[prov].totalComision += perProv;
+        if (isComisionNeta(o.status, o.commission_paid)) {
+          map[prov].totalComision += perProv;
+        }
         
-        if (esRendido) {
+        if (isDisponible(o.status, o.status2, o.commission_paid)) {
           map[prov].rendido += perProv;
+          map[prov].disponible += perProv;
 
-          if (noPagado && !usedOrderIds.has(o.id)) {
-            map[prov].disponible += perProv;
-
-            if (!map[prov].orderIds.includes(o.id)) {
-              map[prov].orderIds.push(o.id);
-            }
+          if (!map[prov].orderIds.includes(o.id)) {
+            map[prov].orderIds.push(o.id);
           }
+        }
+
+        if (isYaSolicitado(o.status, o.status2, o.commission_paid)) {
+          map[prov].yaSolicitado += perProv;
         }
       });
     });
 
-    return Object.values(map).map(b => ({
-      ...b,
-      yaSolicitado: yaSolicitado[b.provider] || 0,
-    })).filter(b => b.totalComision > 0);
-  }, [filtered, products, commissionRequests, myEmail, role]);
+    return Object.values(map).filter(b =>
+      b.totalComision > 0 ||
+      b.rendido > 0 ||
+      b.disponible > 0 ||
+      b.yaSolicitado > 0
+    );
+  }, [baseFiltered, products, myEmail, role]);
 
-  const totalEntregado = filtered.reduce((s, o) => {
+  const totalEntregado = baseFiltered.reduce((s, o) => {
     const commission = Number(o.commission_gs || 0);
-    return s + (commission > 0 ? commission : 0);
+    if (commission > 0 && isComisionNeta(o.status, o.commission_paid)) {
+      return s + commission;
+    }
+    return s;
   }, 0);
   
-  const totalRendido = filtered.reduce((s, o) => {
+  const totalRendido = baseFiltered.reduce((s, o) => {
     const commission = Number(o.commission_gs || 0);
-    if (commission > 0 && isElegible(o.status, o.status2)) {
+    if (commission > 0 && isDisponible(o.status, o.status2, o.commission_paid)) {
       return s + commission;
     }
     return s;
@@ -209,7 +244,7 @@ export default function CommissionsView() {
   };
 
   const markAllPaid = async () => {
-    const pending = filtered.filter(o => !o.commission_paid && isElegible(o.status, o.status2));
+    const pending = baseFiltered.filter(o => isDisponible(o.status, o.status2, o.commission_paid));
     for (const o of pending) {
       await supabase.from('orders').update({ commission_paid: true, paid_at: new Date().toISOString() }).eq('id', o.id);
     }
