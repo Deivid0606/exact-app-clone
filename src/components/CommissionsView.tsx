@@ -117,6 +117,7 @@ export default function CommissionsView() {
   });
 
   const filtered = baseFiltered.filter(o => {
+    if (normalizar(o.status2) !== 'RENDIDO') return false;
     if (filterStatus === 'PENDIENTE' && o.commission_paid) return false;
     if (filterStatus === 'PAGADO' && !o.commission_paid) return false;
     return true;
@@ -158,8 +159,6 @@ export default function CommissionsView() {
   }, 0);
 
   const providerBalances = useMemo(() => {
-    if (role !== 'VENDEDOR') return [];
-
     const skuProvider: Record<string, string> = {};
     products.forEach(p => {
       if (p.sku && p.provider_email) {
@@ -253,7 +252,7 @@ export default function CommissionsView() {
       b.disponible > 0 ||
       b.yaSolicitado > 0
     );
-  }, [baseFiltered, products, myEmail, role, approvedByProvider]);
+  }, [baseFiltered, products, approvedByProvider]);
 
   const totalEntregado = baseFiltered.reduce((s, o) => {
     const commission = Number(o.commission_gs || 0);
@@ -363,15 +362,19 @@ export default function CommissionsView() {
         </div>
       </div>
 
-      {role === 'VENDEDOR' && providerBalances.length > 0 && (
+      {(role === 'VENDEDOR' || role === 'PROVEEDOR' || role === 'ADMIN') && providerBalances.length > 0 && (
         <div className="mb-4">
           <h4 className="font-bold text-sm mb-2">📊 Desglose por Proveedor</h4>
           <div className="overflow-auto">
             <table className="app-table text-sm">
               <thead>
                 <tr className="bg-muted/50">
-                  <th className="text-left">Proveedor</th>
-                  <th className="text-right">Comisión total (Gs)</th>
+                  {(role === 'ADMIN' || role === 'PROVEEDOR') && (
+                    <>
+                      <th className="text-left">Proveedor</th>
+                      <th className="text-right">Comisión total (Gs)</th>
+                    </>
+                  )}
                   <th className="text-right">Rendido disponible (Gs)</th>
                   <th className="text-right">Ya solicitado (Gs)</th>
                   <th className="text-right">Disponible para solicitar (Gs)</th>
@@ -382,8 +385,12 @@ export default function CommissionsView() {
                   const providerName = providers.find(p => p.email?.toLowerCase() === b.provider)?.name || b.provider;
                   return (
                     <tr key={b.provider}>
-                      <td className="text-xs font-medium">{providerName}</td>
-                      <td className="text-right text-xs">{nf(filterStatus === 'PAGADO' ? b.yaSolicitado : b.totalComision)}</td>
+                      {(role === 'ADMIN' || role === 'PROVEEDOR') && (
+                        <>
+                          <td className="text-xs font-medium">{providerName}</td>
+                          <td className="text-right text-xs">{nf(filterStatus === 'PAGADO' ? b.yaSolicitado : b.totalComision)}</td>
+                        </>
+                      )}
                       <td className="text-right text-xs text-green-600">{nf(filterStatus === 'PAGADO' ? b.yaSolicitado : b.rendido)}</td>
                       <td className="text-right text-xs text-orange-600">{nf(b.yaSolicitado)}</td>
                       <td className="text-right text-xs font-bold text-blue-600">{nf(filterStatus === 'PAGADO' ? 0 : b.disponible)}</td>
@@ -393,8 +400,12 @@ export default function CommissionsView() {
               </tbody>
               <tfoot className="bg-muted/30">
                 <tr>
-                  <td className="font-bold">TOTAL</td>
-                  <td className="text-right font-bold">{nf(sumaComisionNeta)}</td>
+                  {(role === 'ADMIN' || role === 'PROVEEDOR') && (
+                    <>
+                      <td className="font-bold">TOTAL</td>
+                      <td className="text-right font-bold">{nf(sumaComisionNeta)}</td>
+                    </>
+                  )}
                   <td className="text-right font-bold">{nf(filterStatus === 'PAGADO' ? totalAprobadoSolicitudes : totalRendido)}</td>
                   <td className="text-right font-bold">{nf(totalSolicitado)}</td>
                   <td className="text-right font-bold">{nf(saldoDisponible)}</td>
