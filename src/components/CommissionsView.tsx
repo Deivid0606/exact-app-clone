@@ -65,7 +65,7 @@ export default function CommissionsView() {
 
   useEffect(() => {
     Promise.all([
-      supabase.from('profiles').select('email, name'),
+      supabase.from('profiles').select('email, name, logo_url'),
       supabase.from('products').select('sku, provider_email'),
       supabase.from('commission_requests').select('*'),
     ]).then(([profilesRes, productsRes, requestsRes]) => {
@@ -375,19 +375,41 @@ export default function CommissionsView() {
           {role === 'VENDEDOR' ? (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
               {providerBalances.map(b => {
-                const providerName = providers.find(p => p.email?.toLowerCase() === b.provider)?.name || b.provider;
+                const providerProfile = providers.find(p => p.email?.toLowerCase() === b.provider);
+                const providerName = providerProfile?.name || b.provider;
+                const providerLogo = providerProfile?.logo_url || '';
                 const rendido = filterStatus === 'PAGADO' ? b.yaSolicitado : b.rendido;
                 const disponible = filterStatus === 'PAGADO' ? 0 : b.disponible;
+                const cardStatus = filterStatus === 'PAGADO'
+                  ? 'PAGADO'
+                  : disponible > 0
+                    ? 'PENDIENTE'
+                    : 'AL DÍA';
 
                 return (
                   <div key={b.provider} className="kpi-card">
-                    <div className="flex items-start justify-between gap-2 mb-3">
-                      <div>
-                        <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Proveedor</div>
-                        <div className="text-sm font-extrabold leading-tight">{providerName}</div>
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div className="flex items-center gap-3 min-w-0">
+                        {providerLogo ? (
+                          <img
+                            src={providerLogo}
+                            alt={providerName}
+                            className="w-10 h-10 rounded-xl object-cover border border-border bg-background shrink-0"
+                          />
+                        ) : (
+                          <div className="w-10 h-10 rounded-xl border border-border bg-secondary flex items-center justify-center text-sm font-extrabold shrink-0">
+                            {String(providerName || '?').slice(0, 1).toUpperCase()}
+                          </div>
+                        )}
+
+                        <div className="min-w-0">
+                          <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">Proveedor</div>
+                          <div className="text-sm font-extrabold leading-tight truncate">{providerName}</div>
+                        </div>
                       </div>
-                      <span className={`badge-status ${filterStatus === 'PAGADO' ? 'badge-entregado' : 'badge-pendiente'}`}>
-                        {filterStatus === 'PAGADO' ? 'PAGADO' : 'PENDIENTE'}
+
+                      <span className={`badge-status ${cardStatus === 'PENDIENTE' ? 'badge-pendiente' : 'badge-entregado'} shrink-0`}>
+                        {cardStatus}
                       </span>
                     </div>
 
@@ -429,12 +451,30 @@ export default function CommissionsView() {
                 </thead>
                 <tbody>
                   {providerBalances.map(b => {
-                    const providerName = providers.find(p => p.email?.toLowerCase() === b.provider)?.name || b.provider;
+                    const providerProfile = providers.find(p => p.email?.toLowerCase() === b.provider);
+                    const providerName = providerProfile?.name || b.provider;
+                    const providerLogo = providerProfile?.logo_url || '';
+
                     return (
                       <tr key={b.provider}>
                         {(role === 'ADMIN' || role === 'PROVEEDOR') && (
                           <>
-                            <td className="text-xs font-medium">{providerName}</td>
+                            <td className="text-xs font-medium">
+                              <div className="flex items-center gap-2">
+                                {providerLogo ? (
+                                  <img
+                                    src={providerLogo}
+                                    alt={providerName}
+                                    className="w-7 h-7 rounded-lg object-cover border border-border bg-background shrink-0"
+                                  />
+                                ) : (
+                                  <div className="w-7 h-7 rounded-lg border border-border bg-secondary flex items-center justify-center text-[10px] font-extrabold shrink-0">
+                                    {String(providerName || '?').slice(0, 1).toUpperCase()}
+                                  </div>
+                                )}
+                                <span>{providerName}</span>
+                              </div>
+                            </td>
                             <td className="text-right text-xs">{nf(filterStatus === 'PAGADO' ? b.yaSolicitado : b.totalComision)}</td>
                           </>
                         )}
