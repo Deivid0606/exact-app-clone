@@ -7,6 +7,14 @@ const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
 const normalizar = (v: any) => String(v || '').toUpperCase().trim();
 
+const cleanPhoneForWhatsApp = (phone: any) => {
+  let p = String(phone || '').replace(/\D/g, '');
+  if (!p) return '';
+  if (p.startsWith('0')) p = '595' + p.slice(1);
+  if (!p.startsWith('595')) p = '595' + p;
+  return p;
+};
+
 const isComisionNeta = (estado1: any, commissionPaid: any) => {
   const e1 = normalizar(estado1);
   return (
@@ -65,7 +73,7 @@ export default function CommissionsView() {
 
   useEffect(() => {
     Promise.all([
-      supabase.from('profiles').select('email, name, logo_url'),
+      supabase.from('profiles').select('email, name, logo_url, phone'),
       supabase.from('products').select('sku, provider_email'),
       supabase.from('commission_requests').select('*'),
     ]).then(([profilesRes, productsRes, requestsRes]) => {
@@ -378,6 +386,7 @@ export default function CommissionsView() {
                 const providerProfile = providers.find(p => p.email?.toLowerCase() === b.provider);
                 const providerName = providerProfile?.name || b.provider;
                 const providerLogo = providerProfile?.logo_url || '';
+                const providerPhone = cleanPhoneForWhatsApp(providerProfile?.phone || '');
                 const rendido = filterStatus === 'PAGADO' ? b.yaSolicitado : b.rendido;
                 const disponible = filterStatus === 'PAGADO' ? 0 : b.disponible;
                 const cardStatus = filterStatus === 'PAGADO'
@@ -385,6 +394,14 @@ export default function CommissionsView() {
                   : disponible > 0
                     ? 'PENDIENTE'
                     : 'AL DÍA';
+
+                const waText = encodeURIComponent(
+                  `Hola ${providerName}, soy ${profile?.name || myEmail}. Tengo una consulta sobre mis comisiones.\n\n` +
+                  `Estado: ${cardStatus}\n` +
+                  `Rendido disponible: Gs ${nf(rendido)}\n` +
+                  `Ya solicitado: Gs ${nf(b.yaSolicitado)}\n` +
+                  `Disponible para solicitar: Gs ${nf(disponible)}`
+                );
 
                 return (
                   <div key={b.provider} className="kpi-card">
@@ -428,6 +445,18 @@ export default function CommissionsView() {
                         <span className="text-xs font-bold">Disponible para solicitar</span>
                         <span className="text-base font-extrabold text-blue-600">Gs {nf(disponible)}</span>
                       </div>
+
+                      {providerPhone && (
+                        <a
+                          href={`https://wa.me/${providerPhone}?text=${waText}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="nav-btn active text-xs !py-2 !px-3 w-full mt-3 flex items-center justify-center gap-2"
+                        >
+                          <span className="text-base">🟢</span>
+                          WhatsApp proveedor
+                        </a>
+                      )}
                     </div>
                   </div>
                 );
