@@ -51,33 +51,27 @@ const canAccessProduct = (product: any, profile: any) => {
   return false;
 };
 
-// 🔥 FUNCIÓN ACTUALIZADA - Genera números de orden únicos sin duplicados
 const generateNormalOrderId = async (): Promise<string> => {
   try {
-    // Usar timestamp + microsegundos + random para garantizar unicidad
     const now = new Date();
     const timestamp = now.getTime();
     const micro = Math.floor(performance.now() * 1000) % 1000;
     const random = Math.floor(Math.random() * 10000);
     const newOrderNumber = `A${timestamp}${micro}${random}`;
-    
-    // Verificar si por casualidad ya existe (doble seguridad)
+
     const { data: existing } = await supabase
       .from('orders')
       .select('order_number')
       .eq('order_number', newOrderNumber)
       .maybeSingle();
-    
+
     if (existing) {
-      // Si existe (caso extremadamente raro), agregar otro random y UUID
-      const fallbackNumber = `A${timestamp}${micro}${random}${Math.floor(Math.random() * 1000)}`;
-      return fallbackNumber;
+      return `A${timestamp}${micro}${random}${Math.floor(Math.random() * 1000)}`;
     }
-    
+
     return newOrderNumber;
   } catch (err) {
     console.error('Error en generateNormalOrderId:', err);
-    // Fallback con UUID si algo falla
     const uuid = crypto.randomUUID().replace(/-/g, '').substring(0, 10);
     return `A${Date.now()}${uuid}`;
   }
@@ -123,7 +117,59 @@ export default function CreateOrderView({
   const [saving, setSaving] = useState(false);
   const [loadingProducts, setLoadingProducts] = useState(false);
 
-  // Cargar favoritos del vendedor desde user_favorites
+  useEffect(() => {
+    if (!profile?.email) {
+      localStorage.setItem('pending_order_url', window.location.href);
+      return;
+    }
+
+    const params = new URLSearchParams(window.location.search);
+
+    const origen = params.get('origen');
+    const nombre = params.get('nombre');
+    const telefono = params.get('telefono');
+    const ciudad = params.get('ciudad');
+    const calle = params.get('calle');
+    const producto = params.get('producto');
+    const cantidad = params.get('cantidad');
+    const total = params.get('total');
+    const pago = params.get('pago');
+
+    if (origen !== 'seller-skyline') return;
+
+    if (nombre) setCustomer(nombre);
+    if (telefono) setPhone(telefono);
+    if (ciudad) setCity(ciudad);
+    if (calle) setStreet(calle);
+
+    const totalNumber = Number(String(total || '').replace(/\D/g, '')) || 0;
+    const qtyNumber = Number(cantidad || 1) || 1;
+
+    if (producto || totalNumber || qtyNumber) {
+      setItems([
+        {
+          sku: '',
+          sale_gs: totalNumber,
+          qty: qtyNumber,
+        },
+      ]);
+
+      setObs(
+        [
+          'Pedido importado desde Seller Skyline',
+          producto ? `Producto: ${producto}` : '',
+          cantidad ? `Cantidad: ${cantidad}` : '',
+          pago ? `Forma de pago: ${pago}` : '',
+          total ? `Total: ${total}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n')
+      );
+
+      toast.success('Pedido recibido desde Seller Skyline');
+    }
+  }, [profile?.email]);
+
   const loadUserFavorites = async () => {
     if (!profile?.email) return new Set<string>();
 
@@ -135,9 +181,8 @@ export default function CreateOrderView({
 
       if (error) throw error;
 
-      const favoriteSet = new Set(data?.map(f => f.product_id) || []);
+      const favoriteSet = new Set(data?.map((f) => f.product_id) || []);
       setUserFavorites(favoriteSet);
-      console.log(`⭐ Favoritos cargados para ${profile.email}:`, favoriteSet.size);
       return favoriteSet;
     } catch (error) {
       console.error('Error cargando favoritos:', error);
@@ -152,7 +197,6 @@ export default function CreateOrderView({
       setLoadingProducts(true);
 
       try {
-        // Cargar favoritos del vendedor
         const favoritesSet = await loadUserFavorites();
 
         const { data: productsData, error: productsError } = await supabase
@@ -165,18 +209,11 @@ export default function CreateOrderView({
         const allProducts = productsData || [];
         const visibleProducts = allProducts.filter((p: any) => canAccessProduct(p, profile));
 
-        // 🔥 FILTRO: Productos PRIVADOS O que el vendedor marcó como favorito
         const filteredProducts = visibleProducts.filter((p: any) => {
           const isPrivate = p.is_private === true;
           const isUserFavorite = favoritesSet.has(p.id);
           return isPrivate || isUserFavorite;
         });
-
-        console.log('📊 Productos totales:', allProducts.length);
-        console.log('📦 Productos visibles:', visibleProducts.length);
-        console.log('⭐ Favoritos del vendedor:', favoritesSet.size);
-        console.log('🔒 Productos privados:', visibleProducts.filter(p => p.is_private === true).length);
-        console.log('✅ Productos filtrados (privados + sus favoritos):', filteredProducts.length);
 
         setProducts(filteredProducts);
 
@@ -444,10 +481,10 @@ export default function CreateOrderView({
 
   return (
     <div className="app-card w-full min-w-0 overflow-x-hidden">
-      <h3 className="text-lg font-extrabold mb-3">Cargar pedido</h3>
+      <h3 className="mb-3 text-lg font-extrabold">Cargar pedido</h3>
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="md:col-span-1 w-full min-w-0">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <div className="w-full min-w-0 md:col-span-1">
           <label className="app-label">Cliente</label>
           <input
             className="app-input w-full min-w-0 text-base"
@@ -513,19 +550,21 @@ export default function CreateOrderView({
           />
         </div>
 
-        <div className="md:col-span-2 w-full min-w-0">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
+        <div className="w-full min-w-0 md:col-span-2">
+          <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <label className="app-label !mt-0">Items</label>
-            <span className="chip text-[10px] w-fit">Catálogo: {products.length} productos</span>
+            <span className="chip w-fit text-[10px]">
+              Catálogo: {products.length} productos
+            </span>
           </div>
 
           {items.map((item, idx) => (
             <div
               key={idx}
-              className="border border-border rounded-xl p-3 mb-3 w-full min-w-0"
+              className="mb-3 w-full min-w-0 rounded-xl border border-border p-3"
             >
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-2 items-start">
-                <div className="md:col-span-5 w-full min-w-0">
+              <div className="grid grid-cols-1 items-start gap-2 md:grid-cols-12">
+                <div className="w-full min-w-0 md:col-span-5">
                   <label className="app-label !mt-0">Producto</label>
                   <select
                     className="app-input w-full min-w-0 text-base"
@@ -537,25 +576,25 @@ export default function CreateOrderView({
                     </option>
                     {products.map((p) => (
                       <option key={p.id} value={p.sku}>
-                        {p.title} — {p.sku} 
+                        {p.title} — {p.sku}
                         {userFavorites.has(p.id) ? ' ⭐' : ''}
                         {p.is_private ? ' 🔒' : ''}
-                        (Stock: {p.stock || 0}) 
-                        (Prov {nf(Number(p.provider_price_gs || 0))})
+                        {` (Stock: ${p.stock || 0})`}
+                        {` (Prov ${nf(Number(p.provider_price_gs || 0))})`}
                         {p.provider_email ? ` [${p.provider_email}]` : ''}
                       </option>
                     ))}
                   </select>
                 </div>
 
-                <div className="md:col-span-2 w-full min-w-0">
+                <div className="w-full min-w-0 md:col-span-2">
                   <label className="app-label !mt-0">Proveedor</label>
-                  <div className="chip text-[10px] break-words w-full">
+                  <div className="chip w-full break-words text-[10px]">
                     Prov: {nf(Number(catalogMap[item.sku]?.provider_price_gs || 0))}
                   </div>
                 </div>
 
-                <div className="md:col-span-3 w-full min-w-0">
+                <div className="w-full min-w-0 md:col-span-3">
                   <label className="app-label !mt-0">Venta TOTAL (Gs)</label>
                   <input
                     className="app-input w-full min-w-0 text-base"
@@ -566,7 +605,7 @@ export default function CreateOrderView({
                   />
                 </div>
 
-                <div className="md:col-span-1 w-full min-w-0">
+                <div className="w-full min-w-0 md:col-span-1">
                   <label className="app-label !mt-0">Cant.</label>
                   <input
                     className="app-input w-full min-w-0 text-base"
@@ -577,10 +616,10 @@ export default function CreateOrderView({
                   />
                 </div>
 
-                <div className="md:col-span-1 w-full min-w-0">
-                  <label className="app-label !mt-0 opacity-0 hidden md:block">Acción</label>
+                <div className="w-full min-w-0 md:col-span-1">
+                  <label className="app-label !mt-0 hidden opacity-0 md:block">Acción</label>
                   <button
-                    className="nav-btn text-xs w-full"
+                    className="nav-btn w-full text-xs"
                     onClick={() => removeItem(idx)}
                   >
                     Quitar
@@ -589,22 +628,22 @@ export default function CreateOrderView({
               </div>
 
               <div className="mt-2">
-                <span className="chip text-[10px] break-words">
+                <span className="chip break-words text-[10px]">
                   Prov×Cant: {nf(Number(catalogMap[item.sku]?.provider_price_gs || 0) * item.qty)}
                 </span>
               </div>
             </div>
           ))}
 
-          <button className="nav-btn active text-xs mt-2 w-full sm:w-auto" onClick={addItem}>
+          <button className="nav-btn active mt-2 w-full text-xs sm:w-auto" onClick={addItem}>
             + Agregar ítem
           </button>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
             <div className="w-full min-w-0">
               <label className="app-label">Total (Gs)</label>
               <input
-                className="app-input bg-secondary w-full min-w-0"
+                className="app-input w-full min-w-0 bg-secondary"
                 readOnly
                 value={nf(totalVenta)}
               />
@@ -613,7 +652,7 @@ export default function CreateOrderView({
             <div className="w-full min-w-0">
               <label className="app-label">Delivery cobrado (Gs)</label>
               <input
-                className="app-input bg-secondary w-full min-w-0"
+                className="app-input w-full min-w-0 bg-secondary"
                 readOnly
                 value={nf(Number(deliveryPrice))}
               />
@@ -622,7 +661,7 @@ export default function CreateOrderView({
             <div className="w-full min-w-0">
               <label className="app-label">Comisión estimada (Gs)</label>
               <input
-                className="app-input bg-secondary w-full min-w-0"
+                className="app-input w-full min-w-0 bg-secondary"
                 readOnly
                 value={nf(commission)}
               />
