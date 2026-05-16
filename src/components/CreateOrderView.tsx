@@ -154,16 +154,14 @@ export default function CreateOrderView({
         },
       ]);
 
+      // ✅ SOLO producto y forma de pago en observación
       setObs(
         [
-          'Pedido importado desde Seller Skyline',
           producto ? `Producto: ${producto}` : '',
-          cantidad ? `Cantidad: ${cantidad}` : '',
           pago ? `Forma de pago: ${pago}` : '',
-          total ? `Total: ${total}` : '',
         ]
           .filter(Boolean)
-          .join('\n')
+          .join(' | ')
       );
 
       toast.success('Pedido recibido desde Seller Skyline');
