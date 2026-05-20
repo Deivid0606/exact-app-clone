@@ -20,43 +20,55 @@ export default function WithGuidesView() {
     return d.toISOString().slice(0, 10);
   });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [loading, setLoading] = useState(false);
 
   const load = async () => {
+    setLoading(true);
     const { data, error } = await supabase
       .from('orders')
       .select('*')
       .or('status2.is.null,status2.eq.--')
       .gte('created_at', dateFrom + 'T00:00:00')
       .lte('created_at', dateTo + 'T23:59:59')
-      .order('created_at', { ascending: false })
-      .limit(2000);
+      .order('created_at', { ascending: false });
 
     if (error) {
       toast.error(error.message);
+      setLoading(false);
       return;
     }
 
     setOrders(data || []);
+    setLoading(false);
   };
 
-  useEffect(() => { load(); }, []);
+  // 🔥 CORREGIDO: Ejecutar load cuando cambian las fechas
+  useEffect(() => { 
+    load(); 
+  }, [dateFrom, dateTo]);
 
   // Extract unique providers (solo para admins/despachantes)
   const allProviders = useMemo(() => {
     if (role === 'PROVEEDOR') return [];
     const set = new Set<string>();
     orders.forEach(o => {
-      (o.provider_emails_list || '').split(',').forEach((e: string) => {
-        const t = e.trim();
-        if (t) set.add(t);
-      });
+      // Usar provider_email si existe, si no usar provider_emails_list
+      if (o.provider_email && o.provider_email.trim()) {
+        set.add(o.provider_email.trim());
+      }
+      if (o.provider_emails_list) {
+        (o.provider_emails_list || '').split(',').forEach((e: string) => {
+          const t = e.trim();
+          if (t) set.add(t);
+        });
+      }
     });
     return [...set].sort();
   }, [orders, role]);
 
   const filtered = useMemo(() => {
     return orders.filter(o => {
-      // 🔥 FILTRO AUTOMÁTICO PARA PROVEEDOR
+      // Filtro automático para PROVEEDOR
       if (role === 'PROVEEDOR') {
         const providerList = o.provider_emails_list || '';
         const myEmailLower = myEmail.toLowerCase();
@@ -65,14 +77,19 @@ export default function WithGuidesView() {
       }
       
       // Filtro manual de proveedor (solo para NO proveedores)
-      if (role !== 'PROVEEDOR' && providerFilter && !(o.provider_emails_list || '').toLowerCase().includes(providerFilter.toLowerCase())) return false;
+      if (role !== 'PROVEEDOR' && providerFilter) {
+        const providerList = (o.provider_emails_list || '') + ',' + (o.provider_email || '');
+        if (!providerList.toLowerCase().includes(providerFilter.toLowerCase())) return false;
+      }
       
       // Búsqueda
       if (!search) return true;
       const q = search.toLowerCase();
       return (o.customer_name || '').toLowerCase().includes(q) ||
         (o.order_number || '').toLowerCase().includes(q) ||
-        (o.phone || '').includes(q) || (o.city || '').toLowerCase().includes(q);
+        (o.phone || '').includes(q) || 
+        (o.city || '').toLowerCase().includes(q) ||
+        (o.id || '').toLowerCase().includes(q);
     });
   }, [orders, search, providerFilter, role, myEmail]);
 
@@ -121,7 +138,7 @@ export default function WithGuidesView() {
       o.obs ? `Observación: ${o.obs}` : '',
       `━━━━━━━━━━━━━━━━━━`,
       `Vendedor: ${o.created_by || ''}`,
-      `Proveedor: ${o.provider_emails_list || '—'}`,
+      `Proveedor: ${o.provider_emails_list || o.provider_email || '—'}`,
     ].filter(Boolean).join('\n');
   };
 
@@ -253,7 +270,7 @@ export default function WithGuidesView() {
             <tr><td style="padding:3px 0;color:#999;">Ciudad:</td><td>${o.city || ''}</td></tr>
             <tr><td style="padding:3px 0;color:#999;">Dirección:</td><td>${o.street || ''} ${o.district ? '- ' + o.district : ''}</td></tr>
             <tr><td style="padding:3px 0;color:#999;">Vendedor:</td><td>${o.created_by || ''}</td></tr>
-            <tr><td style="padding:3px 0;color:#999;">Proveedor:</td><td>${o.provider_emails_list || '—'}</td></tr>
+            <tr><td style="padding:3px 0;color:#999;">Proveedor:</td><td>${o.provider_emails_list || o.provider_email || '—'}</td></tr>
           </tbody></table>
           <table style="width:100%;border-collapse:collapse;font-size:12px;">
             <thead><tr style="background:#1e1e2f;">
@@ -325,7 +342,9 @@ export default function WithGuidesView() {
         
         <input className="app-input flex-1 min-w-[200px]" placeholder="🔎 Buscar por cliente, teléfono, ID o ciudad"
           value={search} onChange={e => setSearch(e.target.value)} />
-        <button className="nav-btn active" onClick={load}>Filtrar</button>
+        <button className="nav-btn active" onClick={load} disabled={loading}>
+          {loading ? 'Cargando...' : 'Filtrar'}
+        </button>
       </div>
 
       {selectedIds.size > 0 && (
@@ -380,7 +399,7 @@ export default function WithGuidesView() {
                 <td className="text-xs">{o.customer_name}</td>
                 <td className="text-xs">{o.phone}</td>
                 <td className="text-xs">{o.created_by}</td>
-                <td className="text-xs">{o.provider_emails_list || '—'}</td>
+                <td className="text-xs">{o.provider_emails_list || o.provider_email || '—'}</td>
                 <td>
                   <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.status2 || '--'}
                     onChange={e => updateStatus2(o.id, e.target.value)}>
