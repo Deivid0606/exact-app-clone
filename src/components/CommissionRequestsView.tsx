@@ -71,8 +71,21 @@ export default function CommissionRequestsView() {
     return map;
   }, [products]);
 
+  // Obtener solicitudes pendientes del vendedor actual
+  const pendingRequests = useMemo(() => {
+    return requests.filter(r => 
+      r.vendor_email?.toLowerCase() === myEmail.toLowerCase() && 
+      r.status === 'PENDIENTE'
+    );
+  }, [requests, myEmail]);
+
   const balances = useMemo(() => {
-    const providerCommissions: Record<string, { total: number; requested: number; orderIds: string[] }> = {};
+    const providerCommissions: Record<string, { 
+      total: number; 
+      requested: number; 
+      pendingRequested: number;
+      orderIds: string[] 
+    }> = {};
     
     orders.forEach(order => {
       if (!isElegible(order.status, order.status2)) return;
@@ -105,7 +118,7 @@ export default function CommissionRequestsView() {
       
       providersList.forEach(prov => {
         if (!providerCommissions[prov]) {
-          providerCommissions[prov] = { total: 0, requested: 0, orderIds: [] };
+          providerCommissions[prov] = { total: 0, requested: 0, pendingRequested: 0, orderIds: [] };
         }
 
         if (order.commission_paid) {
@@ -120,16 +133,39 @@ export default function CommissionRequestsView() {
       });
     });
 
-    const result = Object.entries(providerCommissions).map(([providerEmail, data]) => ({
-      provider: providerEmail,
-      grossRendido: data.total,
-      requested: data.requested,
-      available: data.total,
-      orderIds: data.orderIds,
-    }));
+    // Calcular cuánto tiene pendiente por proveedor en solicitudes no aprobadas
+    pendingRequests.forEach(req => {
+      if (req.status === 'PENDIENTE' && req.provider_email) {
+        const providerEmail = req.provider_email.toLowerCase();
+        if (providerCommissions[providerEmail]) {
+          providerCommissions[providerEmail].pendingRequested += Number(req.amount_gs || 0);
+        } else {
+          providerCommissions[providerEmail] = providerCommissions[providerEmail] || { 
+            total: 0, requested: 0, pendingRequested: 0, orderIds: [] 
+          };
+          providerCommissions[providerEmail].pendingRequested += Number(req.amount_gs || 0);
+        }
+      }
+    });
+
+    const result = Object.entries(providerCommissions).map(([providerEmail, data]) => {
+      const totalGross = data.total;
+      const alreadyRequested = data.requested;
+      const pendingAmount = data.pendingRequested;
+      const available = totalGross - alreadyRequested - pendingAmount;
+      
+      return {
+        provider: providerEmail,
+        grossRendido: totalGross,
+        requested: alreadyRequested,
+        pendingRequested: pendingAmount,
+        available: Math.max(0, available),
+        orderIds: data.orderIds,
+      };
+    });
     
     return result;
-  }, [orders, skuProviderMap]);
+  }, [orders, skuProviderMap, pendingRequests]);
 
   const filtered = requests.filter(r => {
     if (filterStatus && r.status !== filterStatus) return false;
@@ -153,7 +189,7 @@ export default function CommissionRequestsView() {
     const available = balance?.available || 0;
 
     if (available <= 0) {
-      toast.error('No tenés saldo disponible para este proveedor');
+      toast.error('No tenés saldo disponible para este proveedor. Revisá si ya solicitaste anteriormente.');
       return;
     }
 
@@ -184,6 +220,7 @@ export default function CommissionRequestsView() {
     setNewProvider('');
     setNewNote('');
     load();
+    if (showForm && role === 'VENDEDOR') loadBalanceOrders();
   };
 
   const approve = async (id: string) => {
@@ -291,7 +328,7 @@ export default function CommissionRequestsView() {
               <label className="app-label">Proveedor</label>
               <select className="app-input" value={newProvider} onChange={e => { setNewProvider(e.target.value); }}>
                 <option value="">-- Elegir --</option>
-                {balances.map(b => {
+                {balances.filter(b => b.available > 0).map(b => {
                   const providerName = providers.find(p => p.email.toLowerCase() === b.provider)?.name || b.provider;
                   return (
                     <option key={b.provider} value={b.provider}>
@@ -306,12 +343,15 @@ export default function CommissionRequestsView() {
             const bal = balances.find(b => b.provider === newProvider);
             return (
               <div className="mb-3 p-3 rounded-xl border border-border bg-secondary/50">
-                <div className="text-xs text-muted-foreground">
-                  Total rendido: Gs {nf(bal?.grossRendido || 0)} |
-                  Ya solicitado: Gs {nf(bal?.requested || 0)}
+                <div className="text-xs text-muted-foreground space-y-1">
+                  <div>📊 Total rendido: Gs {nf(bal?.grossRendido || 0)}</div>
+                  <div>✅ Ya aprobado/pagado: Gs {nf(bal?.requested || 0)}</div>
+                  {bal?.pendingRequested > 0 && (
+                    <div className="text-yellow-600">⏳ En solicitud pendiente: Gs {nf(bal.pendingRequested)}</div>
+                  )}
                 </div>
-                <div className="text-sm font-bold text-green-600 mt-1">
-                  ✅ Disponible para solicitar: Gs {nf(bal?.available || 0)}
+                <div className="text-sm font-bold text-green-600 mt-2">
+                  💰 Disponible para solicitar: Gs {nf(bal?.available || 0)}
                 </div>
               </div>
             );
