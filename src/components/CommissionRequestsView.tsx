@@ -71,19 +71,19 @@ export default function CommissionRequestsView() {
     return map;
   }, [products]);
 
-  // Obtener solicitudes pendientes del vendedor actual
-  const pendingRequests = useMemo(() => {
+  // Obtener todas las solicitudes PENDIENTES y RECHAZADAS (no aprobadas)
+  const nonApprovedRequests = useMemo(() => {
     return requests.filter(r => 
       r.vendor_email?.toLowerCase() === myEmail.toLowerCase() && 
-      r.status === 'PENDIENTE'
+      (r.status === 'PENDIENTE' || r.status === 'RECHAZADO')
     );
   }, [requests, myEmail]);
 
   const balances = useMemo(() => {
     const providerCommissions: Record<string, { 
       total: number; 
-      requested: number; 
-      pendingRequested: number;
+      paidRequested: number;  // Ya aprobadas/pagadas
+      pendingRequested: number; // En solicitud pendiente o rechazada
       orderIds: string[] 
     }> = {};
     
@@ -118,11 +118,11 @@ export default function CommissionRequestsView() {
       
       providersList.forEach(prov => {
         if (!providerCommissions[prov]) {
-          providerCommissions[prov] = { total: 0, requested: 0, pendingRequested: 0, orderIds: [] };
+          providerCommissions[prov] = { total: 0, paidRequested: 0, pendingRequested: 0, orderIds: [] };
         }
 
         if (order.commission_paid) {
-          providerCommissions[prov].requested += perProvider;
+          providerCommissions[prov].paidRequested += perProvider;
         } else {
           providerCommissions[prov].total += perProvider;
 
@@ -133,15 +133,15 @@ export default function CommissionRequestsView() {
       });
     });
 
-    // Calcular cuánto tiene pendiente por proveedor en solicitudes no aprobadas
-    pendingRequests.forEach(req => {
-      if (req.status === 'PENDIENTE' && req.provider_email) {
+    // Sumar todas las solicitudes NO APROBADAS (pendientes + rechazadas) por proveedor
+    nonApprovedRequests.forEach(req => {
+      if (req.provider_email) {
         const providerEmail = req.provider_email.toLowerCase();
         if (providerCommissions[providerEmail]) {
           providerCommissions[providerEmail].pendingRequested += Number(req.amount_gs || 0);
         } else {
           providerCommissions[providerEmail] = providerCommissions[providerEmail] || { 
-            total: 0, requested: 0, pendingRequested: 0, orderIds: [] 
+            total: 0, paidRequested: 0, pendingRequested: 0, orderIds: [] 
           };
           providerCommissions[providerEmail].pendingRequested += Number(req.amount_gs || 0);
         }
@@ -150,22 +150,22 @@ export default function CommissionRequestsView() {
 
     const result = Object.entries(providerCommissions).map(([providerEmail, data]) => {
       const totalGross = data.total;
-      const alreadyRequested = data.requested;
-      const pendingAmount = data.pendingRequested;
-      const available = totalGross - alreadyRequested - pendingAmount;
+      const alreadyPaid = data.paidRequested;
+      const alreadyRequested = data.pendingRequested;
+      const available = totalGross - alreadyPaid - alreadyRequested;
       
       return {
         provider: providerEmail,
         grossRendido: totalGross,
+        paid: alreadyPaid,
         requested: alreadyRequested,
-        pendingRequested: pendingAmount,
         available: Math.max(0, available),
         orderIds: data.orderIds,
       };
     });
     
     return result;
-  }, [orders, skuProviderMap, pendingRequests]);
+  }, [orders, skuProviderMap, nonApprovedRequests]);
 
   const filtered = requests.filter(r => {
     if (filterStatus && r.status !== filterStatus) return false;
@@ -189,7 +189,7 @@ export default function CommissionRequestsView() {
     const available = balance?.available || 0;
 
     if (available <= 0) {
-      toast.error('No tenés saldo disponible para este proveedor. Revisá si ya solicitaste anteriormente.');
+      toast.error('No tenés saldo disponible para este proveedor. Ya solicitaste este monto anteriormente.');
       return;
     }
 
@@ -280,8 +280,10 @@ export default function CommissionRequestsView() {
   const reject = async (id: string) => {
     const note = prompt('Motivo del rechazo:') || '';
     const { error } = await supabase.from('commission_requests').update({
-      status: 'RECHAZADO', rejected_at: new Date().toISOString(),
-      rejected_by: myEmail, approval_note: note,
+      status: 'RECHAZADO', 
+      rejected_at: new Date().toISOString(),
+      rejected_by: myEmail, 
+      approval_note: note,
     }).eq('id', id);
     if (error) toast.error(error.message);
     else { toast.success('Solicitud rechazada'); load(); }
@@ -291,10 +293,21 @@ export default function CommissionRequestsView() {
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Solicitud de comisiones</h3>
 
-      <div className="grid-kpi mb-4">
-        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Total solicitudes</div><div className="text-[22px] font-extrabold">{kpis.total}</div></div>
-        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Pendientes</div><div className="text-[22px] font-extrabold">{kpis.pendientes}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.sumPendientes)}</div></div>
-        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Aprobados</div><div className="text-[22px] font-extrabold">{kpis.aprobados}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.sumAprobados)}</div></div>
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+        <div className="kpi-card">
+          <div className="text-xs text-muted-foreground mb-1">Total solicitudes</div>
+          <div className="text-[22px] font-extrabold">{kpis.total}</div>
+        </div>
+        <div className="kpi-card">
+          <div className="text-xs text-muted-foreground mb-1">Pendientes</div>
+          <div className="text-[22px] font-extrabold">{kpis.pendientes}</div>
+          <div className="text-xs text-muted-foreground">Gs {nf(kpis.sumPendientes)}</div>
+        </div>
+        <div className="kpi-card">
+          <div className="text-xs text-muted-foreground mb-1">Aprobados</div>
+          <div className="text-[22px] font-extrabold">{kpis.aprobados}</div>
+          <div className="text-xs text-muted-foreground">Gs {nf(kpis.sumAprobados)}</div>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-2 mb-3">
@@ -336,6 +349,9 @@ export default function CommissionRequestsView() {
                     </option>
                   );
                 })}
+                {balances.filter(b => b.available <= 0).length > 0 && (
+                  <option disabled>--- Sin saldo disponible ---</option>
+                )}
               </select>
             </div>
           </div>
@@ -345,13 +361,16 @@ export default function CommissionRequestsView() {
               <div className="mb-3 p-3 rounded-xl border border-border bg-secondary/50">
                 <div className="text-xs text-muted-foreground space-y-1">
                   <div>📊 Total rendido: Gs {nf(bal?.grossRendido || 0)}</div>
-                  <div>✅ Ya aprobado/pagado: Gs {nf(bal?.requested || 0)}</div>
-                  {bal?.pendingRequested > 0 && (
-                    <div className="text-yellow-600">⏳ En solicitud pendiente: Gs {nf(bal.pendingRequested)}</div>
+                  <div>✅ Ya pagado: Gs {nf(bal?.paid || 0)}</div>
+                  {bal && bal.requested > 0 && (
+                    <div className="text-orange-600">⏳ Ya solicitado (Pendiente/Rechazado): Gs {nf(bal.requested)}</div>
                   )}
                 </div>
-                <div className="text-sm font-bold text-green-600 mt-2">
-                  💰 Disponible para solicitar: Gs {nf(bal?.available || 0)}
+                <div className={`text-sm font-bold mt-2 ${(bal?.available || 0) > 0 ? 'text-green-600' : 'text-red-600'}`}>
+                  {bal && bal.available > 0 
+                    ? `💰 Disponible para solicitar: Gs ${nf(bal.available)}`
+                    : `❌ No hay saldo disponible - Ya solicitaste Gs ${nf(bal?.requested || 0)}`
+                  }
                 </div>
               </div>
             );
@@ -360,7 +379,13 @@ export default function CommissionRequestsView() {
             <label className="app-label">Nota (opcional)</label>
             <input className="app-input" value={newNote} onChange={e => setNewNote(e.target.value)} placeholder="Nota para el proveedor" />
           </div>
-          <button className="nav-btn active" onClick={createRequest}>Enviar solicitud</button>
+          <button 
+            className="nav-btn active" 
+            onClick={createRequest}
+            disabled={!newProvider || (balances.find(b => b.provider === newProvider)?.available || 0) <= 0}
+          >
+            Enviar solicitud
+          </button>
         </div>
       )}
 
