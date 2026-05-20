@@ -21,16 +21,69 @@ export default function WithGuidesView() {
   });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [loading, setLoading] = useState(false);
+  
+  // 🔥 NUEVOS FILTROS
+  const [status2Filter, setStatus2Filter] = useState<string>('PENDIENTES'); // 'PENDIENTES', 'CON_GUIA', 'TODOS'
+  const [selectedCities, setSelectedCities] = useState<Set<string>>(new Set());
+  const [citySearch, setCitySearch] = useState('');
+  const [showCityDropdown, setShowCityDropdown] = useState(false);
+
+  // Obtener lista única de ciudades de los pedidos
+  const allCities = useMemo(() => {
+    const cities = new Set<string>();
+    orders.forEach(o => {
+      if (o.city && o.city.trim()) {
+        cities.add(o.city.trim());
+      }
+    });
+    return Array.from(cities).sort();
+  }, [orders]);
+
+  const filteredCities = useMemo(() => {
+    if (!citySearch) return allCities;
+    return allCities.filter(c => c.toLowerCase().includes(citySearch.toLowerCase()));
+  }, [allCities, citySearch]);
+
+  const toggleCity = (city: string) => {
+    setSelectedCities(prev => {
+      const next = new Set(prev);
+      if (next.has(city)) {
+        next.delete(city);
+      } else {
+        next.add(city);
+      }
+      return next;
+    });
+  };
+
+  const selectAllCities = () => {
+    if (selectedCities.size === allCities.length) {
+      setSelectedCities(new Set());
+    } else {
+      setSelectedCities(new Set(allCities));
+    }
+  };
 
   const load = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    
+    // Construir query base
+    let query = supabase
       .from('orders')
       .select('*')
-      .or('status2.is.null,status2.eq.--')
       .gte('created_at', dateFrom + 'T00:00:00')
       .lte('created_at', dateTo + 'T23:59:59')
       .order('created_at', { ascending: false });
+
+    // 🔥 FILTRO POR status2 según selección
+    if (status2Filter === 'PENDIENTES') {
+      query = query.or('status2.is.null,status2.eq.--');
+    } else if (status2Filter === 'CON_GUIA') {
+      query = query.eq('status2', 'GUIA GENERADA');
+    }
+    // Si es 'TODOS', no agregamos filtro de status2
+
+    const { data, error } = await query;
 
     if (error) {
       toast.error(error.message);
@@ -42,17 +95,15 @@ export default function WithGuidesView() {
     setLoading(false);
   };
 
-  // 🔥 CORREGIDO: Ejecutar load cuando cambian las fechas
   useEffect(() => { 
     load(); 
-  }, [dateFrom, dateTo]);
+  }, [dateFrom, dateTo, status2Filter]); // 🔥 Recargar cuando cambia el filtro de estado
 
-  // Extract unique providers (solo para admins/despachantes)
+  // Extract unique providers
   const allProviders = useMemo(() => {
     if (role === 'PROVEEDOR') return [];
     const set = new Set<string>();
     orders.forEach(o => {
-      // Usar provider_email si existe, si no usar provider_emails_list
       if (o.provider_email && o.provider_email.trim()) {
         set.add(o.provider_email.trim());
       }
@@ -76,10 +127,15 @@ export default function WithGuidesView() {
         if (!isMine) return false;
       }
       
-      // Filtro manual de proveedor (solo para NO proveedores)
+      // Filtro manual de proveedor
       if (role !== 'PROVEEDOR' && providerFilter) {
         const providerList = (o.provider_emails_list || '') + ',' + (o.provider_email || '');
         if (!providerList.toLowerCase().includes(providerFilter.toLowerCase())) return false;
+      }
+      
+      // 🔥 FILTRO POR CIUDADES SELECCIONADAS
+      if (selectedCities.size > 0) {
+        if (!o.city || !selectedCities.has(o.city)) return false;
       }
       
       // Búsqueda
@@ -91,11 +147,11 @@ export default function WithGuidesView() {
         (o.city || '').toLowerCase().includes(q) ||
         (o.id || '').toLowerCase().includes(q);
     });
-  }, [orders, search, providerFilter, role, myEmail]);
+  }, [orders, search, providerFilter, role, myEmail, selectedCities]);
 
   const pendingGuides = filtered.filter(o => !o.status2 || o.status2 === '--');
   const withGuides = filtered.filter(o => o.status2 === 'GUIA GENERADA');
-  const visibleOrders = pendingGuides;
+  const visibleOrders = filtered; // 🔥 AHORA MUESTRA TODOS (pendientes + con guía + otros)
 
   const state2Opts = ['--', 'GUIA GENERADA', 'FUERA DE COBERTURA', 'CANCELADO', 'REPETIDO', 'RENDIDO'];
 
@@ -106,7 +162,7 @@ export default function WithGuidesView() {
     else {
       toast.success('Estado 2 actualizado');
       setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status2: val } : o));
-      if (val) {
+      if (val === 'GUIA GENERADA') {
         setSelectedIds(prev => {
           const next = new Set(prev);
           next.delete(orderId);
@@ -257,7 +313,8 @@ export default function WithGuidesView() {
         `<tr><td style="padding:4px 8px;border-bottom:1px solid #333;">${i + 1}</td>
         <td style="padding:4px 8px;border-bottom:1px solid #333;">${it.title || it.sku || 'Item'}</td>
         <td style="padding:4px 8px;border-bottom:1px solid #333;text-align:center;">${it.qty || 1}</td>
-        <td style="padding:4px 8px;border-bottom:1px solid #333;text-align:right;">Gs ${nf(Number(it.sale_gs || 0) * Number(it.qty || 1))}</td></tr>`
+        <td style="padding:4px 8px;border-bottom:1px solid #333;text-align:right;">Gs ${nf(Number(it.sale_gs || 0) * Number(it.qty || 1))}</td>
+      </tr>`
       ).join('');
 
       return `
@@ -305,7 +362,8 @@ export default function WithGuidesView() {
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Pedidos con guías</h3>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+      {/* KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
         <div className="kpi-card">
           <div className="text-xs text-muted-foreground mb-1">Guías pendientes</div>
           <div className="text-[22px] font-extrabold">{pendingGuides.length}</div>
@@ -319,16 +377,28 @@ export default function WithGuidesView() {
           <div className="text-[22px] font-extrabold">{filtered.length}</div>
         </div>
         <div className="kpi-card">
+          <div className="text-xs text-muted-foreground mb-1">Ciudades filtradas</div>
+          <div className="text-[22px] font-extrabold">{selectedCities.size || 'Todas'}</div>
+        </div>
+        <div className="kpi-card">
           <div className="text-xs text-muted-foreground mb-1">Seleccionados</div>
           <div className="text-[22px] font-extrabold">{selectedIds.size}</div>
         </div>
       </div>
 
+      {/* Filtros - Primera línea */}
       <div className="flex flex-wrap gap-2 mb-3">
         <label className="app-label !mt-0">Desde</label>
         <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
         <label className="app-label !mt-0">Hasta</label>
         <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+        
+        <label className="app-label !mt-0">Estado</label>
+        <select className="app-input !w-auto min-w-[150px]" value={status2Filter} onChange={e => setStatus2Filter(e.target.value)}>
+          <option value="PENDIENTES">📋 Pendientes</option>
+          <option value="CON_GUIA">✅ Con guía generada</option>
+          <option value="TODOS">📦 Todos</option>
+        </select>
         
         {role !== 'PROVEEDOR' && (
           <>
@@ -339,14 +409,76 @@ export default function WithGuidesView() {
             </select>
           </>
         )}
-        
+      </div>
+
+      {/* Filtros - Segunda línea: Búsqueda y ciudades */}
+      <div className="flex flex-wrap gap-2 mb-3">
         <input className="app-input flex-1 min-w-[200px]" placeholder="🔎 Buscar por cliente, teléfono, ID o ciudad"
           value={search} onChange={e => setSearch(e.target.value)} />
+        
+        {/* 🔥 FILTRO POR CIUDADES CON DROPDOWN MULTISELECT */}
+        <div className="relative">
+          <button 
+            className="nav-btn"
+            type="button"
+            onClick={() => setShowCityDropdown(!showCityDropdown)}
+            style={{ background: selectedCities.size > 0 ? '#3b82f6' : undefined, color: selectedCities.size > 0 ? 'white' : undefined }}
+          >
+            🏙️ Ciudades {selectedCities.size > 0 ? `(${selectedCities.size})` : ''}
+          </button>
+          
+          {showCityDropdown && (
+            <div className="absolute top-full mt-1 left-0 z-50 bg-card border border-border rounded-xl shadow-xl w-80 max-h-96 overflow-hidden flex flex-col">
+              <div className="p-2 border-b border-border">
+                <input 
+                  type="text" 
+                  className="app-input w-full text-sm" 
+                  placeholder="🔎 Buscar ciudad..."
+                  value={citySearch}
+                  onChange={e => setCitySearch(e.target.value)}
+                />
+              </div>
+              <div className="p-2 border-b border-border flex gap-2">
+                <button className="text-xs nav-btn !py-1" onClick={selectAllCities}>
+                  {selectedCities.size === allCities.length ? 'Deseleccionar todas' : 'Seleccionar todas'}
+                </button>
+                {selectedCities.size > 0 && (
+                  <button className="text-xs nav-btn !py-1" onClick={() => setSelectedCities(new Set())}>
+                    Limpiar
+                  </button>
+                )}
+              </div>
+              <div className="overflow-auto max-h-64">
+                {filteredCities.map(city => (
+                  <label key={city} className="flex items-center gap-2 px-3 py-2 hover:bg-secondary cursor-pointer text-sm">
+                    <input 
+                      type="checkbox" 
+                      checked={selectedCities.has(city)}
+                      onChange={() => toggleCity(city)}
+                      className="rounded border-border"
+                    />
+                    <span>{city}</span>
+                    <span className="text-xs text-muted-foreground ml-auto">
+                      {orders.filter(o => o.city === city).length}
+                    </span>
+                  </label>
+                ))}
+                {filteredCities.length === 0 && (
+                  <div className="px-3 py-4 text-center text-muted-foreground text-sm">
+                    No se encontraron ciudades
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+        
         <button className="nav-btn active" onClick={load} disabled={loading}>
           {loading ? 'Cargando...' : 'Filtrar'}
         </button>
       </div>
 
+      {/* Acciones masivas */}
       {selectedIds.size > 0 && (
         <div className="flex flex-wrap gap-2 mb-3 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
           <div className="text-sm font-bold text-green-400 mr-2 self-center">
@@ -368,13 +500,19 @@ export default function WithGuidesView() {
         <button className="nav-btn" onClick={selectAllPending} style={{ background: '#3b82f6', color: 'white' }}>
           ☑️ Seleccionar todos pendientes ({pendingGuides.length})
         </button>
-        {selectedIds.size > 0 && selectedIds.size !== pendingGuides.length && (
+        {selectedIds.size > 0 && selectedIds.size !== pendingGuides.length && pendingGuides.length > 0 && (
           <button className="nav-btn" onClick={selectAllPending}>
             + Agregar resto pendientes ({pendingGuides.length - selectedIds.size})
           </button>
         )}
+        {selectedCities.size > 0 && (
+          <button className="nav-btn" onClick={() => setSelectedCities(new Set())}>
+            🗑️ Limpiar filtro ciudades
+          </button>
+        )}
       </div>
 
+      {/* Tabla */}
       <div className="overflow-auto">
         <table className="app-table min-w-[1200px]">
           <thead>
@@ -418,11 +556,14 @@ export default function WithGuidesView() {
                 </td>
               </tr>
             ))}
-            {visibleOrders.length === 0 && <tr><td colSpan={10} className="text-center text-muted-foreground py-8">Sin pedidos pendientes</td></tr>}
+            {visibleOrders.length === 0 && (
+              <tr><td colSpan={10} className="text-center text-muted-foreground py-8">Sin pedidos en el rango seleccionado</td></tr>
+            )}
           </tbody>
         </table>
       </div>
 
+      {/* Modal de guía */}
       {guideText && (
         <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-4" onClick={() => setGuideText('')}>
           <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-lg" onClick={e => e.stopPropagation()}>
