@@ -71,19 +71,19 @@ export default function CommissionRequestsView() {
     return map;
   }, [products]);
 
-  // Obtener todas las solicitudes PENDIENTES y RECHAZADAS (no aprobadas)
-  const nonApprovedRequests = useMemo(() => {
+  // CORREGIDO: Solo solicitudes PENDIENTES (NO RECHAZADAS)
+  const pendingRequests = useMemo(() => {
     return requests.filter(r => 
       r.vendor_email?.toLowerCase() === myEmail.toLowerCase() && 
-      (r.status === 'PENDIENTE' || r.status === 'RECHAZADO')
+      r.status === 'PENDIENTE'
     );
   }, [requests, myEmail]);
 
   const balances = useMemo(() => {
     const providerCommissions: Record<string, { 
       total: number; 
-      paidRequested: number;  // Ya aprobadas/pagadas
-      pendingRequested: number; // En solicitud pendiente o rechazada
+      paidRequested: number;
+      pendingRequested: number;
       orderIds: string[] 
     }> = {};
     
@@ -133,14 +133,14 @@ export default function CommissionRequestsView() {
       });
     });
 
-    // Sumar todas las solicitudes NO APROBADAS (pendientes + rechazadas) por proveedor
-    nonApprovedRequests.forEach(req => {
+    // CORREGIDO: Sumar solo solicitudes PENDIENTES (no rechazadas)
+    pendingRequests.forEach(req => {
       if (req.provider_email) {
         const providerEmail = req.provider_email.toLowerCase();
         if (providerCommissions[providerEmail]) {
           providerCommissions[providerEmail].pendingRequested += Number(req.amount_gs || 0);
         } else {
-          providerCommissions[providerEmail] = providerCommissions[providerEmail] || { 
+          providerCommissions[providerEmail] = { 
             total: 0, paidRequested: 0, pendingRequested: 0, orderIds: [] 
           };
           providerCommissions[providerEmail].pendingRequested += Number(req.amount_gs || 0);
@@ -165,7 +165,7 @@ export default function CommissionRequestsView() {
     });
     
     return result;
-  }, [orders, skuProviderMap, nonApprovedRequests]);
+  }, [orders, skuProviderMap, pendingRequests]);
 
   const filtered = requests.filter(r => {
     if (filterStatus && r.status !== filterStatus) return false;
@@ -189,7 +189,7 @@ export default function CommissionRequestsView() {
     const available = balance?.available || 0;
 
     if (available <= 0) {
-      toast.error('No tenés saldo disponible para este proveedor. Ya solicitaste este monto anteriormente.');
+      toast.error('No tenés saldo disponible para este proveedor.');
       return;
     }
 
@@ -219,8 +219,8 @@ export default function CommissionRequestsView() {
     setShowForm(false);
     setNewProvider('');
     setNewNote('');
-    load();
-    if (showForm && role === 'VENDEDOR') loadBalanceOrders();
+    await load();
+    if (showForm && role === 'VENDEDOR') await loadBalanceOrders();
   };
 
   const approve = async (id: string) => {
@@ -273,8 +273,8 @@ export default function CommissionRequestsView() {
       toast.success('Solicitud aprobada (sin órdenes asociadas)');
     }
     
-    load();
-    if (showForm && role === 'VENDEDOR') loadBalanceOrders();
+    await load();
+    if (showForm && role === 'VENDEDOR') await loadBalanceOrders();
   };
 
   const reject = async (id: string) => {
@@ -285,8 +285,14 @@ export default function CommissionRequestsView() {
       rejected_by: myEmail, 
       approval_note: note,
     }).eq('id', id);
-    if (error) toast.error(error.message);
-    else { toast.success('Solicitud rechazada'); load(); }
+    
+    if (error) {
+      toast.error(error.message);
+    } else { 
+      toast.success('Solicitud rechazada');
+      await load();
+      if (showForm && role === 'VENDEDOR') await loadBalanceOrders();
+    }
   };
 
   return (
@@ -363,13 +369,13 @@ export default function CommissionRequestsView() {
                   <div>📊 Total rendido: Gs {nf(bal?.grossRendido || 0)}</div>
                   <div>✅ Ya pagado: Gs {nf(bal?.paid || 0)}</div>
                   {bal && bal.requested > 0 && (
-                    <div className="text-orange-600">⏳ Ya solicitado (Pendiente/Rechazado): Gs {nf(bal.requested)}</div>
+                    <div className="text-orange-600">⏳ Pendiente de aprobación: Gs {nf(bal.requested)}</div>
                   )}
                 </div>
                 <div className={`text-sm font-bold mt-2 ${(bal?.available || 0) > 0 ? 'text-green-600' : 'text-red-600'}`}>
                   {bal && bal.available > 0 
                     ? `💰 Disponible para solicitar: Gs ${nf(bal.available)}`
-                    : `❌ No hay saldo disponible - Ya solicitaste Gs ${nf(bal?.requested || 0)}`
+                    : `❌ No hay saldo disponible`
                   }
                 </div>
               </div>
