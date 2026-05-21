@@ -3,7 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 import { BuyerHistoryModal } from '@/components/BuyerHistoryModal';
-import { Loader2, History, CheckCircle } from 'lucide-react';
+import { Loader2, History, CheckCircle, AlertCircle } from 'lucide-react';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
@@ -51,6 +51,13 @@ const canAccessProduct = (product: any, profile: any) => {
   }
 
   return false;
+};
+
+// Función para extraer SOLO los últimos 6 dígitos del teléfono
+const getLast6Digits = (phone: string): string => {
+  if (!phone) return '';
+  const digits = phone.toString().replace(/\D/g, '');
+  return digits.slice(-6);
 };
 
 const generateNormalOrderId = async (): Promise<string> => {
@@ -121,6 +128,7 @@ const CreateOrderView = ({
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [checkingHistory, setCheckingHistory] = useState(false);
   const [hasHistory, setHasHistory] = useState(false);
+  const [clientStatus, setClientStatus] = useState<'new' | 'regular' | 'problematic' | null>(null);
 
   useEffect(() => {
     if (!profile?.email) {
@@ -175,21 +183,49 @@ const CreateOrderView = ({
   const checkBuyerHistory = async (phoneNumber: string) => {
     if (!phoneNumber || phoneNumber.length < 6) {
       setHasHistory(false);
+      setClientStatus(null);
       return;
     }
 
     setCheckingHistory(true);
     try {
-      const { data, error } = await supabase
+      const last6Digits = getLast6Digits(phoneNumber);
+      
+      const { data: orders, error } = await supabase
         .from('orders')
-        .select('id', { count: 'exact', head: true })
-        .eq('phone', phoneNumber);
+        .select('id, status, total_gs, created_at')
+        .or(`phone.ilike.%${last6Digits}`);
 
       if (error) throw error;
-      setHasHistory((data?.length || 0) > 0);
+      
+      const matchingOrders = orders?.filter(order => {
+        const orderLast6 = getLast6Digits(order.phone);
+        return orderLast6 === last6Digits;
+      }) || [];
+      
+      const hasOrders = matchingOrders.length > 0;
+      setHasHistory(hasOrders);
+      
+      if (hasOrders) {
+        const cancelled = matchingOrders.filter(o => o.status === 'cancelled' || o.status === 'cancelado').length;
+        const returned = matchingOrders.filter(o => o.status === 'returned' || o.status === 'devuelto').length;
+        const problemCount = cancelled + returned;
+        const problemRate = problemCount / matchingOrders.length;
+        
+        if (problemRate >= 0.5) {
+          setClientStatus('problematic');
+        } else if (problemCount > 0) {
+          setClientStatus('regular');
+        } else {
+          setClientStatus('regular');
+        }
+      } else {
+        setClientStatus('new');
+      }
     } catch (error) {
       console.error('Error verificando historial:', error);
       setHasHistory(false);
+      setClientStatus(null);
     } finally {
       setCheckingHistory(false);
     }
@@ -203,6 +239,7 @@ const CreateOrderView = ({
       return () => clearTimeout(debounceTimer);
     } else {
       setHasHistory(false);
+      setClientStatus(null);
     }
   }, [phone]);
 
@@ -542,14 +579,8 @@ const CreateOrderView = ({
                   type="button"
                   onClick={() => setShowHistoryModal(true)}
                   disabled={!phone || phone.length < 6}
-                  className={`px-3 py-2 rounded-lg transition-all flex items-center gap-2 ${
-                    phone && phone.length >= 6 && hasHistory
-                      ? 'bg-primary text-white hover:bg-primary/90'
-                      : phone && phone.length >= 6 && !hasHistory
-                      ? 'bg-gray-200 text-gray-600'
-                      : 'bg-gray-100 text-gray-400 cursor-not-allowed'
-                  }`}
-                  title={hasHistory ? "Ver historial del comprador" : "Sin historial previo"}
+                  className="px-3 py-2 rounded-lg transition-all flex items-center gap-2 bg-gradient-to-r from-slate-700 to-slate-800 text-white hover:from-slate-800 hover:to-slate-900 shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                  title="Ver historial completo del cliente"
                 >
                   {checkingHistory ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -557,25 +588,31 @@ const CreateOrderView = ({
                     <History className="w-4 h-4" />
                   )}
                   <span className="hidden sm:inline text-sm">
-                    {hasHistory ? "Historial" : "Sin historial"}
+                    Historial
                   </span>
                 </button>
               </div>
               
+              {/* Indicador de estado del cliente */}
               {phone && phone.length >= 6 && !checkingHistory && (
-                <div className={`text-xs mt-1 flex items-center gap-1 ${
-                  hasHistory ? 'text-green-600' : 'text-gray-500'
-                }`}>
+                <div className="text-xs mt-1.5 flex items-center gap-2">
                   {hasHistory ? (
-                    <>
-                      <CheckCircle className="w-3 h-3" />
-                      <span>Cliente con historial de compras</span>
-                    </>
+                    <div className="flex items-center gap-1.5 text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                      <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></div>
+                      <span>📋 Cliente registrado</span>
+                    </div>
                   ) : (
-                    <>
-                      <span>🆕 Cliente sin historial previo</span>
-                    </>
+                    <div className="flex items-center gap-1.5 text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
+                      <span>🆕</span>
+                      <span>Sin compras previas</span>
+                    </div>
                   )}
+                  <button
+                    onClick={() => setShowHistoryModal(true)}
+                    className="text-blue-600 hover:text-blue-800 underline-offset-2 hover:underline"
+                  >
+                    Ver detalles →
+                  </button>
                 </div>
               )}
             </div>
