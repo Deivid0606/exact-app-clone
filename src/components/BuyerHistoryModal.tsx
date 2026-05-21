@@ -38,6 +38,29 @@ interface ClientClassification {
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
+// Función para normalizar el estado de la orden
+const normalizeStatus = (status: string): string => {
+  const statusLower = status?.toLowerCase() || '';
+  
+  // Estados de entregado
+  if (['delivered', 'entregado', 'entregada'].includes(statusLower)) {
+    return 'delivered';
+  }
+  // Estados de cancelado
+  if (['cancelled', 'cancelado', 'cancelada'].includes(statusLower)) {
+    return 'cancelled';
+  }
+  // Estados de devuelto - INCLUYE "devuelto a depósito"
+  if (['returned', 'devuelto', 'devuelta', 'devuelto a depósito', 'devuelto al deposito'].includes(statusLower)) {
+    return 'returned';
+  }
+  // Estados en tránsito
+  if (['in_transit', 'transito', 'enviado', 'en tránsito', 'en camino'].includes(statusLower)) {
+    return 'in_transit';
+  }
+  return 'unknown';
+};
+
 // Función para extraer SOLO los últimos 6 dígitos del teléfono
 const getLast6Digits = (phone: string): string => {
   if (!phone) return '';
@@ -94,10 +117,11 @@ export function BuyerHistoryModal({ open, onOpenChange, phone, customerName }: B
 
       const totalOrders = filteredOrders?.length || 0;
       
-      const delivered = filteredOrders?.filter(o => o.status === 'delivered' || o.status === 'entregado').length || 0;
-      const cancelled = filteredOrders?.filter(o => o.status === 'cancelled' || o.status === 'cancelado').length || 0;
-      const returned = filteredOrders?.filter(o => o.status === 'returned' || o.status === 'devuelto').length || 0;
-      const inTransit = filteredOrders?.filter(o => o.status === 'in_transit' || o.status === 'transito' || o.status === 'enviado').length || 0;
+      // Usar la función de normalización para contar correctamente
+      const delivered = filteredOrders?.filter(o => normalizeStatus(o.status) === 'delivered').length || 0;
+      const cancelled = filteredOrders?.filter(o => normalizeStatus(o.status) === 'cancelled').length || 0;
+      const returned = filteredOrders?.filter(o => normalizeStatus(o.status) === 'returned').length || 0;
+      const inTransit = filteredOrders?.filter(o => normalizeStatus(o.status) === 'in_transit').length || 0;
       
       let totalProducts = 0;
       let totalSpent = 0;
@@ -115,14 +139,16 @@ export function BuyerHistoryModal({ open, onOpenChange, phone, customerName }: B
       const carrierStats: Record<string, { delivered: number; returned: number; in_transit: number }> = {};
       filteredOrders?.forEach(order => {
         const carrier = order.carrier || 'No especificada';
+        const normalizedStatus = normalizeStatus(order.status);
+        
         if (!carrierStats[carrier]) {
           carrierStats[carrier] = { delivered: 0, returned: 0, in_transit: 0 };
         }
-        if (order.status === 'delivered' || order.status === 'entregado') {
+        if (normalizedStatus === 'delivered') {
           carrierStats[carrier].delivered++;
-        } else if (order.status === 'returned' || order.status === 'devuelto') {
+        } else if (normalizedStatus === 'returned') {
           carrierStats[carrier].returned++;
-        } else if (order.status === 'in_transit' || order.status === 'transito') {
+        } else if (normalizedStatus === 'in_transit') {
           carrierStats[carrier].in_transit++;
         }
       });
@@ -212,18 +238,23 @@ export function BuyerHistoryModal({ open, onOpenChange, phone, customerName }: B
   };
 
   const getStatusBadge = (status: string) => {
+    const normalizedStatus = normalizeStatus(status);
+    const originalStatus = status || 'Desconocido';
+    
     const statusMap: Record<string, { color: string; bg: string; text: string; icon: JSX.Element }> = {
       'delivered': { bg: 'bg-emerald-50', color: 'text-emerald-700', text: 'Entregada', icon: <CheckCircle className="w-3 h-3" /> },
-      'entregado': { bg: 'bg-emerald-50', color: 'text-emerald-700', text: 'Entregada', icon: <CheckCircle className="w-3 h-3" /> },
       'cancelled': { bg: 'bg-rose-50', color: 'text-rose-700', text: 'Cancelada', icon: <XCircle className="w-3 h-3" /> },
-      'cancelado': { bg: 'bg-rose-50', color: 'text-rose-700', text: 'Cancelada', icon: <XCircle className="w-3 h-3" /> },
       'returned': { bg: 'bg-amber-50', color: 'text-amber-700', text: 'Devuelta', icon: <AlertCircle className="w-3 h-3" /> },
-      'devuelto': { bg: 'bg-amber-50', color: 'text-amber-700', text: 'Devuelta', icon: <AlertCircle className="w-3 h-3" /> },
-      'in_transit': { bg: 'bg-sky-50', color: 'text-sky-700', text: 'En tránsito', icon: <Truck className="w-3 h-3" /> },
-      'transito': { bg: 'bg-sky-50', color: 'text-sky-700', text: 'En tránsito', icon: <Truck className="w-3 h-3" /> },
-      'enviado': { bg: 'bg-sky-50', color: 'text-sky-700', text: 'Enviado', icon: <Package className="w-3 h-3" /> }
+      'in_transit': { bg: 'bg-sky-50', color: 'text-sky-700', text: 'En tránsito', icon: <Truck className="w-3 h-3" /> }
     };
-    const statusInfo = statusMap[status?.toLowerCase()] || { bg: 'bg-gray-50', color: 'text-gray-700', text: status || 'Desconocido', icon: <Package className="w-3 h-3" /> };
+    
+    const statusInfo = statusMap[normalizedStatus] || { 
+      bg: 'bg-gray-50', 
+      color: 'text-gray-700', 
+      text: originalStatus, 
+      icon: <Package className="w-3 h-3" /> 
+    };
+    
     return (
       <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${statusInfo.bg} ${statusInfo.color}`}>
         {statusInfo.icon}
