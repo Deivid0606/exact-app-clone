@@ -1941,10 +1941,10 @@ export default function ProductsView({
       )}
 
       {/* Catálogo separado */}
-      <section className="relative overflow-hidden rounded-[30px] border border-white/10 bg-[linear-gradient(135deg,#77736f_0%,#424650_38%,#171923_100%)] p-4 sm:p-5 shadow-[0_14px_54px_rgba(0,0,0,0.38)] backdrop-blur-xl space-y-5">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.10),transparent_38%)]" />
-        <div className="pointer-events-none absolute -top-28 -right-28 h-72 w-72 rounded-full bg-indigo-400/10 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-28 -left-28 h-72 w-72 rounded-full bg-white/10 blur-3xl" />
+      <section className="relative overflow-hidden rounded-[30px] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(80,95,130,0.20),transparent_30%),linear-gradient(135deg,#07080c_0%,#10131b_48%,#030407_100%)] p-4 sm:p-5 shadow-[0_18px_70px_rgba(0,0,0,0.55)] backdrop-blur-xl space-y-5">
+        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.055),transparent_28%)]" />
+        <div className="pointer-events-none absolute -top-28 -right-28 h-72 w-72 rounded-full bg-blue-500/10 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-28 -left-28 h-72 w-72 rounded-full bg-violet-500/10 blur-3xl" />
         <div className="relative space-y-5">
           <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3 border-b border-white/10 pb-4">
             <div>
@@ -2163,7 +2163,7 @@ export default function ProductsView({
                       return (
                         <div
                           key={p.id}
-                          className="group rounded-[20px] border border-white/10 bg-white/[0.05] backdrop-blur-xl p-2.5 flex flex-col md:flex-row gap-3 md:items-center text-white transition-all duration-300 hover:bg-white/[0.075] hover:border-white/20 hover:shadow-[0_6px_24px_rgba(0,0,0,0.28)]"
+                          className="group rounded-[20px] border border-white/10 bg-[#0b0e14]/90 backdrop-blur-xl p-2.5 flex flex-col md:flex-row gap-3 md:items-center text-white transition-all duration-300 hover:bg-[#111722]/95 hover:border-white/20 hover:shadow-[0_6px_24px_rgba(0,0,0,0.34)]"
                         >
                           <div
                             className="w-16 h-16 rounded-2xl bg-[radial-gradient(circle_at_top,#303542_0%,#191c25_100%)] border border-white/10 overflow-hidden flex items-center justify-center shrink-0 cursor-pointer relative group/img p-1"
@@ -2327,7 +2327,7 @@ export default function ProductsView({
                     return (
                       <div
                         key={p.id}
-                        className="group relative flex flex-col overflow-hidden rounded-[22px] border border-white/10 bg-gradient-to-b from-[#252934]/92 via-[#1d212b]/92 to-[#151821]/95 backdrop-blur-xl shadow-[0_6px_24px_rgba(0,0,0,0.28)] transition-all duration-300 hover:-translate-y-0.5 hover:border-white/20 hover:from-[#2b303d]/95 hover:to-[#171b24]/95 hover:shadow-[0_12px_38px_rgba(0,0,0,0.36)]"
+                        className="group relative flex flex-col overflow-hidden rounded-[22px] border border-white/10 bg-gradient-to-b from-[#171b24]/95 via-[#10141c]/95 to-[#080a0f]/98 backdrop-blur-xl shadow-[0_8px_28px_rgba(0,0,0,0.38)] transition-all duration-300 hover:-translate-y-0.5 hover:border-white/20 hover:from-[#1d2330]/95 hover:to-[#0a0d13]/98 hover:shadow-[0_14px_42px_rgba(0,0,0,0.48)]"
                       >
                         <div
                           className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${headerColor.split(" ")[0]} ${headerColor.split(" ")[1]} z-10`}
@@ -2441,14 +2441,20 @@ export default function ProductsView({
                             </div>
                           )}
 
-                          {/* Características visibles */}
-                          <div className="min-h-[44px] rounded-xl border border-white/10 bg-[#10131b]/35 p-2">
-                            <div className="text-[9px] uppercase tracking-wider text-white/45 font-black mb-1">
-                              Características
+                          {/* Características visibles con scroll interno */}
+                          <div className="relative rounded-xl border border-white/10 bg-[#070a10]/70 p-2.5 shadow-inner">
+                            <div className="flex items-center justify-between gap-2 mb-1.5">
+                              <div className="text-[9px] uppercase tracking-wider text-white/50 font-black">
+                                Características
+                              </div>
+                              <span className="text-[9px] text-white/35 font-bold">scroll</span>
                             </div>
-                            <div className="text-[11px] leading-snug text-white/72 line-clamp-3">
+                            <div
+                              className="max-h-[78px] min-h-[42px] overflow-y-auto pr-2 text-[11px] leading-relaxed text-white/78 whitespace-pre-line [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.28)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/20 hover:[&::-webkit-scrollbar-thumb]:bg-white/32"
+                            >
                               {p.description ? p.description : "Sin características cargadas."}
                             </div>
+                            <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-5 rounded-b-xl bg-gradient-to-t from-[#070a10] to-transparent" />
                           </div>
 
                           {/* Historial plegable */}
