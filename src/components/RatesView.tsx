@@ -5,6 +5,69 @@ import { toast } from 'sonner';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
+// Definir departamentos de Paraguay
+const DEPARTAMENTOS = [
+  "Capital", "Central", "Alto Paraná", "Itapúa", "Cordillera",
+  "Caaguazú", "Guairá", "Ñeembucú", "Concepción", "Amambay",
+  "Canindeyú", "Caazapá", "Misiones", "Paraguarí", "Presidente Hayes",
+  "Boquerón", "Alto Paraguay"
+];
+
+// Mapeo de ciudades a departamentos (basado en tu lista)
+const ciudadDepartamentoMap: { [key: string]: string } = {
+  "Altos": "Cordillera",
+  "Aregua": "Central",
+  "Asuncion": "Capital",
+  "Asunción": "Capital",
+  "Atyra": "Cordillera",
+  "Atyrá": "Cordillera",
+  "Benjamín Aceval": "Presidente Hayes",
+  "Caacupe": "Cordillera",
+  "Capiata": "Central",
+  "Ciudad del este - ALTO PARANÁ": "Alto Paraná",
+  "Colonia Yguazu - ALTO PARANÁ": "Alto Paraná",
+  "Emboscada": "Cordillera",
+  "Eusebio Ayala": "Cordillera",
+  "Fernando de la Mora": "Central",
+  "Guarambare": "Central",
+  "Hernandarias - ALTO PARANÁ": "Alto Paraná",
+  "INTERIOR PAGO ANTICIPADO": "Varios",
+  "Ita": "Central",
+  "Itacurubí de la Cordillera": "Cordillera",
+  "Itaugua": "Central",
+  "J. Augusto Saldívar": "Central",
+  "Juan leon malloriquin - ALTO PARANÁ": "Alto Paraná",
+  "Lambare": "Central",
+  "Limpio": "Central",
+  "Loma Grande": "Cordillera",
+  "Luque": "Central",
+  "Mariano Roque Alonso": "Central",
+  "Minga Guazu - ALTO PARANÁ": "Alto Paraná",
+  "Ñemby": "Central",
+  "Nueva Italia": "Cordillera",
+  "Paraguarí": "Paraguarí",
+  "PIRAYÚ": "Paraguarí",
+  "Piribebuy": "Cordillera",
+  "Presidente franco": "Alto Paraná",
+  "Puerto Pdte. Franco - ALTO PARANÁ": "Alto Paraná",
+  "Remansito": "Presidente Hayes",
+  "San Alberto - ALTO PARANÁ": "Alto Paraná",
+  "San Antonio": "Central",
+  "San Bernardino": "Cordillera",
+  "San Lorenzo": "Central",
+  "SANTA RITA - ALTO PARANÁ": "Alto Paraná",
+  "Tobatí": "Cordillera",
+  "Villa Elisa": "Central",
+  "Villa Hayes": "Presidente Hayes",
+  "Villarrica": "Guairá",
+  "Villeta": "Paraguarí",
+  "YAGUARON": "Paraguarí",
+  "Yguazu": "Alto Paraná",
+  "YGUAZU - ALTO PARANÁ": "Alto Paraná",
+  "Ypacaraí": "Cordillera",
+  "Ypane": "Central", // Asumiendo que es Central, ajustá si es necesario
+};
+
 export default function RatesView() {
   const { profile } = useAuth();
   const role = profile?.role || '';
@@ -17,8 +80,12 @@ export default function RatesView() {
   const [drCity, setDrCity] = useState('');
   const [drRate, setDrRate] = useState('');
   const [cpCity, setCpCity] = useState('');
+  const [cpDepartamento, setCpDepartamento] = useState(''); // NUEVO
   const [cpPrice, setCpPrice] = useState('');
   const [deliveries, setDeliveries] = useState<any[]>([]);
+  
+  // NUEVO: Estado para filtro de departamento
+  const [filtroDepartamento, setFiltroDepartamento] = useState('');
 
   const load = () => {
     supabase.from('delivery_fees').select('*').order('delivery_email').then(({ data }) => setFees(data || []));
@@ -59,17 +126,62 @@ export default function RatesView() {
     else { toast.success('Tarifa eliminada'); load(); }
   };
 
+  // MODIFICADO: Guardar ciudad con departamento
   const saveClientPrice = async () => {
     if (!cpCity || !cpPrice) { toast.error('Completá todos los campos'); return; }
+    
+    // Si no se seleccionó departamento, intentar asignar automáticamente
+    let departamento = cpDepartamento;
+    if (!departamento && ciudadDepartamentoMap[cpCity]) {
+      departamento = ciudadDepartamentoMap[cpCity];
+    }
+    
+    if (!departamento) {
+      toast.error('Por favor seleccioná un departamento para esta ciudad');
+      return;
+    }
+    
     const existing = prices.find(p => p.city?.toLowerCase() === cpCity.toLowerCase());
+    
+    // Verificar si la tabla client_prices tiene columna departamento
+    // Si no existe, primero hay que agregarla a Supabase
     if (existing) {
-      await supabase.from('client_prices').update({ price_gs: Number(cpPrice) }).eq('id', existing.id);
+      await supabase.from('client_prices').update({ 
+        price_gs: Number(cpPrice),
+        departamento: departamento 
+      }).eq('id', existing.id);
     } else {
-      await supabase.from('client_prices').insert({ city: cpCity, price_gs: Number(cpPrice) });
+      await supabase.from('client_prices').insert({ 
+        city: cpCity, 
+        price_gs: Number(cpPrice),
+        departamento: departamento 
+      });
     }
     toast.success('Precio guardado');
+    setCpCity('');
+    setCpDepartamento('');
+    setCpPrice('');
     load();
   };
+
+  // NUEVO: Función para eliminar precio de ciudad
+  const deleteClientPrice = async (id: string) => {
+    if (!confirm('¿Eliminar este precio?')) return;
+    const { error } = await supabase.from('client_prices').delete().eq('id', id);
+    if (error) toast.error(error.message);
+    else { toast.success('Precio eliminado'); load(); }
+  };
+
+  // NUEVO: Obtener departamento de una ciudad (del mapa o de los datos)
+  const getDepartamento = (ciudad: string, precioItem: any) => {
+    if (precioItem.departamento) return precioItem.departamento;
+    return ciudadDepartamentoMap[ciudad] || 'Sin asignar';
+  };
+
+  // NUEVO: Filtrar ciudades por departamento
+  const pricesFiltrados = filtroDepartamento
+    ? prices.filter(p => getDepartamento(p.city, p) === filtroDepartamento)
+    : prices;
 
   return (
     <div className="app-card">
@@ -124,7 +236,7 @@ export default function RatesView() {
               <td className="text-sm">{f.city}</td>
               <td className="text-right text-sm font-bold">{nf(Number(f.fee_gs || 0))}</td>
               {canManage && (
-                <td>
+                <tr>
                   <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={() => deleteRate(f.id)}>Eliminar</button>
                 </td>
               )}
@@ -138,25 +250,98 @@ export default function RatesView() {
 
       <h3 className="text-lg font-extrabold mb-3">Precio al cliente por ciudad</h3>
 
+      {/* NUEVO: Filtro por departamento */}
+      <div className="mb-4 flex gap-2 items-center">
+        <label className="app-label mb-0">Filtrar por departamento:</label>
+        <select 
+          className="app-input !w-auto" 
+          value={filtroDepartamento} 
+          onChange={(e) => setFiltroDepartamento(e.target.value)}
+        >
+          <option value="">Todos los departamentos</option>
+          {DEPARTAMENTOS.map(depto => (
+            <option key={depto} value={depto}>{depto}</option>
+          ))}
+        </select>
+        {filtroDepartamento && (
+          <button 
+            className="nav-btn !px-2 !py-1" 
+            onClick={() => setFiltroDepartamento('')}
+          >
+            Limpiar filtro
+          </button>
+        )}
+      </div>
+
       {role === 'ADMIN' && (
         <div className="flex flex-wrap gap-2 mb-4">
-          <input className="app-input !w-auto" placeholder="Ciudad" value={cpCity} onChange={e => setCpCity(e.target.value)} />
-          <input className="app-input !w-auto" type="number" placeholder="Precio al cliente (Gs)" value={cpPrice} onChange={e => setCpPrice(e.target.value)} />
+          <input 
+            className="app-input !w-auto" 
+            placeholder="Ciudad" 
+            value={cpCity} 
+            onChange={e => setCpCity(e.target.value)} 
+          />
+          <select 
+            className="app-input !w-auto" 
+            value={cpDepartamento} 
+            onChange={e => setCpDepartamento(e.target.value)}
+          >
+            <option value="">Seleccionar departamento...</option>
+            {DEPARTAMENTOS.map(depto => (
+              <option key={depto} value={depto}>{depto}</option>
+            ))}
+          </select>
+          <input 
+            className="app-input !w-auto" 
+            type="number" 
+            placeholder="Precio al cliente (Gs)" 
+            value={cpPrice} 
+            onChange={e => setCpPrice(e.target.value)} 
+          />
           <button className="nav-btn active" onClick={saveClientPrice}>Guardar/Actualizar</button>
           <span className="chip text-[10px]">Impacta en el formulario de pedido</span>
         </div>
       )}
 
       <table className="app-table">
-        <thead><tr><th>Ciudad</th><th className="text-right">Precio cliente (Gs)</th></tr></thead>
+        <thead>
+          <tr>
+            <th>Ciudad</th>
+            <th>Departamento</th> {/* NUEVA COLUMNA */}
+            <th className="text-right">Precio cliente (Gs)</th>
+            {role === 'ADMIN' && <th>Acción</th>}
+          </tr>
+        </thead>
         <tbody>
-          {prices.map(p => (
+          {pricesFiltrados.map(p => (
             <tr key={p.id}>
               <td className="text-sm">{p.city}</td>
+              <td className="text-sm">
+                <span className={`px-2 py-1 rounded text-xs ${
+                  getDepartamento(p.city, p) === 'Capital' ? 'bg-yellow-100 text-yellow-800' :
+                  getDepartamento(p.city, p) === 'Central' ? 'bg-green-100 text-green-800' :
+                  getDepartamento(p.city, p) === 'Alto Paraná' ? 'bg-blue-100 text-blue-800' :
+                  'bg-gray-100 text-gray-800'
+                }`}>
+                  {getDepartamento(p.city, p)}
+                </span>
+              </td>
               <td className="text-right text-sm font-bold">{nf(Number(p.price_gs || 0))}</td>
+              {role === 'ADMIN' && (
+                <td>
+                  <button 
+                    className="nav-btn !px-2 !py-1 !text-[10px]" 
+                    onClick={() => deleteClientPrice(p.id)}
+                  >
+                    Eliminar
+                  </button>
+                </td>
+              )}
             </tr>
           ))}
-          {prices.length === 0 && <tr><td colSpan={2} className="text-center text-muted-foreground py-4">Sin precios</td></tr>}
+          {pricesFiltrados.length === 0 && (
+            <tr><td colSpan={role === 'ADMIN' ? 4 : 3} className="text-center text-muted-foreground py-4">Sin precios</td></tr>
+          )}
         </tbody>
       </table>
     </div>
