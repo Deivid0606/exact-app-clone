@@ -356,7 +356,7 @@ export default function RatesView() {
             </tr>
           )}
         </tbody>
-       </>
+      </table>
     </div>
   );
 }
