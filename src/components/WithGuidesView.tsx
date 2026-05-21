@@ -22,11 +22,16 @@ export default function WithGuidesView() {
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [loading, setLoading] = useState(false);
   
-  // 🔥 NUEVOS FILTROS
-  const [status2Filter, setStatus2Filter] = useState<string>('PENDIENTES'); // 'PENDIENTES', 'CON_GUIA', 'TODOS'
+  // FILTROS EXISTENTES
+  const [status2Filter, setStatus2Filter] = useState<string>('PENDIENTES');
   const [selectedCities, setSelectedCities] = useState<Set<string>>(new Set());
   const [citySearch, setCitySearch] = useState('');
   const [showCityDropdown, setShowCityDropdown] = useState(false);
+
+  // 🔥 NUEVO FILTRO POR DEPARTAMENTOS
+  const [selectedDepartments, setSelectedDepartments] = useState<Set<string>>(new Set());
+  const [deptSearch, setDeptSearch] = useState('');
+  const [showDeptDropdown, setShowDeptDropdown] = useState(false);
 
   // Obtener lista única de ciudades de los pedidos
   const allCities = useMemo(() => {
@@ -39,10 +44,27 @@ export default function WithGuidesView() {
     return Array.from(cities).sort();
   }, [orders]);
 
+  // 🔥 Obtener lista única de departamentos de los pedidos
+  const allDepartments = useMemo(() => {
+    const depts = new Set<string>();
+    orders.forEach(o => {
+      if (o.department && o.department.trim()) {
+        depts.add(o.department.trim());
+      }
+    });
+    return Array.from(depts).sort();
+  }, [orders]);
+
   const filteredCities = useMemo(() => {
     if (!citySearch) return allCities;
     return allCities.filter(c => c.toLowerCase().includes(citySearch.toLowerCase()));
   }, [allCities, citySearch]);
+
+  // 🔥 Filtrar departamentos por búsqueda
+  const filteredDepartments = useMemo(() => {
+    if (!deptSearch) return allDepartments;
+    return allDepartments.filter(d => d.toLowerCase().includes(deptSearch.toLowerCase()));
+  }, [allDepartments, deptSearch]);
 
   const toggleCity = (city: string) => {
     setSelectedCities(prev => {
@@ -56,6 +78,19 @@ export default function WithGuidesView() {
     });
   };
 
+  // 🔥 Toggle para departamentos
+  const toggleDepartment = (dept: string) => {
+    setSelectedDepartments(prev => {
+      const next = new Set(prev);
+      if (next.has(dept)) {
+        next.delete(dept);
+      } else {
+        next.add(dept);
+      }
+      return next;
+    });
+  };
+
   const selectAllCities = () => {
     if (selectedCities.size === allCities.length) {
       setSelectedCities(new Set());
@@ -64,10 +99,18 @@ export default function WithGuidesView() {
     }
   };
 
+  // 🔥 Seleccionar todos los departamentos
+  const selectAllDepartments = () => {
+    if (selectedDepartments.size === allDepartments.length) {
+      setSelectedDepartments(new Set());
+    } else {
+      setSelectedDepartments(new Set(allDepartments));
+    }
+  };
+
   const load = async () => {
     setLoading(true);
     
-    // Construir query base
     let query = supabase
       .from('orders')
       .select('*')
@@ -75,13 +118,11 @@ export default function WithGuidesView() {
       .lte('created_at', dateTo + 'T23:59:59')
       .order('created_at', { ascending: false });
 
-    // 🔥 FILTRO POR status2 según selección
     if (status2Filter === 'PENDIENTES') {
       query = query.or('status2.is.null,status2.eq.--');
     } else if (status2Filter === 'CON_GUIA') {
       query = query.eq('status2', 'GUIA GENERADA');
     }
-    // Si es 'TODOS', no agregamos filtro de status2
 
     const { data, error } = await query;
 
@@ -97,9 +138,8 @@ export default function WithGuidesView() {
 
   useEffect(() => { 
     load(); 
-  }, [dateFrom, dateTo, status2Filter]); // 🔥 Recargar cuando cambia el filtro de estado
+  }, [dateFrom, dateTo, status2Filter]);
 
-  // Extract unique providers
   const allProviders = useMemo(() => {
     if (role === 'PROVEEDOR') return [];
     const set = new Set<string>();
@@ -119,7 +159,6 @@ export default function WithGuidesView() {
 
   const filtered = useMemo(() => {
     return orders.filter(o => {
-      // Filtro automático para PROVEEDOR
       if (role === 'PROVEEDOR') {
         const providerList = o.provider_emails_list || '';
         const myEmailLower = myEmail.toLowerCase();
@@ -127,31 +166,35 @@ export default function WithGuidesView() {
         if (!isMine) return false;
       }
       
-      // Filtro manual de proveedor
       if (role !== 'PROVEEDOR' && providerFilter) {
         const providerList = (o.provider_emails_list || '') + ',' + (o.provider_email || '');
         if (!providerList.toLowerCase().includes(providerFilter.toLowerCase())) return false;
       }
       
-      // 🔥 FILTRO POR CIUDADES SELECCIONADAS
+      // 🔥 FILTRO POR CIUDADES
       if (selectedCities.size > 0) {
         if (!o.city || !selectedCities.has(o.city)) return false;
       }
       
-      // Búsqueda
+      // 🔥 FILTRO POR DEPARTAMENTOS
+      if (selectedDepartments.size > 0) {
+        if (!o.department || !selectedDepartments.has(o.department)) return false;
+      }
+      
       if (!search) return true;
       const q = search.toLowerCase();
       return (o.customer_name || '').toLowerCase().includes(q) ||
         (o.order_number || '').toLowerCase().includes(q) ||
         (o.phone || '').includes(q) || 
         (o.city || '').toLowerCase().includes(q) ||
+        (o.department || '').toLowerCase().includes(q) ||
         (o.id || '').toLowerCase().includes(q);
     });
-  }, [orders, search, providerFilter, role, myEmail, selectedCities]);
+  }, [orders, search, providerFilter, role, myEmail, selectedCities, selectedDepartments]);
 
   const pendingGuides = filtered.filter(o => !o.status2 || o.status2 === '--');
   const withGuides = filtered.filter(o => o.status2 === 'GUIA GENERADA');
-  const visibleOrders = filtered; // 🔥 AHORA MUESTRA TODOS (pendientes + con guía + otros)
+  const visibleOrders = filtered;
 
   const state2Opts = ['--', 'GUIA GENERADA', 'FUERA DE COBERTURA', 'CANCELADO', 'REPETIDO', 'RENDIDO'];
 
@@ -184,6 +227,7 @@ export default function WithGuidesView() {
       `Cliente: ${o.customer_name || ''}`,
       `Teléfono: ${o.phone || ''}`,
       `Email: ${o.email || ''}`,
+      `Departamento: ${o.department || ''}`,
       `Ciudad: ${o.city || ''}`,
       `Dirección: ${o.street || ''} ${o.district ? '- ' + o.district : ''}`,
       `━━━━━━━━━━━━━━━━━━`,
@@ -314,7 +358,7 @@ export default function WithGuidesView() {
         <td style="padding:4px 8px;border-bottom:1px solid #333;">${it.title || it.sku || 'Item'}</td>
         <td style="padding:4px 8px;border-bottom:1px solid #333;text-align:center;">${it.qty || 1}</td>
         <td style="padding:4px 8px;border-bottom:1px solid #333;text-align:right;">Gs ${nf(Number(it.sale_gs || 0) * Number(it.qty || 1))}</td>
-      </tr>`
+       </tr>`
       ).join('');
 
       return `
@@ -324,6 +368,7 @@ export default function WithGuidesView() {
             <tr><td style="padding:3px 0;width:120px;color:#999;">Cliente:</td><td style="font-weight:bold;">${o.customer_name || ''}</td></tr>
             <tr><td style="padding:3px 0;color:#999;">Teléfono:</td><td>${o.phone || ''}</td></tr>
             <tr><td style="padding:3px 0;color:#999;">Email:</td><td>${o.email || ''}</td></tr>
+            <tr><td style="padding:3px 0;color:#999;">Departamento:</td><td>${o.department || ''}</td></tr>
             <tr><td style="padding:3px 0;color:#999;">Ciudad:</td><td>${o.city || ''}</td></tr>
             <tr><td style="padding:3px 0;color:#999;">Dirección:</td><td>${o.street || ''} ${o.district ? '- ' + o.district : ''}</td></tr>
             <tr><td style="padding:3px 0;color:#999;">Vendedor:</td><td>${o.created_by || ''}</td></tr>
@@ -363,7 +408,7 @@ export default function WithGuidesView() {
       <h3 className="text-lg font-extrabold mb-3">Pedidos con guías</h3>
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-3">
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-3">
         <div className="kpi-card">
           <div className="text-xs text-muted-foreground mb-1">Guías pendientes</div>
           <div className="text-[22px] font-extrabold">{pendingGuides.length}</div>
@@ -377,7 +422,11 @@ export default function WithGuidesView() {
           <div className="text-[22px] font-extrabold">{filtered.length}</div>
         </div>
         <div className="kpi-card">
-          <div className="text-xs text-muted-foreground mb-1">Ciudades filtradas</div>
+          <div className="text-xs text-muted-foreground mb-1">Departamentos</div>
+          <div className="text-[22px] font-extrabold">{selectedDepartments.size || 'Todos'}</div>
+        </div>
+        <div className="kpi-card">
+          <div className="text-xs text-muted-foreground mb-1">Ciudades</div>
           <div className="text-[22px] font-extrabold">{selectedCities.size || 'Todas'}</div>
         </div>
         <div className="kpi-card">
@@ -411,12 +460,69 @@ export default function WithGuidesView() {
         )}
       </div>
 
-      {/* Filtros - Segunda línea: Búsqueda y ciudades */}
+      {/* Filtros - Segunda línea: Búsqueda, Departamentos y Ciudades */}
       <div className="flex flex-wrap gap-2 mb-3">
-        <input className="app-input flex-1 min-w-[200px]" placeholder="🔎 Buscar por cliente, teléfono, ID o ciudad"
+        <input className="app-input flex-1 min-w-[200px]" placeholder="🔎 Buscar por cliente, teléfono, ID, ciudad o departamento"
           value={search} onChange={e => setSearch(e.target.value)} />
         
-        {/* 🔥 FILTRO POR CIUDADES CON DROPDOWN MULTISELECT */}
+        {/* 🔥 FILTRO POR DEPARTAMENTOS */}
+        <div className="relative">
+          <button 
+            className="nav-btn"
+            type="button"
+            onClick={() => setShowDeptDropdown(!showDeptDropdown)}
+            style={{ background: selectedDepartments.size > 0 ? '#3b82f6' : undefined, color: selectedDepartments.size > 0 ? 'white' : undefined }}
+          >
+            🗺️ Departamentos {selectedDepartments.size > 0 ? `(${selectedDepartments.size})` : ''}
+          </button>
+          
+          {showDeptDropdown && (
+            <div className="absolute top-full mt-1 left-0 z-50 bg-card border border-border rounded-xl shadow-xl w-80 max-h-96 overflow-hidden flex flex-col">
+              <div className="p-2 border-b border-border">
+                <input 
+                  type="text" 
+                  className="app-input w-full text-sm" 
+                  placeholder="🔎 Buscar departamento..."
+                  value={deptSearch}
+                  onChange={e => setDeptSearch(e.target.value)}
+                />
+              </div>
+              <div className="p-2 border-b border-border flex gap-2">
+                <button className="text-xs nav-btn !py-1" onClick={selectAllDepartments}>
+                  {selectedDepartments.size === allDepartments.length ? 'Deseleccionar todos' : 'Seleccionar todos'}
+                </button>
+                {selectedDepartments.size > 0 && (
+                  <button className="text-xs nav-btn !py-1" onClick={() => setSelectedDepartments(new Set())}>
+                    Limpiar
+                  </button>
+                )}
+              </div>
+              <div className="overflow-auto max-h-64">
+                {filteredDepartments.map(dept => (
+                  <label key={dept} className="flex items-center gap-2 px-3 py-2 hover:bg-secondary cursor-pointer text-sm">
+                    <input 
+                      type="checkbox" 
+                      checked={selectedDepartments.has(dept)}
+                      onChange={() => toggleDepartment(dept)}
+                      className="rounded border-border"
+                    />
+                    <span>{dept}</span>
+                    <span className="text-xs text-muted-foreground ml-auto">
+                      {orders.filter(o => o.department === dept).length}
+                    </span>
+                  </label>
+                ))}
+                {filteredDepartments.length === 0 && (
+                  <div className="px-3 py-4 text-center text-muted-foreground text-sm">
+                    No se encontraron departamentos
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+        
+        {/* FILTRO POR CIUDADES */}
         <div className="relative">
           <button 
             className="nav-btn"
@@ -505,23 +611,26 @@ export default function WithGuidesView() {
             + Agregar resto pendientes ({pendingGuides.length - selectedIds.size})
           </button>
         )}
-        {selectedCities.size > 0 && (
-          <button className="nav-btn" onClick={() => setSelectedCities(new Set())}>
-            🗑️ Limpiar filtro ciudades
+        {(selectedDepartments.size > 0 || selectedCities.size > 0) && (
+          <button className="nav-btn" onClick={() => {
+            setSelectedDepartments(new Set());
+            setSelectedCities(new Set());
+          }}>
+            🗑️ Limpiar todos los filtros de ubicación
           </button>
         )}
       </div>
 
       {/* Tabla */}
       <div className="overflow-auto">
-        <table className="app-table min-w-[1200px]">
+        <table className="app-table min-w-[1300px]">
           <thead>
             <tr>
               <th className="!w-[40px] text-center">
                 <input type="checkbox" checked={selectedIds.size === visibleOrders.length && visibleOrders.length > 0}
                   onChange={() => selectedIds.size === visibleOrders.length ? setSelectedIds(new Set()) : setSelectedIds(new Set(visibleOrders.map(o => o.id)))} />
               </th>
-              <th>Fecha</th><th>ID</th><th>Ciudad</th><th>Cliente</th><th>Teléfono</th>
+              <th>Fecha</th><th>ID</th><th>Departamento</th><th>Ciudad</th><th>Cliente</th><th>Teléfono</th>
               <th>Vendedor</th><th>Proveedor</th><th>Estado 2</th><th>Guía</th>
             </tr>
           </thead>
@@ -533,7 +642,8 @@ export default function WithGuidesView() {
                 </td>
                 <td className="text-xs whitespace-nowrap">{new Date(o.created_at).toLocaleDateString('es-PY')}</td>
                 <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
-                <td className="text-xs">{o.city}</td>
+                <td className="text-xs">{o.department || '—'}</td>
+                <td className="text-xs">{o.city || '—'}</td>
                 <td className="text-xs">{o.customer_name}</td>
                 <td className="text-xs">{o.phone}</td>
                 <td className="text-xs">{o.created_by}</td>
@@ -557,7 +667,7 @@ export default function WithGuidesView() {
               </tr>
             ))}
             {visibleOrders.length === 0 && (
-              <tr><td colSpan={10} className="text-center text-muted-foreground py-8">Sin pedidos en el rango seleccionado</td></tr>
+              <tr><td colSpan={11} className="text-center text-muted-foreground py-8">Sin pedidos en el rango seleccionado</td></tr>
             )}
           </tbody>
         </table>
