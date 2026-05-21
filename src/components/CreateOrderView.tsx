@@ -86,6 +86,69 @@ const generateNormalOrderId = async (): Promise<string> => {
   }
 };
 
+// NUEVO: Mapeo de ciudades a departamentos
+const ciudadDepartamentoMap: { [key: string]: string } = {
+  "Altos": "Cordillera",
+  "Aregua": "Central",
+  "Asuncion": "Capital",
+  "Asunción": "Capital",
+  "Atyra": "Cordillera",
+  "Atyrá": "Cordillera",
+  "Benjamín Aceval": "Presidente Hayes",
+  "Caacupe": "Cordillera",
+  "Capiata": "Central",
+  "Ciudad del este - ALTO PARANÁ": "Alto Paraná",
+  "Colonia Yguazu - ALTO PARANÁ": "Alto Paraná",
+  "Emboscada": "Cordillera",
+  "Eusebio Ayala": "Cordillera",
+  "Fernando de la Mora": "Central",
+  "Guarambare": "Central",
+  "Hernandarias - ALTO PARANÁ": "Alto Paraná",
+  "INTERIOR PAGO ANTICIPADO": "Varios",
+  "Ita": "Central",
+  "Itacurubí de la Cordillera": "Cordillera",
+  "Itaugua": "Central",
+  "J. Augusto Saldívar": "Central",
+  "Juan leon malloriquin - ALTO PARANÁ": "Alto Paraná",
+  "Lambare": "Central",
+  "Limpio": "Central",
+  "Loma Grande": "Cordillera",
+  "Luque": "Central",
+  "Mariano Roque Alonso": "Central",
+  "Minga Guazu - ALTO PARANÁ": "Alto Paraná",
+  "Ñemby": "Central",
+  "Nueva Italia": "Cordillera",
+  "Paraguarí": "Paraguarí",
+  "PIRAYÚ": "Paraguarí",
+  "Piribebuy": "Cordillera",
+  "Presidente franco": "Alto Paraná",
+  "Puerto Pdte. Franco - ALTO PARANÁ": "Alto Paraná",
+  "Remansito": "Presidente Hayes",
+  "San Alberto - ALTO PARANÁ": "Alto Paraná",
+  "San Antonio": "Central",
+  "San Bernardino": "Cordillera",
+  "San Lorenzo": "Central",
+  "SANTA RITA - ALTO PARANÁ": "Alto Paraná",
+  "Tobatí": "Cordillera",
+  "Villa Elisa": "Central",
+  "Villa Hayes": "Presidente Hayes",
+  "Villarrica": "Guairá",
+  "Villeta": "Paraguarí",
+  "YAGUARON": "Paraguarí",
+  "Yguazu": "Alto Paraná",
+  "YGUAZU - ALTO PARANÁ": "Alto Paraná",
+  "Ypacaraí": "Cordillera",
+  "Ypane": "Central",
+};
+
+// NUEVO: Departamentos disponibles
+const DEPARTAMENTOS = [
+  "Capital", "Central", "Alto Paraná", "Itapúa", "Cordillera",
+  "Caaguazú", "Guairá", "Ñeembucú", "Concepción", "Amambay",
+  "Canindeyú", "Caazapá", "Misiones", "Paraguarí", "Presidente Hayes",
+  "Boquerón", "Alto Paraguay", "Varios"
+];
+
 const CreateOrderView = ({
   initialSku,
   onSkuConsumed,
@@ -115,7 +178,12 @@ const CreateOrderView = ({
   const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
   const [customer, setCustomer] = useState('');
   const [phone, setPhone] = useState('');
+  
+  // NUEVO: Estados para departamento y ciudad
+  const [departamento, setDepartamento] = useState('');
   const [city, setCity] = useState('');
+  const [ciudadesFiltradas, setCiudadesFiltradas] = useState<any[]>([]);
+  
   const [street, setStreet] = useState('');
   const [district, setDistrict] = useState('');
   const [email, setEmail] = useState('');
@@ -129,6 +197,28 @@ const CreateOrderView = ({
   const [checkingHistory, setCheckingHistory] = useState(false);
   const [hasHistory, setHasHistory] = useState(false);
   const [clientStatus, setClientStatus] = useState<'new' | 'regular' | 'problematic' | null>(null);
+
+  // NUEVO: Obtener departamentos únicos de las ciudades cargadas
+  const departamentosUnicos = useMemo(() => {
+    const deptos = new Set(clientPrices.map(c => c.departamento || ciudadDepartamentoMap[c.city] || 'Sin asignar'));
+    return Array.from(deptos).sort();
+  }, [clientPrices]);
+
+  // NUEVO: Filtrar ciudades cuando cambia el departamento
+  useEffect(() => {
+    if (departamento) {
+      const filtradas = clientPrices.filter(c => 
+        (c.departamento || ciudadDepartamentoMap[c.city] || '') === departamento
+      );
+      setCiudadesFiltradas(filtradas);
+      // Resetear ciudad cuando cambia departamento
+      if (city && !filtradas.find(c => c.city === city)) {
+        setCity('');
+      }
+    } else {
+      setCiudadesFiltradas(clientPrices);
+    }
+  }, [departamento, clientPrices, city]);
 
   useEffect(() => {
     if (!profile?.email) {
@@ -298,6 +388,7 @@ const CreateOrderView = ({
           onSkuConsumed?.();
         }
 
+        // Cargar precios con departamento
         const { data: pricesData, error: pricesError } = await supabase
           .from('client_prices')
           .select('*')
@@ -305,7 +396,13 @@ const CreateOrderView = ({
 
         if (pricesError) throw pricesError;
 
-        setClientPrices(pricesData || []);
+        // Si la tabla no tiene columna departamento, usar el mapa
+        const pricesConDepto = (pricesData || []).map(p => ({
+          ...p,
+          departamento: p.departamento || ciudadDepartamentoMap[p.city] || 'Sin asignar'
+        }));
+        
+        setClientPrices(pricesConDepto);
 
         if (sheetPrefill) {
           if (sheetPrefill.customer) setCustomer(sheetPrefill.customer);
@@ -346,9 +443,12 @@ const CreateOrderView = ({
             return null;
           };
 
-          const cityMatch = findCity(pricesData || []);
+          const cityMatch = findCity(pricesConDepto || []);
           if (cityMatch) {
             setCity(cityMatch.city);
+            // Auto-select department
+            const depto = cityMatch.departamento || ciudadDepartamentoMap[cityMatch.city];
+            if (depto) setDepartamento(depto);
           } else if (sheetPrefill.city) {
             setCity(sheetPrefill.city);
           }
@@ -463,6 +563,7 @@ const CreateOrderView = ({
   const resetForm = () => {
     setCustomer('');
     setPhone('');
+    setDepartamento('');
     setCity('');
     setStreet('');
     setDistrict('');
@@ -503,6 +604,7 @@ const CreateOrderView = ({
         customer_name: customer,
         phone,
         city,
+        departamento: departamento, // NUEVO: Guardar departamento
         street,
         district,
         email,
@@ -535,7 +637,7 @@ const CreateOrderView = ({
         order_id: String(generatedOrderNumber),
         actor_email: profile?.email,
         role_scope: profile?.role,
-        message: `Nuevo pedido ${generatedOrderNumber} - ${customer} - ${city} - Gs ${nf(totalVenta)}`,
+        message: `Nuevo pedido ${generatedOrderNumber} - ${customer} - ${departamento || city} - Gs ${nf(totalVenta)}`,
       });
 
       if (newsError) {
@@ -617,16 +719,33 @@ const CreateOrderView = ({
               )}
             </div>
 
+            {/* NUEVO: Selector de Departamento */}
+            <label className="app-label">Departamento</label>
+            <select
+              className="app-input w-full min-w-0 text-base"
+              value={departamento}
+              onChange={(e) => setDepartamento(e.target.value)}
+            >
+              <option value="">Selecciona departamento…</option>
+              {DEPARTAMENTOS.map(depto => (
+                <option key={depto} value={depto}>{depto}</option>
+              ))}
+            </select>
+
+            {/* Selector de Ciudad (filtrado por departamento) */}
             <label className="app-label">Ciudad</label>
             <select
               className="app-input w-full min-w-0 text-base"
               value={city}
               onChange={(e) => setCity(e.target.value)}
+              disabled={!departamento}
             >
-              <option value="">Selecciona ciudad…</option>
-              {clientPrices.map((c) => (
+              <option value="">
+                {!departamento ? 'Primero selecciona un departamento…' : 'Selecciona ciudad…'}
+              </option>
+              {ciudadesFiltradas.map((c) => (
                 <option key={c.id} value={c.city}>
-                  {c.city}
+                  {c.city} - {nf(Number(c.price_gs || 0))} Gs
                 </option>
               ))}
             </select>
