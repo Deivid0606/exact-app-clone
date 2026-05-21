@@ -86,7 +86,7 @@ const generateNormalOrderId = async (): Promise<string> => {
   }
 };
 
-// NUEVO: Mapeo de ciudades a departamentos
+// Mapeo de ciudades a departamentos
 const ciudadDepartamentoMap: { [key: string]: string } = {
   "Altos": "Cordillera",
   "Aregua": "Central",
@@ -141,7 +141,7 @@ const ciudadDepartamentoMap: { [key: string]: string } = {
   "Ypane": "Central",
 };
 
-// NUEVO: Departamentos disponibles
+// Departamentos disponibles
 const DEPARTAMENTOS = [
   "Capital", "Central", "Alto Paraná", "Itapúa", "Cordillera",
   "Caaguazú", "Guairá", "Ñeembucú", "Concepción", "Amambay",
@@ -179,7 +179,7 @@ const CreateOrderView = ({
   const [customer, setCustomer] = useState('');
   const [phone, setPhone] = useState('');
   
-  // NUEVO: Estados para departamento y ciudad
+  // Estados para departamento y ciudad
   const [departamento, setDepartamento] = useState('');
   const [city, setCity] = useState('');
   const [ciudadesFiltradas, setCiudadesFiltradas] = useState<any[]>([]);
@@ -198,18 +198,28 @@ const CreateOrderView = ({
   const [hasHistory, setHasHistory] = useState(false);
   const [clientStatus, setClientStatus] = useState<'new' | 'regular' | 'problematic' | null>(null);
 
-  // NUEVO: Obtener departamentos únicos de las ciudades cargadas
-  const departamentosUnicos = useMemo(() => {
-    const deptos = new Set(clientPrices.map(c => c.departamento || ciudadDepartamentoMap[c.city] || 'Sin asignar'));
-    return Array.from(deptos).sort();
+  // Obtener departamentos que TIENEN AL MENOS UNA CIUDAD en clientPrices
+  const departamentosConCiudades = useMemo(() => {
+    const deptosConCiudades = new Set<string>();
+    
+    clientPrices.forEach(c => {
+      const depto = c.departamento || ciudadDepartamentoMap[c.city];
+      if (depto && depto !== 'Sin asignar') {
+        deptosConCiudades.add(depto);
+      }
+    });
+    
+    // Solo mostrar departamentos que tienen ciudades cargadas y ordenarlos
+    return Array.from(deptosConCiudades).sort();
   }, [clientPrices]);
 
-  // NUEVO: Filtrar ciudades cuando cambia el departamento
+  // Filtrar ciudades cuando cambia el departamento
   useEffect(() => {
     if (departamento) {
-      const filtradas = clientPrices.filter(c => 
-        (c.departamento || ciudadDepartamentoMap[c.city] || '') === departamento
-      );
+      const filtradas = clientPrices.filter(c => {
+        const depto = c.departamento || ciudadDepartamentoMap[c.city];
+        return depto === departamento;
+      });
       setCiudadesFiltradas(filtradas);
       // Resetear ciudad cuando cambia departamento
       if (city && !filtradas.find(c => c.city === city)) {
@@ -604,7 +614,7 @@ const CreateOrderView = ({
         customer_name: customer,
         phone,
         city,
-        departamento: departamento, // NUEVO: Guardar departamento
+        departamento: departamento,
         street,
         district,
         email,
@@ -719,29 +729,36 @@ const CreateOrderView = ({
               )}
             </div>
 
-            {/* NUEVO: Selector de Departamento */}
-            <label className="app-label">Departamento</label>
-            <select
-              className="app-input w-full min-w-0 text-base"
-              value={departamento}
-              onChange={(e) => setDepartamento(e.target.value)}
-            >
-              <option value="">Selecciona departamento…</option>
-              {DEPARTAMENTOS.map(depto => (
-                <option key={depto} value={depto}>{depto}</option>
-              ))}
-            </select>
+            {/* NUEVO: Selector de Departamento - SOLO si hay al menos una ciudad cargada */}
+            {departamentosConCiudades.length > 0 && (
+              <>
+                <label className="app-label">Departamento</label>
+                <select
+                  className="app-input w-full min-w-0 text-base"
+                  value={departamento}
+                  onChange={(e) => setDepartamento(e.target.value)}
+                >
+                  <option value="">Selecciona departamento…</option>
+                  {departamentosConCiudades.map(depto => (
+                    <option key={depto} value={depto}>{depto}</option>
+                  ))}
+                </select>
+              </>
+            )}
 
-            {/* Selector de Ciudad (filtrado por departamento) */}
+            {/* Selector de Ciudad (filtrado por departamento si existe) */}
             <label className="app-label">Ciudad</label>
             <select
               className="app-input w-full min-w-0 text-base"
               value={city}
               onChange={(e) => setCity(e.target.value)}
-              disabled={!departamento}
             >
               <option value="">
-                {!departamento ? 'Primero selecciona un departamento…' : 'Selecciona ciudad…'}
+                {departamentosConCiudades.length === 0 
+                  ? 'No hay ciudades cargadas…' 
+                  : !departamento && departamentosConCiudades.length > 0
+                    ? 'Primero selecciona un departamento…'
+                    : 'Selecciona ciudad…'}
               </option>
               {ciudadesFiltradas.map((c) => (
                 <option key={c.id} value={c.city}>
