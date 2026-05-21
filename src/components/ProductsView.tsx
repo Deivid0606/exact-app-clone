@@ -2327,16 +2327,17 @@ export default function ProductsView({
                     return (
                       <div
                         key={p.id}
-                        className="group relative flex flex-col overflow-hidden rounded-[24px] border border-white/10 bg-[#171923]/35 backdrop-blur-xl shadow-[0_5px_20px_rgba(0,0,0,0.20)] transition-all duration-300 hover:-translate-y-0.5 hover:scale-[1.006] hover:border-white/20 hover:bg-[#171923]/45 hover:shadow-[0_10px_34px_rgba(0,0,0,0.34)]"
+                        className="group relative flex flex-col overflow-hidden rounded-[22px] border border-white/10 bg-gradient-to-b from-[#252934]/92 via-[#1d212b]/92 to-[#151821]/95 backdrop-blur-xl shadow-[0_6px_24px_rgba(0,0,0,0.28)] transition-all duration-300 hover:-translate-y-0.5 hover:border-white/20 hover:from-[#2b303d]/95 hover:to-[#171b24]/95 hover:shadow-[0_12px_38px_rgba(0,0,0,0.36)]"
                       >
                         <div
                           className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${headerColor.split(" ")[0]} ${headerColor.split(" ")[1]} z-10`}
                         />
 
                         <div
-                          className="relative m-2 mb-0 aspect-[1/0.88] overflow-hidden rounded-[20px] border border-white/10 bg-[radial-gradient(circle_at_top,#303542_0%,#191c25_100%)] cursor-pointer shadow-inner"
+                          className="relative m-2 mb-0 aspect-[1/0.78] overflow-hidden rounded-[18px] border border-white/10 bg-[radial-gradient(circle_at_top,#343a48_0%,#171b24_100%)] cursor-pointer shadow-inner"
                           onClick={() =>
-                            setExpandedId(isExpanded ? null : p.id)
+                            mainImg &&
+                            setViewingImage({ url: mainImg, title: p.title, index: 0 })
                           }
                         >
                           <ProductImageGallery
@@ -2353,24 +2354,24 @@ export default function ProductsView({
 
                           <div className="absolute top-2 left-2 flex flex-col gap-1 z-10">
                             {stockCritical && (
-                              <span className="chip text-[10px] bg-red-500/20 border-red-500/40 backdrop-blur-sm">
+                              <span className="rounded-full border border-red-400/40 bg-red-500/20 px-2 py-0.5 text-[10px] font-black text-red-100 backdrop-blur-md">
                                 ⚠️ Stock bajo
                               </span>
                             )}
                             {topProduct && (
-                              <span className="chip text-[10px] bg-emerald-500/20 border-emerald-500/40 backdrop-blur-sm">
+                              <span className="rounded-full border border-emerald-400/40 bg-emerald-500/20 px-2 py-0.5 text-[10px] font-black text-emerald-100 backdrop-blur-md">
                                 🔥 Top ventas
                               </span>
                             )}
                             {isPrivateProduct(p) && (
-                              <span className="chip text-[10px] backdrop-blur-sm">
+                              <span className="rounded-full border border-white/15 bg-white/10 px-2 py-0.5 text-[10px] font-black text-white/85 backdrop-blur-md">
                                 🔒 Privado
                               </span>
                             )}
                           </div>
 
                           <button
-                            className="absolute top-2 right-2 z-20 w-8 h-8 rounded-full bg-background/80 backdrop-blur-sm flex items-center justify-center text-lg border border-border hover:scale-110 transition-transform"
+                            className="absolute top-2 right-2 z-20 w-8 h-8 rounded-full bg-[#12151d]/80 backdrop-blur-md flex items-center justify-center text-lg text-white border border-white/15 hover:scale-110 hover:bg-[#1b2030] transition-all"
                             onClick={(e) => {
                               e.stopPropagation();
                               toggleFavorite(p.id);
@@ -2380,215 +2381,187 @@ export default function ProductsView({
                           </button>
                         </div>
 
-                        <div
-                          className="p-3 flex flex-col gap-2 flex-grow cursor-pointer text-white"
-                          onClick={() =>
-                            setExpandedId(isExpanded ? null : p.id)
-                          }
-                        >
+                        <div className="p-3 flex flex-col gap-2.5 flex-grow text-white">
                           <div className="flex items-center justify-between gap-2">
-                            <div className="text-[9px] uppercase tracking-wider text-white/45 font-black">
+                            <div className="min-w-0 text-[9px] uppercase tracking-wider text-white/55 font-black truncate">
                               SKU: {p.sku || "—"}
                             </div>
-                            <span className="rounded-full border border-white/10 bg-white/[0.08] px-2 py-0.5 text-[9px] font-bold text-white/75">
+                            <span className="shrink-0 rounded-full border border-emerald-400/20 bg-emerald-500/12 px-2 py-0.5 text-[9px] font-black text-emerald-200">
                               ✅ {deliveryRate}% entrega
                             </span>
                           </div>
 
-                          <div className="font-black text-[15px] leading-tight line-clamp-2 text-white">
+                          <div className="font-black text-[15px] leading-tight line-clamp-2 text-white drop-shadow-sm">
                             {p.title}
                           </div>
 
-                          {/* Indicadores de stock en vista grid */}
-                          <div className="flex gap-1.5">
-                            <div className="flex-1 rounded-lg bg-white/[0.06] border border-white/10 p-1.5 text-center">
-                              <div className="text-[9px] text-white/50">
+                          {/* Stock y precio siempre visibles */}
+                          <div className="grid grid-cols-2 gap-2">
+                            <div className="rounded-xl bg-white/[0.07] border border-white/10 p-2">
+                              <div className="text-[9px] uppercase tracking-wider text-white/45 font-bold">
                                 Stock
                               </div>
                               <div
-                                className={`font-black text-sm ${stockCritical ? "text-red-500" : ""}`}
+                                className={`font-black text-lg leading-none mt-1 ${stockCritical ? "text-red-300" : "text-white"}`}
                               >
                                 {p.stock || 0}
                               </div>
                             </div>
-                            {canSeeRealStock && (
-                              <div className="flex-1 rounded-lg bg-white/[0.06] border border-white/10 p-1.5 text-center">
-                                <div className="text-[9px] text-white/50">
-                                  Stock Real
+                            {canSeeRealStock ? (
+                              <div className="rounded-xl bg-white/[0.07] border border-white/10 p-2">
+                                <div className="text-[9px] uppercase tracking-wider text-white/45 font-bold">
+                                  Stock real
                                 </div>
                                 <div
-                                  className={`font-black text-sm ${realStockCritical ? "text-red-500" : ""}`}
+                                  className={`font-black text-lg leading-none mt-1 ${realStockCritical ? "text-red-300" : "text-white"}`}
                                 >
                                   {p.real_stock || 0}
                                 </div>
                               </div>
+                            ) : (
+                              <div className="rounded-xl bg-white/[0.07] border border-white/10 p-2">
+                                <div className="text-[9px] uppercase tracking-wider text-white/45 font-bold">
+                                  Precio
+                                </div>
+                                <div className="font-black text-sm leading-none mt-1 text-white font-mono">
+                                  {nf(Number(p.provider_price_gs || 0))} Gs
+                                </div>
+                              </div>
                             )}
                           </div>
 
-                          {p.description && !isExpanded && (
-                            <div className="text-[11px] text-white/55 line-clamp-2">
-                              {p.description}
+                          {canSeeRealStock && (
+                            <div className="rounded-xl bg-white/[0.07] border border-white/10 p-2">
+                              <div className="text-[9px] uppercase tracking-wider text-white/45 font-bold">
+                                Precio
+                              </div>
+                              <div className="font-black text-sm text-white font-mono">
+                                {nf(Number(p.provider_price_gs || 0))} Gs
+                              </div>
                             </div>
                           )}
 
-                          {isExpanded && p.description && (
-                            <div className="text-[11px] text-white/55 whitespace-pre-wrap">
-                              {p.description}
+                          {/* Características visibles */}
+                          <div className="min-h-[44px] rounded-xl border border-white/10 bg-[#10131b]/35 p-2">
+                            <div className="text-[9px] uppercase tracking-wider text-white/45 font-black mb-1">
+                              Características
                             </div>
-                          )}
-
-                          <div className="grid grid-cols-3 gap-2 mt-1">
-                            <div className="rounded-xl bg-white/[0.06] border border-white/10 p-1.5 text-center">
-                              <div className="font-black text-sm text-white">
-                                {m.sold_count}
-                              </div>
-                              <div className="text-[9px] text-white/55">
-                                Vendidos
-                              </div>
-                            </div>
-                            <div className="rounded-xl bg-white/[0.06] border border-white/10 p-1.5 text-center">
-                              <div className="font-black text-sm text-white">
-                                {m.delivered_count}
-                              </div>
-                              <div className="text-[9px] text-white/55">
-                                Entregados
-                              </div>
-                            </div>
-                            <div className="rounded-xl bg-white/[0.06] border border-white/10 p-1.5 text-center">
-                              <div className="font-black text-sm text-white">
-                                {m.cancelled_count}
-                              </div>
-                              <div className="text-[9px] text-white/55">
-                                Cancelados
-                              </div>
+                            <div className="text-[11px] leading-snug text-white/72 line-clamp-3">
+                              {p.description ? p.description : "Sin características cargadas."}
                             </div>
                           </div>
 
-                          {canSeeMoney && (
-                            <div className="rounded-xl border border-white/10 bg-white/[0.06] p-2.5 space-y-1">
-                              <div className="flex justify-between text-xs">
-                                <span className="text-white/55">
-                                  Facturación real
-                                </span>
-                                <b className="font-mono">
-                                  {nf(m.real_revenue_gs)} Gs
-                                </b>
-                              </div>
-                              <div className="flex justify-between text-xs">
-                                <span className="text-white/55">
-                                  Gasto publicitario
-                                </span>
-                                <b className="font-mono">
-                                  {nf(productAdSpend)} Gs
-                                </b>
-                              </div>
-                              <div className="flex justify-between text-sm pt-1 border-t border-white/10">
-                                <span className="font-bold">Ganancia neta</span>
-                                <b
-                                  className={`font-mono ${netProfit >= 0 ? "text-emerald-500" : "text-red-500"}`}
-                                >
-                                  {nf(netProfit)} Gs
-                                </b>
-                              </div>
-                            </div>
-                          )}
-
+                          {/* Historial plegable */}
                           {isExpanded && (
-                            <div className="rounded-xl border border-white/10 bg-white/[0.06] p-2 grid grid-cols-2 gap-1 text-[10px] text-white/60">
-                              <div>
-                                Cancelación: <b>{cancelRate}%</b>
+                            <div className="rounded-xl border border-white/10 bg-white/[0.055] p-2.5 space-y-2 animate-in fade-in duration-200">
+                              <div className="grid grid-cols-3 gap-2">
+                                <div className="rounded-lg bg-[#0f131b]/45 border border-white/10 p-1.5 text-center">
+                                  <div className="font-black text-sm text-white">{m.sold_count}</div>
+                                  <div className="text-[9px] text-white/55">Vendidos</div>
+                                </div>
+                                <div className="rounded-lg bg-[#0f131b]/45 border border-white/10 p-1.5 text-center">
+                                  <div className="font-black text-sm text-white">{m.delivered_count}</div>
+                                  <div className="text-[9px] text-white/55">Entregados</div>
+                                </div>
+                                <div className="rounded-lg bg-[#0f131b]/45 border border-white/10 p-1.5 text-center">
+                                  <div className="font-black text-sm text-white">{m.cancelled_count}</div>
+                                  <div className="text-[9px] text-white/55">Cancelados</div>
+                                </div>
                               </div>
-                              <div>
-                                Facturación bruta:{" "}
-                                <b>{nf(m.gross_revenue_gs)} Gs</b>
-                              </div>
-                              <div>
-                                Stock actual:{" "}
-                                <b
-                                  className={
-                                    stockCritical ? "text-red-500" : ""
-                                  }
-                                >
-                                  {p.stock ?? 0}
-                                </b>
-                              </div>
-                              {canSeeRealStock && (
-                                <div>
-                                  Stock real:{" "}
-                                  <b
-                                    className={
-                                      realStockCritical ? "text-red-500" : ""
-                                    }
-                                  >
-                                    {p.real_stock ?? 0}
-                                  </b>
+
+                              {canSeeMoney && (
+                                <div className="rounded-lg border border-white/10 bg-[#0f131b]/45 p-2 space-y-1">
+                                  <div className="flex justify-between text-xs">
+                                    <span className="text-white/58">Facturación real</span>
+                                    <b className="font-mono text-white">{nf(m.real_revenue_gs)} Gs</b>
+                                  </div>
+                                  <div className="flex justify-between text-xs">
+                                    <span className="text-white/58">Gasto publicitario</span>
+                                    <b className="font-mono text-white">{nf(productAdSpend)} Gs</b>
+                                  </div>
+                                  <div className="flex justify-between text-sm pt-1 border-t border-white/10">
+                                    <span className="font-bold text-white">Ganancia neta</span>
+                                    <b className={`font-mono ${netProfit >= 0 ? "text-emerald-300" : "text-red-300"}`}>
+                                      {nf(netProfit)} Gs
+                                    </b>
+                                  </div>
                                 </div>
                               )}
-                              <div>
-                                Precio venta:{" "}
-                                <b>{nf(Number(p.provider_price_gs || 0))} Gs</b>
+
+                              <div className="grid grid-cols-2 gap-1 text-[10px] text-white/62">
+                                <div>Cancelación: <b>{cancelRate}%</b></div>
+                                <div>Facturación bruta: <b>{nf(m.gross_revenue_gs)} Gs</b></div>
+                                {canSeeRealCost && <div>Ganancia/unidad: <b>{nf(gainUnit)} Gs</b></div>}
+                                <div>Estado: <b>{stockCritical ? "Stock bajo" : "Disponible"}</b></div>
                               </div>
-                              {canSeeRealCost && (
-                                <div>
-                                  Ganancia/unidad: <b>{nf(gainUnit)} Gs</b>
-                                </div>
-                              )}
                             </div>
                           )}
                         </div>
 
-                        <div className="flex justify-between items-center gap-3 px-3 py-2.5 border-t border-white/10 bg-[#11131b]/70 text-white">
-                          <div>
-                            <span className="font-black text-sm font-mono text-white">
-                              {nf(Number(p.provider_price_gs || 0))} Gs
-                            </span>
-                            {canSeeRealCost && (
-                              <div className="text-[10px] text-white/50">
-                                Ganancia: {nf(gainUnit)} Gs/unidad
-                              </div>
-                            )}
-                          </div>
+                        <div className="flex flex-col gap-2 px-3 py-2.5 border-t border-white/10 bg-[#11151f]/80 text-white">
+                          <button
+                            className="w-full rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-black text-white/90 transition-all hover:bg-white/[0.11] hover:border-white/20"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedId(isExpanded ? null : p.id);
+                            }}
+                          >
+                            {isExpanded ? "📉 Ocultar historial" : "📊 Ver historial del producto"}
+                          </button>
 
-                          <div className="flex gap-1.5">
-                            {mainImg && (
-                              <button
-                                className="rounded-lg border border-white/10 bg-white/[0.07] px-2 py-1.5 text-xs font-bold text-white/85 transition-all hover:bg-white/[0.12]"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setViewingImage({
-                                    url: mainImg,
-                                    title: p.title,
-                                    index: 0,
-                                  });
-                                }}
-                              >
-                                👁️ Ver
-                              </button>
-                            )}
+                          <div className="flex justify-between items-center gap-2">
+                            <div className="min-w-0">
+                              <span className="font-black text-sm font-mono text-white">
+                                {nf(Number(p.provider_price_gs || 0))} Gs
+                              </span>
+                              {canSeeRealCost && (
+                                <div className="text-[10px] text-white/52 truncate">
+                                  Ganancia: {nf(gainUnit)} Gs/unidad
+                                </div>
+                              )}
+                            </div>
 
-                            {canEdit && (
-                              <button
-                                className="rounded-lg border border-white/10 bg-white/[0.07] px-2 py-1.5 text-xs font-bold text-white/85 transition-all hover:bg-white/[0.12]"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  openEdit(p);
-                                }}
-                              >
-                                ✏️ Editar
-                              </button>
-                            )}
+                            <div className="flex gap-1.5 shrink-0">
+                              {mainImg && (
+                                <button
+                                  className="rounded-lg border border-white/10 bg-white/[0.07] px-2 py-1.5 text-xs font-bold text-white/85 transition-all hover:bg-white/[0.12]"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setViewingImage({
+                                      url: mainImg,
+                                      title: p.title,
+                                      index: 0,
+                                    });
+                                  }}
+                                >
+                                  👁️ Ver
+                                </button>
+                              )}
 
-                            {canLoadOrder && p.sku && (
-                              <button
-                                className="rounded-lg bg-primary px-2 py-1.5 text-xs font-black text-primary-foreground transition-all hover:scale-[1.01]"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  onLoadProduct?.(p.sku!);
-                                }}
-                              >
-                                ➕ Cargar pedido
-                              </button>
-                            )}
+                              {canEdit && (
+                                <button
+                                  className="rounded-lg border border-white/10 bg-white/[0.07] px-2 py-1.5 text-xs font-bold text-white/85 transition-all hover:bg-white/[0.12]"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openEdit(p);
+                                  }}
+                                >
+                                  ✏️ Editar
+                                </button>
+                              )}
+
+                              {canLoadOrder && p.sku && (
+                                <button
+                                  className="rounded-lg bg-primary px-2 py-1.5 text-xs font-black text-primary-foreground transition-all hover:scale-[1.01]"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    onLoadProduct?.(p.sku!);
+                                  }}
+                                >
+                                  ➕ Pedido
+                                </button>
+                              )}
+                            </div>
                           </div>
                         </div>
                       </div>
