@@ -84,10 +84,6 @@ export default function RatesView() {
   const [cpPrice, setCpPrice] = useState('');
   const [deliveries, setDeliveries] = useState<any[]>([]);
   const [filtroDepartamento, setFiltroDepartamento] = useState('');
-  
-  // Estado para controlar si queremos escribir manualmente el departamento
-  const [modoEscrituraManual, setModoEscrituraManual] = useState(false);
-  const [departamentoPersonalizado, setDepartamentoPersonalizado] = useState('');
 
   const load = () => {
     supabase.from('delivery_fees').select('*').order('delivery_email').then(({ data }) => setFees(data || []));
@@ -130,21 +126,15 @@ export default function RatesView() {
   const saveClientPrice = async () => {
     if (!cpCity || !cpPrice) { toast.error('Completá todos los campos'); return; }
     
-    let departamento = '';
+    let departamento = cpDepartamento;
     
-    // Si está en modo escritura manual, usar el texto personalizado
-    if (modoEscrituraManual && departamentoPersonalizado.trim()) {
-      departamento = departamentoPersonalizado.trim();
-    } else if (cpDepartamento) {
-      // Si seleccionó de la lista desplegable
-      departamento = cpDepartamento;
-    } else {
-      // Intentar obtener del mapa automático
+    // Si no escribió nada, intentar obtener del mapa automático
+    if (!departamento) {
       departamento = ciudadDepartamentoMap[cpCity];
     }
     
     if (!departamento) {
-      toast.error('Por favor seleccioná o escribí un departamento para esta ciudad');
+      toast.error('Por favor escribí un departamento para esta ciudad');
       return;
     }
     
@@ -165,8 +155,6 @@ export default function RatesView() {
     toast.success('Precio guardado');
     setCpCity('');
     setCpDepartamento('');
-    setDepartamentoPersonalizado('');
-    setModoEscrituraManual(false);
     setCpPrice('');
     load();
   };
@@ -287,71 +275,45 @@ export default function RatesView() {
 
       {role === 'ADMIN' && (
         <div className="mb-4">
-          <div className="flex flex-wrap gap-2 mb-2">
-            <input 
-              className="app-input !w-auto" 
-              placeholder="Ciudad" 
-              value={cpCity} 
-              onChange={e => setCpCity(e.target.value)} 
-            />
-            
-            {/* Selector de departamento con opción de escritura manual */}
-            <div className="flex gap-2">
-              <select 
-                className="app-input !w-auto" 
-                value={cpDepartamento} 
-                onChange={(e) => {
-                  setCpDepartamento(e.target.value);
-                  if (e.target.value) {
-                    setModoEscrituraManual(false);
-                    setDepartamentoPersonalizado('');
-                  }
-                }}
-                disabled={modoEscrituraManual}
-              >
-                <option value="">Seleccionar departamento...</option>
-                {DEPARTAMENTOS.map(depto => (
-                  <option key={depto} value={depto}>{depto}</option>
-                ))}
-              </select>
-              
-              <button
-                type="button"
-                className="nav-btn !px-2 !py-1 text-xs"
-                onClick={() => {
-                  setModoEscrituraManual(!modoEscrituraManual);
-                  if (!modoEscrituraManual) {
-                    setCpDepartamento('');
-                  } else {
-                    setDepartamentoPersonalizado('');
-                  }
-                }}
-              >
-                {modoEscrituraManual ? 'Usar selector' : 'Escribir manual'}
-              </button>
+          <div className="flex flex-wrap gap-2 mb-2 items-end">
+            <div>
+              <label className="app-label">Ciudad</label>
+              <input 
+                className="app-input" 
+                placeholder="Ej: Nueva Ciudad" 
+                value={cpCity} 
+                onChange={e => setCpCity(e.target.value)} 
+              />
             </div>
             
-            {/* Campo de escritura manual */}
-            {modoEscrituraManual && (
+            <div>
+              <label className="app-label">Departamento</label>
               <input 
-                className="app-input !w-auto" 
-                placeholder="Escribir departamento..." 
-                value={departamentoPersonalizado} 
-                onChange={e => setDepartamentoPersonalizado(e.target.value)} 
+                className="app-input" 
+                placeholder="Ej: Central, Capital, o cualquier nombre" 
+                value={cpDepartamento} 
+                onChange={e => setCpDepartamento(e.target.value)} 
               />
-            )}
+              <p className="text-xs text-muted-foreground mt-1">
+                💡 Puedes escribir cualquier departamento (aunque no esté en la lista)
+              </p>
+            </div>
             
-            <input 
-              className="app-input !w-auto" 
-              type="number" 
-              placeholder="Precio al cliente (Gs)" 
-              value={cpPrice} 
-              onChange={e => setCpPrice(e.target.value)} 
-            />
-            <button className="nav-btn active" onClick={saveClientPrice}>Guardar/Actualizar</button>
+            <div>
+              <label className="app-label">Precio (Gs)</label>
+              <input 
+                className="app-input" 
+                type="number" 
+                placeholder="Ej: 25000" 
+                value={cpPrice} 
+                onChange={e => setCpPrice(e.target.value)} 
+              />
+            </div>
+            
+            <button className="nav-btn active" onClick={saveClientPrice}>Guardar</button>
           </div>
           
-          <span className="chip text-[10px] mt-2 inline-block">Impacta en el formulario de pedido</span>
+          <span className="chip text-[10px]">Impacta en el formulario de pedido</span>
         </div>
       )}
 
@@ -369,12 +331,7 @@ export default function RatesView() {
             <tr key={p.id}>
               <td className="text-sm">{p.city}</td>
               <td className="text-sm">
-                <span className={`px-2 py-1 rounded text-xs ${
-                  getDepartamento(p.city, p) === 'Capital' ? 'bg-yellow-100 text-yellow-800' :
-                  getDepartamento(p.city, p) === 'Central' ? 'bg-green-100 text-green-800' :
-                  getDepartamento(p.city, p) === 'Alto Paraná' ? 'bg-blue-100 text-blue-800' :
-                  'bg-gray-100 text-gray-800'
-                }`}>
+                <span className="px-2 py-1 rounded text-xs bg-gray-100 text-gray-800">
                   {getDepartamento(p.city, p)}
                 </span>
               </td>
@@ -399,7 +356,7 @@ export default function RatesView() {
             </tr>
           )}
         </tbody>
-      </table>
+       </>
     </div>
   );
 }
