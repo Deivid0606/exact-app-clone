@@ -281,10 +281,10 @@ const ProductImageGallery = ({
   
   if (!images.length) {
     return (
-      <div className="w-full h-full bg-gradient-to-br from-secondary/50 to-secondary/30 flex items-center justify-center">
-        <div className="text-center">
+      <div className="w-full h-full bg-[radial-gradient(circle_at_top,#2f3441_0%,#171923_100%)] flex items-center justify-center">
+        <div className="text-center text-white/70">
           <div className="text-4xl mb-2">📷</div>
-          <div className="text-[10px] text-muted-foreground">Sin imagen</div>
+          <div className="text-[10px]">Sin imagen</div>
         </div>
       </div>
     );
@@ -292,18 +292,18 @@ const ProductImageGallery = ({
 
   return (
     <div 
-      className="relative w-full h-full group"
+      className="relative w-full h-full group overflow-hidden"
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
       <div 
-        className="w-full h-full flex items-center justify-center cursor-pointer bg-gradient-to-br from-background/50 to-background/30"
+        className="w-full h-full flex items-center justify-center cursor-pointer bg-[radial-gradient(circle_at_top,#303542_0%,#191c25_100%)]"
         onClick={() => onViewFullscreen(images[currentIndex])}
       >
         <img 
           src={images[currentIndex]} 
           alt={title}
-          className="max-w-full max-h-full object-contain p-3 transition-transform duration-300 group-hover:scale-105"
+          className="w-full h-full object-contain object-center scale-[1.03] transition-transform duration-300 group-hover:scale-[1.08] select-none"
           loading="lazy"
         />
       </div>
@@ -1617,12 +1617,16 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
       )}
 
       {/* Catálogo separado */}
-      <section className="rounded-[32px] border border-border/70 bg-gradient-to-br from-background via-secondary/10 to-background p-5 sm:p-6 shadow-sm space-y-6">
-        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 border-b border-border/70 pb-5">
+      <section className="relative overflow-hidden rounded-[34px] border border-white/10 bg-[linear-gradient(135deg,#6d6a67_0%,#3a3d46_34%,#171923_100%)] p-5 sm:p-6 shadow-[0_18px_70px_rgba(0,0,0,0.45)] backdrop-blur-xl space-y-6">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.10),transparent_38%)]" />
+        <div className="pointer-events-none absolute -top-32 -right-32 h-80 w-80 rounded-full bg-indigo-500/10 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-32 -left-32 h-80 w-80 rounded-full bg-white/10 blur-3xl" />
+        <div className="relative space-y-6">
+        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 border-b border-white/10 pb-5">
           <div>
-            <div className="text-[11px] uppercase tracking-[0.22em] text-primary font-black">Catálogo</div>
-            <h3 className="text-2xl sm:text-3xl font-black tracking-tight mt-1">📦 Productos disponibles</h3>
-            <p className="text-sm text-muted-foreground mt-1">Listado separado de gastos, organizado por proveedor, stock y métricas.</p>
+            <div className="text-[11px] uppercase tracking-[0.22em] text-white/70 font-black">Catálogo</div>
+            <h3 className="text-2xl sm:text-3xl font-black tracking-tight mt-1 text-white">📦 Productos disponibles</h3>
+            <p className="text-sm text-white/60 mt-1">Listado separado de gastos, organizado por proveedor, stock y métricas.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <span className="chip text-xs px-3 py-1.5">{filtered.length} productos</span>
@@ -1671,7 +1675,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
         return (
           <div key={group.email || group.name} className="space-y-4">
             {/* Header del proveedor */}
-            <div className={`flex flex-col lg:flex-row lg:items-center gap-4 p-4 rounded-2xl border bg-gradient-to-r ${headerColor} backdrop-blur-sm transition-all hover:shadow-md`}>
+            <div className={`flex flex-col lg:flex-row lg:items-center gap-4 p-4 rounded-[26px] border border-white/10 bg-white/[0.055] backdrop-blur-xl transition-all hover:bg-white/[0.075] hover:shadow-[0_12px_40px_rgba(0,0,0,0.25)]`}>
               <div className="flex items-center gap-4 flex-1 min-w-0">
                 {group.logo && group.logo.trim() !== '' ? (
                   <div className="w-14 h-14 rounded-full bg-white/10 backdrop-blur-sm p-0.5 border-2 border-border shadow-md flex-shrink-0">
@@ -1711,33 +1715,33 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
               </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2 flex-1">
-                <div className="text-center bg-background/50 rounded-lg p-2">
+                <div className="text-center bg-white/[0.06] border border-white/10 rounded-xl p-2">
                   <div className="font-black text-sm">{group.items.length}</div>
-                  <div className="text-[10px] text-muted-foreground">Productos</div>
+                  <div className="text-[10px] text-white/55">Productos</div>
                 </div>
-                <div className="text-center bg-background/50 rounded-lg p-2">
+                <div className="text-center bg-white/[0.06] border border-white/10 rounded-xl p-2">
                   <div className="font-black text-sm">{group.totals.sold}</div>
-                  <div className="text-[10px] text-muted-foreground">Vendidos</div>
+                  <div className="text-[10px] text-white/55">Vendidos</div>
                 </div>
-                <div className="text-center bg-background/50 rounded-lg p-2">
+                <div className="text-center bg-white/[0.06] border border-white/10 rounded-xl p-2">
                   <div className="font-black text-sm">{group.totals.delivered}</div>
-                  <div className="text-[10px] text-muted-foreground">Entregados</div>
+                  <div className="text-[10px] text-white/55">Entregados</div>
                 </div>
-                <div className="text-center bg-background/50 rounded-lg p-2">
+                <div className="text-center bg-white/[0.06] border border-white/10 rounded-xl p-2">
                   <div className="font-black text-sm">{group.totals.deliveryRate}%</div>
-                  <div className="text-[10px] text-muted-foreground">Entrega</div>
+                  <div className="text-[10px] text-white/55">Entrega</div>
                 </div>
                 {canSeeMoney && (
                   <>
-                    <div className="text-center bg-background/50 rounded-lg p-2">
+                    <div className="text-center bg-white/[0.06] border border-white/10 rounded-xl p-2">
                       <div className="font-black text-sm">{nf(group.totals.realRevenue)}</div>
-                      <div className="text-[10px] text-muted-foreground">Facturación</div>
+                      <div className="text-[10px] text-white/55">Facturación</div>
                     </div>
-                    <div className="text-center bg-background/50 rounded-lg p-2">
+                    <div className="text-center bg-white/[0.06] border border-white/10 rounded-xl p-2">
                       <div className={`font-black text-sm ${group.totals.netProfit >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                         {nf(group.totals.netProfit)}
                       </div>
-                      <div className="text-[10px] text-muted-foreground">Ganancia neta</div>
+                      <div className="text-[10px] text-white/55">Ganancia neta</div>
                     </div>
                   </>
                 )}
@@ -1777,15 +1781,15 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                   return (
                     <div
                       key={p.id}
-                      className="bg-secondary border border-border rounded-xl p-3 flex flex-col md:flex-row gap-3 md:items-center hover:shadow-md transition-all group"
+                      className="group rounded-[24px] border border-white/10 bg-white/[0.045] backdrop-blur-xl p-3 flex flex-col md:flex-row gap-3 md:items-center transition-all duration-300 hover:bg-white/[0.07] hover:border-white/20 hover:shadow-[0_10px_40px_rgba(0,0,0,0.35)]"
                     >
                       <div 
-                        className="w-16 h-16 rounded-xl bg-gradient-to-br from-background to-secondary/30 border border-border overflow-hidden flex items-center justify-center shrink-0 cursor-pointer relative group"
+                        className="w-16 h-16 rounded-2xl bg-[radial-gradient(circle_at_top,#303542_0%,#191c25_100%)] border border-white/10 overflow-hidden flex items-center justify-center shrink-0 cursor-pointer relative group/img p-1"
                         onClick={() => mainImg && setViewingImage({ url: mainImg, title: p.title, index: 0 })}
                       >
                         {mainImg ? (
                           <>
-                            <img src={mainImg} alt={p.title} className="w-full h-full object-contain p-1 transition-transform group-hover:scale-110" />
+                            <img src={mainImg} alt={p.title} className="w-full h-full object-contain object-center transition-transform group-hover/img:scale-110" />
                             {images.length > 1 && (
                               <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                                 <span className="text-white text-[10px] font-bold bg-black/60 px-1.5 py-0.5 rounded-full">
@@ -1842,12 +1846,12 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                 return (
                   <div
                     key={p.id}
-                    className="bg-secondary border border-border rounded-2xl overflow-hidden flex flex-col transition-all duration-200 hover:-translate-y-1 hover:shadow-xl relative group"
+                    className="group relative flex flex-col overflow-hidden rounded-[30px] border border-white/10 bg-white/[0.045] backdrop-blur-xl shadow-[0_8px_30px_rgba(0,0,0,0.22)] transition-all duration-300 hover:-translate-y-1 hover:scale-[1.012] hover:border-white/20 hover:bg-white/[0.065] hover:shadow-[0_16px_55px_rgba(0,0,0,0.42)]"
                   >
                     <div className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${headerColor.split(' ')[0]} ${headerColor.split(' ')[1]} z-10`} />
 
                     <div
-                      className="relative w-full h-56 overflow-hidden bg-gradient-to-br from-background to-secondary/20 border-b border-border cursor-pointer"
+                      className="relative m-3 mb-0 aspect-square overflow-hidden rounded-[26px] border border-white/10 bg-[radial-gradient(circle_at_top,#303542_0%,#191c25_100%)] cursor-pointer shadow-inner"
                       onClick={() => setExpandedId(isExpanded ? null : p.id)}
                     >
                       <ProductImageGallery
@@ -1876,7 +1880,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                     </div>
 
                     <div
-                      className="p-4 flex flex-col gap-3 flex-grow cursor-pointer"
+                      className="p-4 flex flex-col gap-3 flex-grow cursor-pointer text-white"
                       onClick={() => setExpandedId(isExpanded ? null : p.id)}
                     >
                       <div className="flex items-center justify-between gap-2">
@@ -1917,11 +1921,11 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                       <div className="grid grid-cols-3 gap-2 mt-1">
                         <div className="rounded-xl bg-background/70 border border-border p-2 text-center">
                           <div className="font-black text-sm">{m.sold_count}</div>
-                          <div className="text-[9px] text-muted-foreground">Vendidos</div>
+                          <div className="text-[9px] text-white/55">Vendidos</div>
                         </div>
                         <div className="rounded-xl bg-background/70 border border-border p-2 text-center">
                           <div className="font-black text-sm">{m.delivered_count}</div>
-                          <div className="text-[9px] text-muted-foreground">Entregados</div>
+                          <div className="text-[9px] text-white/55">Entregados</div>
                         </div>
                         <div className="rounded-xl bg-background/70 border border-border p-2 text-center">
                           <div className="font-black text-sm">{m.cancelled_count}</div>
@@ -2022,6 +2026,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
         </div>
       )}
 
+        </div>
       </section>
 
       {/* Modal de edición */}
