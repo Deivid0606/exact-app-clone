@@ -232,7 +232,7 @@ export default function RatesView() {
             <th>Ciudad</th>
             <th className="text-right">Tarifa (Gs)</th>
             {canManage && <th>Acción</th>}
-           </>
+          </tr>
         </thead>
         <tbody>
           {visibleFees.map(f => (
@@ -371,7 +371,7 @@ export default function RatesView() {
             <th>Departamento</th>
             <th className="text-right">Precio cliente (Gs)</th>
             {role === 'ADMIN' && <th>Acción</th>}
-           </>
+          </tr>
         </thead>
         <tbody>
           {pricesFiltrados.map(p => (
