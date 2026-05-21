@@ -358,7 +358,7 @@ export default function WithGuidesView() {
         <td style="padding:4px 8px;border-bottom:1px solid #333;">${it.title || it.sku || 'Item'}</td>
         <td style="padding:4px 8px;border-bottom:1px solid #333;text-align:center;">${it.qty || 1}</td>
         <td style="padding:4px 8px;border-bottom:1px solid #333;text-align:right;">Gs ${nf(Number(it.sale_gs || 0) * Number(it.qty || 1))}</td>
-       </tr>`
+        </tr>`
       ).join('');
 
       return `
@@ -630,8 +630,16 @@ export default function WithGuidesView() {
                 <input type="checkbox" checked={selectedIds.size === visibleOrders.length && visibleOrders.length > 0}
                   onChange={() => selectedIds.size === visibleOrders.length ? setSelectedIds(new Set()) : setSelectedIds(new Set(visibleOrders.map(o => o.id)))} />
               </th>
-              <th>Fecha</th><th>ID</th><th>Departamento</th><th>Ciudad</th><th>Cliente</th><th>Teléfono</th>
-              <th>Vendedor</th><th>Proveedor</th><th>Estado 2</th><th>Guía</th>
+              <th>Fecha</th>
+              <th>ID</th>
+              <th>Departamento</th>
+              <th>Ciudad</th>
+              <th>Cliente</th>
+              <th>Teléfono</th>
+              <th>Vendedor</th>
+              <th>Proveedor</th>
+              <th>Estado 2</th>
+              <th>Guía</th>
             </tr>
           </thead>
           <tbody>
@@ -664,10 +672,12 @@ export default function WithGuidesView() {
                     }} title="Copiar guía">📋</button>
                   </div>
                 </td>
-              </table>
+              </tr>
             ))}
             {visibleOrders.length === 0 && (
-              <tr><td colSpan={11} className="text-center text-muted-foreground py-8">Sin pedidos en el rango seleccionado</td></tr>
+              <tr>
+                <td colSpan={11} className="text-center text-muted-foreground py-8">Sin pedidos en el rango seleccionado</td>
+              </tr>
             )}
           </tbody>
         </table>
