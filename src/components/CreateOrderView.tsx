@@ -1,688 +1,216 @@
-import { useState, useEffect, useMemo } from 'react';
+// components/BuyerHistoryModal.tsx
+import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/hooks/useAuth';
-import { toast } from 'sonner';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Loader2, History, Package, Truck, XCircle, CheckCircle } from 'lucide-react';
+
+interface BuyerHistoryModalProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  phone: string;
+  customerName: string;
+}
+
+interface OrderHistory {
+  total_orders: number;
+  delivered: number;
+  cancelled: number;
+  returned: number;
+  in_transit: number;
+  total_products: number;
+  delivery_success_rate: number;
+  recent_orders: any[];
+}
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
-const normalizeEmail = (value: any) => String(value || '').trim().toLowerCase();
-
-const normalizeRole = (value: any) => {
-  const r = String(value || '').trim().toLowerCase();
-
-  if (['admin', 'administrador'].includes(r)) return 'admin';
-  if (['provider', 'proveedor'].includes(r)) return 'provider';
-  if (['seller', 'vendedor'].includes(r)) return 'seller';
-  if (['despachante', 'dispatcher'].includes(r)) return 'despachante';
-  if (['delivery', 'repartidor'].includes(r)) return 'delivery';
-
-  return r;
-};
-
-const parsePrivateEmails = (value: any): string[] =>
-  String(value || '')
-    .split(',')
-    .map((e) => String(e || '').trim().toLowerCase())
-    .filter(Boolean);
-
-const isPrivateProduct = (product: any) =>
-  Boolean(product?.is_private_stock ?? product?.is_private);
-
-const canAccessProduct = (product: any, profile: any) => {
-  const role = normalizeRole(profile?.role);
-  const userEmail = normalizeEmail(profile?.email);
-  const providerEmail = normalizeEmail(product?.provider_email);
-  const privateEmails = parsePrivateEmails(product?.private_to_emails);
-  const isPrivate = isPrivateProduct(product);
-
-  if (!role || !userEmail) return false;
-
-  if (role === 'admin') return true;
-
-  if (role === 'provider') {
-    return providerEmail === userEmail;
-  }
-
-  if (['seller', 'despachante', 'delivery'].includes(role)) {
-    if (!isPrivate) return true;
-    return privateEmails.includes(userEmail);
-  }
-
-  return false;
-};
-
-const generateNormalOrderId = async (): Promise<string> => {
-  try {
-    const now = new Date();
-    const timestamp = now.getTime();
-    const micro = Math.floor(performance.now() * 1000) % 1000;
-    const random = Math.floor(Math.random() * 10000);
-    const newOrderNumber = `A${timestamp}${micro}${random}`;
-
-    const { data: existing } = await supabase
-      .from('orders')
-      .select('order_number')
-      .eq('order_number', newOrderNumber)
-      .maybeSingle();
-
-    if (existing) {
-      return `A${timestamp}${micro}${random}${Math.floor(Math.random() * 1000)}`;
-    }
-
-    return newOrderNumber;
-  } catch (err) {
-    console.error('Error en generateNormalOrderId:', err);
-    const uuid = crypto.randomUUID().replace(/-/g, '').substring(0, 10);
-    return `A${Date.now()}${uuid}`;
-  }
-};
-
-export default function CreateOrderView({
-  initialSku,
-  onSkuConsumed,
-  sheetPrefill,
-  onPrefillConsumed,
-}: {
-  initialSku?: string | null;
-  onSkuConsumed?: () => void;
-  sheetPrefill?: {
-    customer?: string;
-    phone?: string;
-    city?: string;
-    street?: string;
-    district?: string;
-    email?: string;
-    productTitle?: string;
-    totalGs?: number;
-    qty?: number;
-    obs?: string;
-  } | null;
-  onPrefillConsumed?: () => void;
-}) {
-  const { profile } = useAuth();
-
-  const [products, setProducts] = useState<any[]>([]);
-  const [clientPrices, setClientPrices] = useState<any[]>([]);
-  const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
-  const [customer, setCustomer] = useState('');
-  const [phone, setPhone] = useState('');
-  const [city, setCity] = useState('');
-  const [street, setStreet] = useState('');
-  const [district, setDistrict] = useState('');
-  const [email, setEmail] = useState('');
-  const [obs, setObs] = useState('');
-  const [items, setItems] = useState<{ sku: string; sale_gs: number; qty: number }[]>([
-    { sku: '', sale_gs: 0, qty: 1 },
-  ]);
-  const [saving, setSaving] = useState(false);
-  const [loadingProducts, setLoadingProducts] = useState(false);
+export function BuyerHistoryModal({ open, onOpenChange, phone, customerName }: BuyerHistoryModalProps) {
+  const [loading, setLoading] = useState(false);
+  const [history, setHistory] = useState<OrderHistory | null>(null);
 
   useEffect(() => {
-    if (!profile?.email) {
-      localStorage.setItem('pending_order_url', window.location.href);
-      return;
+    if (open && phone) {
+      loadBuyerHistory();
     }
+  }, [open, phone]);
 
-    const params = new URLSearchParams(window.location.search);
-
-    const origen = params.get('origen');
-    const nombre = params.get('nombre');
-    const telefono = params.get('telefono');
-    const ciudad = params.get('ciudad');
-    const calle = params.get('calle');
-    const producto = params.get('producto');
-    const cantidad = params.get('cantidad');
-    const total = params.get('total');
-    const pago = params.get('pago');
-
-    if (origen !== 'seller-skyline') return;
-
-    if (nombre) setCustomer(nombre);
-    if (telefono) setPhone(telefono);
-    if (ciudad) setCity(ciudad);
-    if (calle) setStreet(calle);
-
-    const totalNumber = Number(String(total || '').replace(/\D/g, '')) || 0;
-    const qtyNumber = Number(cantidad || 1) || 1;
-
-    if (producto || totalNumber || qtyNumber) {
-      setItems([
-        {
-          sku: '',
-          sale_gs: totalNumber,
-          qty: qtyNumber,
-        },
-      ]);
-
-      // ✅ SOLO producto y forma de pago en observación
-      setObs(
-        [
-          producto ? `Producto: ${producto}` : '',
-          pago ? `Forma de pago: ${pago}` : '',
-        ]
-          .filter(Boolean)
-          .join(' | ')
-      );
-
-      toast.success('Pedido recibido desde Seller Skyline');
-    }
-  }, [profile?.email]);
-
-  const loadUserFavorites = async () => {
-    if (!profile?.email) return new Set<string>();
-
+  const loadBuyerHistory = async () => {
+    setLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('user_favorites')
-        .select('product_id')
-        .eq('user_email', profile.email);
+      const { data: orders, error } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('phone', phone)
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
 
-      const favoriteSet = new Set(data?.map((f) => f.product_id) || []);
-      setUserFavorites(favoriteSet);
-      return favoriteSet;
-    } catch (error) {
-      console.error('Error cargando favoritos:', error);
-      return new Set<string>();
-    }
-  };
-
-  useEffect(() => {
-    const loadData = async () => {
-      if (!profile?.email || !profile?.role) return;
-
-      setLoadingProducts(true);
-
-      try {
-        const favoritesSet = await loadUserFavorites();
-
-        const { data: productsData, error: productsError } = await supabase
-          .from('products')
-          .select('*')
-          .order('title');
-
-        if (productsError) throw productsError;
-
-        const allProducts = productsData || [];
-        const visibleProducts = allProducts.filter((p: any) => canAccessProduct(p, profile));
-
-        const filteredProducts = visibleProducts.filter((p: any) => {
-          const isPrivate = p.is_private === true;
-          const isUserFavorite = favoritesSet.has(p.id);
-          return isPrivate || isUserFavorite;
-        });
-
-        setProducts(filteredProducts);
-
-        if (initialSku) {
-          const found = filteredProducts.find((p: any) => p.sku === initialSku);
-          if (found) {
-            setItems([{ sku: initialSku, sale_gs: 0, qty: 1 }]);
-          }
-          onSkuConsumed?.();
+      const totalOrders = orders?.length || 0;
+      
+      const delivered = orders?.filter(o => o.status === 'delivered' || o.status === 'entregado').length || 0;
+      const cancelled = orders?.filter(o => o.status === 'cancelled' || o.status === 'cancelado').length || 0;
+      const returned = orders?.filter(o => o.status === 'returned' || o.status === 'devuelto').length || 0;
+      const inTransit = orders?.filter(o => o.status === 'in_transit' || o.status === 'transito' || o.status === 'enviado').length || 0;
+      
+      let totalProducts = 0;
+      orders?.forEach(order => {
+        if (order.items_json && Array.isArray(order.items_json)) {
+          totalProducts += order.items_json.reduce((sum, item) => sum + (item.qty || 0), 0);
         }
-
-        const { data: pricesData, error: pricesError } = await supabase
-          .from('client_prices')
-          .select('*')
-          .order('city');
-
-        if (pricesError) throw pricesError;
-
-        setClientPrices(pricesData || []);
-
-        if (sheetPrefill) {
-          if (sheetPrefill.customer) setCustomer(sheetPrefill.customer);
-          if (sheetPrefill.phone) setPhone(sheetPrefill.phone);
-          if (sheetPrefill.street) setStreet(sheetPrefill.street);
-          if (sheetPrefill.district) setDistrict(sheetPrefill.district);
-          if (sheetPrefill.email) setEmail(sheetPrefill.email);
-          if (sheetPrefill.obs) setObs(sheetPrefill.obs);
-
-          const normCity = (s: string) =>
-            s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
-
-          const sheetCityNorm = normCity(sheetPrefill.city || '');
-
-          const findCity = (prices: any[]) => {
-            const exact = prices.find((c: any) => normCity(c.city || '') === sheetCityNorm);
-            if (exact) return exact;
-
-            const partial = prices.find((c: any) => {
-              const pc = normCity(c.city || '');
-              return sheetCityNorm.includes(pc) || pc.includes(sheetCityNorm);
-            });
-            if (partial) return partial;
-
-            const parts = sheetCityNorm
-              .split(/[\-–—,\/|]+/)
-              .map((s) => s.trim())
-              .filter(Boolean);
-
-            for (const part of parts) {
-              const m = prices.find((c: any) => {
-                const pc = normCity(c.city || '');
-                return pc.includes(part) || part.includes(pc);
-              });
-              if (m) return m;
-            }
-
-            return null;
-          };
-
-          const cityMatch = findCity(pricesData || []);
-          if (cityMatch) {
-            setCity(cityMatch.city);
-          } else if (sheetPrefill.city) {
-            setCity(sheetPrefill.city);
-          }
-
-          if (sheetPrefill.productTitle) {
-            const titleLower = sheetPrefill.productTitle.toLowerCase().trim();
-            const cleanTitle = titleLower
-              .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '')
-              .trim();
-
-            const exactMatch = filteredProducts.find(
-              (p: any) =>
-                p.title?.toLowerCase().trim() === titleLower ||
-                p.title?.toLowerCase().trim() === cleanTitle
-            );
-
-            if (exactMatch && exactMatch.sku) {
-              setItems([
-                {
-                  sku: exactMatch.sku,
-                  sale_gs: sheetPrefill.totalGs || 0,
-                  qty: sheetPrefill.qty || 1,
-                },
-              ]);
-              toast.success(`🎯 Producto detectado: ${exactMatch.title}`);
-            } else {
-              const partialMatch = filteredProducts.find((p: any) => {
-                const pTitle = p.title?.toLowerCase().trim() || '';
-                return pTitle.includes(cleanTitle) || cleanTitle.includes(pTitle);
-              });
-
-              if (partialMatch && partialMatch.sku) {
-                setItems([
-                  {
-                    sku: partialMatch.sku,
-                    sale_gs: sheetPrefill.totalGs || 0,
-                    qty: sheetPrefill.qty || 1,
-                  },
-                ]);
-                toast.success(`🎯 Producto detectado (parcial): ${partialMatch.title}`);
-              } else {
-                setItems([
-                  {
-                    sku: '',
-                    sale_gs: sheetPrefill.totalGs || 0,
-                    qty: sheetPrefill.qty || 1,
-                  },
-                ]);
-                toast.info(
-                  `⚠️ Producto "${sheetPrefill.productTitle}" no encontrado en catálogo. Elegilo manualmente.`
-                );
-              }
-            }
-          }
-
-          onPrefillConsumed?.();
-        }
-      } catch (error: any) {
-        console.error('Error cargando datos de CreateOrderView:', error);
-        toast.error(error?.message || 'No se pudieron cargar los productos');
-      } finally {
-        setLoadingProducts(false);
-      }
-    };
-
-    loadData();
-  }, [initialSku, onSkuConsumed, sheetPrefill, onPrefillConsumed, profile?.email, profile?.role]);
-
-  const catalogMap: Record<string, any> = useMemo(() => {
-    const map: Record<string, any> = {};
-    products.forEach((p) => {
-      if (p.sku) map[p.sku] = p;
-    });
-    return map;
-  }, [products]);
-
-  const deliveryPrice =
-    clientPrices.find((c) => c.city?.toLowerCase() === city.toLowerCase())?.price_gs || 0;
-
-  const totalVenta = items.reduce(
-    (s, i) => s + Number(i.sale_gs || 0) * Number(i.qty || 0),
-    0
-  );
-
-  const totalProv = items.reduce((s, i) => {
-    const p = catalogMap[i.sku];
-    return s + (p ? Number(p.provider_price_gs || 0) * Number(i.qty || 0) : 0);
-  }, 0);
-
-  const commission = totalVenta - (totalProv + Number(deliveryPrice || 0));
-
-  const addItem = () => setItems([...items, { sku: '', sale_gs: 0, qty: 1 }]);
-
-  const removeItem = (idx: number) => {
-    setItems(items.filter((_, i) => i !== idx));
-  };
-
-  const updateItem = (idx: number, field: string, value: any) => {
-    const copy = [...items];
-    (copy[idx] as any)[field] = value;
-
-    if (field === 'sku') {
-      const selected = catalogMap[value];
-      if (selected && !copy[idx].sale_gs) {
-        copy[idx].sale_gs = Number(selected.sale_price_gs || 0);
-      }
-    }
-
-    setItems(copy);
-  };
-
-  const resetForm = () => {
-    setCustomer('');
-    setPhone('');
-    setCity('');
-    setStreet('');
-    setDistrict('');
-    setEmail('');
-    setObs('');
-    setItems([{ sku: '', sale_gs: 0, qty: 1 }]);
-  };
-
-  const saveOrder = async () => {
-    if (saving) return;
-
-    if (!customer || !phone || !city) {
-      toast.error('Completá cliente / teléfono / ciudad');
-      return;
-    }
-
-    const validItems = items.filter(
-      (i) => i.sku && Number(i.sale_gs) > 0 && Number(i.qty) > 0 && catalogMap[i.sku]
-    );
-
-    if (validItems.length === 0) {
-      toast.error('Agregá al menos 1 ítem válido');
-      return;
-    }
-
-    setSaving(true);
-
-    try {
-      const orderNumber = await generateNormalOrderId();
-
-      const providerEmails = [
-        ...new Set(validItems.map((i) => catalogMap[i.sku]?.provider_email).filter(Boolean)),
-      ];
-
-      const payload = {
-        order_number: orderNumber,
-        created_by: profile?.email || null,
-        customer_name: customer,
-        phone,
-        city,
-        street,
-        district,
-        email,
-        obs,
-        items_json: validItems.map((i) => ({
-          sku: i.sku,
-          title: catalogMap[i.sku]?.title || i.sku,
-          sale_gs: Number(i.sale_gs),
-          qty: Number(i.qty),
-          provider_price_gs: Number(catalogMap[i.sku]?.provider_price_gs || 0),
-          provider_email: catalogMap[i.sku]?.provider_email || '',
-        })),
-        total_gs: totalVenta,
-        delivery_gs: Number(deliveryPrice),
-        commission_gs: commission,
-        provider_emails_list: providerEmails.join(','),
-      };
-
-      const { data: insertedOrder, error: insertError } = await supabase
-        .from('orders')
-        .insert(payload)
-        .select('id, order_number')
-        .single();
-
-      if (insertError) throw insertError;
-
-      const generatedOrderNumber = insertedOrder?.order_number || orderNumber;
-
-      const { error: newsError } = await supabase.from('news').insert({
-        order_id: String(generatedOrderNumber),
-        actor_email: profile?.email,
-        role_scope: profile?.role,
-        message: `Nuevo pedido ${generatedOrderNumber} - ${customer} - ${city} - Gs ${nf(totalVenta)}`,
       });
 
-      if (newsError) {
-        console.error('Error al crear noticia:', newsError);
-      }
+      const successRate = totalOrders > 0 ? (delivered / totalOrders) * 100 : 0;
 
-      toast.success(`✅ Pedido ${generatedOrderNumber} guardado`);
-      resetForm();
-    } catch (error: any) {
-      console.error('Error guardando pedido:', error);
-      toast.error(error?.message || 'No se pudo guardar el pedido');
+      setHistory({
+        total_orders: totalOrders,
+        delivered,
+        cancelled,
+        returned,
+        in_transit: inTransit,
+        total_products: totalProducts,
+        delivery_success_rate: successRate,
+        recent_orders: orders?.slice(0, 5) || []
+      });
+    } catch (error) {
+      console.error('Error cargando historial:', error);
     } finally {
-      setSaving(false);
+      setLoading(false);
     }
+  };
+
+  const getStatusBadge = (status: string) => {
+    const statusMap: Record<string, { color: string; text: string }> = {
+      'delivered': { color: 'bg-green-100 text-green-800', text: 'Entregada' },
+      'entregado': { color: 'bg-green-100 text-green-800', text: 'Entregada' },
+      'cancelled': { color: 'bg-red-100 text-red-800', text: 'Cancelada' },
+      'cancelado': { color: 'bg-red-100 text-red-800', text: 'Cancelada' },
+      'returned': { color: 'bg-orange-100 text-orange-800', text: 'Devuelta' },
+      'devuelto': { color: 'bg-orange-100 text-orange-800', text: 'Devuelta' },
+      'in_transit': { color: 'bg-blue-100 text-blue-800', text: 'En tránsito' },
+      'transito': { color: 'bg-blue-100 text-blue-800', text: 'En tránsito' },
+      'enviado': { color: 'bg-blue-100 text-blue-800', text: 'Enviado' }
+    };
+    const statusInfo = statusMap[status?.toLowerCase()] || { color: 'bg-gray-100 text-gray-800', text: status || 'Desconocido' };
+    return <span className={`px-2 py-1 rounded-full text-xs font-medium ${statusInfo.color}`}>{statusInfo.text}</span>;
   };
 
   return (
-    <div className="app-card w-full min-w-0 overflow-x-hidden">
-      <h3 className="mb-3 text-lg font-extrabold">Cargar pedido</h3>
-
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <div className="w-full min-w-0 md:col-span-1">
-          <label className="app-label">Cliente</label>
-          <input
-            className="app-input w-full min-w-0 text-base"
-            value={customer}
-            onChange={(e) => setCustomer(e.target.value)}
-          />
-
-          <label className="app-label">Teléfono</label>
-          <input
-            className="app-input w-full min-w-0 text-base"
-            value={phone}
-            onChange={(e) => setPhone(e.target.value)}
-          />
-
-          <label className="app-label">Ciudad</label>
-          <select
-            className="app-input w-full min-w-0 text-base"
-            value={city}
-            onChange={(e) => setCity(e.target.value)}
-          >
-            <option value="">Selecciona ciudad…</option>
-            {clientPrices.map((c) => (
-              <option key={c.id} value={c.city}>
-                {c.city}
-              </option>
-            ))}
-          </select>
-
-          {deliveryPrice > 0 && (
-            <div className="chip mt-1 break-words">
-              Delivery cobrado: {nf(Number(deliveryPrice))} Gs
-            </div>
-          )}
-
-          <label className="app-label">Calle</label>
-          <input
-            className="app-input w-full min-w-0 text-base"
-            value={street}
-            onChange={(e) => setStreet(e.target.value)}
-          />
-
-          <label className="app-label">Barrio</label>
-          <input
-            className="app-input w-full min-w-0 text-base"
-            value={district}
-            onChange={(e) => setDistrict(e.target.value)}
-          />
-
-          <label className="app-label">Email</label>
-          <input
-            className="app-input w-full min-w-0 text-base"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="Opcional"
-          />
-
-          <label className="app-label">Observación</label>
-          <textarea
-            className="app-input w-full min-w-0 text-base"
-            rows={3}
-            value={obs}
-            onChange={(e) => setObs(e.target.value)}
-          />
-        </div>
-
-        <div className="w-full min-w-0 md:col-span-2">
-          <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <label className="app-label !mt-0">Items</label>
-            <span className="chip w-fit text-[10px]">
-              Catálogo: {products.length} productos
-            </span>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <History className="w-5 h-5" />
+            Historial del comprador
+          </DialogTitle>
+          <div className="text-sm text-gray-600 mt-1">
+            {customerName && <p><strong>Cliente:</strong> {customerName}</p>}
+            <p><strong>Teléfono:</strong> {phone}</p>
           </div>
+        </DialogHeader>
 
-          {items.map((item, idx) => (
-            <div
-              key={idx}
-              className="mb-3 w-full min-w-0 rounded-xl border border-border p-3"
-            >
-              <div className="grid grid-cols-1 items-start gap-2 md:grid-cols-12">
-                <div className="w-full min-w-0 md:col-span-5">
-                  <label className="app-label !mt-0">Producto</label>
-                  <select
-                    className="app-input w-full min-w-0 text-base"
-                    value={item.sku}
-                    onChange={(e) => updateItem(idx, 'sku', e.target.value)}
-                  >
-                    <option value="">
-                      {loadingProducts ? 'Cargando productos…' : 'Seleccionar producto…'}
-                    </option>
-                    {products.map((p) => (
-                      <option key={p.id} value={p.sku}>
-                        {p.title} — {p.sku}
-                        {userFavorites.has(p.id) ? ' ⭐' : ''}
-                        {p.is_private ? ' 🔒' : ''}
-                        {` (Stock: ${p.stock || 0})`}
-                        {` (Prov ${nf(Number(p.provider_price_gs || 0))})`}
-                        {p.provider_email ? ` [${p.provider_email}]` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+        {loading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-8 h-8 animate-spin text-primary" />
+          </div>
+        ) : !history || history.total_orders === 0 ? (
+          <div className="text-center py-12 text-gray-500">
+            <Package className="w-16 h-16 mx-auto mb-4 text-gray-300" />
+            <p>No se encontraron órdenes previas para este número</p>
+            <p className="text-sm mt-2">Cliente esporádico</p>
+          </div>
+        ) : (
+          <div className="space-y-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="bg-blue-50 rounded-lg p-4 text-center">
+                <Package className="w-8 h-8 mx-auto mb-2 text-blue-600" />
+                <div className="text-2xl font-bold text-blue-700">{history.total_orders}</div>
+                <div className="text-xs text-blue-600">Total órdenes</div>
+                <div className="text-sm font-semibold mt-1">{nf(history.total_products)} productos</div>
+              </div>
 
-                <div className="w-full min-w-0 md:col-span-2">
-                  <label className="app-label !mt-0">Proveedor</label>
-                  <div className="chip w-full break-words text-[10px]">
-                    Prov: {nf(Number(catalogMap[item.sku]?.provider_price_gs || 0))}
-                  </div>
-                </div>
+              <div className="bg-green-50 rounded-lg p-4 text-center">
+                <CheckCircle className="w-8 h-8 mx-auto mb-2 text-green-600" />
+                <div className="text-2xl font-bold text-green-700">{history.delivered}</div>
+                <div className="text-xs text-green-600">Entregas exitosas</div>
+                <div className="text-sm font-semibold mt-1">{history.delivery_success_rate.toFixed(0)}% éxito</div>
+              </div>
 
-                <div className="w-full min-w-0 md:col-span-3">
-                  <label className="app-label !mt-0">Venta TOTAL (Gs)</label>
-                  <input
-                    className="app-input w-full min-w-0 text-base"
-                    type="number"
-                    placeholder="Venta TOTAL (Gs)"
-                    value={item.sale_gs || ''}
-                    onChange={(e) => updateItem(idx, 'sale_gs', Number(e.target.value))}
-                  />
-                </div>
-
-                <div className="w-full min-w-0 md:col-span-1">
-                  <label className="app-label !mt-0">Cant.</label>
-                  <input
-                    className="app-input w-full min-w-0 text-base"
-                    type="number"
-                    placeholder="Cant."
-                    value={item.qty}
-                    onChange={(e) => updateItem(idx, 'qty', Number(e.target.value))}
-                  />
-                </div>
-
-                <div className="w-full min-w-0 md:col-span-1">
-                  <label className="app-label !mt-0 hidden opacity-0 md:block">Acción</label>
-                  <button
-                    className="nav-btn w-full text-xs"
-                    onClick={() => removeItem(idx)}
-                  >
-                    Quitar
-                  </button>
+              <div className="bg-red-50 rounded-lg p-4 text-center">
+                <XCircle className="w-8 h-8 mx-auto mb-2 text-red-600" />
+                <div className="text-2xl font-bold text-red-700">{history.cancelled + history.returned}</div>
+                <div className="text-xs text-red-600">Canceladas/Devueltas</div>
+                <div className="text-xs text-gray-600 mt-1">
+                  Cancel: {history.cancelled} | Dev: {history.returned}
                 </div>
               </div>
 
-              <div className="mt-2">
-                <span className="chip break-words text-[10px]">
-                  Prov×Cant: {nf(Number(catalogMap[item.sku]?.provider_price_gs || 0) * item.qty)}
-                </span>
+              <div className="bg-yellow-50 rounded-lg p-4 text-center">
+                <Truck className="w-8 h-8 mx-auto mb-2 text-yellow-600" />
+                <div className="text-2xl font-bold text-yellow-700">{history.in_transit}</div>
+                <div className="text-xs text-yellow-600">En tránsito</div>
               </div>
             </div>
-          ))}
 
-          <button className="nav-btn active mt-2 w-full text-xs sm:w-auto" onClick={addItem}>
-            + Agregar ítem
-          </button>
-
-          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-            <div className="w-full min-w-0">
-              <label className="app-label">Total (Gs)</label>
-              <input
-                className="app-input w-full min-w-0 bg-secondary"
-                readOnly
-                value={nf(totalVenta)}
-              />
+            <div className="bg-gray-50 rounded-lg p-4">
+              <h4 className="font-semibold mb-2">Probabilidad de entrega</h4>
+              <div className="flex items-center gap-3">
+                <div className={`px-3 py-1 rounded-full text-sm font-semibold ${
+                  history.delivery_success_rate >= 80 ? 'bg-green-500 text-white' :
+                  history.delivery_success_rate >= 50 ? 'bg-yellow-500 text-white' :
+                  'bg-red-500 text-white'
+                }`}>
+                  {history.delivery_success_rate >= 80 ? 'Segura' :
+                   history.delivery_success_rate >= 50 ? 'Media' : 'Riesgo'}
+                </div>
+                <div className="flex-1 bg-gray-200 rounded-full h-2">
+                  <div 
+                    className="bg-primary rounded-full h-2 transition-all"
+                    style={{ width: `${history.delivery_success_rate}%` }}
+                  />
+                </div>
+                <span className="text-sm font-semibold">{history.delivery_success_rate.toFixed(0)}%</span>
+              </div>
+              <p className="text-xs text-gray-600 mt-2">
+                Basado en {history.total_orders} órdenes anteriores
+              </p>
             </div>
 
-            <div className="w-full min-w-0">
-              <label className="app-label">Delivery cobrado (Gs)</label>
-              <input
-                className="app-input w-full min-w-0 bg-secondary"
-                readOnly
-                value={nf(Number(deliveryPrice))}
-              />
-            </div>
-
-            <div className="w-full min-w-0">
-              <label className="app-label">Comisión estimada (Gs)</label>
-              <input
-                className="app-input w-full min-w-0 bg-secondary"
-                readOnly
-                value={nf(commission)}
-              />
-            </div>
+            {history.recent_orders.length > 0 && (
+              <div>
+                <h4 className="font-semibold mb-3">Últimas órdenes</h4>
+                <div className="space-y-2">
+                  {history.recent_orders.map((order) => (
+                    <div key={order.id} className="border rounded-lg p-3">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="font-mono text-sm font-semibold">{order.order_number}</p>
+                          <p className="text-xs text-gray-600">
+                            {new Date(order.created_at).toLocaleDateString('es-PY')}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          {getStatusBadge(order.status)}
+                          <p className="text-sm font-semibold mt-1">{nf(order.total_gs)} Gs</p>
+                        </div>
+                      </div>
+                      {order.items_json && (
+                        <div className="mt-2 text-xs text-gray-600">
+                          {order.items_json.map((item: any, idx: number) => (
+                            <span key={idx}>
+                              {item.title} x{item.qty}
+                              {idx < order.items_json.length - 1 ? ', ' : ''}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
-
-          <div className="mt-4 flex">
-            <button
-              className="nav-btn active w-full md:w-auto md:min-w-[220px]"
-              onClick={saveOrder}
-              disabled={saving || loadingProducts}
-            >
-              {saving ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="btn-spinner" /> Guardando...
-                </span>
-              ) : (
-                'Guardar pedido'
-              )}
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
