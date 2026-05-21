@@ -3,7 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { 
   Loader2, History, Package, Truck, XCircle, CheckCircle, 
   TrendingUp, TrendingDown, Calendar, DollarSign, MapPin, 
-  ShoppingBag, Award, AlertCircle, Clock 
+  ShoppingBag, Award, AlertCircle, Clock, User, Star, AlertTriangle, Info
 } from 'lucide-react';
 
 interface BuyerHistoryModalProps {
@@ -27,20 +27,22 @@ interface OrderHistory {
   carrier_stats: Record<string, { delivered: number; returned: number; in_transit: number }>;
 }
 
+interface ClientClassification {
+  type: 'nuevo' | 'problematico' | 'mixto' | 'confiable' | 'regular';
+  label: string;
+  color: string;
+  bg: string;
+  icon: JSX.Element;
+  description: string;
+}
+
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
 // Función para extraer SOLO los últimos 6 dígitos del teléfono
 const getLast6Digits = (phone: string): string => {
   if (!phone) return '';
-  // Eliminar cualquier caracter que no sea número
   const digits = phone.toString().replace(/\D/g, '');
-  // Tomar los últimos 6 dígitos
   return digits.slice(-6);
-};
-
-// Función para normalizar y buscar por coincidencia de últimos dígitos
-const normalizePhoneForSearch = (phone: string): string => {
-  return getLast6Digits(phone);
 };
 
 const SimpleDialog = ({ open, onOpenChange, children }: { open: boolean; onOpenChange: (open: boolean) => void; children: React.ReactNode }) => {
@@ -77,8 +79,6 @@ export function BuyerHistoryModal({ open, onOpenChange, phone, customerName }: B
   const loadBuyerHistory = async (last6Digits: string) => {
     setLoading(true);
     try {
-      // Buscar por coincidencia en los últimos 6 dígitos
-      // Usamos una consulta que busca cualquier teléfono que termine con estos 6 dígitos
       const { data: orders, error } = await supabase
         .from('orders')
         .select('*')
@@ -87,7 +87,6 @@ export function BuyerHistoryModal({ open, onOpenChange, phone, customerName }: B
 
       if (error) throw error;
 
-      // Filtrar manualmente para asegurar que coincidan los últimos 6 dígitos
       const filteredOrders = orders?.filter(order => {
         const orderLast6 = getLast6Digits(order.phone);
         return orderLast6 === last6Digits;
@@ -113,7 +112,6 @@ export function BuyerHistoryModal({ open, onOpenChange, phone, customerName }: B
       const avgOrderValue = totalOrders > 0 ? totalSpent / totalOrders : 0;
       const successRate = totalOrders > 0 ? (delivered / totalOrders) * 100 : 0;
 
-      // Estadísticas por transportadora
       const carrierStats: Record<string, { delivered: number; returned: number; in_transit: number }> = {};
       filteredOrders?.forEach(order => {
         const carrier = order.carrier || 'No especificada';
@@ -149,6 +147,70 @@ export function BuyerHistoryModal({ open, onOpenChange, phone, customerName }: B
     }
   };
 
+  // Función para clasificar al cliente según su historial REAL
+  const getClientClassification = (history: OrderHistory): ClientClassification => {
+    if (history.total_orders === 0) {
+      return {
+        type: 'nuevo',
+        label: 'Cliente Nuevo',
+        color: 'text-gray-600',
+        bg: 'bg-gray-100',
+        icon: <User className="w-3 h-3" />,
+        description: 'Aún no ha realizado ninguna compra'
+      };
+    }
+    
+    const problemOrders = history.cancelled + history.returned;
+    const problemRate = problemOrders / history.total_orders;
+    const hasAnyProblem = history.cancelled > 0 || history.returned > 0;
+    
+    // Cliente altamente problemático (50% o más de problemas)
+    if (problemRate >= 0.5) {
+      return {
+        type: 'problematico',
+        label: 'Cliente Problemático',
+        color: 'text-red-600',
+        bg: 'bg-red-50',
+        icon: <AlertTriangle className="w-3 h-3" />,
+        description: `Alto índice de problemas: ${problemOrders} de ${history.total_orders} órdenes con cancelaciones o devoluciones`
+      };
+    }
+    
+    // Cliente con problemas ocasionales
+    if (hasAnyProblem) {
+      return {
+        type: 'mixto',
+        label: 'Cliente con Historial Mixto',
+        color: 'text-amber-600',
+        bg: 'bg-amber-50',
+        icon: <AlertCircle className="w-3 h-3" />,
+        description: `${problemOrders} órdenes con problemas de ${history.total_orders} totales`
+      };
+    }
+    
+    // Cliente confiable (80%+ de éxito)
+    if (history.delivery_success_rate >= 80) {
+      return {
+        type: 'confiable',
+        label: 'Cliente Confiable',
+        color: 'text-emerald-600',
+        bg: 'bg-emerald-50',
+        icon: <Star className="w-3 h-3" />,
+        description: `${history.delivered} entregas exitosas de ${history.total_orders} órdenes`
+      };
+    }
+    
+    // Cliente regular
+    return {
+      type: 'regular',
+      label: 'Cliente Regular',
+      color: 'text-blue-600',
+      bg: 'bg-blue-50',
+      icon: <User className="w-3 h-3" />,
+      description: `${history.delivery_success_rate.toFixed(0)}% de tasa de éxito en entregas`
+    };
+  };
+
   const getStatusBadge = (status: string) => {
     const statusMap: Record<string, { color: string; bg: string; text: string; icon: JSX.Element }> = {
       'delivered': { bg: 'bg-emerald-50', color: 'text-emerald-700', text: 'Entregada', icon: <CheckCircle className="w-3 h-3" /> },
@@ -178,9 +240,11 @@ export function BuyerHistoryModal({ open, onOpenChange, phone, customerName }: B
 
   if (!open) return null;
 
+  const clientClassification = history && history.total_orders > 0 ? getClientClassification(history) : null;
+
   return (
     <SimpleDialog open={open} onOpenChange={onOpenChange}>
-      {/* Header mejorado */}
+      {/* Header mejorado con clasificación del cliente */}
       <div className="sticky top-0 z-10 bg-gradient-to-r from-slate-900 to-slate-800 text-white rounded-t-2xl px-6 py-5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -199,22 +263,41 @@ export function BuyerHistoryModal({ open, onOpenChange, phone, customerName }: B
             <XCircle className="w-5 h-5" />
           </button>
         </div>
-        <div className="mt-3 pt-3 border-t border-white/10 flex gap-4 text-sm">
-          {customerName && (
+        
+        <div className="mt-3 pt-3 border-t border-white/10 flex flex-wrap justify-between items-center gap-3">
+          <div className="flex flex-wrap gap-4 text-sm">
+            {customerName && (
+              <div className="flex items-center gap-2">
+                <div className="p-1 bg-white/10 rounded-lg">
+                  <ShoppingBag className="w-3 h-3" />
+                </div>
+                <span>{customerName}</span>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <div className="p-1 bg-white/10 rounded-lg">
-                <ShoppingBag className="w-3 h-3" />
+                <MapPin className="w-3 h-3" />
               </div>
-              <span>{customerName}</span>
+              <span>***{searchTerm}</span>
+            </div>
+          </div>
+          
+          {/* Mostrar clasificación del cliente si tiene historial */}
+          {clientClassification && (
+            <div className={`${clientClassification.bg} px-3 py-1.5 rounded-full text-xs font-semibold ${clientClassification.color} flex items-center gap-1.5 shadow-sm`}>
+              {clientClassification.icon}
+              {clientClassification.label}
             </div>
           )}
-          <div className="flex items-center gap-2">
-            <div className="p-1 bg-white/10 rounded-lg">
-              <MapPin className="w-3 h-3" />
-            </div>
-            <span>***{searchTerm}</span>
-          </div>
         </div>
+        
+        {/* Descripción adicional del tipo de cliente */}
+        {clientClassification && (
+          <div className="mt-2 text-xs text-white/50 flex items-center gap-1">
+            <Info className="w-3 h-3" />
+            <span>{clientClassification.description}</span>
+          </div>
+        )}
       </div>
 
       <div className="px-6 py-6">
@@ -229,11 +312,32 @@ export function BuyerHistoryModal({ open, onOpenChange, phone, customerName }: B
               <Package className="w-12 h-12 text-slate-400" />
             </div>
             <p className="text-slate-600 font-medium">No se encontraron órdenes previas</p>
-            <p className="text-sm text-slate-400 mt-1">Cliente esporádico - sin historial de compras</p>
+            <p className="text-sm text-slate-400 mt-1">Cliente nuevo - sin historial de compras</p>
           </div>
         ) : (
           <div className="space-y-6">
-            {/* KPI Cards mejoradas */}
+            {/* Alerta si el cliente tiene problemas */}
+            {(history.cancelled > 0 || history.returned > 0) && (
+              <div className={`rounded-xl p-4 border ${
+                (history.cancelled + history.returned) / history.total_orders >= 0.5
+                  ? 'bg-red-50 border-red-200 text-red-800'
+                  : 'bg-amber-50 border-amber-200 text-amber-800'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5" />
+                  <span className="font-semibold">
+                    ⚠️ Atención: Este cliente tiene {history.cancelled} cancelación(es) y {history.returned} devolución(es)
+                  </span>
+                </div>
+                <p className="text-xs mt-1 opacity-75">
+                  Recomendación: {history.cancelled + history.returned >= history.total_orders / 2 
+                    ? 'Considere solicitar pago anticipado o evaluar condiciones especiales'
+                    : 'Monitorear el proceso de entrega con atención'}
+                </p>
+              </div>
+            )}
+
+            {/* KPI Cards */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-xl p-4 border border-blue-200">
                 <div className="flex items-center justify-between mb-2">
@@ -286,7 +390,7 @@ export function BuyerHistoryModal({ open, onOpenChange, phone, customerName }: B
               </div>
             </div>
 
-            {/* Probabilidad de entrega mejorada */}
+            {/* Probabilidad de entrega */}
             <div className="bg-gradient-to-r from-slate-50 to-gray-50 rounded-xl p-5 border border-slate-200">
               <div className="flex items-center gap-2 mb-3">
                 <Award className="w-5 h-5 text-slate-600" />
@@ -350,7 +454,7 @@ export function BuyerHistoryModal({ open, onOpenChange, phone, customerName }: B
               </div>
             )}
 
-            {/* Últimas órdenes mejoradas */}
+            {/* Últimas órdenes */}
             {history.recent_orders.length > 0 && (
               <div>
                 <div className="flex items-center gap-2 mb-4">
@@ -358,7 +462,7 @@ export function BuyerHistoryModal({ open, onOpenChange, phone, customerName }: B
                   <h4 className="font-bold text-slate-800">Últimas Órdenes</h4>
                 </div>
                 <div className="space-y-3">
-                  {history.recent_orders.map((order, idx) => (
+                  {history.recent_orders.map((order) => (
                     <div key={order.id} className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-md transition-shadow">
                       <div className="flex flex-wrap justify-between items-start gap-3">
                         <div className="flex-1">
