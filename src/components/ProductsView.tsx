@@ -552,7 +552,7 @@ export default function ProductsView({
   const [selectedProductId, setSelectedProductId] = useState<string>("todos");
 
   // Estado para ocultar/mostrar sección superior
-  const [showTopSection, setShowTopSection] = useState(true);
+  const [showTopSection, setShowTopSection] = useState(false);
 
   // Ad spend states
   const [adSpendFromDate, setAdSpendFromDate] = useState(todayPY());
