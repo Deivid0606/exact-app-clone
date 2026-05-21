@@ -28,7 +28,7 @@ export default function WithGuidesView() {
   const [citySearch, setCitySearch] = useState('');
   const [showCityDropdown, setShowCityDropdown] = useState(false);
 
-  // 🔥 NUEVO FILTRO POR DEPARTAMENTOS
+  // FILTRO POR DEPARTAMENTOS
   const [selectedDepartments, setSelectedDepartments] = useState<Set<string>>(new Set());
   const [deptSearch, setDeptSearch] = useState('');
   const [showDeptDropdown, setShowDeptDropdown] = useState(false);
@@ -44,12 +44,12 @@ export default function WithGuidesView() {
     return Array.from(cities).sort();
   }, [orders]);
 
-  // 🔥 Obtener lista única de departamentos de los pedidos
+  // Obtener lista única de departamentos de los pedidos
   const allDepartments = useMemo(() => {
     const depts = new Set<string>();
     orders.forEach(o => {
-      if (o.department && o.department.trim()) {
-        depts.add(o.department.trim());
+      if (o.departamento && o.departamento.trim()) {
+        depts.add(o.departamento.trim());
       }
     });
     return Array.from(depts).sort();
@@ -60,7 +60,7 @@ export default function WithGuidesView() {
     return allCities.filter(c => c.toLowerCase().includes(citySearch.toLowerCase()));
   }, [allCities, citySearch]);
 
-  // 🔥 Filtrar departamentos por búsqueda
+  // Filtrar departamentos por búsqueda
   const filteredDepartments = useMemo(() => {
     if (!deptSearch) return allDepartments;
     return allDepartments.filter(d => d.toLowerCase().includes(deptSearch.toLowerCase()));
@@ -78,7 +78,7 @@ export default function WithGuidesView() {
     });
   };
 
-  // 🔥 Toggle para departamentos
+  // Toggle para departamentos
   const toggleDepartment = (dept: string) => {
     setSelectedDepartments(prev => {
       const next = new Set(prev);
@@ -99,7 +99,7 @@ export default function WithGuidesView() {
     }
   };
 
-  // 🔥 Seleccionar todos los departamentos
+  // Seleccionar todos los departamentos
   const selectAllDepartments = () => {
     if (selectedDepartments.size === allDepartments.length) {
       setSelectedDepartments(new Set());
@@ -171,14 +171,14 @@ export default function WithGuidesView() {
         if (!providerList.toLowerCase().includes(providerFilter.toLowerCase())) return false;
       }
       
-      // 🔥 FILTRO POR CIUDADES
+      // FILTRO POR CIUDADES
       if (selectedCities.size > 0) {
         if (!o.city || !selectedCities.has(o.city)) return false;
       }
       
-      // 🔥 FILTRO POR DEPARTAMENTOS
+      // FILTRO POR DEPARTAMENTOS
       if (selectedDepartments.size > 0) {
-        if (!o.department || !selectedDepartments.has(o.department)) return false;
+        if (!o.departamento || !selectedDepartments.has(o.departamento)) return false;
       }
       
       if (!search) return true;
@@ -187,7 +187,7 @@ export default function WithGuidesView() {
         (o.order_number || '').toLowerCase().includes(q) ||
         (o.phone || '').includes(q) || 
         (o.city || '').toLowerCase().includes(q) ||
-        (o.department || '').toLowerCase().includes(q) ||
+        (o.departamento || '').toLowerCase().includes(q) ||
         (o.id || '').toLowerCase().includes(q);
     });
   }, [orders, search, providerFilter, role, myEmail, selectedCities, selectedDepartments]);
@@ -227,7 +227,7 @@ export default function WithGuidesView() {
       `Cliente: ${o.customer_name || ''}`,
       `Teléfono: ${o.phone || ''}`,
       `Email: ${o.email || ''}`,
-      `Departamento: ${o.department || ''}`,
+      `Departamento: ${o.departamento || ''}`,
       `Ciudad: ${o.city || ''}`,
       `Dirección: ${o.street || ''} ${o.district ? '- ' + o.district : ''}`,
       `━━━━━━━━━━━━━━━━━━`,
@@ -368,7 +368,7 @@ export default function WithGuidesView() {
             <tr><td style="padding:3px 0;width:120px;color:#999;">Cliente:</td><td style="font-weight:bold;">${o.customer_name || ''}</td></tr>
             <tr><td style="padding:3px 0;color:#999;">Teléfono:</td><td>${o.phone || ''}</td></tr>
             <tr><td style="padding:3px 0;color:#999;">Email:</td><td>${o.email || ''}</td></tr>
-            <tr><td style="padding:3px 0;color:#999;">Departamento:</td><td>${o.department || ''}</td></tr>
+            <tr><td style="padding:3px 0;color:#999;">Departamento:</td><td>${o.departamento || ''}</td></tr>
             <tr><td style="padding:3px 0;color:#999;">Ciudad:</td><td>${o.city || ''}</td></tr>
             <tr><td style="padding:3px 0;color:#999;">Dirección:</td><td>${o.street || ''} ${o.district ? '- ' + o.district : ''}</td></tr>
             <tr><td style="padding:3px 0;color:#999;">Vendedor:</td><td>${o.created_by || ''}</td></tr>
@@ -465,7 +465,7 @@ export default function WithGuidesView() {
         <input className="app-input flex-1 min-w-[200px]" placeholder="🔎 Buscar por cliente, teléfono, ID, ciudad o departamento"
           value={search} onChange={e => setSearch(e.target.value)} />
         
-        {/* 🔥 FILTRO POR DEPARTAMENTOS */}
+        {/* FILTRO POR DEPARTAMENTOS */}
         <div className="relative">
           <button 
             className="nav-btn"
@@ -508,7 +508,7 @@ export default function WithGuidesView() {
                     />
                     <span>{dept}</span>
                     <span className="text-xs text-muted-foreground ml-auto">
-                      {orders.filter(o => o.department === dept).length}
+                      {orders.filter(o => o.departamento === dept).length}
                     </span>
                   </label>
                 ))}
@@ -642,7 +642,7 @@ export default function WithGuidesView() {
                 </td>
                 <td className="text-xs whitespace-nowrap">{new Date(o.created_at).toLocaleDateString('es-PY')}</td>
                 <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
-                <td className="text-xs">{o.department || '—'}</td>
+                <td className="text-xs">{o.departamento || '—'}</td>
                 <td className="text-xs">{o.city || '—'}</td>
                 <td className="text-xs">{o.customer_name}</td>
                 <td className="text-xs">{o.phone}</td>
@@ -664,7 +664,7 @@ export default function WithGuidesView() {
                     }} title="Copiar guía">📋</button>
                   </div>
                 </td>
-              </tr>
+              </table>
             ))}
             {visibleOrders.length === 0 && (
               <tr><td colSpan={11} className="text-center text-muted-foreground py-8">Sin pedidos en el rango seleccionado</td></tr>
