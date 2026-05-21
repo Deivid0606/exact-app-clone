@@ -71,7 +71,15 @@ export default function CommissionRequestsView() {
     return map;
   }, [products]);
 
-  // CORREGIDO: Solo solicitudes PENDIENTES (NO RECHAZADAS)
+  // Obtener solicitudes APROBADAS (ya pagadas)
+  const approvedRequests = useMemo(() => {
+    return requests.filter(r => 
+      r.vendor_email?.toLowerCase() === myEmail.toLowerCase() && 
+      r.status === 'APROBADO'
+    );
+  }, [requests, myEmail]);
+
+  // Obtener solicitudes PENDIENTES (bloquean saldo)
   const pendingRequests = useMemo(() => {
     return requests.filter(r => 
       r.vendor_email?.toLowerCase() === myEmail.toLowerCase() && 
@@ -81,12 +89,13 @@ export default function CommissionRequestsView() {
 
   const balances = useMemo(() => {
     const providerCommissions: Record<string, { 
-      total: number; 
-      paidRequested: number;
-      pendingRequested: number;
+      total: number;      // Total de comisiones RENDIDAS no pagadas
+      paidRequested: number;    // Ya pagadas (solicitudes APROBADAS)
+      pendingRequested: number; // En solicitud PENDIENTE
       orderIds: string[] 
     }> = {};
     
+    // Primero, calcular todas las comisiones de órdenes RENDIDAS
     orders.forEach(order => {
       if (!isElegible(order.status, order.status2)) return;
 
@@ -120,12 +129,11 @@ export default function CommissionRequestsView() {
         if (!providerCommissions[prov]) {
           providerCommissions[prov] = { total: 0, paidRequested: 0, pendingRequested: 0, orderIds: [] };
         }
-
-        if (order.commission_paid) {
-          providerCommissions[prov].paidRequested += perProvider;
-        } else {
+        
+        // Siempre sumar al total si la orden NO está pagada
+        if (!order.commission_paid) {
           providerCommissions[prov].total += perProvider;
-
+          
           if (!providerCommissions[prov].orderIds.includes(order.id)) {
             providerCommissions[prov].orderIds.push(order.id);
           }
@@ -133,17 +141,34 @@ export default function CommissionRequestsView() {
       });
     });
 
-    // CORREGIDO: Sumar solo solicitudes PENDIENTES (no rechazadas)
+    // Sumar solicitudes APROBADAS (ya pagadas)
+    approvedRequests.forEach(req => {
+      if (req.provider_email) {
+        const providerEmail = req.provider_email.toLowerCase();
+        const amount = Number(req.amount_gs || 0);
+        
+        if (providerCommissions[providerEmail]) {
+          providerCommissions[providerEmail].paidRequested += amount;
+        } else {
+          providerCommissions[providerEmail] = { 
+            total: 0, paidRequested: amount, pendingRequested: 0, orderIds: [] 
+          };
+        }
+      }
+    });
+
+    // Sumar solicitudes PENDIENTES (bloquean saldo)
     pendingRequests.forEach(req => {
       if (req.provider_email) {
         const providerEmail = req.provider_email.toLowerCase();
+        const amount = Number(req.amount_gs || 0);
+        
         if (providerCommissions[providerEmail]) {
-          providerCommissions[providerEmail].pendingRequested += Number(req.amount_gs || 0);
+          providerCommissions[providerEmail].pendingRequested += amount;
         } else {
           providerCommissions[providerEmail] = { 
-            total: 0, paidRequested: 0, pendingRequested: 0, orderIds: [] 
+            total: 0, paidRequested: 0, pendingRequested: amount, orderIds: [] 
           };
-          providerCommissions[providerEmail].pendingRequested += Number(req.amount_gs || 0);
         }
       }
     });
@@ -152,11 +177,11 @@ export default function CommissionRequestsView() {
       const totalGross = data.total;
       const alreadyPaid = data.paidRequested;
       const alreadyRequested = data.pendingRequested;
-      const available = totalGross - alreadyPaid - alreadyRequested;
+      const available = totalGross - alreadyRequested; // No restamos alreadyPaid porque esas ya están fuera del total
       
       return {
         provider: providerEmail,
-        grossRendido: totalGross,
+        grossRendido: totalGross + alreadyPaid, // Mostrar total histórico
         paid: alreadyPaid,
         requested: alreadyRequested,
         available: Math.max(0, available),
@@ -165,7 +190,7 @@ export default function CommissionRequestsView() {
     });
     
     return result;
-  }, [orders, skuProviderMap, pendingRequests]);
+  }, [orders, skuProviderMap, approvedRequests, pendingRequests]);
 
   const filtered = requests.filter(r => {
     if (filterStatus && r.status !== filterStatus) return false;
