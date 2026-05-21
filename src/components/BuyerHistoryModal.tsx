@@ -3,7 +3,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { 
   Loader2, History, Package, Truck, XCircle, CheckCircle, 
   TrendingUp, TrendingDown, Calendar, DollarSign, MapPin, 
-  ShoppingBag, Award, AlertCircle, Clock, User, Star, AlertTriangle, Info
+  ShoppingBag, Award, AlertCircle, Clock, User, Star, AlertTriangle, Info, Home
 } from 'lucide-react';
 
 interface BuyerHistoryModalProps {
@@ -66,6 +66,24 @@ const getLast6Digits = (phone: string): string => {
   if (!phone) return '';
   const digits = phone.toString().replace(/\D/g, '');
   return digits.slice(-6);
+};
+
+// Función para formatear la dirección completa
+const formatAddress = (order: any): string => {
+  const parts = [];
+  if (order.address) parts.push(order.address);
+  if (order.city) parts.push(order.city);
+  if (order.department) parts.push(order.department);
+  
+  if (parts.length > 0) {
+    return parts.join(', ');
+  }
+  
+  // Intentar con campos alternativos
+  if (order.shipping_address) return order.shipping_address;
+  if (order.delivery_address) return order.delivery_address;
+  
+  return 'Dirección no especificada';
 };
 
 const SimpleDialog = ({ open, onOpenChange, children }: { open: boolean; onOpenChange: (open: boolean) => void; children: React.ReactNode }) => {
@@ -485,7 +503,7 @@ export function BuyerHistoryModal({ open, onOpenChange, phone, customerName }: B
               </div>
             )}
 
-            {/* Últimas órdenes */}
+            {/* Últimas órdenes con dirección */}
             {history.recent_orders.length > 0 && (
               <div>
                 <div className="flex items-center gap-2 mb-4">
@@ -493,44 +511,57 @@ export function BuyerHistoryModal({ open, onOpenChange, phone, customerName }: B
                   <h4 className="font-bold text-slate-800">Últimas Órdenes</h4>
                 </div>
                 <div className="space-y-3">
-                  {history.recent_orders.map((order) => (
-                    <div key={order.id} className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-md transition-shadow">
-                      <div className="flex flex-wrap justify-between items-start gap-3">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-mono text-sm font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
-                              #{order.order_number}
-                            </span>
-                            {getStatusBadge(order.status)}
-                          </div>
-                          <div className="flex items-center gap-3 mt-2 text-xs text-slate-500">
-                            <span className="flex items-center gap-1">
-                              <Calendar className="w-3 h-3" />
-                              {new Date(order.created_at).toLocaleDateString('es-PY', {
-                                year: 'numeric',
-                                month: 'short',
-                                day: 'numeric'
-                              })}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <DollarSign className="w-3 h-3" />
-                              {nf(order.total_gs)} Gs
-                            </span>
-                          </div>
-                          {order.items_json && (
-                            <div className="mt-2 text-xs text-slate-600 bg-slate-50 p-2 rounded-lg">
-                              {order.items_json.map((item: any, idx: number) => (
-                                <span key={idx}>
-                                  {item.title} × {item.qty}
-                                  {idx < order.items_json.length - 1 && ' • '}
-                                </span>
-                              ))}
+                  {history.recent_orders.map((order) => {
+                    const address = formatAddress(order);
+                    return (
+                      <div key={order.id} className="bg-white rounded-xl border border-slate-200 p-4 hover:shadow-md transition-shadow">
+                        <div className="flex flex-wrap justify-between items-start gap-3">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-mono text-sm font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">
+                                #{order.order_number}
+                              </span>
+                              {getStatusBadge(order.status)}
                             </div>
-                          )}
+                            
+                            <div className="flex items-center gap-3 mt-2 text-xs text-slate-500">
+                              <span className="flex items-center gap-1">
+                                <Calendar className="w-3 h-3" />
+                                {new Date(order.created_at).toLocaleDateString('es-PY', {
+                                  year: 'numeric',
+                                  month: 'short',
+                                  day: 'numeric'
+                                })}
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <DollarSign className="w-3 h-3" />
+                                {nf(order.total_gs)} Gs
+                              </span>
+                            </div>
+                            
+                            {/* Dirección de entrega */}
+                            <div className="mt-2 flex items-start gap-1.5 text-xs bg-blue-50 p-2 rounded-lg border border-blue-100">
+                              <Home className="w-3.5 h-3.5 text-blue-600 mt-0.5 flex-shrink-0" />
+                              <span className="text-blue-800">
+                                {address}
+                              </span>
+                            </div>
+                            
+                            {order.items_json && (
+                              <div className="mt-2 text-xs text-slate-600 bg-slate-50 p-2 rounded-lg">
+                                {order.items_json.map((item: any, idx: number) => (
+                                  <span key={idx}>
+                                    {item.title} × {item.qty}
+                                    {idx < order.items_json.length - 1 && ' • '}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
