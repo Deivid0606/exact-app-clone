@@ -84,6 +84,10 @@ export default function RatesView() {
   const [cpPrice, setCpPrice] = useState('');
   const [deliveries, setDeliveries] = useState<any[]>([]);
   const [filtroDepartamento, setFiltroDepartamento] = useState('');
+  
+  // Nuevos estados para el modo manual
+  const [usarModoManual, setUsarModoManual] = useState(false);
+  const [departamentoManual, setDepartamentoManual] = useState('');
 
   const load = () => {
     supabase.from('delivery_fees').select('*').order('delivery_email').then(({ data }) => setFees(data || []));
@@ -127,12 +131,19 @@ export default function RatesView() {
     if (!cpCity || !cpPrice) { toast.error('Completá todos los campos'); return; }
     
     let departamento = cpDepartamento;
-    if (!departamento && ciudadDepartamentoMap[cpCity]) {
+    
+    // Si no se seleccionó departamento manualmente, intentar obtener del mapa
+    if (!departamento && !usarModoManual) {
       departamento = ciudadDepartamentoMap[cpCity];
     }
     
+    // Si está en modo manual y se seleccionó un departamento, usar ese
+    if (usarModoManual && departamentoManual) {
+      departamento = departamentoManual;
+    }
+    
     if (!departamento) {
-      toast.error('Por favor seleccioná un departamento para esta ciudad');
+      toast.error('Por favor seleccioná un departamento para esta ciudad. Podés usar el modo manual si la ciudad no está en la lista.');
       return;
     }
     
@@ -153,6 +164,8 @@ export default function RatesView() {
     toast.success('Precio guardado');
     setCpCity('');
     setCpDepartamento('');
+    setDepartamentoManual('');
+    setUsarModoManual(false);
     setCpPrice('');
     load();
   };
@@ -219,7 +232,7 @@ export default function RatesView() {
             <th>Ciudad</th>
             <th className="text-right">Tarifa (Gs)</th>
             {canManage && <th>Acción</th>}
-          </tr>
+           </>
         </thead>
         <tbody>
           {visibleFees.map(f => (
@@ -272,32 +285,82 @@ export default function RatesView() {
       </div>
 
       {role === 'ADMIN' && (
-        <div className="flex flex-wrap gap-2 mb-4">
-          <input 
-            className="app-input !w-auto" 
-            placeholder="Ciudad" 
-            value={cpCity} 
-            onChange={e => setCpCity(e.target.value)} 
-          />
-          <select 
-            className="app-input !w-auto" 
-            value={cpDepartamento} 
-            onChange={e => setCpDepartamento(e.target.value)}
-          >
-            <option value="">Seleccionar departamento...</option>
-            {DEPARTAMENTOS.map(depto => (
-              <option key={depto} value={depto}>{depto}</option>
-            ))}
-          </select>
-          <input 
-            className="app-input !w-auto" 
-            type="number" 
-            placeholder="Precio al cliente (Gs)" 
-            value={cpPrice} 
-            onChange={e => setCpPrice(e.target.value)} 
-          />
-          <button className="nav-btn active" onClick={saveClientPrice}>Guardar/Actualizar</button>
-          <span className="chip text-[10px]">Impacta en el formulario de pedido</span>
+        <div className="mb-4">
+          <div className="flex flex-wrap gap-2 mb-2">
+            <input 
+              className="app-input !w-auto" 
+              placeholder="Ciudad" 
+              value={cpCity} 
+              onChange={e => setCpCity(e.target.value)} 
+            />
+            <select 
+              className="app-input !w-auto" 
+              value={cpDepartamento} 
+              onChange={e => {
+                setCpDepartamento(e.target.value);
+                if (e.target.value) {
+                  setUsarModoManual(false);
+                  setDepartamentoManual('');
+                }
+              }}
+            >
+              <option value="">Seleccionar departamento (automático)...</option>
+              {DEPARTAMENTOS.map(depto => (
+                <option key={depto} value={depto}>{depto}</option>
+              ))}
+            </select>
+            <input 
+              className="app-input !w-auto" 
+              type="number" 
+              placeholder="Precio al cliente (Gs)" 
+              value={cpPrice} 
+              onChange={e => setCpPrice(e.target.value)} 
+            />
+            <button className="nav-btn active" onClick={saveClientPrice}>Guardar/Actualizar</button>
+          </div>
+          
+          {/* Modo manual para ciudades no listadas */}
+          <div className="mt-2 p-3 bg-gray-50 rounded-md border border-gray-200">
+            <div className="flex items-center gap-2 mb-2">
+              <input 
+                type="checkbox" 
+                id="modoManual" 
+                checked={usarModoManual}
+                onChange={(e) => {
+                  setUsarModoManual(e.target.checked);
+                  if (e.target.checked) {
+                    setCpDepartamento('');
+                  } else {
+                    setDepartamentoManual('');
+                  }
+                }}
+              />
+              <label htmlFor="modoManual" className="text-sm font-medium">
+                Modo manual: para ciudades que no están en el mapa automático
+              </label>
+            </div>
+            
+            {usarModoManual && (
+              <div className="flex gap-2 items-center">
+                <span className="text-sm text-gray-600">Seleccionar departamento manualmente:</span>
+                <select 
+                  className="app-input !w-auto" 
+                  value={departamentoManual} 
+                  onChange={e => setDepartamentoManual(e.target.value)}
+                >
+                  <option value="">Seleccionar departamento...</option>
+                  {DEPARTAMENTOS.map(depto => (
+                    <option key={depto} value={depto}>{depto}</option>
+                  ))}
+                </select>
+                <span className="text-xs text-gray-500">
+                  ⚠️ Usar solo si la ciudad no está en el mapa automático
+                </span>
+              </div>
+            )}
+          </div>
+          
+          <span className="chip text-[10px] mt-2 inline-block">Impacta en el formulario de pedido</span>
         </div>
       )}
 
@@ -308,7 +371,7 @@ export default function RatesView() {
             <th>Departamento</th>
             <th className="text-right">Precio cliente (Gs)</th>
             {role === 'ADMIN' && <th>Acción</th>}
-          </tr>
+           </>
         </thead>
         <tbody>
           {pricesFiltrados.map(p => (
