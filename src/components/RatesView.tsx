@@ -13,7 +13,7 @@ const DEPARTAMENTOS = [
   "Boquerón", "Alto Paraguay"
 ];
 
-// Mapeo de ciudades a departamentos (basado en tu lista)
+// Mapeo de ciudades a departamentos
 const ciudadDepartamentoMap: { [key: string]: string } = {
   "Altos": "Cordillera",
   "Aregua": "Central",
@@ -65,7 +65,7 @@ const ciudadDepartamentoMap: { [key: string]: string } = {
   "Yguazu": "Alto Paraná",
   "YGUAZU - ALTO PARANÁ": "Alto Paraná",
   "Ypacaraí": "Cordillera",
-  "Ypane": "Central", // Asumiendo que es Central, ajustá si es necesario
+  "Ypane": "Central",
 };
 
 export default function RatesView() {
@@ -80,17 +80,14 @@ export default function RatesView() {
   const [drCity, setDrCity] = useState('');
   const [drRate, setDrRate] = useState('');
   const [cpCity, setCpCity] = useState('');
-  const [cpDepartamento, setCpDepartamento] = useState(''); // NUEVO
+  const [cpDepartamento, setCpDepartamento] = useState('');
   const [cpPrice, setCpPrice] = useState('');
   const [deliveries, setDeliveries] = useState<any[]>([]);
-  
-  // NUEVO: Estado para filtro de departamento
   const [filtroDepartamento, setFiltroDepartamento] = useState('');
 
   const load = () => {
     supabase.from('delivery_fees').select('*').order('delivery_email').then(({ data }) => setFees(data || []));
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setPrices(data || []));
-    // Load delivery profiles for dropdown
     supabase.from('profiles').select('email, name, user_id').then(async ({ data }) => {
       const profiles = data || [];
       const { data: roles } = await supabase.from('user_roles').select('user_id, role').eq('role', 'DELIVERY');
@@ -98,9 +95,9 @@ export default function RatesView() {
       setDeliveries(profiles.filter(p => deliveryIds.has(p.user_id)));
     });
   };
+  
   useEffect(() => { load(); }, []);
 
-  // Filter fees: PROVEEDOR only sees their own delivery fees
   const visibleFees = role === 'PROVEEDOR'
     ? fees.filter(f => f.delivery_email?.toLowerCase() === myEmail.toLowerCase() ||
         deliveries.some(d => d.email === f.delivery_email))
@@ -126,11 +123,9 @@ export default function RatesView() {
     else { toast.success('Tarifa eliminada'); load(); }
   };
 
-  // MODIFICADO: Guardar ciudad con departamento
   const saveClientPrice = async () => {
     if (!cpCity || !cpPrice) { toast.error('Completá todos los campos'); return; }
     
-    // Si no se seleccionó departamento, intentar asignar automáticamente
     let departamento = cpDepartamento;
     if (!departamento && ciudadDepartamentoMap[cpCity]) {
       departamento = ciudadDepartamentoMap[cpCity];
@@ -143,8 +138,6 @@ export default function RatesView() {
     
     const existing = prices.find(p => p.city?.toLowerCase() === cpCity.toLowerCase());
     
-    // Verificar si la tabla client_prices tiene columna departamento
-    // Si no existe, primero hay que agregarla a Supabase
     if (existing) {
       await supabase.from('client_prices').update({ 
         price_gs: Number(cpPrice),
@@ -164,7 +157,6 @@ export default function RatesView() {
     load();
   };
 
-  // NUEVO: Función para eliminar precio de ciudad
   const deleteClientPrice = async (id: string) => {
     if (!confirm('¿Eliminar este precio?')) return;
     const { error } = await supabase.from('client_prices').delete().eq('id', id);
@@ -172,13 +164,11 @@ export default function RatesView() {
     else { toast.success('Precio eliminado'); load(); }
   };
 
-  // NUEVO: Obtener departamento de una ciudad (del mapa o de los datos)
   const getDepartamento = (ciudad: string, precioItem: any) => {
     if (precioItem.departamento) return precioItem.departamento;
     return ciudadDepartamentoMap[ciudad] || 'Sin asignar';
   };
 
-  // NUEVO: Filtrar ciudades por departamento
   const pricesFiltrados = filtroDepartamento
     ? prices.filter(p => getDepartamento(p.city, p) === filtroDepartamento)
     : prices;
@@ -225,7 +215,9 @@ export default function RatesView() {
       <table className="app-table">
         <thead>
           <tr>
-            <th>Delivery</th><th>Ciudad</th><th className="text-right">Tarifa (Gs)</th>
+            <th>Delivery</th>
+            <th>Ciudad</th>
+            <th className="text-right">Tarifa (Gs)</th>
             {canManage && <th>Acción</th>}
           </tr>
         </thead>
@@ -236,13 +228,19 @@ export default function RatesView() {
               <td className="text-sm">{f.city}</td>
               <td className="text-right text-sm font-bold">{nf(Number(f.fee_gs || 0))}</td>
               {canManage && (
-                <tr>
+                <td>
                   <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={() => deleteRate(f.id)}>Eliminar</button>
                 </td>
               )}
             </tr>
           ))}
-          {visibleFees.length === 0 && <tr><td colSpan={canManage ? 4 : 3} className="text-center text-muted-foreground py-4">Sin tarifas</td></tr>}
+          {visibleFees.length === 0 && (
+            <tr>
+              <td colSpan={canManage ? 4 : 3} className="text-center text-muted-foreground py-4">
+                Sin tarifas
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
 
@@ -250,8 +248,8 @@ export default function RatesView() {
 
       <h3 className="text-lg font-extrabold mb-3">Precio al cliente por ciudad</h3>
 
-      {/* NUEVO: Filtro por departamento */}
-      <div className="mb-4 flex gap-2 items-center">
+      {/* Filtro por departamento */}
+      <div className="mb-4 flex gap-2 items-center flex-wrap">
         <label className="app-label mb-0">Filtrar por departamento:</label>
         <select 
           className="app-input !w-auto" 
@@ -307,7 +305,7 @@ export default function RatesView() {
         <thead>
           <tr>
             <th>Ciudad</th>
-            <th>Departamento</th> {/* NUEVA COLUMNA */}
+            <th>Departamento</th>
             <th className="text-right">Precio cliente (Gs)</th>
             {role === 'ADMIN' && <th>Acción</th>}
           </tr>
@@ -340,7 +338,11 @@ export default function RatesView() {
             </tr>
           ))}
           {pricesFiltrados.length === 0 && (
-            <tr><td colSpan={role === 'ADMIN' ? 4 : 3} className="text-center text-muted-foreground py-4">Sin precios</td></tr>
+            <tr>
+              <td colSpan={role === 'ADMIN' ? 4 : 3} className="text-center text-muted-foreground py-4">
+                Sin precios
+              </td>
+            </tr>
           )}
         </tbody>
       </table>
