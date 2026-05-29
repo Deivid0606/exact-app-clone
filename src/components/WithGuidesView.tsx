@@ -88,10 +88,10 @@ export default function WithGuidesView() {
         correctLevel: window.QRCode.CorrectLevel.L
       });
       
-      // Generar QR de Delivery - Usa la ruta correcta
+      // Generar QR de Delivery - URL ABSOLUTA
       const deliveryEmail = profile?.email || '';
-      const deliveryUrl = '/asignar-pedidos?auto_assign=' + currentOrder.id + '&delivery=' + encodeURIComponent(deliveryEmail);
-      console.log('QR Delivery URL:', deliveryUrl); // Para depuración
+      const deliveryUrl = window.location.origin + '/asignar-pedidos?auto_assign=' + currentOrder.id + '&delivery=' + encodeURIComponent(deliveryEmail);
+      console.log('QR Delivery URL:', deliveryUrl);
       new window.QRCode(qrDeliveryRef.current, {
         text: deliveryUrl,
         width: 120,
@@ -438,14 +438,14 @@ export default function WithGuidesView() {
       }
 
       const whatsappUrl = getWhatsAppUrl(order);
-      const deliveryUrl = '/asignar-pedidos?auto_assign=' + order.id + '&delivery=' + encodeURIComponent(deliveryEmail);
+      const deliveryUrl = window.location.origin + '/asignar-pedidos?auto_assign=' + order.id + '&delivery=' + encodeURIComponent(deliveryEmail);
 
       allGuidesHtml += `
         <div class="guide-page">
           <h3 style="color: #7c5cff; margin: 0 0 10px 0;">GUÍA DE ENVÍO — ${order.order_number || order.id.slice(0, 8)}</h3>
           
           <table style="width: 100%; font-size: 12px; margin-bottom: 12px;">
-            <tr><td style="width: 100px; padding: 2px 0; color: #666;">Cliente:</td><td style="font-weight: bold;">${order.customer_name || ''}</td></tr>
+            <tr><td style="width: 100px; padding: 2px 0; color: #666;">Cliente:</td><td style="font-weight: bold;">${order.customer_name || ''}</td></td>
             <tr><td style="padding: 2px 0; color: #666;">Teléfono:</td><td>${order.phone || ''}</td></tr>
             <tr><td style="padding: 2px 0; color: #666;">Email:</td><td>${order.email || ''}</td></tr>
             <tr><td style="padding: 2px 0; color: #666;">Departamento:</td><td>${order.departamento || ''}</td></tr>
