@@ -20,7 +20,20 @@ export default function AssignOrdersView() {
   const [filterBy, setFilterBy] = useState<'created_at' | 'assigned_at'>('created_at');
   const [autoAssignProcessing, setAutoAssignProcessing] = useState(false);
 
-  // Auto-asignación por QR (desde URL)
+  // NUEVO: Auto-completar ID desde QR
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const orderId = params.get('id');
+    
+    if (orderId && !autoAssignProcessing) {
+      setIdsInput(orderId);
+      toast.info(`📦 Pedido ${orderId} cargado. Selecciona un delivery y asigna.`);
+      // Limpiar URL
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
+
+  // Auto-asignación por QR (desde URL) - Mantenemos el original
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const autoAssignId = params.get('auto_assign');
@@ -30,19 +43,16 @@ export default function AssignOrdersView() {
       setAutoAssignProcessing(true);
       
       const autoAssignOrder = async () => {
-        // Verificar que el delivery es el usuario actual o es admin
         const canAssign = role === 'DELIVERY' && deliveryEmail === profile?.email;
         const isAdmin = role === 'ADMIN' || role === 'PROVEEDOR';
         
         if (!canAssign && !isAdmin) {
           toast.error('No tienes permiso para asignar este pedido');
-          // Limpiar URL
           window.history.replaceState({}, '', window.location.pathname);
           setAutoAssignProcessing(false);
           return;
         }
         
-        // Verificar si el pedido ya está asignado a otro delivery
         const { data: orderData } = await supabase
           .from('orders')
           .select('assigned_delivery')
@@ -68,10 +78,9 @@ export default function AssignOrdersView() {
           toast.error('❌ Error al asignar pedido: ' + error.message);
         } else {
           toast.success(`✅ Pedido asignado correctamente a ${deliveryEmail === profile?.email ? 'vos' : deliveryEmail}`);
-          load(); // Recargar la lista
+          load();
         }
         
-        // Limpiar URL
         window.history.replaceState({}, '', window.location.pathname);
         setAutoAssignProcessing(false);
       };
@@ -92,7 +101,6 @@ export default function AssignOrdersView() {
       .lte(filterBy, dateTo + 'T23:59:59')
       .order(filterBy, { ascending: false }).limit(500);
     
-    // Si es delivery, solo ver pedidos no asignados o los suyos
     if (role === 'DELIVERY') {
       query = query.or(`assigned_delivery.is.null,assigned_delivery.eq.${profile?.email}`);
     }
@@ -132,7 +140,6 @@ export default function AssignOrdersView() {
     }
   };
 
-  // Para DELIVERY: asigna automáticamente a sí mismo
   const assignSelected = async () => {
     if (selected.size === 0) {
       toast.error('Seleccioná al menos un pedido');
@@ -159,7 +166,6 @@ export default function AssignOrdersView() {
     let alreadyAssignedCount = 0;
 
     for (const id of selected) {
-      // Verificar si ya está asignado
       const { data: orderData } = await supabase
         .from('orders')
         .select('assigned_delivery')
@@ -204,7 +210,6 @@ export default function AssignOrdersView() {
     load();
   };
 
-  // Para DELIVERY: asigna IDs manuales a sí mismo
   const assignByIds = async () => {
     let deliveryEmail = '';
     
@@ -243,7 +248,6 @@ export default function AssignOrdersView() {
         .limit(1);
       
       if (data && data[0]) {
-        // Si ya está asignado a otro delivery y soy delivery, avisar
         if (data[0].assigned_delivery && data[0].assigned_delivery !== deliveryEmail && role === 'DELIVERY') {
           alreadyAssigned++;
           continue;
@@ -281,7 +285,6 @@ export default function AssignOrdersView() {
     load();
   };
 
-  // Solo para ADMIN/PROVEEDOR
   const assignSingle = async (orderId: string, deliveryEmail: string) => {
     if (!deliveryEmail) {
       toast.error('Seleccioná un delivery');
@@ -315,7 +318,6 @@ export default function AssignOrdersView() {
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Asignar Pedidos</h3>
 
-      {/* Indicador de auto-asignación por QR */}
       {autoAssignProcessing && (
         <div className="mb-3 p-2 bg-blue-100 text-blue-800 rounded-lg text-sm text-center">
           ⏳ Procesando asignación automática por QR...
@@ -328,7 +330,6 @@ export default function AssignOrdersView() {
         <label className="app-label !mt-0">Hasta</label>
         <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
         
-        {/* Selector para elegir filtrar por fecha de venta o asignación */}
         <select className="app-input !w-auto" value={filterBy} onChange={e => setFilterBy(e.target.value as any)}>
           <option value="created_at">📅 Fecha de venta</option>
           <option value="assigned_at">🚚 Fecha de asignación</option>
@@ -339,7 +340,6 @@ export default function AssignOrdersView() {
         <button className="nav-btn active" onClick={load}>Filtrar</button>
       </div>
 
-      {/* Sección para ADMIN/PROVEEDOR */}
       {(role === 'ADMIN' || role === 'PROVEEDOR') && (
         <div className="flex flex-wrap gap-2 mb-3 items-center">
           <select className="app-input !w-auto min-w-[200px]" value={assignDelivery} onChange={e => setAssignDelivery(e.target.value)}>
@@ -361,7 +361,6 @@ export default function AssignOrdersView() {
         </div>
       )}
 
-      {/* Sección para DELIVERY (sin selector de delivery) */}
       {role === 'DELIVERY' && selected.size > 0 && (
         <div className="flex flex-wrap gap-2 mb-3 items-center">
           <button 
@@ -376,14 +375,12 @@ export default function AssignOrdersView() {
         </div>
       )}
 
-      {/* Asignar por IDs */}
       <div className="app-card !p-3 mb-3">
         <div className="flex justify-between items-center mb-2">
           <b className="text-sm">Asignar por IDs manualmente</b>
           <span className="chip text-[10px]">Máximo 35 IDs por carga</span>
         </div>
         
-        {/* Mostrar selector de delivery si es ADMIN/PROVEEDOR */}
         {(role === 'ADMIN' || role === 'PROVEEDOR') && (
           <select className="app-input !w-auto min-w-[200px] mb-2" value={assignDelivery} onChange={e => setAssignDelivery(e.target.value)}>
             <option value="">Seleccionar delivery...</option>
@@ -419,7 +416,6 @@ export default function AssignOrdersView() {
         <table className="app-table">
           <thead>
             <tr>
-              {/* Mostrar checkbox solo si hay algo para seleccionar */}
               {(role === 'ADMIN' || role === 'PROVEEDOR' || role === 'DELIVERY') && (
                 <th style={{ width: '40px' }}>
                   <input 
@@ -505,7 +501,6 @@ export default function AssignOrdersView() {
         </table>
       </div>
       
-      {/* Resumen para DELIVERY */}
       {role === 'DELIVERY' && selected.size > 0 && (
         <div className="mt-3 p-3 bg-green-50 rounded-lg border border-green-200">
           <div className="flex justify-between items-center">
