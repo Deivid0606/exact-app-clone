@@ -39,14 +39,68 @@ export default function WithGuidesView() {
   const [deptSearch, setDeptSearch] = useState('');
   const [showDeptDropdown, setShowDeptDropdown] = useState(false);
 
+  // Estado para el modal de guía con QR
+  const [showGuideModal, setShowGuideModal] = useState(false);
+  const [currentOrder, setCurrentOrder] = useState<any>(null);
+  const [qrLoaded, setQrLoaded] = useState(false);
+  const qrWaRef = useRef<HTMLDivElement>(null);
+  const qrDeliveryRef = useRef<HTMLDivElement>(null);
+
   // Mensajes aleatorios para WhatsApp
   const whatsappMessages = [
     "Buenas le escribo del área del delivery para entregarle su pedido, ¿me podría enviar su ubicación exacta por favor? Desde ya gracias.",
-    "Hola, soy su repartidor. Para completar la entrega, necesito su ubicación en tiempo real. Muchas gracias.",
-    "¡Buen día! Su pedido está en camino. ¿Podría compartirme su ubicación exacta para llegar sin demoras? Gracias.",
+    "Hola, soy su repartidor. Para completar la entrega, necesito su ubicación exacta. Muchas gracias.",
+    "¡Buen día! Su pedido está en camino. ¿Podría compartirme su ubicación exacta? Gracias.",
     "Atención: su delivery necesita su ubicación precisa para la entrega. ¿Me la envía por favor? Gracias.",
     "Hola, soy del servicio de delivery. Para entregarle su pedido correctamente, necesito su ubicación exacta. ¡Gracias!"
   ];
+
+  // Cargar librería QR desde CDN
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !window.QRCode) {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js';
+      script.async = true;
+      script.onload = () => {
+        setQrLoaded(true);
+      };
+      document.body.appendChild(script);
+    } else if (window.QRCode) {
+      setQrLoaded(true);
+    }
+  }, []);
+
+  // Generar QR en el modal cuando se abre
+  useEffect(() => {
+    if (showGuideModal && currentOrder && qrLoaded) {
+      // Limpiar contenedores
+      if (qrWaRef.current) qrWaRef.current.innerHTML = '';
+      if (qrDeliveryRef.current) qrDeliveryRef.current.innerHTML = '';
+      
+      // Generar QR de WhatsApp
+      const whatsappUrl = getWhatsAppUrl(currentOrder);
+      new window.QRCode(qrWaRef.current, {
+        text: whatsappUrl,
+        width: 120,
+        height: 120,
+        colorDark: '#000000',
+        colorLight: '#ffffff',
+        correctLevel: window.QRCode.CorrectLevel.L
+      });
+      
+      // Generar QR de Delivery
+      const deliveryName = profile?.full_name || profile?.email?.split('@')[0] || 'Delivery';
+      const deliveryUrl = window.location.origin + '/assign-delivery?order=' + currentOrder.id + '&delivery=' + encodeURIComponent(deliveryName);
+      new window.QRCode(qrDeliveryRef.current, {
+        text: deliveryUrl,
+        width: 120,
+        height: 120,
+        colorDark: '#000000',
+        colorLight: '#ffffff',
+        correctLevel: window.QRCode.CorrectLevel.L
+      });
+    }
+  }, [showGuideModal, currentOrder, qrLoaded, profile]);
 
   const load = async () => {
     setLoading(true);
@@ -97,7 +151,6 @@ export default function WithGuidesView() {
     return [...set].sort();
   }, [orders, role]);
 
-  // Obtener lista única de ciudades
   const allCities = useMemo(() => {
     const cities = new Set<string>();
     orders.forEach(o => {
@@ -245,18 +298,24 @@ export default function WithGuidesView() {
     ].filter(Boolean).join('\n');
   };
 
-  const generateGuide = (o: any) => {
-    try {
-      setGuideText(buildGuideText(o));
-      setGuideId(o.order_number || o.id.slice(0, 8));
-    } catch {
-      toast.error('Error generando guía');
-    }
+  const getWhatsAppUrl = (order: any) => {
+    const randomMessage = whatsappMessages[Math.floor(Math.random() * whatsappMessages.length)];
+    const phoneNumber = order.phone?.replace(/\D/g, '');
+    const fullNumber = '595' + phoneNumber;
+    return 'https://wa.me/' + fullNumber + '?text=' + encodeURIComponent(randomMessage);
+  };
+
+  const openGuideModal = (order: any) => {
+    setCurrentOrder(order);
+    setShowGuideModal(true);
   };
 
   const copyGuide = () => {
-    navigator.clipboard.writeText(guideText);
-    toast.success('Guía copiada al portapapeles');
+    if (currentOrder) {
+      const text = buildGuideText(currentOrder);
+      navigator.clipboard.writeText(text);
+      toast.success('Guía copiada al portapapeles');
+    }
   };
 
   const toggleSelect = (id: string) => {
@@ -350,15 +409,7 @@ export default function WithGuidesView() {
     toast.success(`${selected.length} guías descargadas en TXT`);
   };
 
-  // Función para obtener URL de WhatsApp
-  const getWhatsAppUrl = (order: any) => {
-    const randomMessage = whatsappMessages[Math.floor(Math.random() * whatsappMessages.length)];
-    const phoneNumber = order.phone?.replace(/\D/g, '');
-    const fullNumber = '595' + phoneNumber;
-    return 'https://wa.me/' + fullNumber + '?text=' + encodeURIComponent(randomMessage);
-  };
-
-  // IMPRESIÓN CON QR DENTRO DE CADA GUÍA
+  // IMPRESIÓN CON QR
   const printWithQR = () => {
     const selected = getSelectedOrders();
     if (selected.length === 0) { 
@@ -368,7 +419,6 @@ export default function WithGuidesView() {
 
     const deliveryNameValue = profile?.full_name || profile?.email?.split('@')[0] || 'Delivery';
     
-    // Construir HTML para cada pedido con sus QR
     let allGuidesHtml = '';
     
     for (const order of selected) {
@@ -386,14 +436,12 @@ export default function WithGuidesView() {
         `;
       }
 
-      const orderId = order.id;
-      const orderNumber = order.order_number || order.id.slice(0, 8);
       const whatsappUrl = getWhatsAppUrl(order);
       const deliveryUrl = window.location.origin + '/assign-delivery?order=' + order.id + '&delivery=' + encodeURIComponent(deliveryNameValue);
 
       allGuidesHtml += `
         <div class="guide-page">
-          <h3 style="color: #7c5cff; margin: 0 0 10px 0;">GUÍA DE ENVÍO — ${orderNumber}</h3>
+          <h3 style="color: #7c5cff; margin: 0 0 10px 0;">GUÍA DE ENVÍO — ${order.order_number || order.id.slice(0, 8)}</h3>
           
           <table style="width: 100%; font-size: 12px; margin-bottom: 12px;">
             <tr><td style="width: 100px; padding: 2px 0; color: #666;">Cliente:</td><td style="font-weight: bold;">${order.customer_name || ''}</td></tr>
@@ -428,16 +476,15 @@ export default function WithGuidesView() {
             Vendedor: ${order.created_by || ''} | Proveedor: ${order.provider_emails_list || order.provider_email || '—'}
           </div>
           
-          <!-- QR CODES DENTRO DE LA GUÍA -->
           <div style="display: flex; justify-content: center; gap: 40px; margin-top: 20px; padding-top: 15px; border-top: 2px dashed #ccc;">
             <div style="text-align: center;">
               <div style="font-size: 11px; font-weight: bold; color: #25D366; margin-bottom: 8px;">📱 QR CLIENTE - Enviar Ubicación</div>
-              <div id="qr-wa-${orderId}" class="qr-wa" data-url="${whatsappUrl}" style="width: 120px; height: 120px; margin: 0 auto;"></div>
-              <div style="font-size: 9px; color: #666; margin-top: 6px;">WhatsApp con ubicación</div>
+              <div id="qr-wa-print-${order.id}" class="qr-wa-print" data-url="${whatsappUrl}" style="width: 120px; height: 120px; margin: 0 auto;"></div>
+              <div style="font-size: 9px; color: #666; margin-top: 6px;">WhatsApp con ubicación exacta</div>
             </div>
             <div style="text-align: center;">
               <div style="font-size: 11px; font-weight: bold; color: #F97316; margin-bottom: 8px;">🚚 QR DELIVERY - Asignar Pedido</div>
-              <div id="qr-delivery-${orderId}" class="qr-delivery" data-url="${deliveryUrl}" style="width: 120px; height: 120px; margin: 0 auto;"></div>
+              <div id="qr-delivery-print-${order.id}" class="qr-delivery-print" data-url="${deliveryUrl}" style="width: 120px; height: 120px; margin: 0 auto;"></div>
               <div style="font-size: 9px; color: #666; margin-top: 6px;">Asignación automática</div>
             </div>
           </div>
@@ -479,16 +526,14 @@ export default function WithGuidesView() {
               return;
             }
             
-            // Generar QR para WhatsApp (clientes)
-            document.querySelectorAll('.qr-wa').forEach(function(el) {
+            document.querySelectorAll('.qr-wa-print').forEach(function(el) {
               const url = el.getAttribute('data-url');
               if (url && el.children.length === 0) {
                 new QRCode(el, { text: url, width: 120, height: 120 });
               }
             });
             
-            // Generar QR para delivery
-            document.querySelectorAll('.qr-delivery').forEach(function(el) {
+            document.querySelectorAll('.qr-delivery-print').forEach(function(el) {
               const url = el.getAttribute('data-url');
               if (url && el.children.length === 0) {
                 new QRCode(el, { text: url, width: 120, height: 120 });
@@ -511,10 +556,6 @@ export default function WithGuidesView() {
       }, 1000);
     }
     toast.success(`${selected.length} guías con QR listas para imprimir`);
-  };
-
-  const downloadPdf = () => {
-    printWithQR();
   };
 
   return (
@@ -713,7 +754,7 @@ export default function WithGuidesView() {
                 </td>
                 <td>
                   <div className="flex gap-1">
-                    <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={() => generateGuide(o)} title="Ver guía">📄</button>
+                    <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={() => openGuideModal(o)} title="Ver guía con QR">📄</button>
                     <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={() => {
                       const text = buildGuideText(o);
                       navigator.clipboard.writeText(text);
@@ -732,17 +773,67 @@ export default function WithGuidesView() {
         </table>
       </div>
 
-      {/* Modal de guía */}
-      {guideText && (
-        <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-4" onClick={() => setGuideText('')}>
-          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-lg" onClick={e => e.stopPropagation()}>
-            <h4 className="text-lg font-extrabold mb-3">📦 Guía — {guideId}</h4>
-            <pre className="text-xs whitespace-pre-wrap bg-background p-4 rounded-xl border border-border max-h-[400px] overflow-auto">{guideText}</pre>
+      {/* MODAL DE GUÍA CON QR */}
+      {showGuideModal && currentOrder && (
+        <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-4" onClick={() => setShowGuideModal(false)}>
+          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
+            <h4 className="text-lg font-extrabold mb-3">📦 Guía de Envío</h4>
+            
+            {/* Información del pedido */}
+            <div className="space-y-2 text-sm">
+              <p><strong>Pedido:</strong> {currentOrder.order_number || currentOrder.id.slice(0, 8)}</p>
+              <p><strong>Cliente:</strong> {currentOrder.customer_name || ''}</p>
+              <p><strong>Teléfono:</strong> {currentOrder.phone || ''}</p>
+              <p><strong>Email:</strong> {currentOrder.email || ''}</p>
+              <p><strong>Departamento:</strong> {currentOrder.departamento || ''}</p>
+              <p><strong>Ciudad:</strong> {currentOrder.city || ''}</p>
+              <p><strong>Dirección:</strong> {currentOrder.street || ''} {currentOrder.district ? '- ' + currentOrder.district : ''}</p>
+              
+              <div className="border-t border-border my-3"></div>
+              
+              <p><strong>Productos:</strong></p>
+              <div className="pl-4">
+                {(() => {
+                  const items = typeof currentOrder.items_json === 'string' ? JSON.parse(currentOrder.items_json) : (currentOrder.items_json || []);
+                  return items.map((it: any, i: number) => (
+                    <p key={i}>{i + 1}. {it.title || it.sku || 'Item'} x{it.qty || 1} — Gs {nf(Number(it.sale_gs || 0) * Number(it.qty || 1))}</p>
+                  ));
+                })()}
+              </div>
+              
+              <p><strong>Total:</strong> Gs {nf(Number(currentOrder.total_gs || 0))}</p>
+              
+              {currentOrder.obs && <p><strong>Observación:</strong> {currentOrder.obs}</p>}
+              
+              <div className="border-t border-border my-3"></div>
+              
+              <p><strong>Vendedor:</strong> {currentOrder.created_by || ''}</p>
+              <p><strong>Proveedor:</strong> {currentOrder.provider_emails_list || currentOrder.provider_email || '—'}</p>
+            </div>
+            
+            {/* QR CODES */}
+            <div className="border-t border-border my-4 pt-4">
+              <p className="font-bold text-center mb-3">Códigos QR</p>
+              <div className="flex justify-center gap-8">
+                <div className="text-center">
+                  <div className="text-sm font-semibold text-green-600 mb-2">📱 QR Cliente</div>
+                  <div ref={qrWaRef} style={{ width: 120, height: 120, margin: '0 auto' }}></div>
+                  <div className="text-xs text-gray-500 mt-2">WhatsApp - Enviar ubicación</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-sm font-semibold text-orange-600 mb-2">🚚 QR Delivery</div>
+                  <div ref={qrDeliveryRef} style={{ width: 120, height: 120, margin: '0 auto' }}></div>
+                  <div className="text-xs text-gray-500 mt-2">Asignar pedido</div>
+                </div>
+              </div>
+            </div>
+            
             <div className="flex gap-2 justify-end mt-4">
-              <button className="nav-btn" onClick={() => setGuideText('')}>Cerrar</button>
-              <button className="nav-btn active" onClick={copyGuide}>📋 Copiar</button>
+              <button className="nav-btn" onClick={() => setShowGuideModal(false)}>Cerrar</button>
+              <button className="nav-btn active" onClick={copyGuide}>📋 Copiar texto</button>
               <button className="nav-btn active" onClick={() => {
-                downloadFile(guideText, `guia_${guideId}.txt`, 'text/plain');
+                const text = buildGuideText(currentOrder);
+                downloadFile(text, `guia_${currentOrder.order_number || currentOrder.id.slice(0, 8)}.txt`, 'text/plain');
               }}>📥 TXT</button>
             </div>
           </div>
