@@ -33,7 +33,7 @@ export default function AssignOrdersView() {
     return result;
   };
 
-  // Manejo de QR - Busca por ID
+  // Manejo de QR - Busca por ID (UUID)
   useEffect(() => {
     const params = getHashParams();
     const orderId = params.id;
@@ -48,7 +48,7 @@ export default function AssignOrdersView() {
         // Buscar por ID (UUID)
         const { data: orderData, error: findError } = await supabase
           .from('orders')
-          .select('id, assigned_delivery, order_number, customer_name')
+          .select('id, assigned_delivery, order_number, customer_name, phone')
           .eq('id', orderId)
           .maybeSingle();
         
@@ -61,7 +61,7 @@ export default function AssignOrdersView() {
         }
         
         if (!orderData) {
-          toast.error(`❌ Pedido no encontrado con ID: ${orderId.substring(0, 8)}...`);
+          toast.error(`❌ Pedido no encontrado`);
           window.location.hash = '/asignar-pedidos';
           setAutoAssignProcessing(false);
           return;
