@@ -88,9 +88,9 @@ export default function WithGuidesView() {
         correctLevel: window.QRCode.CorrectLevel.L
       });
       
-      // Generar QR de Delivery
-      const deliveryName = profile?.full_name || profile?.email?.split('@')[0] || 'Delivery';
-      const deliveryUrl = window.location.origin + '/assign-delivery?order=' + currentOrder.id + '&delivery=' + encodeURIComponent(deliveryName);
+      // Generar QR de Delivery - Usa el email del usuario logueado
+      const deliveryEmail = profile?.email || '';
+      const deliveryUrl = window.location.origin + '/assign-orders?auto_assign=' + currentOrder.id + '&delivery=' + encodeURIComponent(deliveryEmail);
       new window.QRCode(qrDeliveryRef.current, {
         text: deliveryUrl,
         width: 120,
@@ -417,7 +417,7 @@ export default function WithGuidesView() {
       return; 
     }
 
-    const deliveryNameValue = profile?.full_name || profile?.email?.split('@')[0] || 'Delivery';
+    const deliveryEmail = profile?.email || '';
     
     let allGuidesHtml = '';
     
@@ -437,7 +437,7 @@ export default function WithGuidesView() {
       }
 
       const whatsappUrl = getWhatsAppUrl(order);
-      const deliveryUrl = window.location.origin + '/assign-delivery?order=' + order.id + '&delivery=' + encodeURIComponent(deliveryNameValue);
+      const deliveryUrl = window.location.origin + '/assign-orders?auto_assign=' + order.id + '&delivery=' + encodeURIComponent(deliveryEmail);
 
       allGuidesHtml += `
         <div class="guide-page">
@@ -818,12 +818,12 @@ export default function WithGuidesView() {
                 <div className="text-center">
                   <div className="text-sm font-semibold text-green-600 mb-2">📱 QR Cliente</div>
                   <div ref={qrWaRef} style={{ width: 120, height: 120, margin: '0 auto' }}></div>
-                  <div className="text-xs text-gray-500 mt-2">WhatsApp - Enviar ubicación</div>
+                  <div className="text-xs text-gray-500 mt-2">WhatsApp - Enviar ubicación exacta</div>
                 </div>
                 <div className="text-center">
                   <div className="text-sm font-semibold text-orange-600 mb-2">🚚 QR Delivery</div>
                   <div ref={qrDeliveryRef} style={{ width: 120, height: 120, margin: '0 auto' }}></div>
-                  <div className="text-xs text-gray-500 mt-2">Asignar pedido</div>
+                  <div className="text-xs text-gray-500 mt-2">Asignar pedido automáticamente</div>
                 </div>
               </div>
             </div>
