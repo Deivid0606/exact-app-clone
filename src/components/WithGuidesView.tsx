@@ -88,9 +88,10 @@ export default function WithGuidesView() {
         correctLevel: window.QRCode.CorrectLevel.L
       });
       
-      // Generar QR de Delivery - Ruta corregida
+      // Generar QR de Delivery - Usa la ruta correcta
       const deliveryEmail = profile?.email || '';
       const deliveryUrl = '/asignar-pedidos?auto_assign=' + currentOrder.id + '&delivery=' + encodeURIComponent(deliveryEmail);
+      console.log('QR Delivery URL:', deliveryUrl); // Para depuración
       new window.QRCode(qrDeliveryRef.current, {
         text: deliveryUrl,
         width: 120,
@@ -689,7 +690,7 @@ export default function WithGuidesView() {
       {selectedIds.size > 0 && (
         <div className="flex flex-wrap gap-2 mb-3 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
           <div className="text-sm font-bold text-green-400 mr-2 self-center">
-            ✅ ${selectedIds.size} seleccionado${selectedIds.size > 1 ? 's' : ''}:
+            ✅ {selectedIds.size} seleccionado{selectedIds.size > 1 ? 's' : ''}:
           </div>
           <button className="nav-btn" style={{ background: '#10b981', color: 'white' }} onClick={bulkMarkAsGuiaGenerada}>
             🚀 Marcar como GUIA GENERADA
