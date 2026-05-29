@@ -88,12 +88,12 @@ export default function WithGuidesView() {
         correctLevel: window.QRCode.CorrectLevel.L
       });
       
-      // Generar QR de Delivery - usa order_number o id como respaldo
-      const orderIdentifier = currentOrder.order_number || currentOrder.id;
-      if (orderIdentifier) {
-        const deliveryUrl = window.location.origin + '/#/asignar-pedidos?id=' + orderIdentifier;
+      // Generar QR de Delivery - usa SOLO order_number
+      const orderNumber = currentOrder.order_number;
+      if (orderNumber) {
+        const deliveryUrl = window.location.origin + '/#/asignar-pedidos?id=' + orderNumber;
         console.log('QR Delivery URL:', deliveryUrl);
-        console.log('Identificador usado:', orderIdentifier);
+        console.log('Número de orden usado:', orderNumber);
         new window.QRCode(qrDeliveryRef.current, {
           text: deliveryUrl,
           width: 120,
@@ -103,7 +103,7 @@ export default function WithGuidesView() {
           correctLevel: window.QRCode.CorrectLevel.L
         });
       } else {
-        toast.error('Este pedido no tiene identificador');
+        toast.error('Este pedido no tiene número de orden');
       }
     }
   }, [showGuideModal, currentOrder, qrLoaded, profile]);
@@ -441,12 +441,12 @@ export default function WithGuidesView() {
       }
 
       const whatsappUrl = getWhatsAppUrl(order);
-      const orderIdentifier = order.order_number || order.id;
-      const deliveryUrl = orderIdentifier ? window.location.origin + '/#/asignar-pedidos?id=' + orderIdentifier : '#';
+      const orderNumber = order.order_number;
+      const deliveryUrl = orderNumber ? window.location.origin + '/#/asignar-pedidos?id=' + orderNumber : '#';
 
       allGuidesHtml += `
         <div class="guide-page">
-          <h3 style="color: #7c5cff; margin: 0 0 10px 0;">GUÍA DE ENVÍO — ${order.order_number || order.id.slice(0, 8)}</h3>
+          <h3 style="color: #7c5cff; margin: 0 0 10px 0;">GUÍA DE ENVÍO — ${orderNumber || order.id.slice(0, 8)}</h3>
           
           <table style="width: 100%; font-size: 12px; margin-bottom: 12px;">
             <tbody>
@@ -522,35 +522,6 @@ export default function WithGuidesView() {
         }
       </style>
       <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
-    </head>
-    <body>
-      ${allGuidesHtml}
-      <script>
-        (function() {
-          function generateQRCodes() {
-            if (typeof QRCode === 'undefined') {
-              setTimeout(generateQRCodes, 200);
-              return;
-            }
-            
-            document.querySelectorAll('.qr-wa-print').forEach(function(el) {
-              const url = el.getAttribute('data-url');
-              if (url && el.children.length === 0) {
-                new QRCode(el, { text: url, width: 120, height: 120 });
-              }
-            });
-            
-            document.querySelectorAll('.qr-delivery-print').forEach(function(el) {
-              const url = el.getAttribute('data-url');
-              if (url && el.children.length === 0 && url !== '#') {
-                new QRCode(el, { text: url, width: 120, height: 120 });
-              }
-            });
-          }
-          
-          generateQRCodes();
-        })();
-      </script>
     </head>
     <body>
       ${allGuidesHtml}
