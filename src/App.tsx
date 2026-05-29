@@ -6,7 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/hooks/useAuth";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
-import AssignOrdersView from "./components/AssignOrdersView.tsx"; // <-- IMPORTAR
+import AssignOrdersView from "./components/AssignOrdersView.tsx";
 
 const queryClient = new QueryClient();
 
@@ -19,7 +19,7 @@ const App = () => (
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<Index />} />
-            <Route path="/asignar-pedidos" element={<AssignOrdersView />} /> {/* <-- AGREGAR */}
+            <Route path="/asignar-pedidos" element={<AssignOrdersView />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </BrowserRouter>
