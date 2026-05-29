@@ -33,35 +33,58 @@ export default function AssignOrdersView() {
     return result;
   };
 
-  // Manejo de QR - Busca por ID (UUID)
+  // Manejo de QR - Busca por ID o order_number automáticamente
   useEffect(() => {
     const params = getHashParams();
-    const orderId = params.id;
+    const orderValue = params.id;
     
-    console.log('🔍 QR detectado - ID:', orderId);
+    console.log('🔍 QR detectado - Valor:', orderValue);
     
-    if (orderId && !autoAssignProcessing && orderId !== lastScannedId) {
-      setLastScannedId(orderId);
+    if (orderValue && !autoAssignProcessing && orderValue !== lastScannedId) {
+      setLastScannedId(orderValue);
       setAutoAssignProcessing(true);
       
       const selectOrder = async () => {
-        // Buscar por ID (UUID)
-        const { data: orderData, error: findError } = await supabase
-          .from('orders')
-          .select('id, assigned_delivery, order_number, customer_name, phone')
-          .eq('id', orderId)
-          .maybeSingle();
+        let orderData = null;
+        let findError = null;
+        
+        // Determinar si es UUID (tiene guiones y longitud > 30) o número de orden
+        const isUUID = orderValue.includes('-') && orderValue.length > 30;
+        
+        console.log('🔍 Es UUID?', isUUID);
+        
+        if (isUUID) {
+          console.log('🔍 Buscando por ID (UUID)...');
+          const result = await supabase
+            .from('orders')
+            .select('id, assigned_delivery, order_number, customer_name, phone')
+            .eq('id', orderValue)
+            .maybeSingle();
+          orderData = result.data;
+          findError = result.error;
+        } else {
+          console.log('🔍 Buscando por order_number...');
+          const result = await supabase
+            .from('orders')
+            .select('id, assigned_delivery, order_number, customer_name, phone')
+            .eq('order_number', orderValue)
+            .maybeSingle();
+          orderData = result.data;
+          findError = result.error;
+        }
+        
+        console.log('📦 Resultado de búsqueda:', orderData);
         
         if (findError) {
-          console.error('Error buscando pedido:', findError);
-          toast.error(`❌ Error buscando pedido`);
+          console.error('❌ Error de Supabase:', findError);
+          toast.error(`❌ Error: ${findError.message}`);
           window.location.hash = '/asignar-pedidos';
           setAutoAssignProcessing(false);
           return;
         }
         
         if (!orderData) {
-          toast.error(`❌ Pedido no encontrado`);
+          toast.error(`❌ Pedido ${orderValue} no encontrado`);
           window.location.hash = '/asignar-pedidos';
           setAutoAssignProcessing(false);
           return;
