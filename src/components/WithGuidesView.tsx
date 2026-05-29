@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
+import { QRCodeSVG } from 'qrcode.react';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
@@ -32,6 +33,22 @@ export default function WithGuidesView() {
   const [selectedDepartments, setSelectedDepartments] = useState<Set<string>>(new Set());
   const [deptSearch, setDeptSearch] = useState('');
   const [showDeptDropdown, setShowDeptDropdown] = useState(false);
+
+  // ESTADOS PARA QR
+  const [showClientQR, setShowClientQR] = useState(false);
+  const [showDeliveryQR, setShowDeliveryQR] = useState(false);
+  const [selectedOrderForQR, setSelectedOrderForQR] = useState<any>(null);
+  const [deliveryName, setDeliveryName] = useState('');
+  const [assignedOrderId, setAssignedOrderId] = useState<string | null>(null);
+
+  // Mensajes aleatorios para WhatsApp
+  const whatsappMessages = [
+    "Buenas le escribo del área del delivery para entregarle su pedido, ¿me podría enviar su ubicación exacta por favor? Desde ya gracias.",
+    "Hola, soy su repartidor. Para completar la entrega, necesito su ubicación en tiempo real. Muchas gracias.",
+    "¡Buen día! Su pedido está en camino. ¿Podría compartirme su ubicación exacta para llegar sin demoras? Gracias.",
+    "Atención: su delivery necesita su ubicación precisa para la entrega. ¿Me la envía por favor? Gracias.",
+    "Hola, soy del servicio de delivery. Para entregarle su pedido correctamente, necesito su ubicación exacta. ¡Gracias!"
+  ];
 
   // Obtener lista única de ciudades de los pedidos
   const allCities = useMemo(() => {
@@ -403,6 +420,39 @@ export default function WithGuidesView() {
     toast.success(`${selected.length} guías listas para imprimir/PDF`);
   };
 
+  // FUNCIONES PARA QR
+  const getWhatsAppUrl = (order: any) => {
+    const randomMessage = whatsappMessages[Math.floor(Math.random() * whatsappMessages.length)];
+    const phoneNumber = order.phone?.replace(/\D/g, '');
+    const fullNumber = `595${phoneNumber}`; // Código Paraguay 595
+    return `https://wa.me/${fullNumber}?text=${encodeURIComponent(randomMessage)}`;
+  };
+
+  const assignOrderToDelivery = async (orderId: string, deliveryNameValue: string) => {
+    if (!deliveryNameValue.trim()) {
+      toast.error('Debes ingresar tu nombre');
+      return false;
+    }
+
+    const { error } = await supabase
+      .from('orders')
+      .update({ 
+        delivery_assigned_to: deliveryNameValue,
+        delivery_assigned_at: new Date().toISOString()
+      })
+      .eq('id', orderId);
+
+    if (error) {
+      toast.error('Error al asignar: ' + error.message);
+      return false;
+    }
+
+    toast.success(`Pedido asignado a ${deliveryNameValue}`);
+    setAssignedOrderId(orderId);
+    load();
+    return true;
+  };
+
   return (
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Pedidos con guías</h3>
@@ -619,6 +669,158 @@ export default function WithGuidesView() {
             🗑️ Limpiar todos los filtros de ubicación
           </button>
         )}
+      </div>
+
+      {/* SECCIÓN DE QR PARA CLIENTE Y DELIVERY */}
+      <div className="mt-4 mb-6 pt-4 border-t border-border">
+        <h3 className="text-md font-bold mb-3">📱 Códigos QR para delivery</h3>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          
+          {/* QR 1 - Cliente (WhatsApp) */}
+          <div className="bg-card border border-border rounded-xl p-4">
+            <div className="flex items-start gap-3 mb-3">
+              <div className="flex-1">
+                <h4 className="font-bold text-green-400">📱 QR para CLIENTE</h4>
+                <p className="text-xs text-muted-foreground">
+                  Envía mensaje aleatorio al WhatsApp del cliente pidiendo ubicación exacta
+                </p>
+              </div>
+              <button 
+                className="nav-btn active text-sm"
+                onClick={() => {
+                  if (selectedIds.size === 1) {
+                    const order = visibleOrders.find(o => selectedIds.has(o.id));
+                    setSelectedOrderForQR(order);
+                    setShowClientQR(true);
+                    setShowDeliveryQR(false);
+                  } else {
+                    toast.error('Seleccioná EXACTAMENTE UN pedido para generar el QR del cliente');
+                  }
+                }}
+              >
+                Generar QR Cliente
+              </button>
+            </div>
+            
+            {showClientQR && selectedOrderForQR && (
+              <div className="mt-3 p-3 bg-white rounded-lg flex flex-col items-center">
+                <div className="bg-white p-2 rounded">
+                  <QRCodeSVG 
+                    value={getWhatsAppUrl(selectedOrderForQR)} 
+                    size={180}
+                    bgColor="#ffffff"
+                    fgColor="#000000"
+                    level="L"
+                    includeMargin={true}
+                  />
+                </div>
+                <p className="text-xs text-center mt-2">
+                  Cliente: <strong>{selectedOrderForQR.customer_name}</strong><br/>
+                  Tel: {selectedOrderForQR.phone}
+                </p>
+                <div className="flex gap-2 mt-2">
+                  <button 
+                    className="nav-btn !py-1 text-xs" 
+                    onClick={() => {
+                      navigator.clipboard.writeText(getWhatsAppUrl(selectedOrderForQR));
+                      toast.success('URL copiada');
+                    }}
+                  >
+                    Copiar enlace
+                  </button>
+                  <button 
+                    className="nav-btn !py-1 text-xs" 
+                    onClick={() => setShowClientQR(false)}
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* QR 2 - Delivery (Asignación) */}
+          <div className="bg-card border border-border rounded-xl p-4">
+            <div className="flex items-start gap-3 mb-3">
+              <div className="flex-1">
+                <h4 className="font-bold text-orange-400">🚚 QR para DELIVERY</h4>
+                <p className="text-xs text-muted-foreground">
+                  El delivery escanea y se asigna el pedido automáticamente
+                </p>
+              </div>
+              <button 
+                className="nav-btn active text-sm"
+                onClick={() => {
+                  if (selectedIds.size === 1) {
+                    const order = visibleOrders.find(o => selectedIds.has(o.id));
+                    setSelectedOrderForQR(order);
+                    setShowDeliveryQR(true);
+                    setShowClientQR(false);
+                    setDeliveryName('');
+                  } else {
+                    toast.error('Seleccioná EXACTAMENTE UN pedido para generar el QR de delivery');
+                  }
+                }}
+              >
+                Generar QR Delivery
+              </button>
+            </div>
+            
+            {showDeliveryQR && selectedOrderForQR && (
+              <div className="mt-3 p-3 bg-white rounded-lg">
+                {!deliveryName ? (
+                  <div className="space-y-2">
+                    <input
+                      type="text"
+                      className="app-input w-full text-sm"
+                      placeholder="Nombre del delivery (ej: Juan Pérez)"
+                      value={deliveryName}
+                      onChange={(e) => setDeliveryName(e.target.value)}
+                    />
+                    <button
+                      className="nav-btn w-full"
+                      style={{ background: '#f97316', color: 'white' }}
+                      onClick={async () => {
+                        if (deliveryName.trim()) {
+                          await assignOrderToDelivery(selectedOrderForQR.id, deliveryName);
+                          setShowDeliveryQR(false);
+                        } else {
+                          toast.error('Ingresá tu nombre');
+                        }
+                      }}
+                    >
+                      Confirmar y generar QR
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center">
+                    <div className="bg-white p-2 rounded">
+                      <QRCodeSVG 
+                        value={`${window.location.origin}/assign-delivery?order=${selectedOrderForQR.id}&delivery=${encodeURIComponent(deliveryName)}`}
+                        size={180}
+                        bgColor="#ffffff"
+                        fgColor="#000000"
+                      />
+                    </div>
+                    <p className="text-xs text-center mt-2 font-bold">
+                      🚚 {deliveryName}<br/>
+                      Pedido: {selectedOrderForQR.order_number || selectedOrderForQR.id.slice(0, 8)}
+                    </p>
+                    <button 
+                      className="nav-btn !py-1 text-xs mt-2"
+                      onClick={() => {
+                        setDeliveryName('');
+                        setShowDeliveryQR(false);
+                      }}
+                    >
+                      Cerrar
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Tabla */}
