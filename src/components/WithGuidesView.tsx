@@ -88,9 +88,9 @@ export default function WithGuidesView() {
         correctLevel: window.QRCode.CorrectLevel.L
       });
       
-      // Generar QR de Delivery - URL ABSOLUTA
-      const deliveryEmail = profile?.email || '';
-      const deliveryUrl = window.location.origin + '/asignar-pedidos?auto_assign=' + currentOrder.id + '&delivery=' + encodeURIComponent(deliveryEmail);
+      // Generar QR de Delivery - SOLO EL NÚMERO DE PEDIDO
+      const orderNumber = currentOrder.order_number || currentOrder.id.slice(0, 8);
+      const deliveryUrl = window.location.origin + '/asignar-pedidos?id=' + orderNumber;
       console.log('QR Delivery URL:', deliveryUrl);
       new window.QRCode(qrDeliveryRef.current, {
         text: deliveryUrl,
@@ -418,8 +418,6 @@ export default function WithGuidesView() {
       return; 
     }
 
-    const deliveryEmail = profile?.email || '';
-    
     let allGuidesHtml = '';
     
     for (const order of selected) {
@@ -438,14 +436,15 @@ export default function WithGuidesView() {
       }
 
       const whatsappUrl = getWhatsAppUrl(order);
-      const deliveryUrl = window.location.origin + '/asignar-pedidos?auto_assign=' + order.id + '&delivery=' + encodeURIComponent(deliveryEmail);
+      const orderNumber = order.order_number || order.id.slice(0, 8);
+      const deliveryUrl = window.location.origin + '/asignar-pedidos?id=' + orderNumber;
 
       allGuidesHtml += `
         <div class="guide-page">
-          <h3 style="color: #7c5cff; margin: 0 0 10px 0;">GUÍA DE ENVÍO — ${order.order_number || order.id.slice(0, 8)}</h3>
+          <h3 style="color: #7c5cff; margin: 0 0 10px 0;">GUÍA DE ENVÍO — ${orderNumber}</h3>
           
           <table style="width: 100%; font-size: 12px; margin-bottom: 12px;">
-            <tr><td style="width: 100px; padding: 2px 0; color: #666;">Cliente:</td><td style="font-weight: bold;">${order.customer_name || ''}</td></td>
+            <tr><td style="width: 100px; padding: 2px 0; color: #666;">Cliente:</td><td style="font-weight: bold;">${order.customer_name || ''}</td></tr>
             <tr><td style="padding: 2px 0; color: #666;">Teléfono:</td><td>${order.phone || ''}</td></tr>
             <tr><td style="padding: 2px 0; color: #666;">Email:</td><td>${order.email || ''}</td></tr>
             <tr><td style="padding: 2px 0; color: #666;">Departamento:</td><td>${order.departamento || ''}</td></tr>
@@ -486,7 +485,7 @@ export default function WithGuidesView() {
             <div style="text-align: center;">
               <div style="font-size: 11px; font-weight: bold; color: #F97316; margin-bottom: 8px;">🚚 QR DELIVERY - Asignar Pedido</div>
               <div id="qr-delivery-print-${order.id}" class="qr-delivery-print" data-url="${deliveryUrl}" style="width: 120px; height: 120px; margin: 0 auto;"></div>
-              <div style="font-size: 9px; color: #666; margin-top: 6px;">Asignación automática</div>
+              <div style="font-size: 9px; color: #666; margin-top: 6px;">Escanea para asignar</div>
             </div>
           </div>
         </div>
@@ -824,7 +823,7 @@ export default function WithGuidesView() {
                 <div className="text-center">
                   <div className="text-sm font-semibold text-orange-600 mb-2">🚚 QR Delivery</div>
                   <div ref={qrDeliveryRef} style={{ width: 120, height: 120, margin: '0 auto' }}></div>
-                  <div className="text-xs text-gray-500 mt-2">Asignar pedido automáticamente</div>
+                  <div className="text-xs text-gray-500 mt-2">Escanea para asignar pedido</div>
                 </div>
               </div>
             </div>
