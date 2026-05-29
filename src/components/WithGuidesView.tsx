@@ -88,9 +88,9 @@ export default function WithGuidesView() {
         correctLevel: window.QRCode.CorrectLevel.L
       });
       
-      // Generar QR de Delivery - SOLO EL NÚMERO DE PEDIDO
+      // Generar QR de Delivery - SOLO EL NÚMERO DE PEDIDO con HashRouter
       const orderNumber = currentOrder.order_number || currentOrder.id.slice(0, 8);
-      const deliveryUrl = window.location.origin + '/asignar-pedidos?id=' + orderNumber;
+      const deliveryUrl = window.location.origin + '/#/asignar-pedidos?id=' + orderNumber;
       console.log('QR Delivery URL:', deliveryUrl);
       new window.QRCode(qrDeliveryRef.current, {
         text: deliveryUrl,
@@ -437,7 +437,7 @@ export default function WithGuidesView() {
 
       const whatsappUrl = getWhatsAppUrl(order);
       const orderNumber = order.order_number || order.id.slice(0, 8);
-      const deliveryUrl = window.location.origin + '/asignar-pedidos?id=' + orderNumber;
+      const deliveryUrl = window.location.origin + '/#/asignar-pedidos?id=' + orderNumber;
 
       allGuidesHtml += `
         <div class="guide-page">
