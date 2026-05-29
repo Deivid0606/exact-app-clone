@@ -33,45 +33,49 @@ export default function AssignOrdersView() {
     return result;
   };
 
-  // Manejo de QR - SELECCIONA automáticamente el pedido
+  // Manejo de QR - Busca por ID
   useEffect(() => {
     const params = getHashParams();
-    const orderIdNumber = params.id;
+    const orderId = params.id;
     
-    console.log('🔍 QR detectado - ID:', orderIdNumber);
+    console.log('🔍 QR detectado - ID:', orderId);
     
-    if (orderIdNumber && !autoAssignProcessing && orderIdNumber !== lastScannedId) {
-      setLastScannedId(orderIdNumber);
+    if (orderId && !autoAssignProcessing && orderId !== lastScannedId) {
+      setLastScannedId(orderId);
       setAutoAssignProcessing(true);
       
       const selectOrder = async () => {
+        // Buscar por ID (UUID)
         const { data: orderData, error: findError } = await supabase
           .from('orders')
-          .select('id, assigned_delivery, order_number')
-          .eq('order_number', orderIdNumber)
+          .select('id, assigned_delivery, order_number, customer_name')
+          .eq('id', orderId)
           .maybeSingle();
         
         if (findError) {
           console.error('Error buscando pedido:', findError);
-          toast.error(`❌ Error buscando pedido ${orderIdNumber}`);
+          toast.error(`❌ Error buscando pedido`);
           window.location.hash = '/asignar-pedidos';
           setAutoAssignProcessing(false);
           return;
         }
         
         if (!orderData) {
-          toast.error(`❌ Pedido ${orderIdNumber} no encontrado`);
+          toast.error(`❌ Pedido no encontrado con ID: ${orderId.substring(0, 8)}...`);
           window.location.hash = '/asignar-pedidos';
           setAutoAssignProcessing(false);
           return;
         }
+        
+        console.log('✅ Pedido encontrado:', orderData);
+        const displayId = orderData.order_number || orderData.id.substring(0, 8);
         
         // Si es DELIVERY, asignar automáticamente
         if (role === 'DELIVERY') {
           const deliveryEmail = profile?.email || '';
           
           if (orderData.assigned_delivery && orderData.assigned_delivery !== deliveryEmail) {
-            toast.warning(`⚠️ El pedido ${orderIdNumber} ya está asignado a otro delivery`);
+            toast.warning(`⚠️ El pedido ${displayId} ya está asignado a otro delivery`);
             window.location.hash = '/asignar-pedidos';
             setAutoAssignProcessing(false);
             return;
@@ -88,8 +92,11 @@ export default function AssignOrdersView() {
           if (error) {
             toast.error('❌ Error al asignar: ' + error.message);
           } else {
-            toast.success(`✅ Pedido ${orderIdNumber} asignado correctamente`);
+            toast.success(`✅ Pedido ${displayId} asignado correctamente`);
             load();
+            setTimeout(() => {
+              window.location.href = '/';
+            }, 2000);
           }
           
           window.location.hash = '/asignar-pedidos';
@@ -101,18 +108,18 @@ export default function AssignOrdersView() {
             const next = new Set(prev);
             if (next.has(orderData.id)) {
               next.delete(orderData.id);
-              toast.info(`📦 Pedido ${orderIdNumber} deseleccionado`);
+              toast.info(`📦 Pedido ${displayId} deseleccionado`);
             } else {
               next.add(orderData.id);
-              toast.success(`✅ Pedido ${orderIdNumber} seleccionado`);
+              toast.success(`✅ Pedido ${displayId} seleccionado`);
             }
             return next;
           });
           
           setIdsInput(prev => {
             const currentIds = prev.split(/[,\s\n]+/).filter(i => i.trim());
-            if (!currentIds.includes(orderIdNumber)) {
-              return prev.trim() ? prev + ', ' + orderIdNumber : orderIdNumber;
+            if (!currentIds.includes(displayId)) {
+              return prev.trim() ? prev + ', ' + displayId : displayId;
             }
             return prev;
           });
@@ -154,7 +161,8 @@ export default function AssignOrdersView() {
     return (o.customer_name || '').toLowerCase().includes(q) ||
       (o.order_number || '').toLowerCase().includes(q) ||
       (o.city || '').toLowerCase().includes(q) ||
-      (o.phone || '').includes(q);
+      (o.phone || '').includes(q) ||
+      (o.id || '').toLowerCase().includes(q);
   });
 
   const toggleSelect = (id: string) => {
