@@ -59,7 +59,7 @@ export default function AssignOrdersView() {
           if (findError) {
             console.error('Error buscando pedido:', findError);
             toast.error(`❌ Error buscando pedido ${orderId}`);
-            window.history.replaceState({}, '', window.location.pathname);
+            window.location.href = window.location.pathname;
             setAutoAssignProcessing(false);
             return;
           }
@@ -499,7 +499,7 @@ export default function AssignOrdersView() {
             {filtered.map(o => (
               <tr key={o.id} className={selected.has(o.id) ? 'bg-brand/10' : ''}>
                 {(role === 'ADMIN' || role === 'PROVEEDOR' || role === 'DELIVERY') && (
-                  <td>
+                  <td className="text-center">
                     <input 
                       type="checkbox" 
                       checked={selected.has(o.id)} 
@@ -520,7 +520,7 @@ export default function AssignOrdersView() {
                 <td className="text-xs">{o.city || '—'}</td>
                 <td className="text-xs">{o.customer_name || '—'}</td>
                 <td className="text-xs">{o.phone || '—'}</td>
-                <tr>
+                <td className="text-xs">
                   <span className={`badge-status ${o.status === 'ENTREGADO' ? 'badge-entregado' : o.status === 'CANCELADO' ? 'badge-cancelado' : 'badge-pendiente'}`}>
                     {o.status || 'PENDIENTE'}
                   </span>
@@ -535,7 +535,7 @@ export default function AssignOrdersView() {
                   )}
                 </td>
                 {(role === 'ADMIN' || role === 'PROVEEDOR') && (
-                  <td>
+                  <td className="text-xs">
                     <select 
                       className="app-input !w-auto !py-1 !px-2 text-xs" 
                       value={o.assigned_delivery || ''}
