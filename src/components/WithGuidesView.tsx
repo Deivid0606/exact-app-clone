@@ -39,11 +39,6 @@ export default function WithGuidesView() {
   const [deptSearch, setDeptSearch] = useState('');
   const [showDeptDropdown, setShowDeptDropdown] = useState(false);
 
-  // Estado para QR visibles en cada pedido
-  const [qrVisible, setQrVisible] = useState<Record<string, { cliente: boolean; delivery: boolean }>>({});
-  const [qrLoaded, setQrLoaded] = useState(false);
-  const qrRefs = useRef<Record<string, { cliente: HTMLDivElement | null; delivery: HTMLDivElement | null }>>({});
-
   // Mensajes aleatorios para WhatsApp
   const whatsappMessages = [
     "Buenas le escribo del área del delivery para entregarle su pedido, ¿me podría enviar su ubicación exacta por favor? Desde ya gracias.",
@@ -53,57 +48,54 @@ export default function WithGuidesView() {
     "Hola, soy del servicio de delivery. Para entregarle su pedido correctamente, necesito su ubicación exacta. ¡Gracias!"
   ];
 
-  // Cargar librería QR desde CDN
-  useEffect(() => {
-    if (typeof window !== 'undefined' && !window.QRCode) {
-      const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js';
-      script.async = true;
-      script.onload = () => {
-        setQrLoaded(true);
-      };
-      document.body.appendChild(script);
-    } else if (window.QRCode) {
-      setQrLoaded(true);
-    }
-  }, []);
-
-  // Generar QR cuando se muestran
-  useEffect(() => {
-    if (!qrLoaded) return;
+  const load = async () => {
+    setLoading(true);
     
-    Object.entries(qrRefs.current).forEach(([orderId, refs]) => {
-      const order = orders.find(o => o.id === orderId);
-      if (!order) return;
-      
-      if (qrVisible[orderId]?.cliente && refs.cliente) {
-        refs.cliente.innerHTML = '';
-        const url = getWhatsAppUrl(order);
-        new window.QRCode(refs.cliente, {
-          text: url,
-          width: 100,
-          height: 100,
-          colorDark: '#000000',
-          colorLight: '#ffffff',
-          correctLevel: window.QRCode.CorrectLevel.L
-        });
+    let query = supabase
+      .from('orders')
+      .select('*')
+      .gte('created_at', dateFrom + 'T00:00:00')
+      .lte('created_at', dateTo + 'T23:59:59')
+      .order('created_at', { ascending: false });
+
+    if (status2Filter === 'PENDIENTES') {
+      query = query.or('status2.is.null,status2.eq.--');
+    } else if (status2Filter === 'CON_GUIA') {
+      query = query.eq('status2', 'GUIA GENERADA');
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      toast.error(error.message);
+      setLoading(false);
+      return;
+    }
+
+    setOrders(data || []);
+    setLoading(false);
+  };
+
+  useEffect(() => { 
+    load(); 
+  }, [dateFrom, dateTo, status2Filter]);
+
+  const allProviders = useMemo(() => {
+    if (role === 'PROVEEDOR') return [];
+    const set = new Set<string>();
+    orders.forEach(o => {
+      if (o.provider_email && o.provider_email.trim()) {
+        set.add(o.provider_email.trim());
       }
-      
-      if (qrVisible[orderId]?.delivery && refs.delivery) {
-        refs.delivery.innerHTML = '';
-        const deliveryName = profile?.full_name || profile?.email?.split('@')[0] || 'Delivery';
-        const url = window.location.origin + '/assign-delivery?order=' + order.id + '&delivery=' + encodeURIComponent(deliveryName);
-        new window.QRCode(refs.delivery, {
-          text: url,
-          width: 100,
-          height: 100,
-          colorDark: '#000000',
-          colorLight: '#ffffff',
-          correctLevel: window.QRCode.CorrectLevel.L
+      if (o.provider_emails_list) {
+        (o.provider_emails_list || '').split(',').forEach((e: string) => {
+          const t = e.trim();
+          if (t) set.add(t);
         });
       }
     });
-  }, [qrVisible, qrLoaded, orders, profile]);
+    return [...set].sort();
+  }, [orders, role]);
 
   // Obtener lista única de ciudades
   const allCities = useMemo(() => {
@@ -116,7 +108,6 @@ export default function WithGuidesView() {
     return Array.from(cities).sort();
   }, [orders]);
 
-  // Obtener lista única de departamentos
   const allDepartments = useMemo(() => {
     const depts = new Set<string>();
     orders.forEach(o => {
@@ -170,55 +161,6 @@ export default function WithGuidesView() {
       setSelectedDepartments(new Set(allDepartments));
     }
   };
-
-  const load = async () => {
-    setLoading(true);
-    
-    let query = supabase
-      .from('orders')
-      .select('*')
-      .gte('created_at', dateFrom + 'T00:00:00')
-      .lte('created_at', dateTo + 'T23:59:59')
-      .order('created_at', { ascending: false });
-
-    if (status2Filter === 'PENDIENTES') {
-      query = query.or('status2.is.null,status2.eq.--');
-    } else if (status2Filter === 'CON_GUIA') {
-      query = query.eq('status2', 'GUIA GENERADA');
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      toast.error(error.message);
-      setLoading(false);
-      return;
-    }
-
-    setOrders(data || []);
-    setLoading(false);
-  };
-
-  useEffect(() => { 
-    load(); 
-  }, [dateFrom, dateTo, status2Filter]);
-
-  const allProviders = useMemo(() => {
-    if (role === 'PROVEEDOR') return [];
-    const set = new Set<string>();
-    orders.forEach(o => {
-      if (o.provider_email && o.provider_email.trim()) {
-        set.add(o.provider_email.trim());
-      }
-      if (o.provider_emails_list) {
-        (o.provider_emails_list || '').split(',').forEach((e: string) => {
-          const t = e.trim();
-          if (t) set.add(t);
-        });
-      }
-    });
-    return [...set].sort();
-  }, [orders, role]);
 
   const filtered = useMemo(() => {
     return orders.filter(o => {
@@ -303,69 +245,6 @@ export default function WithGuidesView() {
     ].filter(Boolean).join('\n');
   };
 
-  const buildGuideHTML = (o: any, includeQR: boolean = true) => {
-    const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
-    const itemsHtml = items.map((it: any, i: number) => `
-      <tr>
-        <td style="padding:4px 0;">${i + 1}</td>
-        <td style="padding:4px 0;">${it.title || it.sku || 'Item'}</td>
-        <td style="padding:4px 0; text-align:center;">${it.qty || 1}</td>
-        <td style="padding:4px 0; text-align:right;">Gs ${nf(Number(it.sale_gs || 0) * Number(it.qty || 1))}</td>
-      </tr>
-    `).join('');
-
-    const qrHtml = includeQR ? `
-      <div style="display: flex; justify-content: space-between; margin-top: 12px; gap: 16px;">
-        <div style="text-align: center; flex: 1;">
-          <div style="font-size: 10px; color: #666; margin-bottom: 5px;">📱 QR Cliente (WhatsApp)</div>
-          <div class="qr-placeholder" data-qr-wa="${o.id}"></div>
-          <div style="font-size: 8px; color: #999; margin-top: 4px;">Envía ubicación</div>
-        </div>
-        <div style="text-align: center; flex: 1;">
-          <div style="font-size: 10px; color: #666; margin-bottom: 5px;">🚚 QR Delivery (Asignación)</div>
-          <div class="qr-placeholder" data-qr-delivery="${o.id}"></div>
-          <div style="font-size: 8px; color: #999; margin-top: 4px;">Asigna pedido</div>
-        </div>
-      </div>
-    ` : '';
-
-    return `
-      <div class="guide-page" style="page-break-after: always; padding: 20px; font-family: Arial, sans-serif; border: 1px solid #ddd; margin-bottom: 20px; border-radius: 8px;">
-        <h3 style="color: #7c5cff; margin: 0 0 10px 0;">GUÍA DE ENVÍO — ${o.order_number || o.id.slice(0, 8)}</h3>
-        <table style="width: 100%; font-size: 12px; margin-bottom: 12px;">
-          <tr><td style="width: 100px; padding: 2px 0; color: #666;">Cliente:</td><td style="font-weight: bold;">${o.customer_name || ''}</td></tr>
-          <tr><td style="padding: 2px 0; color: #666;">Teléfono:</td><td>${o.phone || ''}</td></tr>
-          <tr><td style="padding: 2px 0; color: #666;">Email:</td><td>${o.email || ''}</td></tr>
-          <tr><td style="padding: 2px 0; color: #666;">Departamento:</td><td>${o.departamento || ''}</td></tr>
-          <tr><td style="padding: 2px 0; color: #666;">Ciudad:</td><td>${o.city || ''}</td></tr>
-          <tr><td style="padding: 2px 0; color: #666;">Dirección:</td><td>${o.street || ''} ${o.district ? '- ' + o.district : ''}</td></tr>
-        </table>
-        <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
-          <thead>
-            <tr style="background: #f0f0f0; border-bottom: 1px solid #ddd;">
-              <th style="text-align: left; padding: 6px 4px;">#</th>
-              <th style="text-align: left; padding: 6px 4px;">Producto</th>
-              <th style="text-align: center; padding: 6px 4px;">Cant.</th>
-              <th style="text-align: right; padding: 6px 4px;">Subtotal</th>
-            </tr>
-          </thead>
-          <tbody>${itemsHtml}</tbody>
-          <tfoot>
-            <tr style="border-top: 1px solid #ddd;">
-              <td colspan="3" style="text-align: right; padding: 8px 4px;"><strong>Total:</strong></td>
-              <td style="text-align: right; padding: 8px 4px;"><strong>Gs ${nf(Number(o.total_gs || 0))}</strong></td>
-            </tr>
-          </tfoot>
-        </table>
-        ${o.obs ? `<div style="margin-top: 8px; font-size: 11px; color: #666;">Observación: ${o.obs}</div>` : ''}
-        <div style="margin-top: 8px; font-size: 10px; color: #666; border-top: 1px solid #eee; padding-top: 8px;">
-          Vendedor: ${o.created_by || ''} | Proveedor: ${o.provider_emails_list || o.provider_email || '—'}
-        </div>
-        ${qrHtml}
-      </div>
-    `;
-  };
-
   const generateGuide = (o: any) => {
     try {
       setGuideText(buildGuideText(o));
@@ -386,16 +265,6 @@ export default function WithGuidesView() {
       next.has(id) ? next.delete(id) : next.add(id);
       return next;
     });
-  };
-
-  const toggleQrVisible = (orderId: string, tipo: 'cliente' | 'delivery') => {
-    setQrVisible(prev => ({
-      ...prev,
-      [orderId]: {
-        ...prev[orderId],
-        [tipo]: !prev[orderId]?.[tipo]
-      }
-    }));
   };
 
   const getSelectedOrders = () => visibleOrders.filter(o => selectedIds.has(o.id));
@@ -481,6 +350,15 @@ export default function WithGuidesView() {
     toast.success(`${selected.length} guías descargadas en TXT`);
   };
 
+  // Función para obtener URL de WhatsApp
+  const getWhatsAppUrl = (order: any) => {
+    const randomMessage = whatsappMessages[Math.floor(Math.random() * whatsappMessages.length)];
+    const phoneNumber = order.phone?.replace(/\D/g, '');
+    const fullNumber = '595' + phoneNumber;
+    return 'https://wa.me/' + fullNumber + '?text=' + encodeURIComponent(randomMessage);
+  };
+
+  // IMPRESIÓN CON QR DENTRO DE CADA GUÍA
   const printWithQR = () => {
     const selected = getSelectedOrders();
     if (selected.length === 0) { 
@@ -488,61 +366,137 @@ export default function WithGuidesView() {
       return; 
     }
 
-    const selectedJson = JSON.stringify(selected);
-    const whatsappMessagesJson = JSON.stringify(whatsappMessages);
     const deliveryNameValue = profile?.full_name || profile?.email?.split('@')[0] || 'Delivery';
     
-    const guidesHtml = selected.map(o => buildGuideHTML(o, true)).join('');
+    // Construir HTML para cada pedido con sus QR
+    let allGuidesHtml = '';
     
+    for (const order of selected) {
+      const items = typeof order.items_json === 'string' ? JSON.parse(order.items_json) : (order.items_json || []);
+      let itemsHtml = '';
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        itemsHtml += `
+          <tr>
+            <td style="padding: 4px 0;">${i + 1}</td>
+            <td style="padding: 4px 0;">${it.title || it.sku || 'Item'}</td>
+            <td style="padding: 4px 0; text-align: center;">${it.qty || 1}</td>
+            <td style="padding: 4px 0; text-align: right;">Gs ${nf(Number(it.sale_gs || 0) * Number(it.qty || 1))}</td>
+          </tr>
+        `;
+      }
+
+      const orderId = order.id;
+      const orderNumber = order.order_number || order.id.slice(0, 8);
+      const whatsappUrl = getWhatsAppUrl(order);
+      const deliveryUrl = window.location.origin + '/assign-delivery?order=' + order.id + '&delivery=' + encodeURIComponent(deliveryNameValue);
+
+      allGuidesHtml += `
+        <div class="guide-page">
+          <h3 style="color: #7c5cff; margin: 0 0 10px 0;">GUÍA DE ENVÍO — ${orderNumber}</h3>
+          
+          <table style="width: 100%; font-size: 12px; margin-bottom: 12px;">
+            <tr><td style="width: 100px; padding: 2px 0; color: #666;">Cliente:</td><td style="font-weight: bold;">${order.customer_name || ''}</td></tr>
+            <tr><td style="padding: 2px 0; color: #666;">Teléfono:</td><td>${order.phone || ''}</td></tr>
+            <tr><td style="padding: 2px 0; color: #666;">Email:</td><td>${order.email || ''}</td></tr>
+            <tr><td style="padding: 2px 0; color: #666;">Departamento:</td><td>${order.departamento || ''}</td></tr>
+            <tr><td style="padding: 2px 0; color: #666;">Ciudad:</td><td>${order.city || ''}</td></tr>
+            <tr><td style="padding: 2px 0; color: #666;">Dirección:</td><td>${order.street || ''} ${order.district ? '- ' + order.district : ''}</td></tr>
+          </table>
+          
+          <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+            <thead>
+              <tr style="background: #f0f0f0; border-bottom: 1px solid #ddd;">
+                <th style="text-align: left; padding: 6px 4px;">#</th>
+                <th style="text-align: left; padding: 6px 4px;">Producto</th>
+                <th style="text-align: center; padding: 6px 4px;">Cant.</th>
+                <th style="text-align: right; padding: 6px 4px;">Subtotal</th>
+              </tr>
+            </thead>
+            <tbody>${itemsHtml}</tbody>
+            <tfoot>
+              <tr style="border-top: 1px solid #ddd;">
+                <td colspan="3" style="text-align: right; padding: 8px 4px;"><strong>Total:</strong></td>
+                <td style="text-align: right; padding: 8px 4px;"><strong>Gs ${nf(Number(order.total_gs || 0))}</strong></td>
+              </tr>
+            </tfoot>
+          </table>
+          
+          ${order.obs ? `<div style="margin-top: 8px; font-size: 11px; color: #666;">Observación: ${order.obs}</div>` : ''}
+          
+          <div style="margin-top: 8px; font-size: 10px; color: #666; border-top: 1px solid #eee; padding-top: 8px;">
+            Vendedor: ${order.created_by || ''} | Proveedor: ${order.provider_emails_list || order.provider_email || '—'}
+          </div>
+          
+          <!-- QR CODES DENTRO DE LA GUÍA -->
+          <div style="display: flex; justify-content: center; gap: 40px; margin-top: 20px; padding-top: 15px; border-top: 2px dashed #ccc;">
+            <div style="text-align: center;">
+              <div style="font-size: 11px; font-weight: bold; color: #25D366; margin-bottom: 8px;">📱 QR CLIENTE - Enviar Ubicación</div>
+              <div id="qr-wa-${orderId}" class="qr-wa" data-url="${whatsappUrl}" style="width: 120px; height: 120px; margin: 0 auto;"></div>
+              <div style="font-size: 9px; color: #666; margin-top: 6px;">WhatsApp con ubicación</div>
+            </div>
+            <div style="text-align: center;">
+              <div style="font-size: 11px; font-weight: bold; color: #F97316; margin-bottom: 8px;">🚚 QR DELIVERY - Asignar Pedido</div>
+              <div id="qr-delivery-${orderId}" class="qr-delivery" data-url="${deliveryUrl}" style="width: 120px; height: 120px; margin: 0 auto;"></div>
+              <div style="font-size: 9px; color: #666; margin-top: 6px;">Asignación automática</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
     const html = `<!DOCTYPE html>
     <html>
     <head>
       <meta charset="utf-8">
-      <title>Guías de Envío</title>
+      <title>Guías de Envío con QR</title>
       <style>
         @media print {
-          body { margin: 0; padding: 20px; }
-          .guide-page { page-break-after: always; margin-bottom: 20px; }
+          body { margin: 0; padding: 0; }
+          .guide-page { page-break-after: always; page-break-inside: avoid; }
         }
         @media screen {
           body { margin: 0; padding: 20px; background: #f5f5f5; }
           .guide-page { background: white; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
         }
-        .guide-page { padding: 20px; font-family: Arial, sans-serif; border: 1px solid #ddd; }
+        .guide-page {
+          padding: 20px;
+          font-family: Arial, sans-serif;
+          border: 1px solid #ddd;
+          max-width: 800px;
+          margin: 0 auto 20px auto;
+        }
       </style>
       <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     </head>
     <body>
-      ${guidesHtml}
+      ${allGuidesHtml}
       <script>
         (function() {
-          const ordersData = ${selectedJson};
-          const messages = ${whatsappMessagesJson};
-          const deliveryName = '${deliveryNameValue}';
-          
-          setTimeout(function() {
-            if (typeof QRCode !== 'undefined') {
-              document.querySelectorAll('[data-qr-wa]').forEach(function(el) {
-                const orderId = el.getAttribute('data-qr-wa');
-                const order = ordersData.find(function(o) { return o.id === orderId; });
-                if (order) {
-                  const phoneNumber = (order.phone || '').replace(/\\D/g, '');
-                  const randomMsg = messages[Math.floor(Math.random() * messages.length)];
-                  const url = 'https://wa.me/595' + phoneNumber + '?text=' + encodeURIComponent(randomMsg);
-                  new QRCode(el, { text: url, width: 100, height: 100 });
-                }
-              });
-              
-              document.querySelectorAll('[data-qr-delivery]').forEach(function(el) {
-                const orderId = el.getAttribute('data-qr-delivery');
-                const order = ordersData.find(function(o) { return o.id === orderId; });
-                if (order) {
-                  const url = window.location.origin + '/assign-delivery?order=' + order.id + '&delivery=' + encodeURIComponent(deliveryName);
-                  new QRCode(el, { text: url, width: 100, height: 100 });
-                }
-              });
+          function generateQRCodes() {
+            if (typeof QRCode === 'undefined') {
+              setTimeout(generateQRCodes, 200);
+              return;
             }
-          }, 500);
+            
+            // Generar QR para WhatsApp (clientes)
+            document.querySelectorAll('.qr-wa').forEach(function(el) {
+              const url = el.getAttribute('data-url');
+              if (url && el.children.length === 0) {
+                new QRCode(el, { text: url, width: 120, height: 120 });
+              }
+            });
+            
+            // Generar QR para delivery
+            document.querySelectorAll('.qr-delivery').forEach(function(el) {
+              const url = el.getAttribute('data-url');
+              if (url && el.children.length === 0) {
+                new QRCode(el, { text: url, width: 120, height: 120 });
+              }
+            });
+          }
+          
+          generateQRCodes();
         })();
       </script>
     </body>
@@ -552,21 +506,15 @@ export default function WithGuidesView() {
     if (printWindow) {
       printWindow.document.write(html);
       printWindow.document.close();
-      setTimeout(() => printWindow.print(), 1000);
+      setTimeout(() => {
+        printWindow.print();
+      }, 1000);
     }
-    toast.success(`${selected.length} guías listas para imprimir con QR`);
+    toast.success(`${selected.length} guías con QR listas para imprimir`);
   };
 
   const downloadPdf = () => {
     printWithQR();
-  };
-
-  // FUNCIÓN PARA QR
-  const getWhatsAppUrl = (order: any) => {
-    const randomMessage = whatsappMessages[Math.floor(Math.random() * whatsappMessages.length)];
-    const phoneNumber = order.phone?.replace(/\D/g, '');
-    const fullNumber = '595' + phoneNumber;
-    return 'https://wa.me/' + fullNumber + '?text=' + encodeURIComponent(randomMessage);
   };
 
   return (
@@ -601,7 +549,7 @@ export default function WithGuidesView() {
         </div>
       </div>
 
-      {/* Filtros - Primera línea */}
+      {/* Filtros */}
       <div className="flex flex-wrap gap-2 mb-3">
         <label className="app-label !mt-0">Desde</label>
         <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
@@ -626,7 +574,7 @@ export default function WithGuidesView() {
         )}
       </div>
 
-      {/* Filtros - Segunda línea */}
+      {/* Filtros segunda línea */}
       <div className="flex flex-wrap gap-2 mb-3">
         <input className="app-input flex-1 min-w-[200px]" placeholder="🔎 Buscar por cliente, teléfono, ID, ciudad o departamento"
           value={search} onChange={e => setSearch(e.target.value)} />
@@ -707,7 +655,9 @@ export default function WithGuidesView() {
           </button>
           <button className="nav-btn" onClick={bulkCopyGuides}>📋 Copiar guías</button>
           <button className="nav-btn active" onClick={downloadTxt}>📥 Descargar TXT</button>
-          <button className="nav-btn active" onClick={downloadPdf}>🖨️ Imprimir con QR</button>
+          <button className="nav-btn active" onClick={printWithQR} style={{ background: '#8b5cf6', color: 'white' }}>
+            🖨️ Imprimir con QR
+          </button>
           <button className="nav-btn" onClick={clearSelection} style={{ background: '#ef4444', color: 'white' }}>
             ✖️ Limpiar selección
           </button>
@@ -718,14 +668,11 @@ export default function WithGuidesView() {
         <button className="nav-btn" onClick={selectAllPending} style={{ background: '#3b82f6', color: 'white' }}>
           ☑️ Seleccionar todos pendientes ({pendingGuides.length})
         </button>
-        <button className="nav-btn active" onClick={printWithQR} style={{ background: '#8b5cf6', color: 'white' }}>
-          🖨️ Imprimir seleccionados con QR
-        </button>
       </div>
 
       {/* Tabla */}
       <div className="overflow-auto">
-        <table className="app-table min-w-[1400px]">
+        <table className="app-table min-w-[1200px]">
           <thead>
             <tr>
               <th className="!w-[40px] text-center">
@@ -742,8 +689,6 @@ export default function WithGuidesView() {
               <th>Proveedor</th>
               <th>Estado 2</th>
               <th>Guía</th>
-              <th>QR Cliente</th>
-              <th>QR Delivery</th>
             </tr>
           </thead>
           <tbody>
@@ -776,37 +721,11 @@ export default function WithGuidesView() {
                     }} title="Copiar guía">📋</button>
                   </div>
                 </td>
-                <td className="text-center">
-                  <button 
-                    className="nav-btn !px-2 !py-1 !text-[10px]"
-                    onClick={() => toggleQrVisible(o.id, 'cliente')}
-                    style={{ background: qrVisible[o.id]?.cliente ? '#10b981' : undefined, color: qrVisible[o.id]?.cliente ? 'white' : undefined }}
-                  >
-                    {qrVisible[o.id]?.cliente ? '✓' : '📱'}
-                  </button>
-                  {qrVisible[o.id]?.cliente && (
-                    <div ref={el => { if (el) qrRefs.current[o.id] = { ...qrRefs.current[o.id], cliente: el } }} 
-                         style={{ marginTop: '8px', display: 'flex', justifyContent: 'center' }} />
-                  )}
-                </td>
-                <td className="text-center">
-                  <button 
-                    className="nav-btn !px-2 !py-1 !text-[10px]"
-                    onClick={() => toggleQrVisible(o.id, 'delivery')}
-                    style={{ background: qrVisible[o.id]?.delivery ? '#f97316' : undefined, color: qrVisible[o.id]?.delivery ? 'white' : undefined }}
-                  >
-                    {qrVisible[o.id]?.delivery ? '✓' : '🚚'}
-                  </button>
-                  {qrVisible[o.id]?.delivery && (
-                    <div ref={el => { if (el) qrRefs.current[o.id] = { ...qrRefs.current[o.id], delivery: el } }} 
-                         style={{ marginTop: '8px', display: 'flex', justifyContent: 'center' }} />
-                  )}
-                </td>
               </tr>
             ))}
             {visibleOrders.length === 0 && (
               <tr>
-                <td colSpan={13} className="text-center text-muted-foreground py-8">Sin pedidos en el rango seleccionado</td>
+                <td colSpan={11} className="text-center text-muted-foreground py-8">Sin pedidos en el rango seleccionado</td>
               </tr>
             )}
           </tbody>
@@ -823,7 +742,7 @@ export default function WithGuidesView() {
               <button className="nav-btn" onClick={() => setGuideText('')}>Cerrar</button>
               <button className="nav-btn active" onClick={copyGuide}>📋 Copiar</button>
               <button className="nav-btn active" onClick={() => {
-                downloadFile(guideText, 'guia_' + guideId + '.txt', 'text/plain');
+                downloadFile(guideText, `guia_${guideId}.txt`, 'text/plain');
               }}>📥 TXT</button>
             </div>
           </div>
