@@ -92,7 +92,7 @@ export default function WithGuidesView() {
       if (qrVisible[orderId]?.delivery && refs.delivery) {
         refs.delivery.innerHTML = '';
         const deliveryName = profile?.full_name || profile?.email?.split('@')[0] || 'Delivery';
-        const url = `${window.location.origin}/assign-delivery?order=${order.id}&delivery=${encodeURIComponent(deliveryName)}`;
+        const url = window.location.origin + '/assign-delivery?order=' + order.id + '&delivery=' + encodeURIComponent(deliveryName);
         new window.QRCode(refs.delivery, {
           text: url,
           width: 100,
@@ -314,20 +314,16 @@ export default function WithGuidesView() {
       </tr>
     `).join('');
 
-    const whatsappUrl = getWhatsAppUrl(o);
-    const deliveryName = profile?.full_name || profile?.email?.split('@')[0] || 'Delivery';
-    const deliveryUrl = `${window.location.origin}/assign-delivery?order=${o.id}&delivery=${encodeURIComponent(deliveryName)}`;
-
     const qrHtml = includeQR ? `
       <div style="display: flex; justify-content: space-between; margin-top: 12px; gap: 16px;">
         <div style="text-align: center; flex: 1;">
           <div style="font-size: 10px; color: #666; margin-bottom: 5px;">📱 QR Cliente (WhatsApp)</div>
-          <div style="width: 100px; height: 100px; margin: 0 auto;" data-qr-wa="${o.id}"></div>
+          <div class="qr-placeholder" data-qr-wa="${o.id}"></div>
           <div style="font-size: 8px; color: #999; margin-top: 4px;">Envía ubicación</div>
         </div>
         <div style="text-align: center; flex: 1;">
           <div style="font-size: 10px; color: #666; margin-bottom: 5px;">🚚 QR Delivery (Asignación)</div>
-          <div style="width: 100px; height: 100px; margin: 0 auto;" data-qr-delivery="${o.id}"></div>
+          <div class="qr-placeholder" data-qr-delivery="${o.id}"></div>
           <div style="font-size: 8px; color: #999; margin-top: 4px;">Asigna pedido</div>
         </div>
       </div>
@@ -492,7 +488,10 @@ export default function WithGuidesView() {
       return; 
     }
 
-    // Generar HTML con 4 pedidos por hoja usando CSS columns
+    const selectedJson = JSON.stringify(selected);
+    const whatsappMessagesJson = JSON.stringify(whatsappMessages);
+    const deliveryNameValue = profile?.full_name || profile?.email?.split('@')[0] || 'Delivery';
+    
     const guidesHtml = selected.map(o => buildGuideHTML(o, true)).join('');
     
     const html = `<!DOCTYPE html>
@@ -503,70 +502,48 @@ export default function WithGuidesView() {
       <style>
         @media print {
           body { margin: 0; padding: 20px; }
-          .guide-page { 
-            page-break-after: always;
-            margin-bottom: 20px;
-          }
-          .qr-container { 
-            display: flex;
-            justify-content: space-between;
-            margin-top: 12px;
-          }
+          .guide-page { page-break-after: always; margin-bottom: 20px; }
         }
         @media screen {
-          body { 
-            margin: 0; 
-            padding: 20px; 
-            background: #f5f5f5;
-          }
-          .guide-page { 
-            background: white;
-            margin-bottom: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-          }
+          body { margin: 0; padding: 20px; background: #f5f5f5; }
+          .guide-page { background: white; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
         }
-        .guide-page {
-          padding: 20px;
-          font-family: Arial, sans-serif;
-          border: 1px solid #ddd;
-        }
-        body {
-          margin: 0;
-          padding: 20px;
-        }
+        .guide-page { padding: 20px; font-family: Arial, sans-serif; border: 1px solid #ddd; }
       </style>
       <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     </head>
     <body>
       ${guidesHtml}
       <script>
-        // Generar QR después de que la página cargue
-        setTimeout(() => {
-          if (typeof QRCode !== 'undefined') {
-            document.querySelectorAll('[data-qr-wa]').forEach(el => {
-              const orderId = el.getAttribute('data-qr-wa');
-              const order = ${JSON.stringify(selected)}.find(o => o.id === orderId);
-              if (order) {
-                const phoneNumber = order.phone?.replace(/\\D/g, '');
-                const randomMessages = ${JSON.stringify(whatsappMessages)};
-                const randomMsg = randomMessages[Math.floor(Math.random() * randomMessages.length)];
-                const url = `https://wa.me/595\${phoneNumber}?text=\${encodeURIComponent(randomMsg)}`;
-                new QRCode(el, { text: url, width: 100, height: 100 });
-              }
-            });
-            
-            document.querySelectorAll('[data-qr-delivery]').forEach(el => {
-              const orderId = el.getAttribute('data-qr-delivery');
-              const order = ${JSON.stringify(selected)}.find(o => o.id === orderId);
-              if (order) {
-                const deliveryName = '${profile?.full_name || profile?.email?.split('@')[0] || 'Delivery'}';
-                const url = `${window.location.origin}/assign-delivery?order=\${order.id}&delivery=\${encodeURIComponent(deliveryName)}`;
-                new QRCode(el, { text: url, width: 100, height: 100 });
-              }
-            });
-          }
-        }, 500);
+        (function() {
+          const ordersData = ${selectedJson};
+          const messages = ${whatsappMessagesJson};
+          const deliveryName = '${deliveryNameValue}';
+          
+          setTimeout(function() {
+            if (typeof QRCode !== 'undefined') {
+              document.querySelectorAll('[data-qr-wa]').forEach(function(el) {
+                const orderId = el.getAttribute('data-qr-wa');
+                const order = ordersData.find(function(o) { return o.id === orderId; });
+                if (order) {
+                  const phoneNumber = (order.phone || '').replace(/\\D/g, '');
+                  const randomMsg = messages[Math.floor(Math.random() * messages.length)];
+                  const url = 'https://wa.me/595' + phoneNumber + '?text=' + encodeURIComponent(randomMsg);
+                  new QRCode(el, { text: url, width: 100, height: 100 });
+                }
+              });
+              
+              document.querySelectorAll('[data-qr-delivery]').forEach(function(el) {
+                const orderId = el.getAttribute('data-qr-delivery');
+                const order = ordersData.find(function(o) { return o.id === orderId; });
+                if (order) {
+                  const url = window.location.origin + '/assign-delivery?order=' + order.id + '&delivery=' + encodeURIComponent(deliveryName);
+                  new QRCode(el, { text: url, width: 100, height: 100 });
+                }
+              });
+            }
+          }, 500);
+        })();
       </script>
     </body>
     </html>`;
@@ -588,8 +565,8 @@ export default function WithGuidesView() {
   const getWhatsAppUrl = (order: any) => {
     const randomMessage = whatsappMessages[Math.floor(Math.random() * whatsappMessages.length)];
     const phoneNumber = order.phone?.replace(/\D/g, '');
-    const fullNumber = `595${phoneNumber}`;
-    return `https://wa.me/${fullNumber}?text=${encodeURIComponent(randomMessage)}`;
+    const fullNumber = '595' + phoneNumber;
+    return 'https://wa.me/' + fullNumber + '?text=' + encodeURIComponent(randomMessage);
   };
 
   return (
@@ -624,7 +601,7 @@ export default function WithGuidesView() {
         </div>
       </div>
 
-      {/* Filtros */}
+      {/* Filtros - Primera línea */}
       <div className="flex flex-wrap gap-2 mb-3">
         <label className="app-label !mt-0">Desde</label>
         <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
@@ -846,7 +823,7 @@ export default function WithGuidesView() {
               <button className="nav-btn" onClick={() => setGuideText('')}>Cerrar</button>
               <button className="nav-btn active" onClick={copyGuide}>📋 Copiar</button>
               <button className="nav-btn active" onClick={() => {
-                downloadFile(guideText, `guia_${guideId}.txt`, 'text/plain');
+                downloadFile(guideText, 'guia_' + guideId + '.txt', 'text/plain');
               }}>📥 TXT</button>
             </div>
           </div>
