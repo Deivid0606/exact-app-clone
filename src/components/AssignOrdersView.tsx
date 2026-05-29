@@ -18,6 +18,67 @@ export default function AssignOrdersView() {
   const [idsInput, setIdsInput] = useState('');
   const [selectAll, setSelectAll] = useState(false);
   const [filterBy, setFilterBy] = useState<'created_at' | 'assigned_at'>('created_at');
+  const [autoAssignProcessing, setAutoAssignProcessing] = useState(false);
+
+  // Auto-asignación por QR (desde URL)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const autoAssignId = params.get('auto_assign');
+    const deliveryEmail = params.get('delivery');
+    
+    if (autoAssignId && deliveryEmail && !autoAssignProcessing) {
+      setAutoAssignProcessing(true);
+      
+      const autoAssignOrder = async () => {
+        // Verificar que el delivery es el usuario actual o es admin
+        const canAssign = role === 'DELIVERY' && deliveryEmail === profile?.email;
+        const isAdmin = role === 'ADMIN' || role === 'PROVEEDOR';
+        
+        if (!canAssign && !isAdmin) {
+          toast.error('No tienes permiso para asignar este pedido');
+          // Limpiar URL
+          window.history.replaceState({}, '', window.location.pathname);
+          setAutoAssignProcessing(false);
+          return;
+        }
+        
+        // Verificar si el pedido ya está asignado a otro delivery
+        const { data: orderData } = await supabase
+          .from('orders')
+          .select('assigned_delivery')
+          .eq('id', autoAssignId)
+          .single();
+        
+        if (orderData?.assigned_delivery && orderData.assigned_delivery !== deliveryEmail && role === 'DELIVERY') {
+          toast.warning(`⚠️ Este pedido ya está asignado a otro delivery`);
+          window.history.replaceState({}, '', window.location.pathname);
+          setAutoAssignProcessing(false);
+          return;
+        }
+        
+        const { error } = await supabase
+          .from('orders')
+          .update({ 
+            assigned_delivery: deliveryEmail, 
+            assigned_at: new Date().toISOString() 
+          })
+          .eq('id', autoAssignId);
+        
+        if (error) {
+          toast.error('❌ Error al asignar pedido: ' + error.message);
+        } else {
+          toast.success(`✅ Pedido asignado correctamente a ${deliveryEmail === profile?.email ? 'vos' : deliveryEmail}`);
+          load(); // Recargar la lista
+        }
+        
+        // Limpiar URL
+        window.history.replaceState({}, '', window.location.pathname);
+        setAutoAssignProcessing(false);
+      };
+      
+      autoAssignOrder();
+    }
+  }, [role, profile?.email]);
 
   useEffect(() => {
     if (role === 'ADMIN' || role === 'PROVEEDOR') {
@@ -42,14 +103,15 @@ export default function AssignOrdersView() {
     setSelected(new Set());
   };
 
-  useEffect(() => { load(); }, [filterBy]);
+  useEffect(() => { load(); }, [filterBy, dateFrom, dateTo]);
 
   const filtered = orders.filter(o => {
     if (!search) return true;
     const q = search.toLowerCase();
     return (o.customer_name || '').toLowerCase().includes(q) ||
       (o.order_number || '').toLowerCase().includes(q) ||
-      (o.city || '').toLowerCase().includes(q);
+      (o.city || '').toLowerCase().includes(q) ||
+      (o.phone || '').includes(q);
   });
 
   const toggleSelect = (id: string) => {
@@ -94,8 +156,21 @@ export default function AssignOrdersView() {
     
     let successCount = 0;
     let errorCount = 0;
+    let alreadyAssignedCount = 0;
 
     for (const id of selected) {
+      // Verificar si ya está asignado
+      const { data: orderData } = await supabase
+        .from('orders')
+        .select('assigned_delivery')
+        .eq('id', id)
+        .single();
+      
+      if (orderData?.assigned_delivery && orderData.assigned_delivery !== deliveryEmail && role === 'DELIVERY') {
+        alreadyAssignedCount++;
+        continue;
+      }
+      
       const { error } = await supabase
         .from('orders')
         .update({ 
@@ -116,6 +191,9 @@ export default function AssignOrdersView() {
     
     if (successCount > 0) {
       toast.success(`✅ ${successCount} pedido(s) asignado(s) a ${role === 'DELIVERY' ? 'vos' : deliveryEmail}`);
+    }
+    if (alreadyAssignedCount > 0) {
+      toast.warning(`⚠️ ${alreadyAssignedCount} pedido(s) ya estaban asignados a otro delivery`);
     }
     if (errorCount > 0) {
       toast.error(`❌ Error en ${errorCount} pedido(s)`);
@@ -237,6 +315,13 @@ export default function AssignOrdersView() {
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Asignar Pedidos</h3>
 
+      {/* Indicador de auto-asignación por QR */}
+      {autoAssignProcessing && (
+        <div className="mb-3 p-2 bg-blue-100 text-blue-800 rounded-lg text-sm text-center">
+          ⏳ Procesando asignación automática por QR...
+        </div>
+      )}
+
       <div className="flex flex-wrap gap-2 mb-3">
         <label className="app-label !mt-0">Desde</label>
         <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
@@ -249,7 +334,7 @@ export default function AssignOrdersView() {
           <option value="assigned_at">🚚 Fecha de asignación</option>
         </select>
         
-        <input className="app-input flex-1 min-w-[200px]" placeholder="🔎 Buscar cliente, ID, ciudad..."
+        <input className="app-input flex-1 min-w-[200px]" placeholder="🔎 Buscar cliente, ID, ciudad, teléfono..."
           value={search} onChange={e => setSearch(e.target.value)} />
         <button className="nav-btn active" onClick={load}>Filtrar</button>
       </div>
@@ -350,6 +435,7 @@ export default function AssignOrdersView() {
               <th>ID</th>
               <th>Ciudad</th>
               <th>Cliente</th>
+              <th>Teléfono</th>
               <th>Estado</th>
               <th>Asignado a</th>
               {(role === 'ADMIN' || role === 'PROVEEDOR') && <th>Acción</th>}
@@ -377,8 +463,9 @@ export default function AssignOrdersView() {
                       : '—'}
                 </td>
                 <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
-                <td className="text-xs">{o.city}</td>
-                <td className="text-xs">{o.customer_name}</td>
+                <td className="text-xs">{o.city || '—'}</td>
+                <td className="text-xs">{o.customer_name || '—'}</td>
+                <td className="text-xs">{o.phone || '—'}</td>
                 <td>
                   <span className={`badge-status ${o.status === 'ENTREGADO' ? 'badge-entregado' : o.status === 'CANCELADO' ? 'badge-cancelado' : 'badge-pendiente'}`}>
                     {o.status || 'PENDIENTE'}
@@ -409,7 +496,7 @@ export default function AssignOrdersView() {
             ))}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={role === 'ADMIN' || role === 'PROVEEDOR' ? 8 : 7} className="text-center text-muted-foreground py-8">
+                <td colSpan={role === 'ADMIN' || role === 'PROVEEDOR' ? 9 : 8} className="text-center text-muted-foreground py-8">
                   {role === 'DELIVERY' ? 'No hay pedidos disponibles para asignarte' : 'Sin pedidos en este rango de fechas'}
                 </td>
               </tr>
