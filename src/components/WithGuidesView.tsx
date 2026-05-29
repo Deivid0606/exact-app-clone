@@ -1,847 +1,566 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 
-declare global {
-  interface Window {
-    QRCode: any;
-  }
-}
-
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
-export default function WithGuidesView() {
+export default function AssignOrdersView() {
   const { profile } = useAuth();
-  const role = profile?.role || '';
-  const myEmail = profile?.email || '';
+  const role = profile?.role;
   const [orders, setOrders] = useState<any[]>([]);
+  const [deliveries, setDeliveries] = useState<any[]>([]);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [assignDelivery, setAssignDelivery] = useState('');
   const [search, setSearch] = useState('');
-  const [providerFilter, setProviderFilter] = useState('');
-  const [guideText, setGuideText] = useState('');
-  const [guideId, setGuideId] = useState('');
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [dateFrom, setDateFrom] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() - 15);
-    return d.toISOString().slice(0, 10);
-  });
+  const [dateFrom, setDateFrom] = useState(() => { const d = new Date(); d.setDate(1); return d.toISOString().slice(0, 10); });
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
-  const [loading, setLoading] = useState(false);
-  
-  // FILTROS EXISTENTES
-  const [status2Filter, setStatus2Filter] = useState<string>('PENDIENTES');
-  const [selectedCities, setSelectedCities] = useState<Set<string>>(new Set());
-  const [citySearch, setCitySearch] = useState('');
-  const [showCityDropdown, setShowCityDropdown] = useState(false);
+  const [idsInput, setIdsInput] = useState('');
+  const [selectAll, setSelectAll] = useState(false);
+  const [filterBy, setFilterBy] = useState<'created_at' | 'assigned_at'>('created_at');
+  const [autoAssignProcessing, setAutoAssignProcessing] = useState(false);
 
-  // FILTRO POR DEPARTAMENTOS
-  const [selectedDepartments, setSelectedDepartments] = useState<Set<string>>(new Set());
-  const [deptSearch, setDeptSearch] = useState('');
-  const [showDeptDropdown, setShowDeptDropdown] = useState(false);
-
-  // Estado para el modal de guía con QR
-  const [showGuideModal, setShowGuideModal] = useState(false);
-  const [currentOrder, setCurrentOrder] = useState<any>(null);
-  const [qrLoaded, setQrLoaded] = useState(false);
-  const qrWaRef = useRef<HTMLDivElement>(null);
-  const qrDeliveryRef = useRef<HTMLDivElement>(null);
-
-  // Mensajes aleatorios para WhatsApp
-  const whatsappMessages = [
-    "Buenas le escribo del área del delivery para entregarle su pedido, ¿me podría enviar su ubicación exacta por favor? Desde ya gracias.",
-    "Hola, soy su repartidor. Para completar la entrega, necesito su ubicación exacta. Muchas gracias.",
-    "¡Buen día! Su pedido está en camino. ¿Podría compartirme su ubicación exacta? Gracias.",
-    "Atención: su delivery necesita su ubicación precisa para la entrega. ¿Me la envía por favor? Gracias.",
-    "Hola, soy del servicio de delivery. Para entregarle su pedido correctamente, necesito su ubicación exacta. ¡Gracias!"
-  ];
-
-  // Cargar librería QR desde CDN
+  // Escuchar cambios en la URL (para HashRouter)
   useEffect(() => {
-    if (typeof window !== 'undefined' && !window.QRCode) {
-      const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js';
-      script.async = true;
-      script.onload = () => {
-        setQrLoaded(true);
-      };
-      document.body.appendChild(script);
-    } else if (window.QRCode) {
-      setQrLoaded(true);
-    }
-  }, []);
-
-  // Generar QR en el modal cuando se abre
-  useEffect(() => {
-    if (showGuideModal && currentOrder && qrLoaded) {
-      // Limpiar contenedores
-      if (qrWaRef.current) qrWaRef.current.innerHTML = '';
-      if (qrDeliveryRef.current) qrDeliveryRef.current.innerHTML = '';
+    const checkUrlForId = () => {
+      const hash = window.location.hash;
+      const params = new URLSearchParams(hash.split('?')[1] || '');
+      const orderId = params.get('id');
       
-      // Generar QR de WhatsApp
-      const whatsappUrl = getWhatsAppUrl(currentOrder);
-      new window.QRCode(qrWaRef.current, {
-        text: whatsappUrl,
-        width: 120,
-        height: 120,
-        colorDark: '#000000',
-        colorLight: '#ffffff',
-        correctLevel: window.QRCode.CorrectLevel.L
-      });
+      console.log('URL detectada:', window.location.href);
+      console.log('Hash:', hash);
+      console.log('orderId detectado:', orderId);
       
-      // Generar QR de Delivery
-      const orderNumber = currentOrder.order_number;
-      if (orderNumber) {
-        const deliveryUrl = window.location.origin + '/#/asignar-pedidos?id=' + orderNumber;
-        console.log('QR Delivery URL:', deliveryUrl);
-        new window.QRCode(qrDeliveryRef.current, {
-          text: deliveryUrl,
-          width: 120,
-          height: 120,
-          colorDark: '#000000',
-          colorLight: '#ffffff',
-          correctLevel: window.QRCode.CorrectLevel.L
-        });
-      } else {
-        toast.error('Este pedido no tiene número de orden');
-      }
-    }
-  }, [showGuideModal, currentOrder, qrLoaded, profile]);
-
-  const load = async () => {
-    setLoading(true);
-    
-    let query = supabase
-      .from('orders')
-      .select('*')
-      .gte('created_at', dateFrom + 'T00:00:00')
-      .lte('created_at', dateTo + 'T23:59:59')
-      .order('created_at', { ascending: false });
-
-    if (status2Filter === 'PENDIENTES') {
-      query = query.or('status2.is.null,status2.eq.--');
-    } else if (status2Filter === 'CON_GUIA') {
-      query = query.eq('status2', 'GUIA GENERADA');
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      toast.error(error.message);
-      setLoading(false);
-      return;
-    }
-
-    setOrders(data || []);
-    setLoading(false);
-  };
-
-  useEffect(() => { 
-    load(); 
-  }, [dateFrom, dateTo, status2Filter]);
-
-  const allProviders = useMemo(() => {
-    if (role === 'PROVEEDOR') return [];
-    const set = new Set<string>();
-    orders.forEach(o => {
-      if (o.provider_email && o.provider_email.trim()) {
-        set.add(o.provider_email.trim());
-      }
-      if (o.provider_emails_list) {
-        (o.provider_emails_list || '').split(',').forEach((e: string) => {
-          const t = e.trim();
-          if (t) set.add(t);
-        });
-      }
-    });
-    return [...set].sort();
-  }, [orders, role]);
-
-  const allCities = useMemo(() => {
-    const cities = new Set<string>();
-    orders.forEach(o => {
-      if (o.city && o.city.trim()) {
-        cities.add(o.city.trim());
-      }
-    });
-    return Array.from(cities).sort();
-  }, [orders]);
-
-  const allDepartments = useMemo(() => {
-    const depts = new Set<string>();
-    orders.forEach(o => {
-      if (o.departamento && o.departamento.trim()) {
-        depts.add(o.departamento.trim());
-      }
-    });
-    return Array.from(depts).sort();
-  }, [orders]);
-
-  const filteredCities = useMemo(() => {
-    if (!citySearch) return allCities;
-    return allCities.filter(c => c.toLowerCase().includes(citySearch.toLowerCase()));
-  }, [allCities, citySearch]);
-
-  const filteredDepartments = useMemo(() => {
-    if (!deptSearch) return allDepartments;
-    return allDepartments.filter(d => d.toLowerCase().includes(deptSearch.toLowerCase()));
-  }, [allDepartments, deptSearch]);
-
-  const toggleCity = (city: string) => {
-    setSelectedCities(prev => {
-      const next = new Set(prev);
-      if (next.has(city)) next.delete(city);
-      else next.add(city);
-      return next;
-    });
-  };
-
-  const toggleDepartment = (dept: string) => {
-    setSelectedDepartments(prev => {
-      const next = new Set(prev);
-      if (next.has(dept)) next.delete(dept);
-      else next.add(dept);
-      return next;
-    });
-  };
-
-  const selectAllCities = () => {
-    if (selectedCities.size === allCities.length) {
-      setSelectedCities(new Set());
-    } else {
-      setSelectedCities(new Set(allCities));
-    }
-  };
-
-  const selectAllDepartments = () => {
-    if (selectedDepartments.size === allDepartments.length) {
-      setSelectedDepartments(new Set());
-    } else {
-      setSelectedDepartments(new Set(allDepartments));
-    }
-  };
-
-  const filtered = useMemo(() => {
-    return orders.filter(o => {
-      if (role === 'PROVEEDOR') {
-        const providerList = o.provider_emails_list || '';
-        const myEmailLower = myEmail.toLowerCase();
-        const isMine = providerList.toLowerCase().includes(myEmailLower);
-        if (!isMine) return false;
-      }
-      
-      if (role !== 'PROVEEDOR' && providerFilter) {
-        const providerList = (o.provider_emails_list || '') + ',' + (o.provider_email || '');
-        if (!providerList.toLowerCase().includes(providerFilter.toLowerCase())) return false;
-      }
-      
-      if (selectedCities.size > 0) {
-        if (!o.city || !selectedCities.has(o.city)) return false;
-      }
-      
-      if (selectedDepartments.size > 0) {
-        if (!o.departamento || !selectedDepartments.has(o.departamento)) return false;
-      }
-      
-      if (!search) return true;
-      const q = search.toLowerCase();
-      return (o.customer_name || '').toLowerCase().includes(q) ||
-        (o.order_number || '').toLowerCase().includes(q) ||
-        (o.phone || '').includes(q) || 
-        (o.city || '').toLowerCase().includes(q) ||
-        (o.departamento || '').toLowerCase().includes(q) ||
-        (o.id || '').toLowerCase().includes(q);
-    });
-  }, [orders, search, providerFilter, role, myEmail, selectedCities, selectedDepartments]);
-
-  const pendingGuides = filtered.filter(o => !o.status2 || o.status2 === '--');
-  const withGuides = filtered.filter(o => o.status2 === 'GUIA GENERADA');
-  const visibleOrders = filtered;
-
-  const state2Opts = ['--', 'GUIA GENERADA', 'FUERA DE COBERTURA', 'CANCELADO', 'REPETIDO', 'RENDIDO'];
-
-  const updateStatus2 = async (orderId: string, status2: string) => {
-    const val = status2 === '--' ? null : status2;
-    const { error } = await supabase.from('orders').update({ status2: val, updated_at: new Date().toISOString() }).eq('id', orderId);
-    if (error) toast.error(error.message);
-    else {
-      toast.success('Estado 2 actualizado');
-      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status2: val } : o));
-      if (val === 'GUIA GENERADA') {
-        setSelectedIds(prev => {
-          const next = new Set(prev);
-          next.delete(orderId);
-          return next;
-        });
-      }
-    }
-  };
-
-  const buildGuideText = (o: any) => {
-    const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
-    const itemsText = items.map((it: any, i: number) =>
-      `${i + 1}. ${it.title || it.sku || 'Item'} x${it.qty || 1} — Gs ${nf(Number(it.sale_gs || 0) * Number(it.qty || 1))}`
-    ).join('\n');
-
-    return [
-      `GUÍA DE ENVÍO — ${o.order_number || o.id.slice(0, 8)}`,
-      `━━━━━━━━━━━━━━━━━━`,
-      `Cliente: ${o.customer_name || ''}`,
-      `Teléfono: ${o.phone || ''}`,
-      `Email: ${o.email || ''}`,
-      `Departamento: ${o.departamento || ''}`,
-      `Ciudad: ${o.city || ''}`,
-      `Dirección: ${o.street || ''} ${o.district ? '- ' + o.district : ''}`,
-      `━━━━━━━━━━━━━━━━━━`,
-      `Productos:`,
-      itemsText,
-      `━━━━━━━━━━━━━━━━━━`,
-      `Total: Gs ${nf(Number(o.total_gs || 0))}`,
-      o.obs ? `Observación: ${o.obs}` : '',
-      `━━━━━━━━━━━━━━━━━━`,
-      `Vendedor: ${o.created_by || ''}`,
-      `Proveedor: ${o.provider_emails_list || o.provider_email || '—'}`,
-    ].filter(Boolean).join('\n');
-  };
-
-  const getWhatsAppUrl = (order: any) => {
-    const randomMessage = whatsappMessages[Math.floor(Math.random() * whatsappMessages.length)];
-    const phoneNumber = order.phone?.replace(/\D/g, '');
-    const fullNumber = '595' + phoneNumber;
-    return 'https://wa.me/' + fullNumber + '?text=' + encodeURIComponent(randomMessage);
-  };
-
-  const openGuideModal = (order: any) => {
-    setCurrentOrder(order);
-    setShowGuideModal(true);
-  };
-
-  const copyGuide = () => {
-    if (currentOrder) {
-      const text = buildGuideText(currentOrder);
-      navigator.clipboard.writeText(text);
-      toast.success('Guía copiada al portapapeles');
-    }
-  };
-
-  const toggleSelect = (id: string) => {
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  };
-
-  const getSelectedOrders = () => visibleOrders.filter(o => selectedIds.has(o.id));
-
-  const bulkCopyGuides = () => {
-    const selected = getSelectedOrders();
-    if (selected.length === 0) { toast.error('Seleccioná pedidos primero'); return; }
-    const allText = selected.map(o => buildGuideText(o)).join('\n\n════════════════════\n\n');
-    navigator.clipboard.writeText(allText);
-    toast.success(`${selected.length} guías copiadas`);
-  };
-
-  const bulkMarkAsGuiaGenerada = async () => {
-    const selected = getSelectedOrders();
-    
-    if (selected.length === 0) {
-      toast.error('Seleccioná pedidos primero');
-      return;
-    }
-
-    const toastId = toast.loading(`Actualizando ${selected.length} pedido${selected.length > 1 ? 's' : ''}...`);
-    
-    try {
-      const updates = selected.map(order => 
-        supabase.from('orders').update({ 
-          status2: 'GUIA GENERADA', 
-          updated_at: new Date().toISOString() 
-        }).eq('id', order.id)
-      );
-      
-      const results = await Promise.all(updates);
-      const errors = results.filter(r => r.error);
-      
-      if (errors.length > 0) {
-        toast.error(`${errors.length} error${errors.length > 1 ? 'es' : ''} al actualizar`, { id: toastId });
-      } else {
-        toast.success(`${selected.length} pedido${selected.length > 1 ? 's' : ''} marcado${selected.length > 1 ? 's' : ''} como GUIA GENERADA`, { id: toastId });
-        
-        setOrders(prev => prev.map(o => 
-          selectedIds.has(o.id) ? { ...o, status2: 'GUIA GENERADA' } : o
-        ));
-        
-        setSelectedIds(new Set());
-      }
-    } catch (error) {
-      toast.error('Error al actualizar los pedidos', { id: toastId });
-    }
-  };
-
-  const selectAllPending = () => {
-    const allPendingIds = pendingGuides.map(o => o.id);
-    if (allPendingIds.length === 0) {
-      toast.error('No hay pedidos pendientes');
-      return;
-    }
-    setSelectedIds(new Set(allPendingIds));
-    toast.success(`${allPendingIds.length} pedido${allPendingIds.length > 1 ? 's' : ''} pendiente${allPendingIds.length > 1 ? 's' : ''} seleccionado${allPendingIds.length > 1 ? 's' : ''}`);
-  };
-
-  const clearSelection = () => {
-    if (selectedIds.size === 0) return;
-    setSelectedIds(new Set());
-    toast.success('Selección limpiada');
-  };
-
-  const downloadFile = (content: string, filename: string, mime: string) => {
-    const blob = new Blob([content], { type: mime });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
-
-  const downloadTxt = () => {
-    const selected = getSelectedOrders();
-    if (selected.length === 0) { toast.error('Seleccioná pedidos primero'); return; }
-    const content = selected.map(o => buildGuideText(o)).join('\n\n════════════════════\n\n');
-    downloadFile(content, `guias_${new Date().toISOString().slice(0, 10)}.txt`, 'text/plain');
-    toast.success(`${selected.length} guías descargadas en TXT`);
-  };
-
-  // IMPRESIÓN CON QR
-  const printWithQR = () => {
-    const selected = getSelectedOrders();
-    if (selected.length === 0) { 
-      toast.error('Seleccioná pedidos primero'); 
-      return; 
-    }
-
-    let allGuidesHtml = '';
-    
-    for (const order of selected) {
-      const items = typeof order.items_json === 'string' ? JSON.parse(order.items_json) : (order.items_json || []);
-      let itemsHtml = '';
-      for (let i = 0; i < items.length; i++) {
-        const it = items[i];
-        itemsHtml += `
-          <tr>
-            <td style="padding: 4px 0;">${i + 1}</td>
-            <td style="padding: 4px 0;">${it.title || it.sku || 'Item'}</td>
-            <td style="padding: 4px 0; text-align: center;">${it.qty || 1}</td>
-            <td style="padding: 4px 0; text-align: right;">Gs ${nf(Number(it.sale_gs || 0) * Number(it.qty || 1))}</td>
-          </tr>
-        `;
-      }
-
-      const whatsappUrl = getWhatsAppUrl(order);
-      const orderNumber = order.order_number;
-      const deliveryUrl = orderNumber ? window.location.origin + '/#/asignar-pedidos?id=' + orderNumber : '#';
-
-      allGuidesHtml += `
-        <div class="guide-page">
-          <h3 style="color: #7c5cff; margin: 0 0 10px 0;">GUÍA DE ENVÍO — ${orderNumber || order.id.slice(0, 8)}</h3>
+      if (orderId && !autoAssignProcessing) {
+        // Para DELIVERY: asignar automáticamente
+        if (role === 'DELIVERY') {
+          setAutoAssignProcessing(true);
           
-          <table style="width: 100%; font-size: 12px; margin-bottom: 12px;">
-            <tbody>
-              <tr><td style="width: 100px; padding: 2px 0; color: #666;">Cliente:</td><td style="font-weight: bold;">${order.customer_name || ''}</td></tr>
-              <tr><td style="padding: 2px 0; color: #666;">Teléfono:</td><td>${order.phone || ''}</td></tr>
-              <tr><td style="padding: 2px 0; color: #666;">Email:</td><td>${order.email || ''}</td></tr>
-              <tr><td style="padding: 2px 0; color: #666;">Departamento:</td><td>${order.departamento || ''}</td></tr>
-              <tr><td style="padding: 2px 0; color: #666;">Ciudad:</td><td>${order.city || ''}</td></tr>
-              <tr><td style="padding: 2px 0; color: #666;">Dirección:</td><td>${order.street || ''} ${order.district ? '- ' + order.district : ''}</td></tr>
-            </tbody>
-          </table>
-          
-          <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
-            <thead>
-              <tr style="background: #f0f0f0; border-bottom: 1px solid #ddd;">
-                <th style="text-align: left; padding: 6px 4px;">#</th>
-                <th style="text-align: left; padding: 6px 4px;">Producto</th>
-                <th style="text-align: center; padding: 6px 4px;">Cant.</th>
-                <th style="text-align: right; padding: 6px 4px;">Subtotal</th>
-              </tr>
-            </thead>
-            <tbody>${itemsHtml}</tbody>
-            <tfoot>
-              <tr style="border-top: 1px solid #ddd;">
-                <td colspan="3" style="text-align: right; padding: 8px 4px;"><strong>Total:</strong></td>
-                <td style="text-align: right; padding: 8px 4px;"><strong>Gs ${nf(Number(order.total_gs || 0))}</strong></td>
-              </tr>
-            </tfoot>
-          </table>
-          
-          ${order.obs ? `<div style="margin-top: 8px; font-size: 11px; color: #666;">Observación: ${order.obs}</div>` : ''}
-          
-          <div style="margin-top: 8px; font-size: 10px; color: #666; border-top: 1px solid #eee; padding-top: 8px;">
-            Vendedor: ${order.created_by || ''} | Proveedor: ${order.provider_emails_list || order.provider_email || '—'}
-          </div>
-          
-          <div style="display: flex; justify-content: center; gap: 40px; margin-top: 20px; padding-top: 15px; border-top: 2px dashed #ccc;">
-            <div style="text-align: center;">
-              <div style="font-size: 11px; font-weight: bold; color: #25D366; margin-bottom: 8px;">📱 QR CLIENTE - Enviar Ubicación</div>
-              <div id="qr-wa-print-${order.id}" class="qr-wa-print" data-url="${whatsappUrl}" style="width: 120px; height: 120px; margin: 0 auto;"></div>
-              <div style="font-size: 9px; color: #666; margin-top: 6px;">WhatsApp con ubicación exacta</div>
-            </div>
-            <div style="text-align: center;">
-              <div style="font-size: 11px; font-weight: bold; color: #F97316; margin-bottom: 8px;">🚚 QR DELIVERY - Asignar Pedido</div>
-              <div id="qr-delivery-print-${order.id}" class="qr-delivery-print" data-url="${deliveryUrl}" style="width: 120px; height: 120px; margin: 0 auto;"></div>
-              <div style="font-size: 9px; color: #666; margin-top: 6px;">Escanea para asignar</div>
-            </div>
-          </div>
-        </div>
-      `;
-    }
-
-    const html = `<!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="utf-8">
-      <title>Guías de Envío con QR</title>
-      <style>
-        @media print {
-          body { margin: 0; padding: 0; }
-          .guide-page { page-break-after: always; page-break-inside: avoid; }
-        }
-        @media screen {
-          body { margin: 0; padding: 20px; background: #f5f5f5; }
-          .guide-page { background: white; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
-        }
-        .guide-page {
-          padding: 20px;
-          font-family: Arial, sans-serif;
-          border: 1px solid #ddd;
-          max-width: 800px;
-          margin: 0 auto 20px auto;
-        }
-      </style>
-      <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
-    </head>
-    <body>
-      ${allGuidesHtml}
-      <script>
-        (function() {
-          function generateQRCodes() {
-            if (typeof QRCode === 'undefined') {
-              setTimeout(generateQRCodes, 200);
+          const autoAssignOrder = async () => {
+            const deliveryEmail = profile?.email || '';
+            
+            const { data: orderData } = await supabase
+              .from('orders')
+              .select('id, assigned_delivery')
+              .eq('order_number', orderId)
+              .single();
+            
+            if (!orderData) {
+              toast.error(`❌ Pedido ${orderId} no encontrado`);
+              window.history.replaceState({}, '', window.location.pathname);
+              setAutoAssignProcessing(false);
               return;
             }
             
-            document.querySelectorAll('.qr-wa-print').forEach(function(el) {
-              const url = el.getAttribute('data-url');
-              if (url && el.children.length === 0) {
-                new QRCode(el, { text: url, width: 120, height: 120 });
-              }
-            });
+            if (orderData.assigned_delivery && orderData.assigned_delivery !== deliveryEmail) {
+              toast.warning(`⚠️ El pedido ${orderId} ya está asignado a otro delivery`);
+              window.history.replaceState({}, '', window.location.pathname);
+              setAutoAssignProcessing(false);
+              return;
+            }
             
-            document.querySelectorAll('.qr-delivery-print').forEach(function(el) {
-              const url = el.getAttribute('data-url');
-              if (url && el.children.length === 0 && url !== '#') {
-                new QRCode(el, { text: url, width: 120, height: 120 });
-              }
-            });
-          }
+            const { error } = await supabase
+              .from('orders')
+              .update({ 
+                assigned_delivery: deliveryEmail, 
+                assigned_at: new Date().toISOString() 
+              })
+              .eq('id', orderData.id);
+            
+            if (error) {
+              toast.error('❌ Error al asignar: ' + error.message);
+            } else {
+              toast.success(`✅ Pedido ${orderId} asignado correctamente`);
+              load();
+              setTimeout(() => {
+                window.location.href = '/';
+              }, 2000);
+            }
+            
+            window.history.replaceState({}, '', window.location.pathname);
+            setAutoAssignProcessing(false);
+          };
           
-          generateQRCodes();
-        })();
-      </script>
-    </body>
-    </html>`;
+          autoAssignOrder();
+        } 
+        // Para ADMIN/PROVEEDOR: ACUMULAR IDs
+        else if (role === 'ADMIN' || role === 'PROVEEDOR') {
+          setIdsInput(prev => {
+            const currentIds = prev.split(/[,\s\n]+/).filter(i => i.trim());
+            if (!currentIds.includes(orderId)) {
+              const newValue = prev.trim() ? prev + ', ' + orderId : orderId;
+              toast.info(`📦 ID ${orderId} agregado. Total: ${currentIds.length + 1} pedido(s) cargados`);
+              return newValue;
+            } else {
+              toast.info(`📦 ID ${orderId} ya estaba en la lista`);
+              return prev;
+            }
+          });
+          
+          // Limpiar URL
+          window.history.replaceState({}, '', window.location.pathname);
+        }
+      }
+    };
+    
+    // Ejecutar al cargar y cuando cambia la URL
+    checkUrlForId();
+    
+    // Escuchar cambios en el hash (para HashRouter)
+    window.addEventListener('hashchange', checkUrlForId);
+    return () => window.removeEventListener('hashchange', checkUrlForId);
+  }, [role, profile?.email]);
 
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(html);
-      printWindow.document.close();
-      setTimeout(() => {
-        printWindow.print();
-      }, 1000);
+  useEffect(() => {
+    if (role === 'ADMIN' || role === 'PROVEEDOR') {
+      supabase.from('profiles').select('email, name').then(({ data }) => setDeliveries(data || []));
     }
-    toast.success(`${selected.length} guías con QR listas para imprimir`);
+  }, [role]);
+
+  const load = async () => {
+    let query = supabase.from('orders').select('*')
+      .gte(filterBy, dateFrom + 'T00:00:00')
+      .lte(filterBy, dateTo + 'T23:59:59')
+      .order(filterBy, { ascending: false }).limit(500);
+    
+    if (role === 'DELIVERY') {
+      query = query.or(`assigned_delivery.is.null,assigned_delivery.eq.${profile?.email}`);
+    }
+    
+    const { data } = await query;
+    setOrders(data || []);
+    setSelectAll(false);
+    setSelected(new Set());
   };
+
+  useEffect(() => { load(); }, [filterBy, dateFrom, dateTo]);
+
+  const filtered = orders.filter(o => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (o.customer_name || '').toLowerCase().includes(q) ||
+      (o.order_number || '').toLowerCase().includes(q) ||
+      (o.city || '').toLowerCase().includes(q) ||
+      (o.phone || '').includes(q);
+  });
+
+  const toggleSelect = (id: string) => {
+    const s = new Set(selected);
+    s.has(id) ? s.delete(id) : s.add(id);
+    setSelected(s);
+    setSelectAll(s.size === filtered.length && filtered.length > 0);
+  };
+
+  const handleSelectAll = () => {
+    if (selectAll) {
+      setSelected(new Set());
+      setSelectAll(false);
+    } else {
+      const allIds = filtered.map(o => o.id);
+      setSelected(new Set(allIds));
+      setSelectAll(true);
+    }
+  };
+
+  const assignSelected = async () => {
+    if (selected.size === 0) {
+      toast.error('Seleccioná al menos un pedido');
+      return;
+    }
+    
+    let deliveryEmail = '';
+    
+    if (role === 'DELIVERY') {
+      deliveryEmail = profile?.email || '';
+    } else if ((role === 'ADMIN' || role === 'PROVEEDOR') && assignDelivery) {
+      deliveryEmail = assignDelivery;
+    }
+    
+    if (!deliveryEmail) {
+      toast.error('Seleccioná un delivery primero');
+      return;
+    }
+
+    const loadingToast = toast.loading(`Asignando ${selected.size} pedido(s)...`);
+    
+    let successCount = 0;
+    let errorCount = 0;
+    let alreadyAssignedCount = 0;
+
+    for (const id of selected) {
+      const { data: orderData } = await supabase
+        .from('orders')
+        .select('assigned_delivery')
+        .eq('id', id)
+        .single();
+      
+      if (orderData?.assigned_delivery && orderData.assigned_delivery !== deliveryEmail && role === 'DELIVERY') {
+        alreadyAssignedCount++;
+        continue;
+      }
+      
+      const { error } = await supabase
+        .from('orders')
+        .update({ 
+          assigned_delivery: deliveryEmail, 
+          assigned_at: new Date().toISOString() 
+        })
+        .eq('id', id);
+      
+      if (error) {
+        errorCount++;
+        console.error(`Error asignando pedido ${id}:`, error);
+      } else {
+        successCount++;
+      }
+    }
+    
+    toast.dismiss(loadingToast);
+    
+    if (successCount > 0) {
+      toast.success(`✅ ${successCount} pedido(s) asignado(s) a ${role === 'DELIVERY' ? 'vos' : deliveryEmail}`);
+    }
+    if (alreadyAssignedCount > 0) {
+      toast.warning(`⚠️ ${alreadyAssignedCount} pedido(s) ya estaban asignados a otro delivery`);
+    }
+    if (errorCount > 0) {
+      toast.error(`❌ Error en ${errorCount} pedido(s)`);
+    }
+    
+    setSelected(new Set());
+    setSelectAll(false);
+    load();
+  };
+
+  const assignByIds = async () => {
+    let deliveryEmail = '';
+    
+    if (role === 'DELIVERY') {
+      deliveryEmail = profile?.email || '';
+    } else if ((role === 'ADMIN' || role === 'PROVEEDOR') && assignDelivery) {
+      deliveryEmail = assignDelivery;
+    }
+    
+    if (!deliveryEmail) {
+      toast.error('Seleccioná un delivery primero');
+      return;
+    }
+    
+    const ids = idsInput.split(/[,\s\n]+/).map(s => s.trim().toUpperCase()).filter(Boolean);
+    if (ids.length === 0) { 
+      toast.error('Ingresá al menos un ID'); 
+      return; 
+    }
+    
+    if (ids.length > 35) {
+      toast.error('Máximo 35 IDs por carga');
+      return;
+    }
+
+    const loadingToast = toast.loading(`Procesando ${ids.length} ID(s)...`);
+    let count = 0;
+    let notFound = 0;
+    let alreadyAssigned = 0;
+
+    for (const id of ids) {
+      const { data } = await supabase
+        .from('orders')
+        .select('id, assigned_delivery')
+        .eq('order_number', id)
+        .limit(1);
+      
+      if (data && data[0]) {
+        if (data[0].assigned_delivery && data[0].assigned_delivery !== deliveryEmail && role === 'DELIVERY') {
+          alreadyAssigned++;
+          continue;
+        }
+        
+        const { error } = await supabase
+          .from('orders')
+          .update({ 
+            assigned_delivery: deliveryEmail, 
+            assigned_at: new Date().toISOString() 
+          })
+          .eq('id', data[0].id);
+        
+        if (!error) {
+          count++;
+        }
+      } else {
+        notFound++;
+      }
+    }
+    
+    toast.dismiss(loadingToast);
+    
+    if (count > 0) {
+      toast.success(`✅ ${count} pedido(s) asignado(s) a ${role === 'DELIVERY' ? 'vos' : deliveryEmail}`);
+    }
+    if (alreadyAssigned > 0) {
+      toast.warning(`⚠️ ${alreadyAssigned} pedido(s) ya estaban asignados a otro delivery`);
+    }
+    if (notFound > 0) {
+      toast.warning(`❓ ${notFound} ID(s) no encontrados`);
+    }
+    
+    setIdsInput('');
+    load();
+  };
+
+  const assignSingle = async (orderId: string, deliveryEmail: string) => {
+    if (!deliveryEmail) {
+      toast.error('Seleccioná un delivery');
+      return;
+    }
+    
+    const { error } = await supabase
+      .from('orders')
+      .update({ 
+        assigned_delivery: deliveryEmail, 
+        assigned_at: new Date().toISOString() 
+      })
+      .eq('id', orderId);
+    
+    if (error) {
+      toast.error('Error al asignar delivery');
+      console.error(error);
+    } else {
+      toast.success('Delivery asignado correctamente');
+      load();
+    }
+  };
+
+  const clearSelection = () => {
+    setSelected(new Set());
+    setSelectAll(false);
+    toast.info('Selección limpiada');
+  };
+
+  const clearIdsInput = () => {
+    setIdsInput('');
+    toast.info('Lista de IDs limpiada');
+  };
+
+  const idsCount = idsInput.split(/[,\s\n]+/).filter(i => i.trim()).length;
 
   return (
     <div className="app-card">
-      <h3 className="text-lg font-extrabold mb-3">Pedidos con guías</h3>
+      <h3 className="text-lg font-extrabold mb-3">Asignar Pedidos</h3>
 
-      {/* KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-3">
-        <div className="kpi-card">
-          <div className="text-xs text-muted-foreground mb-1">Guías pendientes</div>
-          <div className="text-[22px] font-extrabold">{pendingGuides.length}</div>
+      {autoAssignProcessing && (
+        <div className="mb-3 p-2 bg-blue-100 text-blue-800 rounded-lg text-sm text-center">
+          ⏳ Asignando pedido automáticamente...
         </div>
-        <div className="kpi-card">
-          <div className="text-xs text-muted-foreground mb-1">Con guía generada</div>
-          <div className="text-[22px] font-extrabold">{withGuides.length}</div>
-        </div>
-        <div className="kpi-card">
-          <div className="text-xs text-muted-foreground mb-1">Total en rango</div>
-          <div className="text-[22px] font-extrabold">{filtered.length}</div>
-        </div>
-        <div className="kpi-card">
-          <div className="text-xs text-muted-foreground mb-1">Departamentos</div>
-          <div className="text-[22px] font-extrabold">{selectedDepartments.size || 'Todos'}</div>
-        </div>
-        <div className="kpi-card">
-          <div className="text-xs text-muted-foreground mb-1">Ciudades</div>
-          <div className="text-[22px] font-extrabold">{selectedCities.size || 'Todas'}</div>
-        </div>
-        <div className="kpi-card">
-          <div className="text-xs text-muted-foreground mb-1">Seleccionados</div>
-          <div className="text-[22px] font-extrabold">{selectedIds.size}</div>
-        </div>
-      </div>
+      )}
 
-      {/* Filtros */}
       <div className="flex flex-wrap gap-2 mb-3">
         <label className="app-label !mt-0">Desde</label>
         <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
         <label className="app-label !mt-0">Hasta</label>
         <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
         
-        <label className="app-label !mt-0">Estado</label>
-        <select className="app-input !w-auto min-w-[150px]" value={status2Filter} onChange={e => setStatus2Filter(e.target.value)}>
-          <option value="PENDIENTES">📋 Pendientes</option>
-          <option value="CON_GUIA">✅ Con guía generada</option>
-          <option value="TODOS">📦 Todos</option>
+        <select className="app-input !w-auto" value={filterBy} onChange={e => setFilterBy(e.target.value as any)}>
+          <option value="created_at">📅 Fecha de venta</option>
+          <option value="assigned_at">🚚 Fecha de asignación</option>
         </select>
         
-        {role !== 'PROVEEDOR' && (
-          <>
-            <label className="app-label !mt-0">Proveedor</label>
-            <select className="app-input !w-auto min-w-[200px]" value={providerFilter} onChange={e => setProviderFilter(e.target.value)}>
-              <option value="">Todos los proveedores</option>
-              {allProviders.map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
-          </>
-        )}
-      </div>
-
-      {/* Filtros segunda línea */}
-      <div className="flex flex-wrap gap-2 mb-3">
-        <input className="app-input flex-1 min-w-[200px]" placeholder="🔎 Buscar por cliente, teléfono, ID, ciudad o departamento"
+        <input className="app-input flex-1 min-w-[200px]" placeholder="🔎 Buscar cliente, ID, ciudad, teléfono..."
           value={search} onChange={e => setSearch(e.target.value)} />
-        
-        <div className="relative">
-          <button className="nav-btn" type="button" onClick={() => setShowDeptDropdown(!showDeptDropdown)}
-            style={{ background: selectedDepartments.size > 0 ? '#3b82f6' : undefined, color: selectedDepartments.size > 0 ? 'white' : undefined }}>
-            🗺️ Departamentos {selectedDepartments.size > 0 ? `(${selectedDepartments.size})` : ''}
-          </button>
-          {showDeptDropdown && (
-            <div className="absolute top-full mt-1 left-0 z-50 bg-card border border-border rounded-xl shadow-xl w-80 max-h-96 overflow-hidden flex flex-col">
-              <div className="p-2 border-b border-border">
-                <input type="text" className="app-input w-full text-sm" placeholder="🔎 Buscar departamento..."
-                  value={deptSearch} onChange={e => setDeptSearch(e.target.value)} />
-              </div>
-              <div className="p-2 border-b border-border flex gap-2">
-                <button className="text-xs nav-btn !py-1" onClick={selectAllDepartments}>
-                  {selectedDepartments.size === allDepartments.length ? 'Deseleccionar todos' : 'Seleccionar todos'}
-                </button>
-                <button className="text-xs nav-btn !py-1" onClick={() => setSelectedDepartments(new Set())}>Limpiar</button>
-              </div>
-              <div className="overflow-auto max-h-64">
-                {filteredDepartments.map(dept => (
-                  <label key={dept} className="flex items-center gap-2 px-3 py-2 hover:bg-secondary cursor-pointer text-sm">
-                    <input type="checkbox" checked={selectedDepartments.has(dept)} onChange={() => toggleDepartment(dept)} />
-                    <span>{dept}</span>
-                    <span className="text-xs text-muted-foreground ml-auto">{orders.filter(o => o.departamento === dept).length}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-        
-        <div className="relative">
-          <button className="nav-btn" type="button" onClick={() => setShowCityDropdown(!showCityDropdown)}
-            style={{ background: selectedCities.size > 0 ? '#3b82f6' : undefined, color: selectedCities.size > 0 ? 'white' : undefined }}>
-            🏙️ Ciudades {selectedCities.size > 0 ? `(${selectedCities.size})` : ''}
-          </button>
-          {showCityDropdown && (
-            <div className="absolute top-full mt-1 left-0 z-50 bg-card border border-border rounded-xl shadow-xl w-80 max-h-96 overflow-hidden flex flex-col">
-              <div className="p-2 border-b border-border">
-                <input type="text" className="app-input w-full text-sm" placeholder="🔎 Buscar ciudad..."
-                  value={citySearch} onChange={e => setCitySearch(e.target.value)} />
-              </div>
-              <div className="p-2 border-b border-border flex gap-2">
-                <button className="text-xs nav-btn !py-1" onClick={selectAllCities}>
-                  {selectedCities.size === allCities.length ? 'Deseleccionar todas' : 'Seleccionar todas'}
-                </button>
-                <button className="text-xs nav-btn !py-1" onClick={() => setSelectedCities(new Set())}>Limpiar</button>
-              </div>
-              <div className="overflow-auto max-h-64">
-                {filteredCities.map(city => (
-                  <label key={city} className="flex items-center gap-2 px-3 py-2 hover:bg-secondary cursor-pointer text-sm">
-                    <input type="checkbox" checked={selectedCities.has(city)} onChange={() => toggleCity(city)} />
-                    <span>{city}</span>
-                    <span className="text-xs text-muted-foreground ml-auto">{orders.filter(o => o.city === city).length}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-        
-        <button className="nav-btn active" onClick={load} disabled={loading}>
-          {loading ? 'Cargando...' : 'Filtrar'}
-        </button>
+        <button className="nav-btn active" onClick={load}>Filtrar</button>
       </div>
 
-      {/* Acciones masivas */}
-      {selectedIds.size > 0 && (
-        <div className="flex flex-wrap gap-2 mb-3 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
-          <div className="text-sm font-bold text-green-400 mr-2 self-center">
-            ✅ {selectedIds.size} seleccionado{selectedIds.size > 1 ? 's' : ''}:
-          </div>
-          <button className="nav-btn" style={{ background: '#10b981', color: 'white' }} onClick={bulkMarkAsGuiaGenerada}>
-            🚀 Marcar como GUIA GENERADA
+      {(role === 'ADMIN' || role === 'PROVEEDOR') && (
+        <div className="flex flex-wrap gap-2 mb-3 items-center">
+          <select className="app-input !w-auto min-w-[200px]" value={assignDelivery} onChange={e => setAssignDelivery(e.target.value)}>
+            <option value="">Seleccionar delivery...</option>
+            {deliveries.map(d => <option key={d.email} value={d.email}>{d.name || d.email}</option>)}
+          </select>
+          <button 
+            className="nav-btn active" 
+            onClick={assignSelected} 
+            disabled={selected.size === 0 || !assignDelivery}
+          >
+            📦 Asignar seleccionados ({selected.size})
           </button>
-          <button className="nav-btn" onClick={bulkCopyGuides}>📋 Copiar guías</button>
-          <button className="nav-btn active" onClick={downloadTxt}>📥 Descargar TXT</button>
-          <button className="nav-btn active" onClick={printWithQR} style={{ background: '#8b5cf6', color: 'white' }}>
-            🖨️ Imprimir con QR
+          {selected.size > 0 && (
+            <button className="nav-btn !bg-gray-500" onClick={clearSelection}>
+              ✖ Limpiar
+            </button>
+          )}
+        </div>
+      )}
+
+      {role === 'DELIVERY' && selected.size > 0 && (
+        <div className="flex flex-wrap gap-2 mb-3 items-center">
+          <button 
+            className="nav-btn active bg-green-600 hover:bg-green-700" 
+            onClick={assignSelected}
+          >
+            ✅ Asignarme estos {selected.size} pedido(s)
           </button>
-          <button className="nav-btn" onClick={clearSelection} style={{ background: '#ef4444', color: 'white' }}>
-            ✖️ Limpiar selección
+          <button className="nav-btn !bg-gray-500" onClick={clearSelection}>
+            ✖ Limpiar selección
           </button>
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2 mb-3">
-        <button className="nav-btn" onClick={selectAllPending} style={{ background: '#3b82f6', color: 'white' }}>
-          ☑️ Seleccionar todos pendientes ({pendingGuides.length})
-        </button>
+      <div className="app-card !p-3 mb-3">
+        <div className="flex justify-between items-center mb-2">
+          <b className="text-sm">Asignar por IDs</b>
+          <div className="flex gap-2">
+            <span className="chip text-[10px] bg-blue-100 text-blue-800">
+              📦 {idsCount} ID(s) cargados
+            </span>
+            {idsCount > 0 && (
+              <button 
+                className="text-xs text-red-500 hover:text-red-700"
+                onClick={clearIdsInput}
+              >
+                Limpiar todo
+              </button>
+            )}
+          </div>
+        </div>
+        
+        <p className="text-xs text-muted-foreground mb-2">
+          🔄 Escanea los QR de los pedidos y se irán acumulando aquí automáticamente
+        </p>
+        
+        {(role === 'ADMIN' || role === 'PROVEEDOR') && (
+          <select className="app-input !w-auto min-w-[200px] mb-2" value={assignDelivery} onChange={e => setAssignDelivery(e.target.value)}>
+            <option value="">Seleccionar delivery...</option>
+            {deliveries.map(d => <option key={d.email} value={d.email}>{d.name || d.email}</option>)}
+          </select>
+        )}
+        
+        {role === 'DELIVERY' && (
+          <div className="mb-2 p-2 bg-blue-50 rounded text-sm text-blue-700">
+            📍 Los pedidos se asignarán automáticamente a tu usuario: <strong>{profile?.email}</strong>
+          </div>
+        )}
+        
+        <textarea 
+          className="app-input mb-2 font-mono text-sm" 
+          rows={4} 
+          placeholder="Los IDs aparecerán aquí automáticamente al escanear los QR..."
+          value={idsInput} 
+          onChange={e => setIdsInput(e.target.value)} 
+        />
+        
+        <div className="flex gap-2">
+          <button 
+            className="nav-btn active text-sm flex-1" 
+            onClick={assignByIds}
+            disabled={((role !== 'DELIVERY') && !assignDelivery) || idsInput.trim() === ''}
+            style={{ background: '#10b981', color: 'white' }}
+          >
+            🚀 Asignar {idsCount} ID(s) {role === 'DELIVERY' ? 'a mí' : 'masivamente'}
+          </button>
+        </div>
       </div>
 
-      {/* Tabla */}
       <div className="overflow-auto">
-        <table className="app-table min-w-[1200px]">
+        <table className="app-table">
           <thead>
             <tr>
-              <th className="w-[40px] text-center">
-                <input type="checkbox" checked={selectedIds.size === visibleOrders.length && visibleOrders.length > 0}
-                  onChange={() => selectedIds.size === visibleOrders.length ? setSelectedIds(new Set()) : setSelectedIds(new Set(visibleOrders.map(o => o.id)))} />
-              </th>
-              <th>Fecha</th>
+              {(role === 'ADMIN' || role === 'PROVEEDOR' || role === 'DELIVERY') && (
+                <th style={{ width: '40px' }}>
+                  <input 
+                    type="checkbox" 
+                    checked={selectAll && filtered.length > 0}
+                    onChange={handleSelectAll}
+                    className="accent-brand"
+                    disabled={filtered.length === 0}
+                  />
+                </th>
+              )}
+              <th>{filterBy === 'created_at' ? 'Fecha venta' : 'Fecha asignación'}</th>
               <th>ID</th>
-              <th>Departamento</th>
               <th>Ciudad</th>
               <th>Cliente</th>
               <th>Teléfono</th>
-              <th>Vendedor</th>
-              <th>Proveedor</th>
-              <th>Estado 2</th>
-              <th>Guía</th>
+              <th>Estado</th>
+              <th>Asignado a</th>
+              {(role === 'ADMIN' || role === 'PROVEEDOR') && <th>Acción</th>}
             </tr>
           </thead>
           <tbody>
-            {visibleOrders.map(o => (
-              <tr key={o.id}>
-                <td className="text-center">
-                  <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
+            {filtered.map(o => (
+              <tr key={o.id} className={selected.has(o.id) ? 'bg-brand/10' : ''}>
+                {(role === 'ADMIN' || role === 'PROVEEDOR' || role === 'DELIVERY') && (
+                  <td>
+                    <input 
+                      type="checkbox" 
+                      checked={selected.has(o.id)} 
+                      onChange={() => toggleSelect(o.id)} 
+                      className="accent-brand"
+                      disabled={role === 'DELIVERY' && o.assigned_delivery && o.assigned_delivery !== profile?.email}
+                    />
+                  </td>
+                )}
+                <td className="text-xs whitespace-nowrap">
+                  {filterBy === 'created_at' 
+                    ? new Date(o.created_at).toLocaleDateString('es-PY')
+                    : o.assigned_at 
+                      ? new Date(o.assigned_at).toLocaleDateString('es-PY')
+                      : '—'}
                 </td>
-                <td className="text-xs whitespace-nowrap">{new Date(o.created_at).toLocaleDateString('es-PY')}</td>
                 <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
-                <td className="text-xs">{o.departamento || '—'}</td>
                 <td className="text-xs">{o.city || '—'}</td>
-                <td className="text-xs">{o.customer_name}</td>
-                <td className="text-xs">{o.phone}</td>
-                <td className="text-xs">{o.created_by}</td>
-                <td className="text-xs">{o.provider_emails_list || o.provider_email || '—'}</td>
-                <td className="text-xs">
-                  <select className="app-input w-auto py-1 px-2 text-xs" value={o.status2 || '--'}
-                    onChange={e => updateStatus2(o.id, e.target.value)}>
-                    {state2Opts.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
+                <td className="text-xs">{o.customer_name || '—'}</td>
+                <td className="text-xs">{o.phone || '—'}</td>
+                <td>
+                  <span className={`badge-status ${o.status === 'ENTREGADO' ? 'badge-entregado' : o.status === 'CANCELADO' ? 'badge-cancelado' : 'badge-pendiente'}`}>
+                    {o.status || 'PENDIENTE'}
+                  </span>
                 </td>
                 <td className="text-xs">
-                  <div className="flex gap-1">
-                    <button className="nav-btn px-2 py-1 text-[10px]" onClick={() => openGuideModal(o)} title="Ver guía con QR">📄</button>
-                    <button className="nav-btn px-2 py-1 text-[10px]" onClick={() => {
-                      const text = buildGuideText(o);
-                      navigator.clipboard.writeText(text);
-                      toast.success('Copiada');
-                    }} title="Copiar guía">📋</button>
-                  </div>
+                  {o.assigned_delivery === profile?.email ? (
+                    <span className="text-green-600 font-bold">✓ Vos</span>
+                  ) : (
+                    <span className={o.assigned_delivery ? 'text-orange-600' : 'text-gray-400'}>
+                      {o.assigned_delivery || '—'}
+                    </span>
+                  )}
                 </td>
+                {(role === 'ADMIN' || role === 'PROVEEDOR') && (
+                  <td>
+                    <select 
+                      className="app-input !w-auto !py-1 !px-2 text-xs" 
+                      value={o.assigned_delivery || ''}
+                      onChange={e => assignSingle(o.id, e.target.value)}
+                    >
+                      <option value="">Sin asignar</option>
+                      {deliveries.map(d => <option key={d.email} value={d.email}>{d.name || d.email}</option>)}
+                    </select>
+                  </td>
+                )}
               </tr>
             ))}
-            {visibleOrders.length === 0 && (
+            {filtered.length === 0 && (
               <tr>
-                <td colSpan={11} className="text-center text-muted-foreground py-8">Sin pedidos en el rango seleccionado</td>
+                <td colSpan={role === 'ADMIN' || role === 'PROVEEDOR' ? 9 : 8} className="text-center text-muted-foreground py-8">
+                  {role === 'DELIVERY' ? 'No hay pedidos disponibles para asignarte' : 'Sin pedidos en este rango de fechas'}
+                </td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
-
-      {/* MODAL DE GUÍA CON QR */}
-      {showGuideModal && currentOrder && (
-        <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-4" onClick={() => setShowGuideModal(false)}>
-          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
-            <h4 className="text-lg font-extrabold mb-3">📦 Guía de Envío</h4>
-            
-            {/* Información del pedido */}
-            <div className="space-y-2 text-sm">
-              <p><strong>Pedido:</strong> {currentOrder.order_number || currentOrder.id.slice(0, 8)}</p>
-              <p><strong>Cliente:</strong> {currentOrder.customer_name || ''}</p>
-              <p><strong>Teléfono:</strong> {currentOrder.phone || ''}</p>
-              <p><strong>Email:</strong> {currentOrder.email || ''}</p>
-              <p><strong>Departamento:</strong> {currentOrder.departamento || ''}</p>
-              <p><strong>Ciudad:</strong> {currentOrder.city || ''}</p>
-              <p><strong>Dirección:</strong> {currentOrder.street || ''} {currentOrder.district ? '- ' + currentOrder.district : ''}</p>
-              
-              <div className="border-t border-border my-3"></div>
-              
-              <p><strong>Productos:</strong></p>
-              <div className="pl-4">
-                {(() => {
-                  const items = typeof currentOrder.items_json === 'string' ? JSON.parse(currentOrder.items_json) : (currentOrder.items_json || []);
-                  return items.map((it: any, i: number) => (
-                    <p key={i}>{i + 1}. {it.title || it.sku || 'Item'} x{it.qty || 1} — Gs {nf(Number(it.sale_gs || 0) * Number(it.qty || 1))}</p>
-                  ));
-                })()}
-              </div>
-              
-              <p><strong>Total:</strong> Gs {nf(Number(currentOrder.total_gs || 0))}</p>
-              
-              {currentOrder.obs && <p><strong>Observación:</strong> {currentOrder.obs}</p>}
-              
-              <div className="border-t border-border my-3"></div>
-              
-              <p><strong>Vendedor:</strong> {currentOrder.created_by || ''}</p>
-              <p><strong>Proveedor:</strong> {currentOrder.provider_emails_list || currentOrder.provider_email || '—'}</p>
+      
+      {role === 'DELIVERY' && selected.size > 0 && (
+        <div className="mt-3 p-3 bg-green-50 rounded-lg border border-green-200">
+          <div className="flex justify-between items-center">
+            <div>
+              <span className="text-sm font-bold text-green-800">✅ {selected.size} pedido(s) seleccionado(s)</span>
+              <p className="text-xs text-green-600 mt-1">Se asignarán automáticamente a tu cuenta</p>
             </div>
-            
-            {/* QR CODES */}
-            <div className="border-t border-border my-4 pt-4">
-              <p className="font-bold text-center mb-3">Códigos QR</p>
-              <div className="flex justify-center gap-8">
-                <div className="text-center">
-                  <div className="text-sm font-semibold text-green-600 mb-2">📱 QR Cliente</div>
-                  <div ref={qrWaRef} style={{ width: 120, height: 120, margin: '0 auto' }}></div>
-                  <div className="text-xs text-gray-500 mt-2">WhatsApp - Enviar ubicación exacta</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-sm font-semibold text-orange-600 mb-2">🚚 QR Delivery</div>
-                  <div ref={qrDeliveryRef} style={{ width: 120, height: 120, margin: '0 auto' }}></div>
-                  <div className="text-xs text-gray-500 mt-2">Escanea para asignar pedido</div>
-                </div>
-              </div>
-            </div>
-            
-            <div className="flex gap-2 justify-end mt-4">
-              <button className="nav-btn" onClick={() => setShowGuideModal(false)}>Cerrar</button>
-              <button className="nav-btn active" onClick={copyGuide}>📋 Copiar texto</button>
-              <button className="nav-btn active" onClick={() => {
-                const text = buildGuideText(currentOrder);
-                downloadFile(text, `guia_${currentOrder.order_number || currentOrder.id.slice(0, 8)}.txt`, 'text/plain');
-              }}>📥 TXT</button>
-            </div>
+            <button 
+              className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-green-700"
+              onClick={assignSelected}
+            >
+              Asignarme todo
+            </button>
           </div>
         </div>
       )}
