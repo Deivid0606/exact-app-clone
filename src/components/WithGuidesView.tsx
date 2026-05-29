@@ -88,8 +88,13 @@ export default function WithGuidesView() {
         correctLevel: window.QRCode.CorrectLevel.L
       });
       
-      // Generar QR de Delivery - SOLO EL NÚMERO DE PEDIDO con HashRouter
-      const orderNumber = currentOrder.order_number || currentOrder.id.slice(0, 8);
+      // Generar QR de Delivery - USA SOLO order_number
+      const orderNumber = currentOrder.order_number;
+      if (!orderNumber) {
+        console.error('No hay order_number para este pedido:', currentOrder);
+        toast.error('Este pedido no tiene número de orden');
+        return;
+      }
       const deliveryUrl = window.location.origin + '/#/asignar-pedidos?id=' + orderNumber;
       console.log('QR Delivery URL:', deliveryUrl);
       new window.QRCode(qrDeliveryRef.current, {
@@ -436,7 +441,11 @@ export default function WithGuidesView() {
       }
 
       const whatsappUrl = getWhatsAppUrl(order);
-      const orderNumber = order.order_number || order.id.slice(0, 8);
+      const orderNumber = order.order_number;
+      if (!orderNumber) {
+        console.error('No hay order_number para el pedido:', order);
+        continue;
+      }
       const deliveryUrl = window.location.origin + '/#/asignar-pedidos?id=' + orderNumber;
 
       allGuidesHtml += `
@@ -762,7 +771,7 @@ export default function WithGuidesView() {
                     }} title="Copiar guía">📋</button>
                   </div>
                 </td>
-              </tr>
+              <tr>
             ))}
             {visibleOrders.length === 0 && (
               <tr>
