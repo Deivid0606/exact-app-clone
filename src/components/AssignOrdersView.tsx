@@ -45,7 +45,6 @@ export default function AssignOrdersView() {
       setAutoAssignProcessing(true);
       
       const selectOrder = async () => {
-        // Buscar el pedido por order_number
         const { data: orderData, error: findError } = await supabase
           .from('orders')
           .select('id, assigned_delivery, order_number')
@@ -98,7 +97,6 @@ export default function AssignOrdersView() {
         } 
         // Para ADMIN/PROVEEDOR: SELECCIONAR automáticamente el pedido
         else if (role === 'ADMIN' || role === 'PROVEEDOR') {
-          // Seleccionar el pedido (agregar a la selección)
           setSelected(prev => {
             const next = new Set(prev);
             if (next.has(orderData.id)) {
@@ -111,7 +109,6 @@ export default function AssignOrdersView() {
             return next;
           });
           
-          // También agregar al textarea de IDs
           setIdsInput(prev => {
             const currentIds = prev.split(/[,\s\n]+/).filter(i => i.trim());
             if (!currentIds.includes(orderIdNumber)) {
@@ -163,7 +160,11 @@ export default function AssignOrdersView() {
   const toggleSelect = (id: string) => {
     setSelected(prev => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
       return next;
     });
   };
@@ -449,7 +450,7 @@ export default function AssignOrdersView() {
             </tr>
           </thead>
           <tbody>
-            {filtered.map(o => (
+            {filtered.map((o) => (
               <tr key={o.id} className={selected.has(o.id) ? 'bg-green-100' : ''}>
                 {(role === 'ADMIN' || role === 'PROVEEDOR' || role === 'DELIVERY') && (
                   <td className="text-center">
@@ -492,14 +493,16 @@ export default function AssignOrdersView() {
                     <select 
                       className="app-input !w-auto !py-1 !px-2 text-xs" 
                       value={o.assigned_delivery || ''}
-                      onChange={e => assignSingle(o.id, e.target.value)}
+                      onChange={(e) => assignSingle(o.id, e.target.value)}
                     >
                       <option value="">Sin asignar</option>
-                      {deliveries.map(d => <option key={d.email} value={d.email}>{d.name || d.email}</option>)}
+                      {deliveries.map((d) => (
+                        <option key={d.email} value={d.email}>{d.name || d.email}</option>
+                      ))}
                     </select>
                   </td>
                 )}
-              <tr>
+              </tr>
             ))}
             {filtered.length === 0 && (
               <tr>
