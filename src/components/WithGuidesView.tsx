@@ -88,23 +88,22 @@ export default function WithGuidesView() {
         correctLevel: window.QRCode.CorrectLevel.L
       });
       
-      // Generar QR de Delivery - USA SOLO order_number
+      // Generar QR de Delivery
       const orderNumber = currentOrder.order_number;
-      if (!orderNumber) {
-        console.error('No hay order_number para este pedido:', currentOrder);
+      if (orderNumber) {
+        const deliveryUrl = window.location.origin + '/#/asignar-pedidos?id=' + orderNumber;
+        console.log('QR Delivery URL:', deliveryUrl);
+        new window.QRCode(qrDeliveryRef.current, {
+          text: deliveryUrl,
+          width: 120,
+          height: 120,
+          colorDark: '#000000',
+          colorLight: '#ffffff',
+          correctLevel: window.QRCode.CorrectLevel.L
+        });
+      } else {
         toast.error('Este pedido no tiene número de orden');
-        return;
       }
-      const deliveryUrl = window.location.origin + '/#/asignar-pedidos?id=' + orderNumber;
-      console.log('QR Delivery URL:', deliveryUrl);
-      new window.QRCode(qrDeliveryRef.current, {
-        text: deliveryUrl,
-        width: 120,
-        height: 120,
-        colorDark: '#000000',
-        colorLight: '#ffffff',
-        correctLevel: window.QRCode.CorrectLevel.L
-      });
     }
   }, [showGuideModal, currentOrder, qrLoaded, profile]);
 
@@ -442,23 +441,21 @@ export default function WithGuidesView() {
 
       const whatsappUrl = getWhatsAppUrl(order);
       const orderNumber = order.order_number;
-      if (!orderNumber) {
-        console.error('No hay order_number para el pedido:', order);
-        continue;
-      }
-      const deliveryUrl = window.location.origin + '/#/asignar-pedidos?id=' + orderNumber;
+      const deliveryUrl = orderNumber ? window.location.origin + '/#/asignar-pedidos?id=' + orderNumber : '#';
 
       allGuidesHtml += `
         <div class="guide-page">
-          <h3 style="color: #7c5cff; margin: 0 0 10px 0;">GUÍA DE ENVÍO — ${orderNumber}</h3>
+          <h3 style="color: #7c5cff; margin: 0 0 10px 0;">GUÍA DE ENVÍO — ${orderNumber || order.id.slice(0, 8)}</h3>
           
           <table style="width: 100%; font-size: 12px; margin-bottom: 12px;">
-            <tr><td style="width: 100px; padding: 2px 0; color: #666;">Cliente:</td><td style="font-weight: bold;">${order.customer_name || ''}</td></tr>
-            <tr><td style="padding: 2px 0; color: #666;">Teléfono:</td><td>${order.phone || ''}</td></tr>
-            <tr><td style="padding: 2px 0; color: #666;">Email:</td><td>${order.email || ''}</td></tr>
-            <tr><td style="padding: 2px 0; color: #666;">Departamento:</td><td>${order.departamento || ''}</td></tr>
-            <tr><td style="padding: 2px 0; color: #666;">Ciudad:</td><td>${order.city || ''}</td></tr>
-            <tr><td style="padding: 2px 0; color: #666;">Dirección:</td><td>${order.street || ''} ${order.district ? '- ' + order.district : ''}</td></tr>
+            <tbody>
+              <tr><td style="width: 100px; padding: 2px 0; color: #666;">Cliente:</td><td style="font-weight: bold;">${order.customer_name || ''}</td></tr>
+              <tr><td style="padding: 2px 0; color: #666;">Teléfono:</td><td>${order.phone || ''}</td></tr>
+              <tr><td style="padding: 2px 0; color: #666;">Email:</td><td>${order.email || ''}</td></tr>
+              <tr><td style="padding: 2px 0; color: #666;">Departamento:</td><td>${order.departamento || ''}</td></tr>
+              <tr><td style="padding: 2px 0; color: #666;">Ciudad:</td><td>${order.city || ''}</td></tr>
+              <tr><td style="padding: 2px 0; color: #666;">Dirección:</td><td>${order.street || ''} ${order.district ? '- ' + order.district : ''}</td></tr>
+            </tbody>
           </table>
           
           <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
@@ -544,7 +541,7 @@ export default function WithGuidesView() {
             
             document.querySelectorAll('.qr-delivery-print').forEach(function(el) {
               const url = el.getAttribute('data-url');
-              if (url && el.children.length === 0) {
+              if (url && el.children.length === 0 && url !== '#') {
                 new QRCode(el, { text: url, width: 120, height: 120 });
               }
             });
@@ -725,7 +722,7 @@ export default function WithGuidesView() {
         <table className="app-table min-w-[1200px]">
           <thead>
             <tr>
-              <th className="!w-[40px] text-center">
+              <th className="w-[40px] text-center">
                 <input type="checkbox" checked={selectedIds.size === visibleOrders.length && visibleOrders.length > 0}
                   onChange={() => selectedIds.size === visibleOrders.length ? setSelectedIds(new Set()) : setSelectedIds(new Set(visibleOrders.map(o => o.id)))} />
               </th>
@@ -755,23 +752,23 @@ export default function WithGuidesView() {
                 <td className="text-xs">{o.phone}</td>
                 <td className="text-xs">{o.created_by}</td>
                 <td className="text-xs">{o.provider_emails_list || o.provider_email || '—'}</td>
-                <td>
-                  <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.status2 || '--'}
+                <td className="text-xs">
+                  <select className="app-input w-auto py-1 px-2 text-xs" value={o.status2 || '--'}
                     onChange={e => updateStatus2(o.id, e.target.value)}>
                     {state2Opts.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
                 </td>
-                <td>
+                <td className="text-xs">
                   <div className="flex gap-1">
-                    <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={() => openGuideModal(o)} title="Ver guía con QR">📄</button>
-                    <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={() => {
+                    <button className="nav-btn px-2 py-1 text-[10px]" onClick={() => openGuideModal(o)} title="Ver guía con QR">📄</button>
+                    <button className="nav-btn px-2 py-1 text-[10px]" onClick={() => {
                       const text = buildGuideText(o);
                       navigator.clipboard.writeText(text);
                       toast.success('Copiada');
                     }} title="Copiar guía">📋</button>
                   </div>
                 </td>
-              <tr>
+              </tr>
             ))}
             {visibleOrders.length === 0 && (
               <tr>
