@@ -88,9 +88,9 @@ export default function WithGuidesView() {
         correctLevel: window.QRCode.CorrectLevel.L
       });
       
-      // Generar QR de Delivery - Usa el email del usuario logueado
+      // Generar QR de Delivery - Ruta corregida
       const deliveryEmail = profile?.email || '';
-      const deliveryUrl = window.location.origin + '/assign-orders?auto_assign=' + currentOrder.id + '&delivery=' + encodeURIComponent(deliveryEmail);
+      const deliveryUrl = '/asignar-pedidos?auto_assign=' + currentOrder.id + '&delivery=' + encodeURIComponent(deliveryEmail);
       new window.QRCode(qrDeliveryRef.current, {
         text: deliveryUrl,
         width: 120,
@@ -437,7 +437,7 @@ export default function WithGuidesView() {
       }
 
       const whatsappUrl = getWhatsAppUrl(order);
-      const deliveryUrl = window.location.origin + '/assign-orders?auto_assign=' + order.id + '&delivery=' + encodeURIComponent(deliveryEmail);
+      const deliveryUrl = '/asignar-pedidos?auto_assign=' + order.id + '&delivery=' + encodeURIComponent(deliveryEmail);
 
       allGuidesHtml += `
         <div class="guide-page">
@@ -689,7 +689,7 @@ export default function WithGuidesView() {
       {selectedIds.size > 0 && (
         <div className="flex flex-wrap gap-2 mb-3 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
           <div className="text-sm font-bold text-green-400 mr-2 self-center">
-            ✅ {selectedIds.size} seleccionado{selectedIds.size > 1 ? 's' : ''}:
+            ✅ ${selectedIds.size} seleccionado${selectedIds.size > 1 ? 's' : ''}:
           </div>
           <button className="nav-btn" style={{ background: '#10b981', color: 'white' }} onClick={bulkMarkAsGuiaGenerada}>
             🚀 Marcar como GUIA GENERADA
