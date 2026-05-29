@@ -20,72 +20,74 @@ export default function AssignOrdersView() {
   const [filterBy, setFilterBy] = useState<'created_at' | 'assigned_at'>('created_at');
   const [autoAssignProcessing, setAutoAssignProcessing] = useState(false);
 
-  // NUEVO: Auto-completar ID desde QR
+  // Manejo de QR - ACUMULA IDs para ADMIN/PROVEEDOR
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const orderId = params.get('id');
     
     if (orderId && !autoAssignProcessing) {
-      setIdsInput(orderId);
-      toast.info(`📦 Pedido ${orderId} cargado. Selecciona un delivery y asigna.`);
-      // Limpiar URL
-      window.history.replaceState({}, '', window.location.pathname);
-    }
-  }, []);
-
-  // Auto-asignación por QR (desde URL) - Mantenemos el original
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const autoAssignId = params.get('auto_assign');
-    const deliveryEmail = params.get('delivery');
-    
-    if (autoAssignId && deliveryEmail && !autoAssignProcessing) {
-      setAutoAssignProcessing(true);
-      
-      const autoAssignOrder = async () => {
-        const canAssign = role === 'DELIVERY' && deliveryEmail === profile?.email;
-        const isAdmin = role === 'ADMIN' || role === 'PROVEEDOR';
+      // Para DELIVERY: asignar automáticamente
+      if (role === 'DELIVERY') {
+        setAutoAssignProcessing(true);
         
-        if (!canAssign && !isAdmin) {
-          toast.error('No tienes permiso para asignar este pedido');
+        const autoAssignOrder = async () => {
+          const deliveryEmail = profile?.email || '';
+          
+          const { data: orderData } = await supabase
+            .from('orders')
+            .select('id, assigned_delivery')
+            .eq('order_number', orderId)
+            .single();
+          
+          if (!orderData) {
+            toast.error(`❌ Pedido ${orderId} no encontrado`);
+            window.history.replaceState({}, '', window.location.pathname);
+            setAutoAssignProcessing(false);
+            return;
+          }
+          
+          if (orderData.assigned_delivery && orderData.assigned_delivery !== deliveryEmail) {
+            toast.warning(`⚠️ El pedido ${orderId} ya está asignado a otro delivery`);
+            window.history.replaceState({}, '', window.location.pathname);
+            setAutoAssignProcessing(false);
+            return;
+          }
+          
+          const { error } = await supabase
+            .from('orders')
+            .update({ 
+              assigned_delivery: deliveryEmail, 
+              assigned_at: new Date().toISOString() 
+            })
+            .eq('id', orderData.id);
+          
+          if (error) {
+            toast.error('❌ Error al asignar: ' + error.message);
+          } else {
+            toast.success(`✅ Pedido ${orderId} asignado correctamente`);
+            load();
+          }
+          
           window.history.replaceState({}, '', window.location.pathname);
           setAutoAssignProcessing(false);
-          return;
-        }
+        };
         
-        const { data: orderData } = await supabase
-          .from('orders')
-          .select('assigned_delivery')
-          .eq('id', autoAssignId)
-          .single();
+        autoAssignOrder();
+      } 
+      // Para ADMIN/PROVEEDOR: ACUMULAR IDs en el textarea
+      else if (role === 'ADMIN' || role === 'PROVEEDOR') {
+        setIdsInput(prev => {
+          if (!prev.trim()) {
+            return orderId;
+          }
+          return prev + ', ' + orderId;
+        });
         
-        if (orderData?.assigned_delivery && orderData.assigned_delivery !== deliveryEmail && role === 'DELIVERY') {
-          toast.warning(`⚠️ Este pedido ya está asignado a otro delivery`);
-          window.history.replaceState({}, '', window.location.pathname);
-          setAutoAssignProcessing(false);
-          return;
-        }
-        
-        const { error } = await supabase
-          .from('orders')
-          .update({ 
-            assigned_delivery: deliveryEmail, 
-            assigned_at: new Date().toISOString() 
-          })
-          .eq('id', autoAssignId);
-        
-        if (error) {
-          toast.error('❌ Error al asignar pedido: ' + error.message);
-        } else {
-          toast.success(`✅ Pedido asignado correctamente a ${deliveryEmail === profile?.email ? 'vos' : deliveryEmail}`);
-          load();
-        }
+        const currentCount = idsInput.split(',').filter(i => i.trim()).length;
+        toast.info(`📦 ID ${orderId} agregado. Total: ${currentCount + 1} pedido(s) cargados`);
         
         window.history.replaceState({}, '', window.location.pathname);
-        setAutoAssignProcessing(false);
-      };
-      
-      autoAssignOrder();
+      }
     }
   }, [role, profile?.email]);
 
@@ -314,13 +316,21 @@ export default function AssignOrdersView() {
     toast.info('Selección limpiada');
   };
 
+  const clearIdsInput = () => {
+    setIdsInput('');
+    toast.info('Lista de IDs limpiada');
+  };
+
+  // Contar cuántos IDs hay en el textarea
+  const idsCount = idsInput.split(/[,\s\n]+/).filter(i => i.trim()).length;
+
   return (
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Asignar Pedidos</h3>
 
       {autoAssignProcessing && (
         <div className="mb-3 p-2 bg-blue-100 text-blue-800 rounded-lg text-sm text-center">
-          ⏳ Procesando asignación automática por QR...
+          ⏳ Asignando pedido automáticamente...
         </div>
       )}
 
@@ -375,11 +385,28 @@ export default function AssignOrdersView() {
         </div>
       )}
 
+      {/* Asignar por IDs - Sección mejorada */}
       <div className="app-card !p-3 mb-3">
         <div className="flex justify-between items-center mb-2">
-          <b className="text-sm">Asignar por IDs manualmente</b>
-          <span className="chip text-[10px]">Máximo 35 IDs por carga</span>
+          <b className="text-sm">Asignar por IDs</b>
+          <div className="flex gap-2">
+            <span className="chip text-[10px] bg-blue-100 text-blue-800">
+              📦 {idsCount} ID(s) cargados
+            </span>
+            {idsCount > 0 && (
+              <button 
+                className="text-xs text-red-500 hover:text-red-700"
+                onClick={clearIdsInput}
+              >
+                Limpiar todo
+              </button>
+            )}
+          </div>
         </div>
+        
+        <p className="text-xs text-muted-foreground mb-2">
+          🔄 Escanea los QR de los pedidos y se irán acumulando aquí automáticamente
+        </p>
         
         {(role === 'ADMIN' || role === 'PROVEEDOR') && (
           <select className="app-input !w-auto min-w-[200px] mb-2" value={assignDelivery} onChange={e => setAssignDelivery(e.target.value)}>
@@ -395,21 +422,23 @@ export default function AssignOrdersView() {
         )}
         
         <textarea 
-          className="app-input mb-2" 
-          rows={3} 
-          placeholder="Ejemplo: A4800, A4599, A4601"
+          className="app-input mb-2 font-mono text-sm" 
+          rows={4} 
+          placeholder="Los IDs aparecerán aquí automáticamente al escanear los QR..."
           value={idsInput} 
           onChange={e => setIdsInput(e.target.value)} 
         />
-        <p className="text-xs text-muted-foreground mb-2">Podés separar por coma, espacio o salto de línea.</p>
         
-        <button 
-          className="nav-btn active text-xs" 
-          onClick={assignByIds}
-          disabled={((role !== 'DELIVERY') && !assignDelivery) || idsInput.trim() === ''}
-        >
-          🚀 Asignar IDs masivamente
-        </button>
+        <div className="flex gap-2">
+          <button 
+            className="nav-btn active text-sm flex-1" 
+            onClick={assignByIds}
+            disabled={((role !== 'DELIVERY') && !assignDelivery) || idsInput.trim() === ''}
+            style={{ background: '#10b981', color: 'white' }}
+          >
+            🚀 Asignar {idsCount} ID(s) {role === 'DELIVERY' ? 'a mí' : 'masivamente'}
+          </button>
+        </div>
       </div>
 
       <div className="overflow-auto">
