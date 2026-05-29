@@ -20,10 +20,27 @@ export default function AssignOrdersView() {
   const [filterBy, setFilterBy] = useState<'created_at' | 'assigned_at'>('created_at');
   const [autoAssignProcessing, setAutoAssignProcessing] = useState(false);
 
+  // Función para obtener parámetros del hash (para HashRouter)
+  const getHashParams = () => {
+    const hash = window.location.hash;
+    const queryString = hash.split('?')[1];
+    if (!queryString) return {};
+    const params = new URLSearchParams(queryString);
+    const result: Record<string, string> = {};
+    params.forEach((value, key) => {
+      result[key] = value;
+    });
+    return result;
+  };
+
   // Manejo de QR - ACUMULA IDs para ADMIN/PROVEEDOR
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const orderId = params.get('id');
+    const params = getHashParams();
+    const orderId = params.id;
+    
+    console.log('🔍 Debug - URL actual:', window.location.href);
+    console.log('🔍 Debug - Hash:', window.location.hash);
+    console.log('🔍 Debug - orderId detectado:', orderId);
     
     if (orderId && !autoAssignProcessing) {
       // Para DELIVERY: asignar automáticamente
@@ -33,22 +50,30 @@ export default function AssignOrdersView() {
         const autoAssignOrder = async () => {
           const deliveryEmail = profile?.email || '';
           
-          const { data: orderData } = await supabase
+          const { data: orderData, error: findError } = await supabase
             .from('orders')
             .select('id, assigned_delivery')
             .eq('order_number', orderId)
-            .single();
+            .maybeSingle();
+          
+          if (findError) {
+            console.error('Error buscando pedido:', findError);
+            toast.error(`❌ Error buscando pedido ${orderId}`);
+            window.history.replaceState({}, '', window.location.pathname);
+            setAutoAssignProcessing(false);
+            return;
+          }
           
           if (!orderData) {
             toast.error(`❌ Pedido ${orderId} no encontrado`);
-            window.history.replaceState({}, '', window.location.pathname);
+            window.location.href = window.location.pathname;
             setAutoAssignProcessing(false);
             return;
           }
           
           if (orderData.assigned_delivery && orderData.assigned_delivery !== deliveryEmail) {
             toast.warning(`⚠️ El pedido ${orderId} ya está asignado a otro delivery`);
-            window.history.replaceState({}, '', window.location.pathname);
+            window.location.href = window.location.pathname;
             setAutoAssignProcessing(false);
             return;
           }
@@ -66,9 +91,12 @@ export default function AssignOrdersView() {
           } else {
             toast.success(`✅ Pedido ${orderId} asignado correctamente`);
             load();
+            setTimeout(() => {
+              window.location.href = '/';
+            }, 2000);
           }
           
-          window.history.replaceState({}, '', window.location.pathname);
+          window.location.href = window.location.pathname;
           setAutoAssignProcessing(false);
         };
         
@@ -77,16 +105,19 @@ export default function AssignOrdersView() {
       // Para ADMIN/PROVEEDOR: ACUMULAR IDs en el textarea
       else if (role === 'ADMIN' || role === 'PROVEEDOR') {
         setIdsInput(prev => {
-          if (!prev.trim()) {
-            return orderId;
+          const currentIds = prev.split(/[,\s\n]+/).filter(i => i.trim());
+          if (!currentIds.includes(orderId)) {
+            const newValue = prev.trim() ? prev + ', ' + orderId : orderId;
+            toast.info(`📦 ID ${orderId} agregado. Total: ${currentIds.length + 1} pedido(s) cargados`);
+            return newValue;
+          } else {
+            toast.info(`📦 ID ${orderId} ya estaba en la lista`);
+            return prev;
           }
-          return prev + ', ' + orderId;
         });
         
-        const currentCount = idsInput.split(',').filter(i => i.trim()).length;
-        toast.info(`📦 ID ${orderId} agregado. Total: ${currentCount + 1} pedido(s) cargados`);
-        
-        window.history.replaceState({}, '', window.location.pathname);
+        // Limpiar URL sin recargar la página
+        window.location.hash = '/asignar-pedidos';
       }
     }
   }, [role, profile?.email]);
@@ -321,7 +352,6 @@ export default function AssignOrdersView() {
     toast.info('Lista de IDs limpiada');
   };
 
-  // Contar cuántos IDs hay en el textarea
   const idsCount = idsInput.split(/[,\s\n]+/).filter(i => i.trim()).length;
 
   return (
@@ -385,7 +415,6 @@ export default function AssignOrdersView() {
         </div>
       )}
 
-      {/* Asignar por IDs - Sección mejorada */}
       <div className="app-card !p-3 mb-3">
         <div className="flex justify-between items-center mb-2">
           <b className="text-sm">Asignar por IDs</b>
@@ -491,7 +520,7 @@ export default function AssignOrdersView() {
                 <td className="text-xs">{o.city || '—'}</td>
                 <td className="text-xs">{o.customer_name || '—'}</td>
                 <td className="text-xs">{o.phone || '—'}</td>
-                <td>
+                <tr>
                   <span className={`badge-status ${o.status === 'ENTREGADO' ? 'badge-entregado' : o.status === 'CANCELADO' ? 'badge-cancelado' : 'badge-pendiente'}`}>
                     {o.status || 'PENDIENTE'}
                   </span>
