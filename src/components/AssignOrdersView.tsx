@@ -33,47 +33,36 @@ export default function AssignOrdersView() {
     return result;
   };
 
-  // Manejo de QR - ACUMULA IDs para ADMIN/PROVEEDOR
+  // Manejo de QR - SELECCIONA el pedido en la tabla
   useEffect(() => {
     const params = getHashParams();
-    const orderId = params.id;
+    const orderIdNumber = params.id;
     
-    console.log('🔍 Debug - URL actual:', window.location.href);
-    console.log('🔍 Debug - Hash:', window.location.hash);
-    console.log('🔍 Debug - orderId detectado:', orderId);
-    
-    if (orderId && !autoAssignProcessing) {
-      // Para DELIVERY: asignar automáticamente
-      if (role === 'DELIVERY') {
-        setAutoAssignProcessing(true);
+    if (orderIdNumber && !autoAssignProcessing) {
+      setAutoAssignProcessing(true);
+      
+      const selectAndAssign = async () => {
+        // Buscar el pedido por order_number
+        const { data: orderData } = await supabase
+          .from('orders')
+          .select('id, assigned_delivery')
+          .eq('order_number', orderIdNumber)
+          .maybeSingle();
         
-        const autoAssignOrder = async () => {
+        if (!orderData) {
+          toast.error(`❌ Pedido ${orderIdNumber} no encontrado`);
+          window.location.hash = '/asignar-pedidos';
+          setAutoAssignProcessing(false);
+          return;
+        }
+        
+        // Si es DELIVERY, asignar automáticamente
+        if (role === 'DELIVERY') {
           const deliveryEmail = profile?.email || '';
           
-          const { data: orderData, error: findError } = await supabase
-            .from('orders')
-            .select('id, assigned_delivery')
-            .eq('order_number', orderId)
-            .maybeSingle();
-          
-          if (findError) {
-            console.error('Error buscando pedido:', findError);
-            toast.error(`❌ Error buscando pedido ${orderId}`);
-            window.location.href = window.location.pathname;
-            setAutoAssignProcessing(false);
-            return;
-          }
-          
-          if (!orderData) {
-            toast.error(`❌ Pedido ${orderId} no encontrado`);
-            window.location.href = window.location.pathname;
-            setAutoAssignProcessing(false);
-            return;
-          }
-          
           if (orderData.assigned_delivery && orderData.assigned_delivery !== deliveryEmail) {
-            toast.warning(`⚠️ El pedido ${orderId} ya está asignado a otro delivery`);
-            window.location.href = window.location.pathname;
+            toast.warning(`⚠️ El pedido ${orderIdNumber} ya está asignado a otro delivery`);
+            window.location.hash = '/asignar-pedidos';
             setAutoAssignProcessing(false);
             return;
           }
@@ -89,36 +78,34 @@ export default function AssignOrdersView() {
           if (error) {
             toast.error('❌ Error al asignar: ' + error.message);
           } else {
-            toast.success(`✅ Pedido ${orderId} asignado correctamente`);
+            toast.success(`✅ Pedido ${orderIdNumber} asignado correctamente`);
             load();
-            setTimeout(() => {
-              window.location.href = '/';
-            }, 2000);
           }
           
-          window.location.href = window.location.pathname;
+          window.location.hash = '/asignar-pedidos';
           setAutoAssignProcessing(false);
-        };
-        
-        autoAssignOrder();
-      } 
-      // Para ADMIN/PROVEEDOR: ACUMULAR IDs en el textarea
-      else if (role === 'ADMIN' || role === 'PROVEEDOR') {
-        setIdsInput(prev => {
-          const currentIds = prev.split(/[,\s\n]+/).filter(i => i.trim());
-          if (!currentIds.includes(orderId)) {
-            const newValue = prev.trim() ? prev + ', ' + orderId : orderId;
-            toast.info(`📦 ID ${orderId} agregado. Total: ${currentIds.length + 1} pedido(s) cargados`);
-            return newValue;
-          } else {
-            toast.info(`📦 ID ${orderId} ya estaba en la lista`);
-            return prev;
-          }
-        });
-        
-        // Limpiar URL sin recargar la página
-        window.location.hash = '/asignar-pedidos';
-      }
+        } 
+        // Para ADMIN/PROVEEDOR: seleccionar el pedido en la tabla
+        else if (role === 'ADMIN' || role === 'PROVEEDOR') {
+          // Seleccionar el pedido
+          setSelected(prev => {
+            const next = new Set(prev);
+            if (next.has(orderData.id)) {
+              next.delete(orderData.id);
+              toast.info(`📦 Pedido ${orderIdNumber} deseleccionado`);
+            } else {
+              next.add(orderData.id);
+              toast.info(`📦 Pedido ${orderIdNumber} seleccionado`);
+            }
+            return next;
+          });
+          
+          window.location.hash = '/asignar-pedidos';
+          setAutoAssignProcessing(false);
+        }
+      };
+      
+      selectAndAssign();
     }
   }, [role, profile?.email]);
 
@@ -141,7 +128,7 @@ export default function AssignOrdersView() {
     const { data } = await query;
     setOrders(data || []);
     setSelectAll(false);
-    setSelected(new Set());
+    // No limpiar selected al recargar para mantener la selección
   };
 
   useEffect(() => { load(); }, [filterBy, dateFrom, dateTo]);
@@ -156,21 +143,21 @@ export default function AssignOrdersView() {
   });
 
   const toggleSelect = (id: string) => {
-    const s = new Set(selected);
-    s.has(id) ? s.delete(id) : s.add(id);
-    setSelected(s);
-    setSelectAll(s.size === filtered.length && filtered.length > 0);
+    setSelected(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
   };
 
   const handleSelectAll = () => {
-    if (selectAll) {
+    if (selected.size === filtered.length && filtered.length > 0) {
       setSelected(new Set());
-      setSelectAll(false);
     } else {
       const allIds = filtered.map(o => o.id);
       setSelected(new Set(allIds));
-      setSelectAll(true);
     }
+    setSelectAll(!selectAll);
   };
 
   const assignSelected = async () => {
@@ -239,7 +226,6 @@ export default function AssignOrdersView() {
     }
     
     setSelected(new Set());
-    setSelectAll(false);
     load();
   };
 
@@ -343,7 +329,6 @@ export default function AssignOrdersView() {
 
   const clearSelection = () => {
     setSelected(new Set());
-    setSelectAll(false);
     toast.info('Selección limpiada');
   };
 
@@ -360,7 +345,7 @@ export default function AssignOrdersView() {
 
       {autoAssignProcessing && (
         <div className="mb-3 p-2 bg-blue-100 text-blue-800 rounded-lg text-sm text-center">
-          ⏳ Asignando pedido automáticamente...
+          ⏳ Procesando QR...
         </div>
       )}
 
@@ -395,7 +380,7 @@ export default function AssignOrdersView() {
           </button>
           {selected.size > 0 && (
             <button className="nav-btn !bg-gray-500" onClick={clearSelection}>
-              ✖ Limpiar
+              ✖ Limpiar selección
             </button>
           )}
         </div>
@@ -417,7 +402,7 @@ export default function AssignOrdersView() {
 
       <div className="app-card !p-3 mb-3">
         <div className="flex justify-between items-center mb-2">
-          <b className="text-sm">Asignar por IDs</b>
+          <b className="text-sm">Asignar por IDs manualmente</b>
           <div className="flex gap-2">
             <span className="chip text-[10px] bg-blue-100 text-blue-800">
               📦 {idsCount} ID(s) cargados
@@ -434,7 +419,7 @@ export default function AssignOrdersView() {
         </div>
         
         <p className="text-xs text-muted-foreground mb-2">
-          🔄 Escanea los QR de los pedidos y se irán acumulando aquí automáticamente
+          📝 También podés escribir los IDs manualmente, separados por coma
         </p>
         
         {(role === 'ADMIN' || role === 'PROVEEDOR') && (
@@ -452,22 +437,20 @@ export default function AssignOrdersView() {
         
         <textarea 
           className="app-input mb-2 font-mono text-sm" 
-          rows={4} 
-          placeholder="Los IDs aparecerán aquí automáticamente al escanear los QR..."
+          rows={3} 
+          placeholder="Ejemplo: A4800, A4599, A4601"
           value={idsInput} 
           onChange={e => setIdsInput(e.target.value)} 
         />
         
-        <div className="flex gap-2">
-          <button 
-            className="nav-btn active text-sm flex-1" 
-            onClick={assignByIds}
-            disabled={((role !== 'DELIVERY') && !assignDelivery) || idsInput.trim() === ''}
-            style={{ background: '#10b981', color: 'white' }}
-          >
-            🚀 Asignar {idsCount} ID(s) {role === 'DELIVERY' ? 'a mí' : 'masivamente'}
-          </button>
-        </div>
+        <button 
+          className="nav-btn active text-sm" 
+          onClick={assignByIds}
+          disabled={((role !== 'DELIVERY') && !assignDelivery) || idsInput.trim() === ''}
+          style={{ background: '#10b981', color: 'white' }}
+        >
+          🚀 Asignar {idsCount} ID(s) {role === 'DELIVERY' ? 'a mí' : 'masivamente'}
+        </button>
       </div>
 
       <div className="overflow-auto">
@@ -497,7 +480,7 @@ export default function AssignOrdersView() {
           </thead>
           <tbody>
             {filtered.map(o => (
-              <tr key={o.id} className={selected.has(o.id) ? 'bg-brand/10' : ''}>
+              <tr key={o.id} className={selected.has(o.id) ? 'bg-green-100' : ''}>
                 {(role === 'ADMIN' || role === 'PROVEEDOR' || role === 'DELIVERY') && (
                   <td className="text-center">
                     <input 
