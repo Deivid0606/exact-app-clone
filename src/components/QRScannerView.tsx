@@ -17,7 +17,7 @@ export default function QRScannerView() {
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(true);
 
-  // Obtener ID de la URL si existe
+  // Obtener ID de la URL si existe (cuando se abre desde QR)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const orderId = params.get('id');
@@ -58,19 +58,22 @@ export default function QRScannerView() {
   const handleScan = async (result: any) => {
     if (result && !orderData) {
       const scannedText = result?.text || result;
+      console.log('QR escaneado:', scannedText);
+      
+      // Extraer el ID de la URL
       const match = scannedText.match(/[?&]id=([^&]+)/);
       if (match && match[1]) {
         await loadOrderByNumber(match[1]);
         setScanning(false);
       } else {
-        toast.error('QR inválido');
+        toast.error('QR inválido - No contiene ID de pedido');
       }
     }
   };
 
   const handleError = (err: any) => {
-    console.error(err);
-    toast.error('Error al acceder a la cámara');
+    console.error('Error del lector QR:', err);
+    toast.error('Error al acceder a la cámara. Asegúrate de dar permisos.');
   };
 
   const loadDeliveryUsers = async () => {
@@ -89,18 +92,20 @@ export default function QRScannerView() {
     if (!orderData) return;
     
     if (role === 'DELIVERY') {
+      // Delivery solo puede asignarse a sí mismo
       const { error } = await supabase
         .from('orders')
         .update({ 
           assigned_delivery: userEmail,
-          status2: 'EN RUTA'
+          status2: 'EN RUTA',
+          updated_at: new Date().toISOString()
         })
         .eq('id', orderData.id);
 
       if (error) {
-        toast.error('Error al asignar');
+        toast.error('Error al asignar pedido');
       } else {
-        toast.success('✅ Pedido asignado a ti');
+        toast.success('✅ Pedido asignado a ti correctamente');
         setOrderData(null);
         setScanning(true);
       }
@@ -114,14 +119,15 @@ export default function QRScannerView() {
         .from('orders')
         .update({ 
           assigned_delivery: selectedDelivery,
-          status2: 'EN RUTA'
+          status2: 'EN RUTA',
+          updated_at: new Date().toISOString()
         })
         .eq('id', orderData.id);
 
       if (error) {
-        toast.error('Error al asignar');
+        toast.error('Error al asignar pedido');
       } else {
-        toast.success(`✅ Asignado a ${selectedDelivery}`);
+        toast.success(`✅ Pedido asignado a ${selectedDelivery}`);
         setOrderData(null);
         setSelectedDelivery('');
         setScanning(true);
@@ -150,14 +156,14 @@ export default function QRScannerView() {
           <p><span className="font-semibold">Email:</span> {order.email || '—'}</p>
           <p><span className="font-semibold">Departamento:</span> {order.departamento || '—'}</p>
           <p><span className="font-semibold">Ciudad:</span> {order.city || '—'}</p>
-          <p><span className="font-semibold">Dirección:</span> {order.street || ''}</p>
+          <p><span className="font-semibold">Dirección:</span> {order.street || ''} {order.district ? `- ${order.district}` : ''}</p>
         </div>
         
         <div className="border-t pt-2">
           <p className="font-semibold">📦 Productos:</p>
           {items.map((item: any, idx: number) => (
             <p key={idx} className="text-sm pl-2">
-              {idx + 1}. {item.title} x{item.qty} — Gs {nf(Number(item.sale_gs || 0) * Number(item.qty || 1))}
+              {idx + 1}. {item.title || item.sku} x{item.qty} — Gs {nf(Number(item.sale_gs || 0) * Number(item.qty || 1))}
             </p>
           ))}
         </div>
@@ -170,6 +176,12 @@ export default function QRScannerView() {
           <p><span className="font-semibold">👤 Vendedor:</span> {order.created_by || '—'}</p>
           <p><span className="font-semibold">🏢 Proveedor:</span> {order.provider_emails_list || order.provider_email || '—'}</p>
         </div>
+        
+        {order.obs && (
+          <div className="border-t pt-2 text-sm">
+            <p><span className="font-semibold">📝 Observación:</span> {order.obs}</p>
+          </div>
+        )}
       </div>
     );
   };
@@ -207,7 +219,7 @@ export default function QRScannerView() {
               <div className="mt-4">
                 {role === 'DELIVERY' ? (
                   <button
-                    className="w-full bg-green-500 text-white py-2 rounded-lg font-bold"
+                    className="w-full bg-green-500 text-white py-2 rounded-lg font-bold hover:bg-green-600 transition"
                     onClick={assignOrder}
                   >
                     ✅ Asignarme este pedido
@@ -227,7 +239,7 @@ export default function QRScannerView() {
                       ))}
                     </select>
                     <button
-                      className="w-full bg-green-500 text-white py-2 rounded-lg font-bold"
+                      className="w-full bg-green-500 text-white py-2 rounded-lg font-bold hover:bg-green-600 transition"
                       onClick={assignOrder}
                     >
                       🚚 Asignar pedido
@@ -236,7 +248,7 @@ export default function QRScannerView() {
                 )}
                 
                 <button
-                  className="w-full mt-2 bg-gray-300 text-gray-700 py-2 rounded-lg"
+                  className="w-full mt-2 bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400 transition"
                   onClick={() => {
                     setOrderData(null);
                     setScanning(true);
@@ -251,7 +263,7 @@ export default function QRScannerView() {
           {!scanning && !orderData && (
             <div className="text-center py-8">
               <button
-                className="bg-purple-500 text-white px-6 py-2 rounded-lg"
+                className="bg-purple-500 text-white px-6 py-2 rounded-lg hover:bg-purple-600 transition"
                 onClick={() => setScanning(true)}
               >
                 📷 Comenzar a escanear
