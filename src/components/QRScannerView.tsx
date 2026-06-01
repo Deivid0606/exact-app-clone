@@ -16,6 +16,7 @@ export default function QRScannerView() {
   const [loading, setLoading] = useState(false);
   const [scannerActive, setScannerActive] = useState(true);
   const [manualNumber, setManualNumber] = useState('');
+  const [scanError, setScanError] = useState('');
 
   // Inicializar escáner cuando el componente se monta
   useEffect(() => {
@@ -23,6 +24,7 @@ export default function QRScannerView() {
     const params = new URLSearchParams(window.location.search);
     const orderId = params.get('id');
     if (orderId) {
+      console.log("📦 ID encontrado en URL:", orderId);
       loadOrderByNumber(orderId);
       setScannerActive(false);
       return;
@@ -75,43 +77,59 @@ export default function QRScannerView() {
         (decodedText: string) => {
           console.log("✅ QR DETECTADO:", decodedText);
           
-          // Detener escáner
+          // Detener escáner inmediatamente
           html5QrCode.stop().catch(console.error);
           
-          // Extraer número de pedido
+          // Extraer número de pedido de diferentes formatos
           let orderNumber = null;
-          const match = decodedText.match(/[?&]id=([^&]+)/);
-          if (match) {
-            orderNumber = match[1];
-          } else if (decodedText.length < 50 && !decodedText.includes('http')) {
-            orderNumber = decodedText;
+          
+          // Formato 1: ?id=XXX
+          const match1 = decodedText.match(/[?&]id=([^&]+)/);
+          if (match1) {
+            orderNumber = match1[1];
+          }
+          // Formato 2: #/qr?id=XXX
+          const match2 = decodedText.match(/#\/qr\?id=([^&]+)/);
+          if (match2) {
+            orderNumber = match2[1];
+          }
+          // Formato 3: Solo el número
+          const match3 = decodedText.match(/([A-Z0-9]{10,})/);
+          if (match3 && !orderNumber) {
+            orderNumber = match3[1];
           }
           
+          console.log("🔍 Número de pedido extraído:", orderNumber);
+          
           if (orderNumber) {
+            setScanError('');
             loadOrderByNumber(orderNumber);
             setScannerActive(false);
           } else {
+            setScanError("No se pudo extraer el número de pedido del QR");
             toast.error('QR no válido. Escanea el QR de Delivery.');
             // Reiniciar escáner después de 2 segundos
             setTimeout(() => {
+              setScanError('');
               startScanner();
-            }, 2000);
+              setScannerActive(true);
+            }, 3000);
           }
         },
         (errorMessage: string) => {
-          // Ignorar errores normales
+          // Ignorar errores normales de escaneo
         }
       );
-      console.log("✅ Escáner iniciado");
+      console.log("✅ Escáner iniciado - esperando QR");
     } catch (err) {
-      console.error("Error:", err);
+      console.error("Error al iniciar:", err);
       toast.error('No se pudo iniciar la cámara');
     }
   };
 
   const loadOrderByNumber = async (orderNumber: string) => {
     setLoading(true);
-    console.log("Buscando pedido:", orderNumber);
+    console.log("🔍 Buscando pedido en Supabase:", orderNumber);
     
     const { data, error } = await supabase
       .from('orders')
@@ -120,13 +138,16 @@ export default function QRScannerView() {
       .single();
 
     if (error) {
-      console.error("Error:", error);
+      console.error("❌ Error al buscar:", error);
       toast.error(`Pedido ${orderNumber} no encontrado`);
       setLoading(false);
+      setScannerActive(true);
+      // Reiniciar escáner
+      setTimeout(() => startScanner(), 1000);
       return;
     }
 
-    console.log("Pedido encontrado:", data);
+    console.log("✅ Pedido encontrado:", data);
     setOrderData(data);
     setLoading(false);
   };
@@ -144,6 +165,7 @@ export default function QRScannerView() {
     setOrderData(null);
     setScannerActive(true);
     setManualNumber('');
+    setScanError('');
     setTimeout(() => startScanner(), 500);
   };
 
@@ -161,6 +183,10 @@ export default function QRScannerView() {
   const assignOrder = async () => {
     if (!orderData) return;
     
+    console.log("📦 Asignando pedido:", orderData.order_number);
+    console.log("👤 Rol:", role);
+    console.log("👤 Usuario:", userEmail);
+    
     if (role === 'DELIVERY') {
       const { error } = await supabase
         .from('orders')
@@ -172,8 +198,10 @@ export default function QRScannerView() {
         .eq('id', orderData.id);
         
       if (error) {
+        console.error("❌ Error al asignar:", error);
         toast.error('Error al asignar pedido');
       } else {
+        console.log("✅ Pedido asignado exitosamente");
         toast.success('✅ Pedido asignado a ti correctamente');
         resetScanner();
       }
@@ -193,8 +221,10 @@ export default function QRScannerView() {
         .eq('id', orderData.id);
         
       if (error) {
+        console.error("❌ Error al asignar:", error);
         toast.error('Error al asignar pedido');
       } else {
+        console.log("✅ Pedido asignado exitosamente a:", selectedDelivery);
         toast.success(`✅ Pedido asignado a ${selectedDelivery}`);
         resetScanner();
       }
@@ -309,6 +339,12 @@ export default function QRScannerView() {
           <h2 className="text-2xl font-bold text-center mb-6">
             🚚 QR Delivery - Asignar Pedidos
           </h2>
+          
+          {scanError && (
+            <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg text-center">
+              ❌ {scanError}
+            </div>
+          )}
           
           <div className="mb-6">
             <div 
