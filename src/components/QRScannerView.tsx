@@ -15,46 +15,55 @@ export default function QRScannerView() {
   const [selectedDelivery, setSelectedDelivery] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [idFromUrl, setIdFromUrl] = useState<string | null>(null);
 
-  // AL CARGAR EL COMPONENTE, VERIFICAR SI HAY ID EN LA URL
+  // LEER EL ID DE LA URL AL CARGAR
   useEffect(() => {
-    console.log("🔍 QRScannerView cargado");
-    console.log("📍 URL actual:", window.location.href);
-    console.log("📍 Hash:", window.location.hash);
+    console.log("=== QRScannerView CARGADO ===");
+    console.log("URL completa:", window.location.href);
+    console.log("Hash:", window.location.hash);
     
-    // Extraer el ID de la URL
+    // Extraer ID del hash
     const hash = window.location.hash;
     const match = hash.match(/[?&]id=([^&]+)/);
     
     if (match && match[1]) {
       const orderId = match[1];
       console.log("✅ ID encontrado en URL:", orderId);
+      setIdFromUrl(orderId);
       loadOrderByNumber(orderId);
     } else {
       console.log("❌ No se encontró ID en la URL");
-      setError("No se encontró número de pedido en el QR");
+      setError("No se encontró número de pedido en el QR. Asegúrate de escanear el QR de Delivery.");
     }
   }, []);
 
   const loadOrderByNumber = async (orderNumber: string) => {
     setLoading(true);
+    setError('');
     console.log("🔍 Buscando pedido:", orderNumber);
     
-    const { data, error } = await supabase
-      .from('orders')
-      .select('*')
-      .eq('order_number', orderNumber)
-      .single();
+    try {
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('order_number', orderNumber)
+        .single();
 
-    if (error) {
-      console.error("❌ Error:", error);
-      setError(`Pedido ${orderNumber} no encontrado`);
-      setLoading(false);
-      return;
+      if (error) {
+        console.error("❌ Error Supabase:", error);
+        setError(`Pedido ${orderNumber} no encontrado en la base de datos`);
+        setLoading(false);
+        return;
+      }
+
+      console.log("✅ Pedido encontrado:", data);
+      setOrderData(data);
+    } catch (err) {
+      console.error("❌ Error inesperado:", err);
+      setError("Error al cargar el pedido");
     }
-
-    console.log("✅ Pedido encontrado:", data);
-    setOrderData(data);
+    
     setLoading(false);
   };
 
@@ -72,6 +81,8 @@ export default function QRScannerView() {
   const assignOrder = async () => {
     if (!orderData) return;
     
+    console.log("📦 Asignando pedido:", orderData.order_number);
+    
     if (role === 'DELIVERY') {
       const { error } = await supabase
         .from('orders')
@@ -83,10 +94,12 @@ export default function QRScannerView() {
         .eq('id', orderData.id);
         
       if (error) {
+        console.error("❌ Error al asignar:", error);
         toast.error('Error al asignar pedido');
       } else {
+        console.log("✅ Pedido asignado exitosamente");
         toast.success('✅ Pedido asignado a ti correctamente');
-        // Redirigir a otra página o mostrar mensaje
+        // Redirigir después de 2 segundos
         setTimeout(() => {
           window.location.href = '#/pedidos';
         }, 2000);
@@ -107,8 +120,10 @@ export default function QRScannerView() {
         .eq('id', orderData.id);
         
       if (error) {
+        console.error("❌ Error al asignar:", error);
         toast.error('Error al asignar pedido');
       } else {
+        console.log("✅ Pedido asignado exitosamente a:", selectedDelivery);
         toast.success(`✅ Pedido asignado a ${selectedDelivery}`);
         setTimeout(() => {
           window.location.href = '#/pedidos';
@@ -138,7 +153,7 @@ export default function QRScannerView() {
           <p><span className="font-semibold">Email:</span> {order.email || '—'}</p>
           <p><span className="font-semibold">Departamento:</span> {order.departamento || '—'}</p>
           <p><span className="font-semibold">Ciudad:</span> {order.city || '—'}</p>
-          <p><span className="font-semibold">Dirección:</span> {order.street || ''}</p>
+          <p><span className="font-semibold">Dirección:</span> {order.street || ''} {order.district ? `- ${order.district}` : ''}</p>
         </div>
         
         <div className="border-t pt-2">
@@ -162,7 +177,7 @@ export default function QRScannerView() {
     );
   };
 
-  // Mostrar loading
+  // Estado: Cargando
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-100 p-4 flex items-center justify-center">
@@ -174,7 +189,7 @@ export default function QRScannerView() {
     );
   }
 
-  // Mostrar error
+  // Estado: Error
   if (error && !orderData) {
     return (
       <div className="min-h-screen bg-gray-100 p-4">
@@ -184,7 +199,7 @@ export default function QRScannerView() {
             <h2 className="text-xl font-bold mb-2">Error</h2>
             <p className="text-gray-600 mb-4">{error}</p>
             <p className="text-sm text-gray-500 mb-4">
-              Asegúrate de escanear el QR de Delivery correcto
+              ID detectado: {idFromUrl || 'ninguno'}
             </p>
             <button
               className="bg-purple-500 text-white px-4 py-2 rounded-lg"
@@ -198,7 +213,7 @@ export default function QRScannerView() {
     );
   }
 
-  // Mostrar pedido encontrado
+  // Estado: Mostrar pedido para asignar
   if (orderData) {
     return (
       <div className="min-h-screen bg-gray-100 p-4">
@@ -246,7 +261,7 @@ export default function QRScannerView() {
     );
   }
 
-  // Estado inicial - no debería llegar aquí
+  // Estado inicial (no debería llegar aquí)
   return (
     <div className="min-h-screen bg-gray-100 p-4 flex items-center justify-center">
       <div className="text-center">
