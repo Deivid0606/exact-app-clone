@@ -84,11 +84,12 @@ export default function QRScannerView() {
     console.log("📦 Asignando pedido:", orderData.order_number);
     
     if (role === 'DELIVERY') {
+      // SOLO actualizar assigned_delivery, NO tocar status2
       const { error } = await supabase
         .from('orders')
         .update({ 
           assigned_delivery: userEmail,
-          status2: 'EN RUTA',
+          assigned_at: new Date().toISOString(), // 👈 Agregar fecha de asignación
           updated_at: new Date().toISOString()
         })
         .eq('id', orderData.id);
@@ -97,12 +98,12 @@ export default function QRScannerView() {
         console.error("❌ Error al asignar:", error);
         toast.error('Error al asignar pedido');
       } else {
-        console.log("✅ Pedido asignado exitosamente");
+        console.log("✅ Pedido asignado exitosamente a:", userEmail);
         toast.success('✅ Pedido asignado a ti correctamente');
-        // Redirigir después de 2 segundos
+        // Redirigir a Cierres para ver el pedido asignado
         setTimeout(() => {
-          window.location.href = '#/pedidos';
-        }, 2000);
+          window.location.href = '#/cierres';
+        }, 1500);
       }
     } else if (role === 'ADMIN' || role === 'PROVEEDOR') {
       if (!selectedDelivery) {
@@ -114,7 +115,7 @@ export default function QRScannerView() {
         .from('orders')
         .update({ 
           assigned_delivery: selectedDelivery,
-          status2: 'EN RUTA',
+          assigned_at: new Date().toISOString(), // 👈 Agregar fecha de asignación
           updated_at: new Date().toISOString()
         })
         .eq('id', orderData.id);
@@ -126,8 +127,8 @@ export default function QRScannerView() {
         console.log("✅ Pedido asignado exitosamente a:", selectedDelivery);
         toast.success(`✅ Pedido asignado a ${selectedDelivery}`);
         setTimeout(() => {
-          window.location.href = '#/pedidos';
-        }, 2000);
+          window.location.href = '#/cierres';
+        }, 1500);
       }
     }
   };
