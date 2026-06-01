@@ -3,9 +3,6 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 
-// @ts-ignore
-const Html5Qrcode = window.Html5Qrcode;
-
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
 export default function QRScannerView() {
@@ -18,20 +15,42 @@ export default function QRScannerView() {
   const [selectedDelivery, setSelectedDelivery] = useState('');
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(true);
+  const [cameraError, setCameraError] = useState(false);
   const scannerRef = useRef<any>(null);
-  const [cameraStarted, setCameraStarted] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   // Cargar la librería HTML5-QRCODE
   useEffect(() => {
-    if (typeof window !== 'undefined' && !window.Html5Qrcode) {
+    const loadScript = () => {
+      if (document.querySelector('script[src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"]')) {
+        console.log('Script ya cargado');
+        return;
+      }
+      
       const script = document.createElement('script');
       script.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
       script.async = true;
       script.onload = () => {
-        console.log('Librería QR cargada');
+        console.log('Librería QR cargada exitosamente');
+        if (scanning && !orderData) {
+          setTimeout(() => startCamera(), 500);
+        }
+      };
+      script.onerror = () => {
+        console.error('Error al cargar la librería QR');
+        toast.error('Error al cargar el escáner QR');
+        setCameraError(true);
       };
       document.body.appendChild(script);
-    }
+    };
+    
+    loadScript();
+    
+    return () => {
+      if (scannerRef.current) {
+        scannerRef.current.stop().catch(console.error);
+      }
+    };
   }, []);
 
   // Obtener ID de la URL
@@ -72,28 +91,32 @@ export default function QRScannerView() {
     setLoading(false);
   };
 
-  // Iniciar cámara
-  useEffect(() => {
-    if (scanning && !orderData && !cameraStarted && window.Html5Qrcode) {
-      startCamera();
-    }
-    return () => {
-      if (scannerRef.current) {
-        scannerRef.current.stop().catch(console.error);
-      }
-    };
-  }, [scanning, orderData, cameraStarted]);
-
   const startCamera = async () => {
+    if (!window.Html5Qrcode) {
+      console.log('Esperando librería...');
+      setTimeout(() => startCamera(), 500);
+      return;
+    }
+    
+    if (!containerRef.current) return;
+    
     try {
       if (scannerRef.current) {
         await scannerRef.current.stop();
+        scannerRef.current.clear();
       }
       
-      const html5QrCode = new window.Html5Qrcode("qr-reader");
+      // Limpiar el contenedor
+      containerRef.current.innerHTML = '';
+      
+      const html5QrCode = new window.Html5Qrcode("qr-reader-container");
       scannerRef.current = html5QrCode;
       
-      const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+      const config = { 
+        fps: 10, 
+        qrbox: { width: 300, height: 300 },
+        aspectRatio: 1.0
+      };
       
       await html5QrCode.start(
         { facingMode: "environment" },
@@ -110,21 +133,25 @@ export default function QRScannerView() {
           }
         },
         (errorMessage: string) => {
-          // Error de escaneo, ignorar
+          // Ignorar errores de escaneo
         }
       );
-      setCameraStarted(true);
+      setCameraError(false);
     } catch (err) {
       console.error("Error al iniciar cámara:", err);
-      toast.error('Error al acceder a la cámara. Verifica permisos.');
+      setCameraError(true);
+      toast.error('No se pudo acceder a la cámara. Verifica permisos.');
     }
   };
 
   const stopCamera = async () => {
     if (scannerRef.current) {
-      await scannerRef.current.stop().catch(console.error);
-      scannerRef.current = null;
-      setCameraStarted(false);
+      try {
+        await scannerRef.current.stop();
+        scannerRef.current = null;
+      } catch (err) {
+        console.error("Error al detener cámara:", err);
+      }
     }
   };
 
@@ -159,7 +186,7 @@ export default function QRScannerView() {
         toast.success('✅ Pedido asignado a ti correctamente');
         setOrderData(null);
         setScanning(true);
-        await stopCamera();
+        setTimeout(() => startCamera(), 500);
       }
     } else if (role === 'ADMIN' || role === 'PROVEEDOR') {
       if (!selectedDelivery) {
@@ -183,7 +210,7 @@ export default function QRScannerView() {
         setOrderData(null);
         setSelectedDelivery('');
         setScanning(true);
-        await stopCamera();
+        setTimeout(() => startCamera(), 500);
       }
     }
   };
@@ -243,8 +270,32 @@ export default function QRScannerView() {
           
           {scanning && !orderData && (
             <div className="mb-6">
-              <div id="qr-reader" style={{ width: '100%' }}></div>
-              <p className="text-center text-sm text-gray-500 mt-2">
+              <div 
+                id="qr-reader-container" 
+                ref={containerRef}
+                style={{ 
+                  width: '100%', 
+                  minHeight: '400px',
+                  backgroundColor: '#000',
+                  borderRadius: '12px',
+                  overflow: 'hidden'
+                }}
+              ></div>
+              {cameraError && (
+                <div className="text-center mt-4">
+                  <p className="text-red-500 mb-2">No se pudo acceder a la cámara</p>
+                  <button
+                    className="bg-blue-500 text-white px-4 py-2 rounded-lg"
+                    onClick={() => {
+                      setCameraError(false);
+                      startCamera();
+                    }}
+                  >
+                    🔄 Reintentar
+                  </button>
+                </div>
+              )}
+              <p className="text-center text-sm text-gray-500 mt-4">
                 📷 Escanea el código QR del pedido
               </p>
             </div>
@@ -257,7 +308,7 @@ export default function QRScannerView() {
               <div className="mt-4">
                 {role === 'DELIVERY' ? (
                   <button
-                    className="w-full bg-green-500 text-white py-2 rounded-lg font-bold"
+                    className="w-full bg-green-500 text-white py-3 rounded-lg font-bold hover:bg-green-600 transition"
                     onClick={assignOrder}
                   >
                     ✅ Asignarme este pedido
@@ -277,7 +328,7 @@ export default function QRScannerView() {
                       ))}
                     </select>
                     <button
-                      className="w-full bg-green-500 text-white py-2 rounded-lg font-bold"
+                      className="w-full bg-green-500 text-white py-3 rounded-lg font-bold hover:bg-green-600 transition"
                       onClick={assignOrder}
                     >
                       🚚 Asignar pedido
@@ -286,10 +337,11 @@ export default function QRScannerView() {
                 )}
                 
                 <button
-                  className="w-full mt-2 bg-gray-300 text-gray-700 py-2 rounded-lg"
+                  className="w-full mt-2 bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400 transition"
                   onClick={() => {
                     setOrderData(null);
                     setScanning(true);
+                    startCamera();
                   }}
                 >
                   🔄 Escanear otro QR
