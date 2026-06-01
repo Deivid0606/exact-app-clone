@@ -88,10 +88,10 @@ export default function WithGuidesView() {
         correctLevel: window.QRCode.CorrectLevel.L
       });
       
-      // Generar QR de Delivery - usa SOLO order_number
+      // Generar QR de Delivery - apunta a /qr
       const orderNumber = currentOrder.order_number;
       if (orderNumber) {
-        const deliveryUrl = window.location.origin + '/#/asignar-pedidos?id=' + orderNumber;
+        const deliveryUrl = window.location.origin + '/#/qr?id=' + orderNumber;
         console.log('QR Delivery URL:', deliveryUrl);
         console.log('Número de orden usado:', orderNumber);
         new window.QRCode(qrDeliveryRef.current, {
@@ -442,7 +442,7 @@ export default function WithGuidesView() {
 
       const whatsappUrl = getWhatsAppUrl(order);
       const orderNumber = order.order_number;
-      const deliveryUrl = orderNumber ? window.location.origin + '/#/asignar-pedidos?id=' + orderNumber : '#';
+      const deliveryUrl = orderNumber ? window.location.origin + '/#/qr?id=' + orderNumber : '#';
 
       allGuidesHtml += `
         <div class="guide-page">
@@ -567,7 +567,15 @@ export default function WithGuidesView() {
 
   return (
     <div className="app-card">
-      <h3 className="text-lg font-extrabold mb-3">Pedidos con guías</h3>
+      <div className="flex justify-between items-center mb-3">
+        <h3 className="text-lg font-extrabold">Pedidos con guías</h3>
+        <button
+          onClick={() => window.open('#/qr', '_blank')}
+          className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2"
+        >
+          📷 <span>Abrir Lector QR</span>
+        </button>
+      </div>
 
       {/* KPIs */}
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-3">
