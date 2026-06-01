@@ -24,6 +24,7 @@ import CounterView from '@/components/CounterView';
 import MapView from '@/components/MapView';
 import ShopifyInboxView from '@/components/ShopifyInboxView';
 import ShopifyConnectionView from '@/components/ShopifyConnectionView';
+import QRScannerView from '@/components/QRScannerView';
 
 export interface SheetPrefill {
   customer?: string;
@@ -250,6 +251,9 @@ export default function Index() {
 
       case 'shopifyConnection':
         return <ShopifyConnectionView />;
+
+      case 'qrScanner':
+        return <QRScannerView />;
 
       default:
         return <DashboardView />;
