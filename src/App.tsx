@@ -7,7 +7,7 @@ import { AuthProvider } from "@/hooks/useAuth";
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import AssignOrdersView from "./components/AssignOrdersView.tsx";
-import QRScannerView from "./components/QRScannerView.tsx"; // 👈 IMPORTAR EL NUEVO COMPONENTE
+import QRScannerView from "./components/QRScannerView.tsx";
 
 const queryClient = new QueryClient();
 
@@ -21,7 +21,7 @@ const App = () => (
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/asignar-pedidos" element={<AssignOrdersView />} />
-            <Route path="/qr" element={<QRScannerView />} /> {/* 👈 NUEVA RUTA */}
+            <Route path="/qr" element={<QRScannerView />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </HashRouter>
