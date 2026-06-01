@@ -14,122 +14,31 @@ export default function QRScannerView() {
   const [deliveryUsers, setDeliveryUsers] = useState<any[]>([]);
   const [selectedDelivery, setSelectedDelivery] = useState('');
   const [loading, setLoading] = useState(false);
-  const [scannerActive, setScannerActive] = useState(true);
-  const [manualNumber, setManualNumber] = useState('');
-  const [scanError, setScanError] = useState('');
+  const [error, setError] = useState('');
 
-  // Inicializar escáner cuando el componente se monta
+  // AL CARGAR EL COMPONENTE, VERIFICAR SI HAY ID EN LA URL
   useEffect(() => {
-    // Verificar si hay ID en la URL
-    const params = new URLSearchParams(window.location.search);
-    const orderId = params.get('id');
-    if (orderId) {
-      console.log("📦 ID encontrado en URL:", orderId);
+    console.log("🔍 QRScannerView cargado");
+    console.log("📍 URL actual:", window.location.href);
+    console.log("📍 Hash:", window.location.hash);
+    
+    // Extraer el ID de la URL
+    const hash = window.location.hash;
+    const match = hash.match(/[?&]id=([^&]+)/);
+    
+    if (match && match[1]) {
+      const orderId = match[1];
+      console.log("✅ ID encontrado en URL:", orderId);
       loadOrderByNumber(orderId);
-      setScannerActive(false);
-      return;
+    } else {
+      console.log("❌ No se encontró ID en la URL");
+      setError("No se encontró número de pedido en el QR");
     }
-
-    // Cargar script de html5-qrcode
-    const script = document.createElement('script');
-    script.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
-    script.onload = () => {
-      console.log('✅ Librería cargada');
-      startScanner();
-    };
-    script.onerror = () => {
-      toast.error('Error al cargar el escáner');
-    };
-    document.body.appendChild(script);
-
-    return () => {
-      const scanner = (window as any).currentScanner;
-      if (scanner) {
-        scanner.stop().catch(console.error);
-      }
-    };
   }, []);
-
-  const startScanner = async () => {
-    if (!(window as any).Html5Qrcode) {
-      setTimeout(startScanner, 500);
-      return;
-    }
-
-    const elementId = "qr-reader";
-    const element = document.getElementById(elementId);
-    if (!element) return;
-
-    element.innerHTML = '';
-
-    try {
-      const html5QrCode = new (window as any).Html5Qrcode(elementId);
-      (window as any).currentScanner = html5QrCode;
-
-      const config = {
-        fps: 10,
-        qrbox: { width: 250, height: 250 }
-      };
-
-      await html5QrCode.start(
-        { facingMode: "environment" },
-        config,
-        (decodedText: string) => {
-          console.log("✅ QR DETECTADO:", decodedText);
-          
-          // Detener escáner inmediatamente
-          html5QrCode.stop().catch(console.error);
-          
-          // Extraer número de pedido de diferentes formatos
-          let orderNumber = null;
-          
-          // Formato 1: ?id=XXX
-          const match1 = decodedText.match(/[?&]id=([^&]+)/);
-          if (match1) {
-            orderNumber = match1[1];
-          }
-          // Formato 2: #/qr?id=XXX
-          const match2 = decodedText.match(/#\/qr\?id=([^&]+)/);
-          if (match2) {
-            orderNumber = match2[1];
-          }
-          // Formato 3: Solo el número
-          const match3 = decodedText.match(/([A-Z0-9]{10,})/);
-          if (match3 && !orderNumber) {
-            orderNumber = match3[1];
-          }
-          
-          console.log("🔍 Número de pedido extraído:", orderNumber);
-          
-          if (orderNumber) {
-            setScanError('');
-            loadOrderByNumber(orderNumber);
-            setScannerActive(false);
-          } else {
-            setScanError("No se pudo extraer el número de pedido del QR");
-            toast.error('QR no válido. Escanea el QR de Delivery.');
-            // Reiniciar escáner después de 2 segundos
-            setTimeout(() => {
-              setScanError('');
-              startScanner();
-              setScannerActive(true);
-            }, 3000);
-          }
-        },
-        (errorMessage: string) => {
-          // Ignorar errores normales de escaneo
-        }
-      );
-      console.log("✅ Escáner iniciado - esperando QR");
-    } catch (err) {
-      console.error("Error al iniciar:", err);
-      toast.error('No se pudo iniciar la cámara');
-    }
-  };
 
   const loadOrderByNumber = async (orderNumber: string) => {
     setLoading(true);
-    console.log("🔍 Buscando pedido en Supabase:", orderNumber);
+    console.log("🔍 Buscando pedido:", orderNumber);
     
     const { data, error } = await supabase
       .from('orders')
@@ -138,35 +47,15 @@ export default function QRScannerView() {
       .single();
 
     if (error) {
-      console.error("❌ Error al buscar:", error);
-      toast.error(`Pedido ${orderNumber} no encontrado`);
+      console.error("❌ Error:", error);
+      setError(`Pedido ${orderNumber} no encontrado`);
       setLoading(false);
-      setScannerActive(true);
-      // Reiniciar escáner
-      setTimeout(() => startScanner(), 1000);
       return;
     }
 
     console.log("✅ Pedido encontrado:", data);
     setOrderData(data);
     setLoading(false);
-  };
-
-  const handleManualSearch = () => {
-    if (manualNumber.trim()) {
-      loadOrderByNumber(manualNumber.trim());
-      setScannerActive(false);
-    } else {
-      toast.error('Ingresa un número de pedido');
-    }
-  };
-
-  const resetScanner = () => {
-    setOrderData(null);
-    setScannerActive(true);
-    setManualNumber('');
-    setScanError('');
-    setTimeout(() => startScanner(), 500);
   };
 
   const loadDeliveryUsers = async () => {
@@ -183,10 +72,6 @@ export default function QRScannerView() {
   const assignOrder = async () => {
     if (!orderData) return;
     
-    console.log("📦 Asignando pedido:", orderData.order_number);
-    console.log("👤 Rol:", role);
-    console.log("👤 Usuario:", userEmail);
-    
     if (role === 'DELIVERY') {
       const { error } = await supabase
         .from('orders')
@@ -198,12 +83,13 @@ export default function QRScannerView() {
         .eq('id', orderData.id);
         
       if (error) {
-        console.error("❌ Error al asignar:", error);
         toast.error('Error al asignar pedido');
       } else {
-        console.log("✅ Pedido asignado exitosamente");
         toast.success('✅ Pedido asignado a ti correctamente');
-        resetScanner();
+        // Redirigir a otra página o mostrar mensaje
+        setTimeout(() => {
+          window.location.href = '#/pedidos';
+        }, 2000);
       }
     } else if (role === 'ADMIN' || role === 'PROVEEDOR') {
       if (!selectedDelivery) {
@@ -221,12 +107,12 @@ export default function QRScannerView() {
         .eq('id', orderData.id);
         
       if (error) {
-        console.error("❌ Error al asignar:", error);
         toast.error('Error al asignar pedido');
       } else {
-        console.log("✅ Pedido asignado exitosamente a:", selectedDelivery);
         toast.success(`✅ Pedido asignado a ${selectedDelivery}`);
-        resetScanner();
+        setTimeout(() => {
+          window.location.href = '#/pedidos';
+        }, 2000);
       }
     }
   };
@@ -243,7 +129,7 @@ export default function QRScannerView() {
     return (
       <div className="space-y-3">
         <div className="border-b pb-2">
-          <h3 className="font-bold text-xl">📋 GUÍA DE ENVÍO — {order.order_number || order.id.slice(0, 8)}</h3>
+          <h3 className="font-bold text-xl">📋 GUÍA DE ENVÍO — {order.order_number}</h3>
         </div>
         
         <div className="grid grid-cols-2 gap-2 text-sm">
@@ -252,7 +138,7 @@ export default function QRScannerView() {
           <p><span className="font-semibold">Email:</span> {order.email || '—'}</p>
           <p><span className="font-semibold">Departamento:</span> {order.departamento || '—'}</p>
           <p><span className="font-semibold">Ciudad:</span> {order.city || '—'}</p>
-          <p><span className="font-semibold">Dirección:</span> {order.street || ''} {order.district ? `- ${order.district}` : ''}</p>
+          <p><span className="font-semibold">Dirección:</span> {order.street || ''}</p>
         </div>
         
         <div className="border-t pt-2">
@@ -275,6 +161,42 @@ export default function QRScannerView() {
       </div>
     );
   };
+
+  // Mostrar loading
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-100 p-4 flex items-center justify-center">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500"></div>
+          <p className="mt-2 text-gray-500">Cargando pedido...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Mostrar error
+  if (error && !orderData) {
+    return (
+      <div className="min-h-screen bg-gray-100 p-4">
+        <div className="max-w-2xl mx-auto">
+          <div className="bg-white rounded-xl shadow-lg p-6 text-center">
+            <div className="text-red-500 text-6xl mb-4">❌</div>
+            <h2 className="text-xl font-bold mb-2">Error</h2>
+            <p className="text-gray-600 mb-4">{error}</p>
+            <p className="text-sm text-gray-500 mb-4">
+              Asegúrate de escanear el QR de Delivery correcto
+            </p>
+            <button
+              className="bg-purple-500 text-white px-4 py-2 rounded-lg"
+              onClick={() => window.location.href = '#/pedidos'}
+            >
+              Volver a Pedidos
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Mostrar pedido encontrado
   if (orderData) {
@@ -316,13 +238,6 @@ export default function QRScannerView() {
                     </button>
                   </>
                 )}
-                
-                <button
-                  className="w-full mt-2 bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400 transition"
-                  onClick={resetScanner}
-                >
-                  🔄 Escanear otro QR
-                </button>
               </div>
             </div>
           </div>
@@ -331,59 +246,11 @@ export default function QRScannerView() {
     );
   }
 
-  // Mostrar escáner
+  // Estado inicial - no debería llegar aquí
   return (
-    <div className="min-h-screen bg-gray-100 p-4">
-      <div className="max-w-2xl mx-auto">
-        <div className="bg-white rounded-xl shadow-lg p-6">
-          <h2 className="text-2xl font-bold text-center mb-6">
-            🚚 QR Delivery - Asignar Pedidos
-          </h2>
-          
-          {scanError && (
-            <div className="mb-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-lg text-center">
-              ❌ {scanError}
-            </div>
-          )}
-          
-          <div className="mb-6">
-            <div 
-              id="qr-reader"
-              style={{ 
-                width: '100%', 
-                minHeight: '400px',
-                backgroundColor: '#000',
-                borderRadius: '12px',
-                overflow: 'hidden'
-              }}
-            ></div>
-            <p className="text-center text-sm text-gray-500 mt-4">
-              📷 Acerca el código QR a la cámara
-            </p>
-            <p className="text-center text-xs text-gray-400">
-              Asegúrate de tener buena iluminación
-            </p>
-          </div>
-
-          <div className="border-t pt-4 mt-2">
-            <p className="text-center text-sm text-gray-500 mb-2">O ingresa el número de pedido manualmente:</p>
-            <div className="flex gap-2">
-              <input
-                type="text"
-                className="flex-1 p-2 border rounded-lg"
-                placeholder="Ej: A178033883496909665"
-                value={manualNumber}
-                onChange={(e) => setManualNumber(e.target.value)}
-              />
-              <button
-                className="bg-blue-500 text-white px-4 py-2 rounded-lg hover:bg-blue-600"
-                onClick={handleManualSearch}
-              >
-                Buscar
-              </button>
-            </div>
-          </div>
-        </div>
+    <div className="min-h-screen bg-gray-100 p-4 flex items-center justify-center">
+      <div className="text-center">
+        <p className="text-gray-500">Inicializando...</p>
       </div>
     </div>
   );
