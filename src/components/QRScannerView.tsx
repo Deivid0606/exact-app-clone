@@ -23,12 +23,29 @@ export default function QRScannerView() {
     console.log("URL completa:", window.location.href);
     console.log("Hash:", window.location.hash);
     
-    // Extraer ID del hash
+    // Extraer ID del hash - Múltiples formatos
     const hash = window.location.hash;
-    const match = hash.match(/[?&]id=([^&]+)/);
+    let orderId = null;
     
-    if (match && match[1]) {
-      const orderId = match[1];
+    // Formato 1: #/qr?id=XXX
+    let match = hash.match(/[?&]id=([^&]+)/);
+    if (match) orderId = match[1];
+    
+    // Formato 2: #/qr/XXX
+    if (!orderId) {
+      match = hash.match(/\/qr\/([^?&#]+)/);
+      if (match) orderId = match[1];
+    }
+    
+    // Formato 3: Solo el número al final
+    if (!orderId) {
+      match = hash.match(/([A-Z0-9]{15,})/);
+      if (match) orderId = match[1];
+    }
+    
+    if (orderId) {
+      // Limpiar el ID de caracteres extraños
+      orderId = orderId.trim();
       console.log("✅ ID encontrado en URL:", orderId);
       setIdFromUrl(orderId);
       loadOrderByNumber(orderId);
@@ -41,18 +58,37 @@ export default function QRScannerView() {
   const loadOrderByNumber = async (orderNumber: string) => {
     setLoading(true);
     setError('');
-    console.log("🔍 Buscando pedido:", orderNumber);
+    console.log("🔍 Buscando pedido con número:", `"${orderNumber}"`);
+    
+    // Limpiar el número de orden
+    orderNumber = orderNumber.trim();
     
     try {
-      const { data, error } = await supabase
+      // Primero intentar buscar por order_number exacto
+      let { data, error } = await supabase
         .from('orders')
         .select('*')
         .eq('order_number', orderNumber)
-        .single();
+        .maybeSingle();
 
-      if (error) {
+      // Si no encuentra, intentar buscar por ID (UUID)
+      if (error || !data) {
+        console.log("No encontrado por order_number, intentando por ID...");
+        const { data: dataById, error: errorById } = await supabase
+          .from('orders')
+          .select('*')
+          .eq('id', orderNumber)
+          .maybeSingle();
+        
+        if (dataById) {
+          data = dataById;
+          error = null;
+        }
+      }
+
+      if (error || !data) {
         console.error("❌ Error Supabase:", error);
-        setError(`Pedido ${orderNumber} no encontrado en la base de datos`);
+        setError(`Pedido "${orderNumber}" no encontrado en la base de datos`);
         setLoading(false);
         return;
       }
@@ -70,7 +106,7 @@ export default function QRScannerView() {
   const loadDeliveryUsers = async () => {
     const { data, error } = await supabase
       .from('profiles')
-      .select('email, full_name')
+      .select('email, full_name, name')
       .eq('role', 'DELIVERY')
       .eq('active', true);
     if (!error && data) {
@@ -84,12 +120,11 @@ export default function QRScannerView() {
     console.log("📦 Asignando pedido:", orderData.order_number);
     
     if (role === 'DELIVERY') {
-      // SOLO actualizar assigned_delivery, NO tocar status2
       const { error } = await supabase
         .from('orders')
         .update({ 
           assigned_delivery: userEmail,
-          assigned_at: new Date().toISOString(), // 👈 Agregar fecha de asignación
+          assigned_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         })
         .eq('id', orderData.id);
@@ -100,7 +135,6 @@ export default function QRScannerView() {
       } else {
         console.log("✅ Pedido asignado exitosamente a:", userEmail);
         toast.success('✅ Pedido asignado a ti correctamente');
-        // Redirigir a Cierres para ver el pedido asignado
         setTimeout(() => {
           window.location.href = '#/cierres';
         }, 1500);
@@ -115,7 +149,7 @@ export default function QRScannerView() {
         .from('orders')
         .update({ 
           assigned_delivery: selectedDelivery,
-          assigned_at: new Date().toISOString(), // 👈 Agregar fecha de asignación
+          assigned_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         })
         .eq('id', orderData.id);
@@ -242,7 +276,7 @@ export default function QRScannerView() {
                       <option value="">Seleccionar repartidor...</option>
                       {deliveryUsers.map(user => (
                         <option key={user.email} value={user.email}>
-                          {user.full_name || user.email}
+                          {user.full_name || user.name || user.email}
                         </option>
                       ))}
                     </select>
