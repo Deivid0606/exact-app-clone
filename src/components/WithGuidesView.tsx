@@ -117,9 +117,18 @@ export default function WithGuidesView() {
     let query = supabase
       .from('orders')
       .select('*')
-      .gte('created_at', dateFrom + 'T00:00:00')
-      .lte('created_at', dateTo + 'T23:59:59')
       .order('created_at', { ascending: false });
+
+    // Si hay búsqueda por order_number, buscar por este campo
+    if (search && search.trim()) {
+      const searchTerm = search.trim();
+      query = query.ilike('order_number', `%${searchTerm}%`);
+    } else {
+      // Si no hay búsqueda por order_number, aplicar filtros de fecha
+      query = query
+        .gte('created_at', dateFrom + 'T00:00:00')
+        .lte('created_at', dateTo + 'T23:59:59');
+    }
 
     if (status2Filter === 'PENDIENTES') {
       query = query.or('status2.is.null,status2.eq.--');
@@ -142,6 +151,13 @@ export default function WithGuidesView() {
   useEffect(() => { 
     load(); 
   }, [dateFrom, dateTo, status2Filter]);
+
+  // Efecto para recargar cuando se busca por order_number
+  useEffect(() => {
+    if (search && search.trim()) {
+      load();
+    }
+  }, [search]);
 
   const allProviders = useMemo(() => {
     if (role === 'PROVEEDOR') return [];
@@ -245,6 +261,9 @@ export default function WithGuidesView() {
       if (selectedDepartments.size > 0) {
         if (!o.departamento || !selectedDepartments.has(o.departamento)) return false;
       }
+      
+      // Si ya estamos filtrando por order_number en la consulta, no aplicar filtro adicional
+      if (search && search.trim()) return true;
       
       if (!search) return true;
       const q = search.toLowerCase();
@@ -638,7 +657,7 @@ export default function WithGuidesView() {
 
       {/* Filtros segunda línea */}
       <div className="flex flex-wrap gap-2 mb-3">
-        <input className="app-input flex-1 min-w-[200px]" placeholder="🔎 Buscar por cliente, teléfono, ID, ciudad o departamento"
+        <input className="app-input flex-1 min-w-[200px]" placeholder="🔎 Buscar por order_number..."
           value={search} onChange={e => setSearch(e.target.value)} />
         
         <div className="relative">
