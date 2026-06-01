@@ -88,13 +88,15 @@ export default function WithGuidesView() {
         correctLevel: window.QRCode.CorrectLevel.L
       });
       
-      // Generar QR de Delivery - apunta a /qr
+      // Generar QR de Delivery - usa el UUID real del pedido para evitar errores con order_number
+      const orderId = currentOrder.id;
       const orderNumber = currentOrder.order_number;
-      if (orderNumber) {
-        const cleanOrderNumber = String(orderNumber).trim();
-        const deliveryUrl = window.location.origin + '/#/asignar-pedidos?id=' + encodeURIComponent(cleanOrderNumber);
+      if (orderId) {
+        const cleanOrderId = String(orderId).trim();
+        const deliveryUrl = window.location.origin + '/#/asignar-pedidos?id=' + encodeURIComponent(cleanOrderId);
         console.log('QR Delivery URL:', deliveryUrl);
-        console.log('Número de orden usado:', orderNumber);
+        console.log('UUID de pedido usado:', cleanOrderId);
+        console.log('Número de orden visible:', orderNumber);
         new window.QRCode(qrDeliveryRef.current, {
           text: deliveryUrl,
           width: 120,
@@ -104,7 +106,7 @@ export default function WithGuidesView() {
           correctLevel: window.QRCode.CorrectLevel.L
         });
       } else {
-        toast.error('Este pedido no tiene número de orden');
+        toast.error('Este pedido no tiene ID');
       }
     }
   }, [showGuideModal, currentOrder, qrLoaded, profile]);
@@ -443,9 +445,9 @@ export default function WithGuidesView() {
 
       const whatsappUrl = getWhatsAppUrl(order);
       const orderNumber = order.order_number;
-      const cleanOrderNumber = orderNumber ? String(orderNumber).trim() : '';
-      const deliveryUrl = cleanOrderNumber
-        ? window.location.origin + '/#/asignar-pedidos?id=' + encodeURIComponent(cleanOrderNumber)
+      const cleanOrderId = order.id ? String(order.id).trim() : '';
+      const deliveryUrl = cleanOrderId
+        ? window.location.origin + '/#/asignar-pedidos?id=' + encodeURIComponent(cleanOrderId)
         : '#';
 
       allGuidesHtml += `
@@ -574,7 +576,7 @@ export default function WithGuidesView() {
       <div className="flex justify-between items-center mb-3">
         <h3 className="text-lg font-extrabold">Pedidos con guías</h3>
         <button
-          onClick={() => window.open('#/qr', '_blank')}
+          onClick={() => window.open('#/asignar-pedidos', '_blank')}
           className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2"
         >
           📷 <span>Abrir Lector QR</span>
