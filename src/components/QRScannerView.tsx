@@ -17,86 +17,38 @@ export default function QRScannerView() {
   const [error, setError] = useState('');
   const [idFromUrl, setIdFromUrl] = useState<string | null>(null);
 
-  // LEER EL ID DE LA URL AL CARGAR
   useEffect(() => {
-    console.log("=== QRScannerView CARGADO ===");
-    console.log("URL completa:", window.location.href);
-    console.log("Hash:", window.location.hash);
-    
-    // Extraer ID del hash - Múltiples formatos
     const hash = window.location.hash;
-    let orderId = null;
+    const match = hash.match(/[?&]id=([^&]+)/);
     
-    // Formato 1: #/qr?id=XXX
-    let match = hash.match(/[?&]id=([^&]+)/);
-    if (match) orderId = match[1];
-    
-    // Formato 2: #/qr/XXX
-    if (!orderId) {
-      match = hash.match(/\/qr\/([^?&#]+)/);
-      if (match) orderId = match[1];
-    }
-    
-    // Formato 3: Solo el número al final
-    if (!orderId) {
-      match = hash.match(/([A-Z0-9]{15,})/);
-      if (match) orderId = match[1];
-    }
-    
-    if (orderId) {
-      // Limpiar el ID de caracteres extraños
-      orderId = orderId.trim();
-      console.log("✅ ID encontrado en URL:", orderId);
+    if (match && match[1]) {
+      const orderId = match[1];
       setIdFromUrl(orderId);
       loadOrderByNumber(orderId);
     } else {
-      console.log("❌ No se encontró ID en la URL");
-      setError("No se encontró número de pedido en el QR. Asegúrate de escanear el QR de Delivery.");
+      setError("No se encontró número de pedido en el QR");
     }
   }, []);
 
   const loadOrderByNumber = async (orderNumber: string) => {
     setLoading(true);
     setError('');
-    console.log("🔍 Buscando pedido con número:", `"${orderNumber}"`);
-    
-    // Limpiar el número de orden
-    orderNumber = orderNumber.trim();
     
     try {
-      // Primero intentar buscar por order_number exacto
-      let { data, error } = await supabase
+      const { data, error } = await supabase
         .from('orders')
         .select('*')
         .eq('order_number', orderNumber)
-        .maybeSingle();
+        .single();
 
-      // Si no encuentra, intentar buscar por ID (UUID)
-      if (error || !data) {
-        console.log("No encontrado por order_number, intentando por ID...");
-        const { data: dataById, error: errorById } = await supabase
-          .from('orders')
-          .select('*')
-          .eq('id', orderNumber)
-          .maybeSingle();
-        
-        if (dataById) {
-          data = dataById;
-          error = null;
-        }
-      }
-
-      if (error || !data) {
-        console.error("❌ Error Supabase:", error);
-        setError(`Pedido "${orderNumber}" no encontrado en la base de datos`);
+      if (error) {
+        setError(`Pedido ${orderNumber} no encontrado`);
         setLoading(false);
         return;
       }
 
-      console.log("✅ Pedido encontrado:", data);
       setOrderData(data);
     } catch (err) {
-      console.error("❌ Error inesperado:", err);
       setError("Error al cargar el pedido");
     }
     
@@ -106,7 +58,7 @@ export default function QRScannerView() {
   const loadDeliveryUsers = async () => {
     const { data, error } = await supabase
       .from('profiles')
-      .select('email, full_name, name')
+      .select('email, full_name')
       .eq('role', 'DELIVERY')
       .eq('active', true);
     if (!error && data) {
@@ -116,8 +68,6 @@ export default function QRScannerView() {
 
   const assignOrder = async () => {
     if (!orderData) return;
-    
-    console.log("📦 Asignando pedido:", orderData.order_number);
     
     if (role === 'DELIVERY') {
       const { error } = await supabase
@@ -130,10 +80,8 @@ export default function QRScannerView() {
         .eq('id', orderData.id);
         
       if (error) {
-        console.error("❌ Error al asignar:", error);
         toast.error('Error al asignar pedido');
       } else {
-        console.log("✅ Pedido asignado exitosamente a:", userEmail);
         toast.success('✅ Pedido asignado a ti correctamente');
         setTimeout(() => {
           window.location.href = '#/cierres';
@@ -155,10 +103,8 @@ export default function QRScannerView() {
         .eq('id', orderData.id);
         
       if (error) {
-        console.error("❌ Error al asignar:", error);
         toast.error('Error al asignar pedido');
       } else {
-        console.log("✅ Pedido asignado exitosamente a:", selectedDelivery);
         toast.success(`✅ Pedido asignado a ${selectedDelivery}`);
         setTimeout(() => {
           window.location.href = '#/cierres';
@@ -212,7 +158,6 @@ export default function QRScannerView() {
     );
   };
 
-  // Estado: Cargando
   if (loading) {
     return (
       <div className="min-h-screen bg-gray-100 p-4 flex items-center justify-center">
@@ -224,7 +169,6 @@ export default function QRScannerView() {
     );
   }
 
-  // Estado: Error
   if (error && !orderData) {
     return (
       <div className="min-h-screen bg-gray-100 p-4">
@@ -248,7 +192,6 @@ export default function QRScannerView() {
     );
   }
 
-  // Estado: Mostrar pedido para asignar
   if (orderData) {
     return (
       <div className="min-h-screen bg-gray-100 p-4">
@@ -276,7 +219,7 @@ export default function QRScannerView() {
                       <option value="">Seleccionar repartidor...</option>
                       {deliveryUsers.map(user => (
                         <option key={user.email} value={user.email}>
-                          {user.full_name || user.name || user.email}
+                          {user.full_name || user.email}
                         </option>
                       ))}
                     </select>
@@ -296,7 +239,6 @@ export default function QRScannerView() {
     );
   }
 
-  // Estado inicial (no debería llegar aquí)
   return (
     <div className="min-h-screen bg-gray-100 p-4 flex items-center justify-center">
       <div className="text-center">
