@@ -9,7 +9,7 @@ export default function QRScannerView() {
   const { profile } = useAuth();
   const role = profile?.role || '';
   const userEmail = profile?.email || '';
-  
+
   const [orderData, setOrderData] = useState<any>(null);
   const [deliveryUsers, setDeliveryUsers] = useState<any[]>([]);
   const [selectedDelivery, setSelectedDelivery] = useState('');
@@ -17,50 +17,102 @@ export default function QRScannerView() {
   const [error, setError] = useState('');
   const [idFromUrl, setIdFromUrl] = useState<string | null>(null);
 
-  useEffect(() => {
+  const getHashParam = (key: string) => {
     const hash = window.location.hash;
-    const match = hash.match(/[?&]id=([^&]+)/);
-    
-    if (match && match[1]) {
-      const orderId = match[1];
-      setIdFromUrl(orderId);
-      loadOrderByNumber(orderId);
-    } else {
-      setError("No se encontró número de pedido en el QR");
+    const queryString = hash.includes('?') ? hash.split('?')[1] : '';
+    const params = new URLSearchParams(queryString);
+    return params.get(key);
+  };
+
+  const cleanQrValue = (value: string) => {
+    return decodeURIComponent(value || '').trim().replace(/\s+/g, '').toUpperCase();
+  };
+
+  const isUUID = (value: string) => {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+  };
+
+  useEffect(() => {
+    const rawId = getHashParam('id');
+
+    if (!rawId) {
+      setError('No se encontró número de pedido en el QR');
+      return;
     }
+
+    const cleanId = cleanQrValue(rawId);
+    setIdFromUrl(cleanId);
+    loadOrderByNumber(cleanId);
   }, []);
 
   const loadOrderByNumber = async (orderNumber: string) => {
     setLoading(true);
     setError('');
-    
-    try {
-      const { data, error } = await supabase
-        .from('orders')
-        .select('*')
-        .eq('order_number', orderNumber)
-        .single();
 
-      if (error) {
+    try {
+      let data: any = null;
+      let findError: any = null;
+
+      if (isUUID(orderNumber)) {
+        const result = await supabase
+          .from('orders')
+          .select('*')
+          .eq('id', orderNumber)
+          .maybeSingle();
+
+        data = result.data;
+        findError = result.error;
+      }
+
+      if (!data) {
+        const result = await supabase
+          .from('orders')
+          .select('*')
+          .eq('order_number', orderNumber)
+          .maybeSingle();
+
+        data = result.data;
+        findError = result.error;
+      }
+
+      if (!data) {
+        const result = await supabase
+          .from('orders')
+          .select('*')
+          .ilike('order_number', orderNumber)
+          .maybeSingle();
+
+        data = result.data;
+        findError = result.error;
+      }
+
+      if (findError) {
+        console.error('Error buscando pedido:', findError);
         setError(`Pedido ${orderNumber} no encontrado`);
-        setLoading(false);
+        return;
+      }
+
+      if (!data) {
+        setError(`Pedido ${orderNumber} no encontrado`);
         return;
       }
 
       setOrderData(data);
     } catch (err) {
-      setError("Error al cargar el pedido");
+      console.error('Error al cargar pedido:', err);
+      setError('Error al cargar el pedido');
+    } finally {
+      setLoading(false);
     }
-    
-    setLoading(false);
   };
 
   const loadDeliveryUsers = async () => {
     const { data, error } = await supabase
       .from('profiles')
-      .select('email, full_name')
-      .eq('role', 'DELIVERY')
+      .select('email, full_name, name')
+      .in('role', ['DELIVERY', 'delivery'])
       .eq('active', true);
+
     if (!error && data) {
       setDeliveryUsers(data || []);
     }
@@ -68,17 +120,17 @@ export default function QRScannerView() {
 
   const assignOrder = async () => {
     if (!orderData) return;
-    
+
     if (role === 'DELIVERY') {
       const { error } = await supabase
         .from('orders')
-        .update({ 
+        .update({
           assigned_delivery: userEmail,
           assigned_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
         })
         .eq('id', orderData.id);
-        
+
       if (error) {
         toast.error('Error al asignar pedido');
       } else {
@@ -95,13 +147,13 @@ export default function QRScannerView() {
 
       const { error } = await supabase
         .from('orders')
-        .update({ 
+        .update({
           assigned_delivery: selectedDelivery,
           assigned_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
+          updated_at: new Date().toISOString(),
         })
         .eq('id', orderData.id);
-        
+
       if (error) {
         toast.error('Error al asignar pedido');
       } else {
@@ -120,14 +172,18 @@ export default function QRScannerView() {
   }, [role]);
 
   const renderGuideDetails = (order: any) => {
-    const items = typeof order.items_json === 'string' ? JSON.parse(order.items_json) : (order.items_json || []);
-    
+    const items = typeof order.items_json === 'string'
+      ? JSON.parse(order.items_json || '[]')
+      : order.items_json || [];
+
     return (
       <div className="space-y-3">
         <div className="border-b pb-2">
-          <h3 className="font-bold text-xl">📋 GUÍA DE ENVÍO — {order.order_number}</h3>
+          <h3 className="font-bold text-xl">
+            📋 GUÍA DE ENVÍO — {order.order_number || order.id}
+          </h3>
         </div>
-        
+
         <div className="grid grid-cols-2 gap-2 text-sm">
           <p><span className="font-semibold">Cliente:</span> {order.customer_name}</p>
           <p><span className="font-semibold">Teléfono:</span> {order.phone}</p>
@@ -136,7 +192,7 @@ export default function QRScannerView() {
           <p><span className="font-semibold">Ciudad:</span> {order.city || '—'}</p>
           <p><span className="font-semibold">Dirección:</span> {order.street || ''} {order.district ? `- ${order.district}` : ''}</p>
         </div>
-        
+
         <div className="border-t pt-2">
           <p className="font-semibold">📦 Productos:</p>
           {items.map((item: any, idx: number) => (
@@ -145,11 +201,11 @@ export default function QRScannerView() {
             </p>
           ))}
         </div>
-        
+
         <div className="border-t pt-2">
           <p className="font-semibold">💰 Total: Gs {nf(Number(order.total_gs || 0))}</p>
         </div>
-        
+
         <div className="border-t pt-2 text-sm">
           <p><span className="font-semibold">👤 Vendedor:</span> {order.created_by || '—'}</p>
           <p><span className="font-semibold">🏢 Proveedor:</span> {order.provider_emails_list || order.provider_email || '—'}</p>
@@ -200,7 +256,7 @@ export default function QRScannerView() {
             <h2 className="text-2xl font-bold text-center mb-6">🚚 Asignar Pedido</h2>
             <div className="border-2 border-purple-300 rounded-lg p-4 bg-purple-50">
               {renderGuideDetails(orderData)}
-              
+
               <div className="mt-4">
                 {role === 'DELIVERY' ? (
                   <button
@@ -219,7 +275,7 @@ export default function QRScannerView() {
                       <option value="">Seleccionar repartidor...</option>
                       {deliveryUsers.map(user => (
                         <option key={user.email} value={user.email}>
-                          {user.full_name || user.email}
+                          {user.full_name || user.name || user.email}
                         </option>
                       ))}
                     </select>
