@@ -4,7 +4,8 @@ export type ViewName =
   | 'auth' | 'dashboard' | 'news' | 'chat' | 'products' | 'earnings'
   | 'order' | 'orders' | 'rates' | 'commissions' | 'commissionRequests'
   | 'counter' | 'closures' | 'rendicionesPagadas' | 'profile' | 'users'
-  | 'assignOrders' | 'rankingDelivery' | 'withGuides' | 'shopifyInbox' | 'shopifyConnection' | 'mapa';
+  | 'assignOrders' | 'rankingDelivery' | 'withGuides' | 'shopifyInbox' | 'shopifyConnection' | 'mapa'
+  | 'qrScanner'; // 👈 AGREGAR ESTO
 
 interface NavItem {
   id: ViewName;
@@ -27,6 +28,7 @@ const navItems: NavItem[] = [
   { id: 'shopifyConnection', label: '🔗 Conexión Shopify', roles: ['ADMIN'] },
   { id: 'assignOrders', label: 'Asignar Pedidos', roles: ['ADMIN', 'PROVEEDOR', 'DELIVERY'] },
   { id: 'mapa', label: 'Mapa', roles: ['ADMIN', 'DELIVERY'] },
+  { id: 'qrScanner', label: '📷 QR Delivery', roles: ['ADMIN', 'PROVEEDOR', 'DELIVERY'] }, // 👈 NUEVO ITEM
   { id: 'rates', label: 'Costos delivery', excludeRoles: ['DESPACHANTE', 'DELIVERY', 'VENDEDOR'] },
   { id: 'commissions', label: 'Pago de comisiones', roles: ['ADMIN', 'PROVEEDOR', 'VENDEDOR'] },
   { id: 'commissionRequests', label: 'Solicitud de comisiones', roles: ['ADMIN', 'PROVEEDOR', 'VENDEDOR'] },
