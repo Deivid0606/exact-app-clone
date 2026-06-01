@@ -3,6 +3,12 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
 
+declare global {
+  interface Window {
+    Html5Qrcode: any;
+  }
+}
+
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
 export default function QRScannerView() {
@@ -16,35 +22,30 @@ export default function QRScannerView() {
   const [loading, setLoading] = useState(false);
   const [scanning, setScanning] = useState(true);
   const [cameraError, setCameraError] = useState(false);
+  const [scriptLoaded, setScriptLoaded] = useState(false);
   const scannerRef = useRef<any>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const containerId = "qr-reader-container";
 
   // Cargar la librería HTML5-QRCODE
   useEffect(() => {
-    const loadScript = () => {
-      if (document.querySelector('script[src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"]')) {
-        console.log('Script ya cargado');
-        return;
-      }
-      
-      const script = document.createElement('script');
-      script.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
-      script.async = true;
-      script.onload = () => {
-        console.log('Librería QR cargada exitosamente');
-        if (scanning && !orderData) {
-          setTimeout(() => startCamera(), 500);
-        }
-      };
-      script.onerror = () => {
-        console.error('Error al cargar la librería QR');
-        toast.error('Error al cargar el escáner QR');
-        setCameraError(true);
-      };
-      document.body.appendChild(script);
-    };
+    if (window.Html5Qrcode) {
+      setScriptLoaded(true);
+      return;
+    }
     
-    loadScript();
+    const script = document.createElement('script');
+    script.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
+    script.async = true;
+    script.onload = () => {
+      console.log('Librería QR cargada');
+      setScriptLoaded(true);
+    };
+    script.onerror = () => {
+      console.error('Error al cargar la librería');
+      toast.error('Error al cargar el escáner QR');
+      setCameraError(true);
+    };
+    document.body.appendChild(script);
     
     return () => {
       if (scannerRef.current) {
@@ -62,6 +63,13 @@ export default function QRScannerView() {
       setScanning(false);
     }
   }, []);
+
+  // Iniciar cámara cuando el script esté cargado y esté en modo escaneo
+  useEffect(() => {
+    if (scriptLoaded && scanning && !orderData) {
+      setTimeout(() => startCamera(), 500);
+    }
+  }, [scriptLoaded, scanning, orderData]);
 
   const loadOrderByNumber = async (orderNumber: string) => {
     setLoading(true);
@@ -94,11 +102,15 @@ export default function QRScannerView() {
   const startCamera = async () => {
     if (!window.Html5Qrcode) {
       console.log('Esperando librería...');
-      setTimeout(() => startCamera(), 500);
       return;
     }
     
-    if (!containerRef.current) return;
+    const container = document.getElementById(containerId);
+    if (!container) {
+      console.log('Contenedor no encontrado');
+      setTimeout(() => startCamera(), 500);
+      return;
+    }
     
     try {
       if (scannerRef.current) {
@@ -107,15 +119,14 @@ export default function QRScannerView() {
       }
       
       // Limpiar el contenedor
-      containerRef.current.innerHTML = '';
+      container.innerHTML = '';
       
-      const html5QrCode = new window.Html5Qrcode("qr-reader-container");
+      const html5QrCode = new window.Html5Qrcode(containerId);
       scannerRef.current = html5QrCode;
       
       const config = { 
         fps: 10, 
-        qrbox: { width: 300, height: 300 },
-        aspectRatio: 1.0
+        qrbox: { width: 250, height: 250 }
       };
       
       await html5QrCode.start(
@@ -134,9 +145,11 @@ export default function QRScannerView() {
         },
         (errorMessage: string) => {
           // Ignorar errores de escaneo
+          console.log("Error de escaneo:", errorMessage);
         }
       );
       setCameraError(false);
+      console.log("Cámara iniciada correctamente");
     } catch (err) {
       console.error("Error al iniciar cámara:", err);
       setCameraError(true);
@@ -186,7 +199,7 @@ export default function QRScannerView() {
         toast.success('✅ Pedido asignado a ti correctamente');
         setOrderData(null);
         setScanning(true);
-        setTimeout(() => startCamera(), 500);
+        await stopCamera();
       }
     } else if (role === 'ADMIN' || role === 'PROVEEDOR') {
       if (!selectedDelivery) {
@@ -210,7 +223,7 @@ export default function QRScannerView() {
         setOrderData(null);
         setSelectedDelivery('');
         setScanning(true);
-        setTimeout(() => startCamera(), 500);
+        await stopCamera();
       }
     }
   };
@@ -268,11 +281,17 @@ export default function QRScannerView() {
             🚚 QR Delivery - Asignar Pedidos
           </h2>
           
-          {scanning && !orderData && (
+          {!scriptLoaded && (
+            <div className="text-center py-8">
+              <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500"></div>
+              <p className="mt-2 text-gray-500">Cargando escáner QR...</p>
+            </div>
+          )}
+          
+          {scriptLoaded && scanning && !orderData && (
             <div className="mb-6">
               <div 
-                id="qr-reader-container" 
-                ref={containerRef}
+                id={containerId}
                 style={{ 
                   width: '100%', 
                   minHeight: '400px',
@@ -338,10 +357,10 @@ export default function QRScannerView() {
                 
                 <button
                   className="w-full mt-2 bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400 transition"
-                  onClick={() => {
+                  onClick={async () => {
                     setOrderData(null);
                     setScanning(true);
-                    startCamera();
+                    await stopCamera();
                   }}
                 >
                   🔄 Escanear otro QR
