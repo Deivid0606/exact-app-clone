@@ -14,27 +14,26 @@ export default function QRScannerView() {
   const [deliveryUsers, setDeliveryUsers] = useState<any[]>([]);
   const [selectedDelivery, setSelectedDelivery] = useState('');
   const [loading, setLoading] = useState(false);
-  const [scanner, setScanner] = useState<any>(null);
-  const [isScanning, setIsScanning] = useState(true);
+  const [scannerActive, setScannerActive] = useState(true);
   const [manualNumber, setManualNumber] = useState('');
 
-  // Inicializar escáner al cargar el componente
+  // Inicializar escáner cuando el componente se monta
   useEffect(() => {
     // Verificar si hay ID en la URL
     const params = new URLSearchParams(window.location.search);
     const orderId = params.get('id');
     if (orderId) {
       loadOrderByNumber(orderId);
-      setIsScanning(false);
+      setScannerActive(false);
       return;
     }
 
-    // Cargar el script de html5-qrcode
+    // Cargar script de html5-qrcode
     const script = document.createElement('script');
     script.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
     script.onload = () => {
       console.log('✅ Librería cargada');
-      initScanner();
+      startScanner();
     };
     script.onerror = () => {
       toast.error('Error al cargar el escáner');
@@ -42,15 +41,16 @@ export default function QRScannerView() {
     document.body.appendChild(script);
 
     return () => {
+      const scanner = (window as any).currentScanner;
       if (scanner) {
         scanner.stop().catch(console.error);
       }
     };
   }, []);
 
-  const initScanner = async () => {
-    if (!window.Html5Qrcode) {
-      setTimeout(initScanner, 500);
+  const startScanner = async () => {
+    if (!(window as any).Html5Qrcode) {
+      setTimeout(startScanner, 500);
       return;
     }
 
@@ -61,8 +61,8 @@ export default function QRScannerView() {
     element.innerHTML = '';
 
     try {
-      const html5QrCode = new window.Html5Qrcode(elementId);
-      setScanner(html5QrCode);
+      const html5QrCode = new (window as any).Html5Qrcode(elementId);
+      (window as any).currentScanner = html5QrCode;
 
       const config = {
         fps: 10,
@@ -72,48 +72,40 @@ export default function QRScannerView() {
       await html5QrCode.start(
         { facingMode: "environment" },
         config,
-        onScanSuccess,
+        (decodedText: string) => {
+          console.log("✅ QR DETECTADO:", decodedText);
+          
+          // Detener escáner
+          html5QrCode.stop().catch(console.error);
+          
+          // Extraer número de pedido
+          let orderNumber = null;
+          const match = decodedText.match(/[?&]id=([^&]+)/);
+          if (match) {
+            orderNumber = match[1];
+          } else if (decodedText.length < 50 && !decodedText.includes('http')) {
+            orderNumber = decodedText;
+          }
+          
+          if (orderNumber) {
+            loadOrderByNumber(orderNumber);
+            setScannerActive(false);
+          } else {
+            toast.error('QR no válido. Escanea el QR de Delivery.');
+            // Reiniciar escáner después de 2 segundos
+            setTimeout(() => {
+              startScanner();
+            }, 2000);
+          }
+        },
         (errorMessage: string) => {
           // Ignorar errores normales
-          console.log("🔍 Buscando QR...");
         }
       );
-      console.log("✅ Escáner iniciado correctamente");
+      console.log("✅ Escáner iniciado");
     } catch (err) {
-      console.error("Error al iniciar:", err);
-      toast.error('No se pudo iniciar la cámara. Verifica permisos.');
-    }
-  };
-
-  const onScanSuccess = (decodedText: string) => {
-    console.log("✅ QR DETECTADO:", decodedText);
-    
-    // Detener el escáner
-    if (scanner) {
-      scanner.stop().catch(console.error);
-    }
-    
-    // Extraer el número de pedido
-    let orderNumber = null;
-    
-    // Buscar id=XXX en la URL
-    const match = decodedText.match(/[?&]id=([^&]+)/);
-    if (match) {
-      orderNumber = match[1];
-    } else if (decodedText.length < 50 && !decodedText.includes('http')) {
-      // Si es solo el número
-      orderNumber = decodedText;
-    }
-    
-    if (orderNumber) {
-      loadOrderByNumber(orderNumber);
-      setIsScanning(false);
-    } else {
-      toast.error('QR no válido. Escanea el QR de Delivery.');
-      // Reiniciar escáner
-      setTimeout(() => {
-        initScanner();
-      }, 2000);
+      console.error("Error:", err);
+      toast.error('No se pudo iniciar la cámara');
     }
   };
 
@@ -142,10 +134,17 @@ export default function QRScannerView() {
   const handleManualSearch = () => {
     if (manualNumber.trim()) {
       loadOrderByNumber(manualNumber.trim());
-      setIsScanning(false);
+      setScannerActive(false);
     } else {
       toast.error('Ingresa un número de pedido');
     }
+  };
+
+  const resetScanner = () => {
+    setOrderData(null);
+    setScannerActive(true);
+    setManualNumber('');
+    setTimeout(() => startScanner(), 500);
   };
 
   const loadDeliveryUsers = async () => {
@@ -176,11 +175,7 @@ export default function QRScannerView() {
         toast.error('Error al asignar pedido');
       } else {
         toast.success('✅ Pedido asignado a ti correctamente');
-        // Resetear todo
-        setOrderData(null);
-        setIsScanning(true);
-        setManualNumber('');
-        setTimeout(() => initScanner(), 500);
+        resetScanner();
       }
     } else if (role === 'ADMIN' || role === 'PROVEEDOR') {
       if (!selectedDelivery) {
@@ -201,10 +196,7 @@ export default function QRScannerView() {
         toast.error('Error al asignar pedido');
       } else {
         toast.success(`✅ Pedido asignado a ${selectedDelivery}`);
-        setOrderData(null);
-        setIsScanning(true);
-        setSelectedDelivery('');
-        setTimeout(() => initScanner(), 500);
+        resetScanner();
       }
     }
   };
@@ -294,6 +286,13 @@ export default function QRScannerView() {
                     </button>
                   </>
                 )}
+                
+                <button
+                  className="w-full mt-2 bg-gray-300 text-gray-700 py-2 rounded-lg hover:bg-gray-400 transition"
+                  onClick={resetScanner}
+                >
+                  🔄 Escanear otro QR
+                </button>
               </div>
             </div>
           </div>
