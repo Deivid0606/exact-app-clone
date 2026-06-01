@@ -88,12 +88,14 @@ export default function WithGuidesView() {
         correctLevel: window.QRCode.CorrectLevel.L
       });
       
-      // Generar QR de Delivery - apunta a /qr
+      // Generar QR de Delivery - apunta a /qr con order_number limpio
       const orderNumber = currentOrder.order_number;
-      if (orderNumber) {
-        const deliveryUrl = window.location.origin + '/#/qr?id=' + orderNumber;
+      const cleanOrderNumber = orderNumber ? String(orderNumber).trim() : '';
+      
+      if (cleanOrderNumber) {
+        const deliveryUrl = window.location.origin + '/#/qr?id=' + encodeURIComponent(cleanOrderNumber);
         console.log('QR Delivery URL:', deliveryUrl);
-        console.log('Número de orden usado:', orderNumber);
+        console.log('Número de orden usado:', cleanOrderNumber);
         new window.QRCode(qrDeliveryRef.current, {
           text: deliveryUrl,
           width: 120,
@@ -436,13 +438,17 @@ export default function WithGuidesView() {
             <td style="padding: 4px 0;">${it.title || it.sku || 'Item'}</td>
             <td style="padding: 4px 0; text-align: center;">${it.qty || 1}</td>
             <td style="padding: 4px 0; text-align: right;">Gs ${nf(Number(it.sale_gs || 0) * Number(it.qty || 1))}</td>
-          </tr>
+           </tr>
         `;
       }
 
       const whatsappUrl = getWhatsAppUrl(order);
+      // CORRECCIÓN APLICADA AQUÍ
       const orderNumber = order.order_number;
-      const deliveryUrl = orderNumber ? window.location.origin + '/#/qr?id=' + orderNumber : '#';
+      const cleanOrderNumber = orderNumber ? String(orderNumber).trim() : '';
+      const deliveryUrl = cleanOrderNumber
+        ? window.location.origin + '/#/qr?id=' + encodeURIComponent(cleanOrderNumber)
+        : '#';
 
       allGuidesHtml += `
         <div class="guide-page">
