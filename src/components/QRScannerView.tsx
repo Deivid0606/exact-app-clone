@@ -26,7 +26,9 @@ export default function QRScannerView() {
     const match = hash.match(/[?&]id=([^&]+)/);
 
     if (match && match[1]) {
-      const orderId = decodeURIComponent(match[1]).trim();
+      const orderId = decodeURIComponent(match[1])
+        .trim()
+        .replace(/\s+/g, '');
       console.log('✅ ID encontrado en URL:', orderId);
       setIdFromUrl(orderId);
       loadOrderByNumber(orderId);
@@ -39,37 +41,53 @@ export default function QRScannerView() {
   const loadOrderByNumber = async (orderNumber: string) => {
     setLoading(true);
     setError('');
-    console.log('🔍 Buscando pedido:', orderNumber);
+
+    const cleanOrderNumber = decodeURIComponent(orderNumber || '')
+      .trim()
+      .replace(/\s+/g, '');
+
+    console.log('🔍 QR ORIGINAL:', orderNumber);
+    console.log('🔍 QR LIMPIO:', cleanOrderNumber);
 
     try {
-      const { data, error } = await supabase
+      let foundOrder = null;
+
+      const exact = await supabase
         .from('orders')
         .select('*')
-        .eq('order_number', orderNumber)
+        .eq('order_number', cleanOrderNumber)
         .maybeSingle();
 
-      if (error) {
-        console.error('❌ Error Supabase:', error);
-        setError(`Pedido ${orderNumber} no encontrado en la base de datos`);
-        setLoading(false);
+      if (exact.data) {
+        foundOrder = exact.data;
+      }
+
+      if (!foundOrder) {
+        const insensitive = await supabase
+          .from('orders')
+          .select('*')
+          .ilike('order_number', cleanOrderNumber)
+          .maybeSingle();
+
+        if (insensitive.data) {
+          foundOrder = insensitive.data;
+        }
+      }
+
+      if (!foundOrder) {
+        setError(`Pedido ${cleanOrderNumber} no encontrado`);
         return;
       }
 
-      if (!data) {
-        console.log('❌ Pedido no encontrado');
-        setError(`Pedido ${orderNumber} no encontrado en la base de datos`);
-        setLoading(false);
-        return;
-      }
+      console.log('✅ Pedido encontrado:', foundOrder);
+      setOrderData(foundOrder);
 
-      console.log('✅ Pedido encontrado:', data);
-      setOrderData(data);
     } catch (err) {
-      console.error('❌ Error inesperado:', err);
+      console.error(err);
       setError('Error al cargar el pedido');
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   const loadDeliveryUsers = async () => {
