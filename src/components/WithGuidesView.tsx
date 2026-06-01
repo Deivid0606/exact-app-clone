@@ -88,15 +88,12 @@ export default function WithGuidesView() {
         correctLevel: window.QRCode.CorrectLevel.L
       });
       
-      // Generar QR de Delivery - usa el UUID real del pedido para evitar errores con order_number
+      // Generar QR de Delivery
       const orderId = currentOrder.id;
       const orderNumber = currentOrder.order_number;
       if (orderId) {
         const cleanOrderId = String(orderId).trim();
         const deliveryUrl = window.location.origin + '/#/asignar-pedidos?id=' + encodeURIComponent(cleanOrderId);
-        console.log('QR Delivery URL:', deliveryUrl);
-        console.log('UUID de pedido usado:', cleanOrderId);
-        console.log('Número de orden visible:', orderNumber);
         new window.QRCode(qrDeliveryRef.current, {
           text: deliveryUrl,
           width: 120,
@@ -109,7 +106,7 @@ export default function WithGuidesView() {
         toast.error('Este pedido no tiene ID');
       }
     }
-  }, [showGuideModal, currentOrder, qrLoaded, profile]);
+  }, [showGuideModal, currentOrder, qrLoaded]);
 
   const load = async () => {
     setLoading(true);
@@ -119,12 +116,10 @@ export default function WithGuidesView() {
       .select('*')
       .order('created_at', { ascending: false });
 
-    // Si hay búsqueda por order_number, buscar por este campo
     if (search && search.trim()) {
       const searchTerm = search.trim();
       query = query.ilike('order_number', `%${searchTerm}%`);
     } else {
-      // Si no hay búsqueda por order_number, aplicar filtros de fecha
       query = query
         .gte('created_at', dateFrom + 'T00:00:00')
         .lte('created_at', dateTo + 'T23:59:59');
@@ -152,7 +147,6 @@ export default function WithGuidesView() {
     load(); 
   }, [dateFrom, dateTo, status2Filter]);
 
-  // Efecto para recargar cuando se busca por order_number
   useEffect(() => {
     if (search && search.trim()) {
       load();
@@ -262,7 +256,6 @@ export default function WithGuidesView() {
         if (!o.departamento || !selectedDepartments.has(o.departamento)) return false;
       }
       
-      // Si ya estamos filtrando por order_number en la consulta, no aplicar filtro adicional
       if (search && search.trim()) return true;
       
       if (!search) return true;
@@ -437,7 +430,7 @@ export default function WithGuidesView() {
     toast.success(`${selected.length} guías descargadas en TXT`);
   };
 
-  // ✅ FUNCIÓN CORREGIDA - IMPRESIÓN CON QR
+  // IMPRESIÓN CON QR - VERSIÓN CORREGIDA
   const printWithQR = () => {
     const selected = getSelectedOrders();
     if (selected.length === 0) { 
@@ -469,7 +462,6 @@ export default function WithGuidesView() {
         ? window.location.origin + '/#/asignar-pedidos?id=' + encodeURIComponent(cleanOrderId)
         : '#';
 
-      // ✅ ID únicos para cada QR (evita conflictos)
       const waQrId = `qr-wa-${order.id.replace(/-/g, '')}`;
       const deliveryQrId = `qr-delivery-${order.id.replace(/-/g, '')}`;
 
@@ -515,12 +507,12 @@ export default function WithGuidesView() {
           <div style="display: flex; justify-content: center; gap: 40px; margin-top: 20px; padding-top: 15px; border-top: 2px dashed #ccc;">
             <div style="text-align: center;">
               <div style="font-size: 11px; font-weight: bold; color: #25D366; margin-bottom: 8px;">📱 QR CLIENTE - Enviar Ubicación</div>
-              <div id="${waQrId}" style="width: 120px; height: 120px; margin: 0 auto;"></div>
+              <div id="${waQrId}" data-url="${whatsappUrl}" style="width: 120px; height: 120px; margin: 0 auto;"></div>
               <div style="font-size: 9px; color: #666; margin-top: 6px;">WhatsApp con ubicación exacta</div>
             </div>
             <div style="text-align: center;">
               <div style="font-size: 11px; font-weight: bold; color: #F97316; margin-bottom: 8px;">🚚 QR DELIVERY - Asignar Pedido</div>
-              <div id="${deliveryQrId}" style="width: 120px; height: 120px; margin: 0 auto;"></div>
+              <div id="${deliveryQrId}" data-url="${deliveryUrl}" style="width: 120px; height: 120px; margin: 0 auto;"></div>
               <div style="font-size: 9px; color: #666; margin-top: 6px;">Escanea para asignar</div>
             </div>
           </div>
@@ -528,7 +520,6 @@ export default function WithGuidesView() {
       `;
     }
 
-    // ✅ HTML completo con generación de QR mejorada
     const html = `<!DOCTYPE html>
     <html>
     <head>
@@ -543,7 +534,6 @@ export default function WithGuidesView() {
         @media print {
           body { margin: 0; padding: 0; }
           .guide-page { page-break-after: always; page-break-inside: avoid; }
-          .no-print { display: none; }
         }
         @media screen {
           body { 
@@ -578,66 +568,62 @@ export default function WithGuidesView() {
       
       <script>
         (function() {
-          var maxAttempts = 50;
-          var attempt = 0;
-          
           function generateAllQRCodes() {
             if (typeof QRCode === 'undefined') {
-              attempt++;
-              if (attempt < maxAttempts) {
-                console.log('Esperando librería QRCode.js... intento ' + attempt);
-                setTimeout(generateAllQRCodes, 200);
-              } else {
-                console.error('No se pudo cargar QRCode.js');
-              }
+              setTimeout(generateAllQRCodes, 500);
               return;
             }
             
-            console.log('QRCode.js cargado, generando códigos...');
-            var totalQRCodes = 0;
-            
-            // Generar QR de WhatsApp para cada pedido
             document.querySelectorAll('[id^="qr-wa-"]').forEach(function(el) {
               if (el.children.length === 0) {
-                try {
-                  // Obtener la URL del pedido desde el atributo o contexto
-                  var orderElement = el.closest('.guide-page');
-                  var waUrl = '${whatsappMessages[0]}'; // Esto se debe mejorar
-                  // En su lugar, usamos un enfoque mejor: pasar la URL en un data attribute
-                  console.log('Generando QR WhatsApp para:', el.id);
-                } catch(e) {
-                  console.error('Error generando QR WhatsApp:', e);
+                var url = el.getAttribute('data-url');
+                if (url && url !== '#') {
+                  try {
+                    new QRCode(el, { 
+                      text: url, 
+                      width: 120, 
+                      height: 120,
+                      colorDark: '#000000',
+                      colorLight: '#ffffff',
+                      correctLevel: QRCode.CorrectLevel.L
+                    });
+                  } catch(e) {
+                    el.innerHTML = '<div style="color: red; font-size: 10px;">Error</div>';
+                  }
                 }
               }
             });
             
-            // Recargar la página actual para obtener los datos correctos
-            // Mejor enfoque: usar los datos que ya tenemos en el HTML
-            var qrElements = [];
-            
-            // Buscar todos los divs que necesitan QR
-            for (var i = 0; i < document.body.querySelectorAll('[id^="qr-wa-"], [id^="qr-delivery-"]').length; i++) {
-              qrElements.push(document.body.querySelectorAll('[id^="qr-wa-"], [id^="qr-delivery-"]')[i]);
-            }
-            
-            qrElements.forEach(function(el) {
-              if (el.children.length === 0 && el.id) {
-                try {
-                  var prefix = el.id.startsWith('qr-wa-') ? 'wa' : 'delivery';
-                  var orderId = el.id.replace('qr-wa-', '').replace('qr-delivery-', '');
-                  
-                  // Buscar el pedido correspondiente en los datos del HTML
-                  // Esta es la parte más compleja, necesitamos pasar las URLs correctas
-                  console.log('Generando QR para:', el.id, 'prefix:', prefix);
-                } catch(e) {
-                  console.error('Error:', e);
+            document.querySelectorAll('[id^="qr-delivery-"]').forEach(function(el) {
+              if (el.children.length === 0) {
+                var url = el.getAttribute('data-url');
+                if (url && url !== '#') {
+                  try {
+                    new QRCode(el, { 
+                      text: url, 
+                      width: 120, 
+                      height: 120,
+                      colorDark: '#000000',
+                      colorLight: '#ffffff',
+                      correctLevel: QRCode.CorrectLevel.L
+                    });
+                  } catch(e) {
+                    el.innerHTML = '<div style="color: red; font-size: 10px;">Error</div>';
+                  }
+                } else if (url === '#') {
+                  el.innerHTML = '<div style="color: orange; font-size: 10px;">Sin ID</div>';
                 }
               }
             });
           }
           
-          // Iniciar generación
-          setTimeout(generateAllQRCodes, 500);
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function() {
+              setTimeout(generateAllQRCodes, 200);
+            });
+          } else {
+            setTimeout(generateAllQRCodes, 200);
+          }
         })();
       </script>
     </body>
@@ -647,10 +633,9 @@ export default function WithGuidesView() {
     if (printWindow) {
       printWindow.document.write(html);
       printWindow.document.close();
-      // Esperar a que los QR se generen
       setTimeout(() => {
         printWindow.print();
-      }, 2000);
+      }, 1500);
     }
     toast.success(`${selected.length} guías con QR listas para imprimir`);
   };
