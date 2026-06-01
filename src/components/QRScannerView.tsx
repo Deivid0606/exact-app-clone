@@ -17,100 +17,66 @@ export default function QRScannerView() {
   const [error, setError] = useState('');
   const [idFromUrl, setIdFromUrl] = useState<string | null>(null);
 
-  const getHashParam = (key: string) => {
-    const hash = window.location.hash;
-    const queryString = hash.includes('?') ? hash.split('?')[1] : '';
-    const params = new URLSearchParams(queryString);
-    return params.get(key);
-  };
-
-  const cleanQrValue = (value: string) => {
-    return decodeURIComponent(value || '').trim().replace(/\s+/g, '').toUpperCase();
-  };
-
-  const isUUID = (value: string) => {
-    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-  };
-
   useEffect(() => {
-    const rawId = getHashParam('id');
+    console.log('=== QRScannerView CARGADO ===');
+    console.log('URL completa:', window.location.href);
+    console.log('Hash:', window.location.hash);
 
-    if (!rawId) {
-      setError('No se encontró número de pedido en el QR');
-      return;
+    const hash = window.location.hash;
+    const match = hash.match(/[?&]id=([^&]+)/);
+
+    if (match && match[1]) {
+      const orderId = decodeURIComponent(match[1]).trim();
+      console.log('✅ ID encontrado en URL:', orderId);
+      setIdFromUrl(orderId);
+      loadOrderByNumber(orderId);
+    } else {
+      console.log('❌ No se encontró ID en la URL');
+      setError('No se encontró número de pedido en el QR. Asegúrate de escanear el QR de Delivery.');
     }
-
-    const cleanId = cleanQrValue(rawId);
-    setIdFromUrl(cleanId);
-    loadOrderByNumber(cleanId);
   }, []);
 
   const loadOrderByNumber = async (orderNumber: string) => {
     setLoading(true);
     setError('');
+    console.log('🔍 Buscando pedido:', orderNumber);
 
     try {
-      let data: any = null;
-      let findError: any = null;
+      const { data, error } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('order_number', orderNumber)
+        .maybeSingle();
 
-      if (isUUID(orderNumber)) {
-        const result = await supabase
-          .from('orders')
-          .select('*')
-          .eq('id', orderNumber)
-          .maybeSingle();
-
-        data = result.data;
-        findError = result.error;
-      }
-
-      if (!data) {
-        const result = await supabase
-          .from('orders')
-          .select('*')
-          .eq('order_number', orderNumber)
-          .maybeSingle();
-
-        data = result.data;
-        findError = result.error;
-      }
-
-      if (!data) {
-        const result = await supabase
-          .from('orders')
-          .select('*')
-          .ilike('order_number', orderNumber)
-          .maybeSingle();
-
-        data = result.data;
-        findError = result.error;
-      }
-
-      if (findError) {
-        console.error('Error buscando pedido:', findError);
-        setError(`Pedido ${orderNumber} no encontrado`);
+      if (error) {
+        console.error('❌ Error Supabase:', error);
+        setError(`Pedido ${orderNumber} no encontrado en la base de datos`);
+        setLoading(false);
         return;
       }
 
       if (!data) {
-        setError(`Pedido ${orderNumber} no encontrado`);
+        console.log('❌ Pedido no encontrado');
+        setError(`Pedido ${orderNumber} no encontrado en la base de datos`);
+        setLoading(false);
         return;
       }
 
+      console.log('✅ Pedido encontrado:', data);
       setOrderData(data);
     } catch (err) {
-      console.error('Error al cargar pedido:', err);
+      console.error('❌ Error inesperado:', err);
       setError('Error al cargar el pedido');
-    } finally {
-      setLoading(false);
     }
+
+    setLoading(false);
   };
 
   const loadDeliveryUsers = async () => {
     const { data, error } = await supabase
       .from('profiles')
-      .select('email, full_name, name')
-      .in('role', ['DELIVERY', 'delivery'])
+      .select('email, full_name')
+      .eq('role', 'DELIVERY')
       .eq('active', true);
 
     if (!error && data) {
@@ -121,20 +87,25 @@ export default function QRScannerView() {
   const assignOrder = async () => {
     if (!orderData) return;
 
+    console.log('📦 Asignando pedido:', orderData.order_number);
+
     if (role === 'DELIVERY') {
       const { error } = await supabase
         .from('orders')
         .update({
           assigned_delivery: userEmail,
           assigned_at: new Date().toISOString(),
+          status: 'EN RUTA',
           updated_at: new Date().toISOString(),
         })
         .eq('id', orderData.id);
 
       if (error) {
+        console.error('❌ Error al asignar:', error);
         toast.error('Error al asignar pedido');
       } else {
-        toast.success('✅ Pedido asignado a ti correctamente');
+        console.log('✅ Pedido asignado exitosamente');
+        toast.success('✅ Pedido asignado y Estado 1 cambiado a EN RUTA');
         setTimeout(() => {
           window.location.href = '#/cierres';
         }, 1500);
@@ -150,14 +121,17 @@ export default function QRScannerView() {
         .update({
           assigned_delivery: selectedDelivery,
           assigned_at: new Date().toISOString(),
+          status: 'EN RUTA',
           updated_at: new Date().toISOString(),
         })
         .eq('id', orderData.id);
 
       if (error) {
+        console.error('❌ Error al asignar:', error);
         toast.error('Error al asignar pedido');
       } else {
-        toast.success(`✅ Pedido asignado a ${selectedDelivery}`);
+        console.log('✅ Pedido asignado exitosamente a:', selectedDelivery);
+        toast.success(`✅ Pedido asignado a ${selectedDelivery} y Estado 1 cambiado a EN RUTA`);
         setTimeout(() => {
           window.location.href = '#/cierres';
         }, 1500);
@@ -172,16 +146,15 @@ export default function QRScannerView() {
   }, [role]);
 
   const renderGuideDetails = (order: any) => {
-    const items = typeof order.items_json === 'string'
-      ? JSON.parse(order.items_json || '[]')
-      : order.items_json || [];
+    const items =
+      typeof order.items_json === 'string'
+        ? JSON.parse(order.items_json || '[]')
+        : order.items_json || [];
 
     return (
       <div className="space-y-3">
         <div className="border-b pb-2">
-          <h3 className="font-bold text-xl">
-            📋 GUÍA DE ENVÍO — {order.order_number || order.id}
-          </h3>
+          <h3 className="font-bold text-xl">📋 GUÍA DE ENVÍO — {order.order_number}</h3>
         </div>
 
         <div className="grid grid-cols-2 gap-2 text-sm">
@@ -190,14 +163,18 @@ export default function QRScannerView() {
           <p><span className="font-semibold">Email:</span> {order.email || '—'}</p>
           <p><span className="font-semibold">Departamento:</span> {order.departamento || '—'}</p>
           <p><span className="font-semibold">Ciudad:</span> {order.city || '—'}</p>
-          <p><span className="font-semibold">Dirección:</span> {order.street || ''} {order.district ? `- ${order.district}` : ''}</p>
+          <p>
+            <span className="font-semibold">Dirección:</span> {order.street || ''}{' '}
+            {order.district ? `- ${order.district}` : ''}
+          </p>
         </div>
 
         <div className="border-t pt-2">
           <p className="font-semibold">📦 Productos:</p>
           {items.map((item: any, idx: number) => (
             <p key={idx} className="text-sm pl-2">
-              {idx + 1}. {item.title || item.sku} x{item.qty} — Gs {nf(Number(item.sale_gs || 0) * Number(item.qty || 1))}
+              {idx + 1}. {item.title || item.sku} x{item.qty} — Gs{' '}
+              {nf(Number(item.sale_gs || 0) * Number(item.qty || 1))}
             </p>
           ))}
         </div>
@@ -208,7 +185,10 @@ export default function QRScannerView() {
 
         <div className="border-t pt-2 text-sm">
           <p><span className="font-semibold">👤 Vendedor:</span> {order.created_by || '—'}</p>
-          <p><span className="font-semibold">🏢 Proveedor:</span> {order.provider_emails_list || order.provider_email || '—'}</p>
+          <p>
+            <span className="font-semibold">🏢 Proveedor:</span>{' '}
+            {order.provider_emails_list || order.provider_email || '—'}
+          </p>
         </div>
       </div>
     );
@@ -254,6 +234,7 @@ export default function QRScannerView() {
         <div className="max-w-2xl mx-auto">
           <div className="bg-white rounded-xl shadow-lg p-6">
             <h2 className="text-2xl font-bold text-center mb-6">🚚 Asignar Pedido</h2>
+
             <div className="border-2 border-purple-300 rounded-lg p-4 bg-purple-50">
               {renderGuideDetails(orderData)}
 
@@ -275,10 +256,11 @@ export default function QRScannerView() {
                       <option value="">Seleccionar repartidor...</option>
                       {deliveryUsers.map(user => (
                         <option key={user.email} value={user.email}>
-                          {user.full_name || user.name || user.email}
+                          {user.full_name || user.email}
                         </option>
                       ))}
                     </select>
+
                     <button
                       className="w-full bg-green-500 text-white py-3 rounded-lg font-bold hover:bg-green-600 transition"
                       onClick={assignOrder}
