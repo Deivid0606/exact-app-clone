@@ -108,7 +108,8 @@ export default function AssignOrdersView() {
             .from('orders')
             .update({ 
               assigned_delivery: deliveryEmail, 
-              assigned_at: new Date().toISOString() 
+              assigned_at: new Date().toISOString(),
+              status: 'EN RUTA' 
             })
             .eq('id', orderData.id);
           
@@ -326,7 +327,8 @@ export default function AssignOrdersView() {
           .from('orders')
           .update({ 
             assigned_delivery: deliveryEmail, 
-            assigned_at: new Date().toISOString() 
+            assigned_at: new Date().toISOString(),
+            status: 'EN RUTA' 
           })
           .eq('id', data[0].id);
         
