@@ -568,7 +568,7 @@ export default function WithGuidesView() {
     toast.success(`${selected.length} guías con QR listas para imprimir`);
   };
 
-  // NUEVA IMPRESIÓN PARA IMPRESORA TÉRMICA
+  // IMPRESIÓN PARA IMPRESORA TÉRMICA - VERSIÓN CON TEXTO GRANDE Y NEGRITA
   const printThermal = () => {
     const selected = getSelectedOrders();
     if (selected.length === 0) {
@@ -591,7 +591,7 @@ export default function WithGuidesView() {
         
         itemsHtml += `
           <div class="product-row">
-            <span class="product-name">${productName}</span>
+            <span class="product-name">${i+1}. ${productName}</span>
             <span class="product-qty">x${qty}</span>
             <span class="product-price">${nf(price)}</span>
             <span class="product-subtotal">${nf(subtotal)}</span>
@@ -615,7 +615,7 @@ export default function WithGuidesView() {
           <div class="header">
             <div class="title">🎫 GUÍA DE ENVÍO</div>
             <div class="order-number">#${order.order_number || order.id.slice(0, 8)}</div>
-            <div class="date">${new Date(order.created_at).toLocaleDateString('es-PY')}</div>
+            <div class="date">${new Date(order.created_at).toLocaleDateString('es-PY')} ${new Date(order.created_at).toLocaleTimeString('es-PY')}</div>
           </div>
 
           <div class="divider"></div>
@@ -696,67 +696,235 @@ export default function WithGuidesView() {
       <meta charset="utf-8">
       <title>Guías Térmicas</title>
       <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
+        }
         
-        @page { size: 80mm 297mm; margin: 0mm; }
+        @page {
+          size: 80mm auto;
+          margin: 0mm;
+        }
         
         @media print {
-          html, body { margin: 0; padding: 0; width: 80mm; background: white; }
-          .thermal-ticket { page-break-after: always; width: 100%; padding: 3mm 3mm 0 3mm; font-family: 'Courier New', monospace; font-size: 10px; }
+          html, body {
+            margin: 0;
+            padding: 0;
+            width: 80mm;
+            background: white;
+          }
+          .thermal-ticket {
+            page-break-after: always;
+            width: 100%;
+            padding: 2mm;
+            font-family: 'Courier New', 'Fira Code', monospace;
+            font-size: 12px;
+          }
         }
         
         @media screen {
-          body { background: #e0e0e0; padding: 10px; }
-          .thermal-ticket { background: white; width: 80mm; margin: 0 auto 10px auto; box-shadow: 0 2px 5px rgba(0,0,0,0.2); }
+          body {
+            background: #e0e0e0;
+            padding: 10px;
+          }
+          .thermal-ticket {
+            background: white;
+            width: 80mm;
+            margin: 0 auto 10px auto;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+          }
         }
         
-        .thermal-ticket { padding: 3mm; font-family: 'Courier New', monospace; font-size: 10px; line-height: 1.4; background: white; }
+        .thermal-ticket {
+          padding: 2mm;
+          font-family: 'Courier New', 'Fira Code', monospace;
+          font-size: 12px;
+          line-height: 1.5;
+          background: white;
+        }
         
-        .header { text-align: center; margin-bottom: 5px; }
-        .title { font-size: 14px; font-weight: bold; letter-spacing: 2px; }
-        .order-number { font-size: 11px; font-weight: bold; margin-top: 2px; }
-        .date { font-size: 8px; color: #555; margin-top: 2px; }
+        .header {
+          text-align: center;
+          margin-bottom: 6px;
+        }
+        .title {
+          font-size: 16px;
+          font-weight: bold;
+          letter-spacing: 2px;
+        }
+        .order-number {
+          font-size: 14px;
+          font-weight: bold;
+          margin-top: 3px;
+        }
+        .date {
+          font-size: 10px;
+          font-weight: normal;
+          margin-top: 2px;
+        }
         
-        .divider { border-top: 1px dashed #000; margin: 5px 0; }
+        .divider {
+          border-top: 1px dashed #000;
+          margin: 6px 0;
+        }
         
-        .customer-box { margin: 5px 0; }
-        .customer-label { font-weight: bold; font-size: 9px; background: #f0f0f0; display: inline-block; padding: 0 3px; }
-        .customer-name { font-weight: bold; font-size: 11px; margin-top: 3px; }
-        .customer-contact { font-size: 9px; margin-top: 2px; }
+        .customer-box {
+          margin: 6px 0;
+        }
+        .customer-label {
+          font-weight: bold;
+          font-size: 11px;
+          background: #f0f0f0;
+          display: inline-block;
+          padding: 0 4px;
+        }
+        .customer-name {
+          font-weight: bold;
+          font-size: 13px;
+          margin-top: 4px;
+        }
+        .customer-contact {
+          font-size: 11px;
+          margin-top: 3px;
+        }
         
-        .address-box { margin: 5px 0; }
-        .address-label { font-weight: bold; font-size: 9px; background: #f0f0f0; display: inline-block; padding: 0 3px; }
-        .address-text { font-size: 9px; margin-top: 2px; }
+        .address-box {
+          margin: 6px 0;
+        }
+        .address-label {
+          font-weight: bold;
+          font-size: 11px;
+          background: #f0f0f0;
+          display: inline-block;
+          padding: 0 4px;
+        }
+        .address-text {
+          font-size: 11px;
+          font-weight: bold;
+          margin-top: 3px;
+        }
         
-        .products-header { display: flex; font-weight: bold; font-size: 9px; border-bottom: 1px dotted #000; padding-bottom: 3px; margin-bottom: 3px; }
-        .col-product { flex: 3; }
-        .col-qty { flex: 1; text-align: center; }
-        .col-price { flex: 1.5; text-align: right; }
-        .col-subtotal { flex: 1.5; text-align: right; }
+        .products-header {
+          display: flex;
+          font-weight: bold;
+          font-size: 11px;
+          border-bottom: 2px solid #000;
+          padding-bottom: 4px;
+          margin-bottom: 4px;
+        }
+        .col-product {
+          flex: 3;
+        }
+        .col-qty {
+          flex: 1;
+          text-align: center;
+        }
+        .col-price {
+          flex: 1.5;
+          text-align: right;
+        }
+        .col-subtotal {
+          flex: 1.5;
+          text-align: right;
+        }
         
-        .products-list { margin: 3px 0; }
-        .product-row { display: flex; font-size: 9px; margin: 2px 0; }
-        .product-name { flex: 3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .product-qty { flex: 1; text-align: center; }
-        .product-price { flex: 1.5; text-align: right; }
-        .product-subtotal { flex: 1.5; text-align: right; }
+        .products-list {
+          margin: 4px 0;
+        }
+        .product-row {
+          display: flex;
+          font-size: 11px;
+          font-weight: bold;
+          margin: 3px 0;
+        }
+        .product-name {
+          flex: 3;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .product-qty {
+          flex: 1;
+          text-align: center;
+        }
+        .product-price {
+          flex: 1.5;
+          text-align: right;
+        }
+        .product-subtotal {
+          flex: 1.5;
+          text-align: right;
+        }
         
-        .total-box { display: flex; justify-content: space-between; font-weight: bold; font-size: 12px; margin: 5px 0; padding-top: 3px; border-top: 2px solid #000; }
-        .total-label { font-weight: bold; }
-        .total-amount { font-weight: bold; }
+        .total-box {
+          display: flex;
+          justify-content: space-between;
+          font-weight: bold;
+          font-size: 15px;
+          margin: 6px 0;
+          padding-top: 4px;
+          border-top: 2px solid #000;
+        }
+        .total-label {
+          font-weight: bold;
+        }
+        .total-amount {
+          font-weight: bold;
+          font-size: 16px;
+        }
         
-        .obs-box { margin: 5px 0; font-size: 8px; background: #f9f9f9; padding: 3px; border-left: 3px solid #ff9800; }
-        .obs-label { font-weight: bold; }
+        .obs-box {
+          margin: 6px 0;
+          font-size: 10px;
+          font-weight: bold;
+          background: #f9f9f9;
+          padding: 4px;
+          border-left: 3px solid #ff9800;
+        }
+        .obs-label {
+          font-weight: bold;
+        }
         
-        .qr-section { display: flex; justify-content: space-between; gap: 10px; margin: 8px 0; }
-        .qr-item { text-align: center; width: 50%; }
-        .qr-label { font-size: 8px; font-weight: bold; margin-bottom: 5px; }
-        .qr-code { width: 70px; height: 70px; margin: 0 auto; }
-        .qr-hint { font-size: 6px; color: #555; margin-top: 4px; }
+        .qr-section {
+          display: flex;
+          justify-content: space-between;
+          gap: 10px;
+          margin: 10px 0;
+        }
+        .qr-item {
+          text-align: center;
+          width: 50%;
+        }
+        .qr-label {
+          font-size: 10px;
+          font-weight: bold;
+          margin-bottom: 6px;
+        }
+        .qr-code {
+          width: 80px;
+          height: 80px;
+          margin: 0 auto;
+        }
+        .qr-hint {
+          font-size: 8px;
+          font-weight: normal;
+          margin-top: 4px;
+        }
         
-        .footer { font-size: 7px; text-align: center; margin: 5px 0; color: #666; }
+        .footer {
+          font-size: 9px;
+          font-weight: bold;
+          text-align: center;
+          margin: 6px 0;
+        }
         
-        .cut-line { text-align: center; font-size: 8px; color: #aaa; margin: 8px 0 3px 0; letter-spacing: 2px; }
+        .cut-line {
+          text-align: center;
+          font-size: 10px;
+          letter-spacing: 2px;
+          margin: 8px 0 2px 0;
+        }
       </style>
       <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
     </head>
@@ -765,13 +933,20 @@ export default function WithGuidesView() {
       <script>
         (function() {
           function waitForQRCode() {
-            if (typeof QRCode === 'undefined') { setTimeout(waitForQRCode, 300); return; }
+            if (typeof QRCode === 'undefined') {
+              setTimeout(waitForQRCode, 300);
+              return;
+            }
             
             document.querySelectorAll('[id^="qr-wa-thermal-"]').forEach(function(el) {
               if (el.children.length === 0) {
                 var url = el.getAttribute('data-url');
                 if (url && url !== '#') {
-                  try { new QRCode(el, { text: url, width: 70, height: 70, colorDark: '#000000', colorLight: '#ffffff' }); } catch(e) { el.innerHTML = '<div style="font-size:8px;color:red;">Error</div>'; }
+                  try {
+                    new QRCode(el, { text: url, width: 80, height: 80 });
+                  } catch(e) {
+                    el.innerHTML = '<div style="font-size:8px;color:red;">Error</div>';
+                  }
                 }
               }
             });
@@ -780,13 +955,25 @@ export default function WithGuidesView() {
               if (el.children.length === 0) {
                 var url = el.getAttribute('data-url');
                 if (url && url !== '#') {
-                  try { new QRCode(el, { text: url, width: 70, height: 70, colorDark: '#000000', colorLight: '#ffffff' }); } catch(e) { el.innerHTML = '<div style="font-size:8px;color:red;">Error</div>'; }
-                } else if (url === '#') { el.innerHTML = '<div style="font-size:8px;color:orange;">Sin ID</div>'; }
+                  try {
+                    new QRCode(el, { text: url, width: 80, height: 80 });
+                  } catch(e) {
+                    el.innerHTML = '<div style="font-size:8px;color:red;">Error</div>';
+                  }
+                } else if (url === '#') {
+                  el.innerHTML = '<div style="font-size:8px;color:orange;">Sin ID</div>';
+                }
               }
             });
           }
           
-          if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', function() { setTimeout(waitForQRCode, 200); }); } else { setTimeout(waitForQRCode, 200); }
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function() {
+              setTimeout(waitForQRCode, 200);
+            });
+          } else {
+            setTimeout(waitForQRCode, 200);
+          }
         })();
       </script>
     </body>
@@ -796,7 +983,9 @@ export default function WithGuidesView() {
     if (printWindow) {
       printWindow.document.write(thermalHtml);
       printWindow.document.close();
-      setTimeout(() => { printWindow.print(); }, 2000);
+      setTimeout(() => {
+        printWindow.print();
+      }, 1500);
     }
     toast.success(`${selected.length} ticket(s) listos para imprimir en térmica`);
   };
