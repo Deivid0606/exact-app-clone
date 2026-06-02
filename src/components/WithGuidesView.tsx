@@ -568,7 +568,7 @@ export default function WithGuidesView() {
     toast.success(`${selected.length} guías con QR listas para imprimir`);
   };
 
-  // IMPRESIÓN PARA IMPRESORA TÉRMICA - VERSIÓN FINAL CON NEGRITA Y QR GRANDES
+  // IMPRESIÓN PARA IMPRESORA TÉRMICA - QR GRANDES (180x180)
   const printThermal = () => {
     const selected = getSelectedOrders();
     if (selected.length === 0) {
@@ -665,15 +665,16 @@ export default function WithGuidesView() {
 
           <div class="divider"></div>
 
+          <!-- QR SECTION - TAMAÑO GRANDE -->
           <div class="qr-section">
             <div class="qr-item">
-              <div class="qr-label">📱 QR CLIENTE</div>
-              <div id="${waQrId}" data-url="${whatsappUrl}" class="qr-code"></div>
+              <div class="qr-label-large">📱 QR CLIENTE</div>
+              <div id="${waQrId}" data-url="${whatsappUrl}" class="qr-code-large"></div>
               <div class="qr-hint">Escanea para enviar ubicación</div>
             </div>
             <div class="qr-item">
-              <div class="qr-label">🚚 QR DELIVERY</div>
-              <div id="${deliveryQrId}" data-url="${deliveryUrl}" class="qr-code"></div>
+              <div class="qr-label-large">🚚 QR DELIVERY</div>
+              <div id="${deliveryQrId}" data-url="${deliveryUrl}" class="qr-code-large"></div>
               <div class="qr-hint">Escanea para asignar pedido</div>
             </div>
           </div>
@@ -717,7 +718,7 @@ export default function WithGuidesView() {
           .thermal-ticket {
             page-break-after: always;
             width: 100%;
-            padding: 2mm;
+            padding: 3mm;
             font-family: 'Courier New', 'Fira Code', monospace;
             font-size: 12px;
           }
@@ -737,7 +738,7 @@ export default function WithGuidesView() {
         }
         
         .thermal-ticket {
-          padding: 2mm;
+          padding: 3mm;
           font-family: 'Courier New', 'Fira Code', monospace;
           font-size: 12px;
           line-height: 1.5;
@@ -887,6 +888,7 @@ export default function WithGuidesView() {
           font-weight: bold;
         }
         
+        /* QR SECTION - TAMAÑOS GRANDES */
         .qr-section {
           display: flex;
           justify-content: space-between;
@@ -897,20 +899,30 @@ export default function WithGuidesView() {
           text-align: center;
           width: 50%;
         }
-        .qr-label {
-          font-size: 10px;
+        .qr-label-large {
+          font-size: 11px;
           font-weight: bold;
           margin-bottom: 6px;
+          background: #f0f0f0;
+          padding: 3px 6px;
+          border-radius: 4px;
         }
-        .qr-code {
-          width: 90px;
-          height: 90px;
+        .qr-code-large {
+          width: 170px;
+          height: 170px;
           margin: 0 auto;
+        }
+        @media print {
+          .qr-code-large {
+            width: 165px;
+            height: 165px;
+          }
         }
         .qr-hint {
           font-size: 8px;
           font-weight: normal;
           margin-top: 4px;
+          color: #555;
         }
         
         .footer {
@@ -944,10 +956,12 @@ export default function WithGuidesView() {
                 var url = el.getAttribute('data-url');
                 if (url && url !== '#') {
                   try {
-                    new QRCode(el, { text: url, width: 90, height: 90 });
+                    new QRCode(el, { text: url, width: 170, height: 170 });
                   } catch(e) {
-                    el.innerHTML = '<div style="font-size:8px;color:red;">Error</div>';
+                    el.innerHTML = '<div style="font-size:8px;color:red;">Error QR</div>';
                   }
+                } else if (!url || url === '#') {
+                  el.innerHTML = '<div style="font-size:8px;color:orange;">URL no disponible</div>';
                 }
               }
             });
@@ -957,12 +971,12 @@ export default function WithGuidesView() {
                 var url = el.getAttribute('data-url');
                 if (url && url !== '#') {
                   try {
-                    new QRCode(el, { text: url, width: 90, height: 90 });
+                    new QRCode(el, { text: url, width: 170, height: 170 });
                   } catch(e) {
-                    el.innerHTML = '<div style="font-size:8px;color:red;">Error</div>';
+                    el.innerHTML = '<div style="font-size:8px;color:red;">Error QR</div>';
                   }
                 } else if (url === '#') {
-                  el.innerHTML = '<div style="font-size:8px;color:orange;">Sin ID</div>';
+                  el.innerHTML = '<div style="font-size:8px;color:orange;">Sin ID de pedido</div>';
                 }
               }
             });
@@ -988,7 +1002,7 @@ export default function WithGuidesView() {
         printWindow.print();
       }, 1500);
     }
-    toast.success(`${selected.length} ticket(s) listos para imprimir en térmica`);
+    toast.success(`${selected.length} ticket(s) listos para imprimir en térmica con QR grandes`);
   };
 
   return (
@@ -1193,7 +1207,7 @@ export default function WithGuidesView() {
               <tr key={o.id}>
                 <td className="text-center">
                   <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
-                </td>
+                 </td>
                 <td className="text-xs whitespace-nowrap">{new Date(o.created_at).toLocaleDateString('es-PY')}</td>
                 <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
                 <td className="text-xs">{o.departamento || '—'}</td>
