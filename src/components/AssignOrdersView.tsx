@@ -23,7 +23,7 @@ export default function AssignOrdersView() {
   const lastProcessedRef = useRef<string | null>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Obtener ID del hash (#/asignar-pedidos?id=12345 o #/asignar-pedidos?=A178042235595303124)
+  // Obtener ID del hash (#/asignar-pedidos?id=12345)
   const getOrderIdFromHash = () => {
     const hash = window.location.hash;
     console.log('📍 Hash actual:', hash);
@@ -32,12 +32,6 @@ export default function AssignOrdersView() {
     const match = hash.match(/[?&]id=([^&]+)/);
     if (match && match[1]) {
       return decodeURIComponent(match[1]);
-    }
-    
-    // También buscar después de ? sin nombre
-    const match2 = hash.match(/\?([^&]+)/);
-    if (match2 && match2[1] && !match2[1].includes('=')) {
-      return decodeURIComponent(match2[1]);
     }
     
     return null;
@@ -129,7 +123,6 @@ export default function AssignOrdersView() {
     try {
       console.log('🔍 Buscando pedido:', orderIdValue);
       
-      // Buscar por order_number (como A178042235595303124) o por UUID
       let orderData = null;
       const isUUID = orderIdValue.includes('-') && orderIdValue.length > 30;
       
@@ -159,7 +152,6 @@ export default function AssignOrdersView() {
       const displayId = orderData.order_number || orderData.id.substring(0, 8);
       console.log('✅ Pedido encontrado:', displayId);
       
-      // Verificar si ya está asignado
       if (orderData.assigned_delivery && orderData.assigned_delivery !== profile?.email) {
         const deliveryName = await getDeliveryName(orderData.assigned_delivery);
         toast.error(`❌ Pedido ${displayId} ya pertenece a ${deliveryName}`);
@@ -168,7 +160,6 @@ export default function AssignOrdersView() {
         return;
       }
       
-      // ASIGNAR (solo para DELIVERY)
       if (role === 'DELIVERY') {
         const deliveryEmail = profile?.email || '';
         const deliveryName = profile?.name || deliveryEmail;
