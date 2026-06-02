@@ -84,8 +84,8 @@ export default function WithGuidesView() {
       const orderId = currentOrder.id;
       if (orderId) {
         const cleanOrderId = String(orderId).trim();
-        // ✅ URL RELATIVA - Funciona en cualquier entorno (local, producción, celular)
-        const deliveryUrl = '/asignar-pedidos/' + encodeURIComponent(cleanOrderId);
+        // ✅ URL CORRECTA PARA HASHRouter
+        const deliveryUrl = '/#/asignar-pedidos?id=' + encodeURIComponent(cleanOrderId);
         console.log('📱 QR generado URL:', window.location.origin + deliveryUrl);
         new window.QRCode(qrDeliveryRef.current, {
           text: deliveryUrl,
@@ -422,8 +422,8 @@ export default function WithGuidesView() {
       const whatsappUrl = getWhatsAppUrl(order);
       const orderNumber = order.order_number;
       const cleanOrderId = order.id ? String(order.id).trim() : '';
-      // ✅ URL RELATIVA - Funciona en cualquier entorno
-      const deliveryUrl = cleanOrderId ? '/asignar-pedidos/' + encodeURIComponent(cleanOrderId) : '#';
+      // ✅ URL CORRECTA PARA HASHRouter
+      const deliveryUrl = cleanOrderId ? '/#/asignar-pedidos?id=' + encodeURIComponent(cleanOrderId) : '#';
 
       const waQrId = `qr-wa-${order.id.replace(/-/g, '')}`;
       const deliveryQrId = `qr-delivery-${order.id.replace(/-/g, '')}`;
@@ -434,12 +434,12 @@ export default function WithGuidesView() {
           
           <table style="width: 100%; font-size: 12px; margin-bottom: 12px;">
             <tbody>
-              <tr><td style="width: 100px; padding: 2px 0; color: #666;">Cliente:</td><td style="font-weight: bold;">${(order.customer_name || '').replace(/</g, '&lt;')}</td></tr>
-              <tr><td style="padding: 2px 0; color: #666;">Teléfono:</td><td style="font-weight: bold;">${order.phone || ''}</td></tr>
-              <tr><td style="padding: 2px 0; color: #666;">Email:</td><td style="font-weight: bold;">${(order.email || '').replace(/</g, '&lt;')}</td></tr>
-              <tr><td style="padding: 2px 0; color: #666;">Departamento:</td><td style="font-weight: bold;">${order.departamento || ''}</td></tr>
-              <tr><td style="padding: 2px 0; color: #666;">Ciudad:</td><td style="font-weight: bold;">${order.city || ''}</td></tr>
-              <tr><td style="padding: 2px 0; color: #666;">Dirección:</td><td style="font-weight: bold;">${(order.street || '').replace(/</g, '&lt;')} ${order.district ? '- ' + order.district : ''}</td></tr>
+              <tr><td style="width: 100px; padding: 2px 0; color: #666;">Cliente:</td><td style="font-weight: bold;">${(order.customer_name || '').replace(/</g, '&lt;')}</td></td>
+              <tr><td style="padding: 2px 0; color: #666;">Teléfono:</td><td style="font-weight: bold;">${order.phone || ''}</td></td>
+              <tr><td style="padding: 2px 0; color: #666;">Email:</td><td style="font-weight: bold;">${(order.email || '').replace(/</g, '&lt;')}</td></td>
+              <tr><td style="padding: 2px 0; color: #666;">Departamento:</td><td style="font-weight: bold;">${order.departamento || ''}</td></td>
+              <tr><td style="padding: 2px 0; color: #666;">Ciudad:</td><td style="font-weight: bold;">${order.city || ''}</td></td>
+              <tr><td style="padding: 2px 0; color: #666;">Dirección:</td><td style="font-weight: bold;">${(order.street || '').replace(/</g, '&lt;')} ${order.district ? '- ' + order.district : ''}</td></td>
             </tbody>
           </table>
           
@@ -571,8 +571,8 @@ export default function WithGuidesView() {
       const total = Number(order.total_gs || 0);
       const whatsappUrl = getWhatsAppUrl(order);
       const cleanOrderId = order.id ? String(order.id).trim() : '';
-      // ✅ URL RELATIVA - Funciona en cualquier entorno
-      const deliveryUrl = cleanOrderId ? '/asignar-pedidos/' + encodeURIComponent(cleanOrderId) : '#';
+      // ✅ URL CORRECTA PARA HASHRouter
+      const deliveryUrl = cleanOrderId ? '/#/asignar-pedidos?id=' + encodeURIComponent(cleanOrderId) : '#';
 
       const timestamp = Date.now();
       const waQrId = `qr-wa-thermal-${timestamp}-${order.id.slice(0, 8)}`;
@@ -746,7 +746,7 @@ export default function WithGuidesView() {
       <div className="flex justify-between items-center mb-3">
         <h3 className="text-lg font-extrabold">Pedidos con guías</h3>
         <button
-          onClick={() => window.open('/asignar-pedidos', '_blank')}
+          onClick={() => window.open('#/asignar-pedidos', '_blank')}
           className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2"
         >
           📷 <span>Abrir Lector QR</span>
