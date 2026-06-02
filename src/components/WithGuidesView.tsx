@@ -91,7 +91,7 @@ export default function WithGuidesView() {
       const orderId = currentOrder.id;
       if (orderId) {
         const cleanOrderId = String(orderId).trim();
-        // ✅ CORREGIDO: Sin hash para que funcione en Android
+        // ✅ CORREGIDO: Usando BrowserRouter - sin hash
         const deliveryUrl = window.location.origin + '/asignar-pedidos?id=' + encodeURIComponent(cleanOrderId);
         new window.QRCode(qrDeliveryRef.current, {
           text: deliveryUrl,
@@ -466,7 +466,7 @@ export default function WithGuidesView() {
       const whatsappUrl = getWhatsAppUrl(order);
       const orderNumber = order.order_number;
       const cleanOrderId = order.id ? String(order.id).trim() : '';
-      // ✅ CORREGIDO: Sin hash para que funcione en Android
+      // ✅ CORREGIDO: Usando BrowserRouter - sin hash
       const deliveryUrl = cleanOrderId
         ? window.location.origin + '/asignar-pedidos?id=' + encodeURIComponent(cleanOrderId)
         : '#';
@@ -617,7 +617,7 @@ export default function WithGuidesView() {
       const total = Number(order.total_gs || 0);
       const whatsappUrl = getWhatsAppUrl(order);
       const cleanOrderId = order.id ? String(order.id).trim() : '';
-      // ✅ CORREGIDO: Sin hash para que funcione en Android
+      // ✅ CORREGIDO: Usando BrowserRouter - sin hash
       const deliveryUrl = cleanOrderId
         ? window.location.origin + '/asignar-pedidos?id=' + encodeURIComponent(cleanOrderId)
         : '#';
