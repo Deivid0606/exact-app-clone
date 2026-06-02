@@ -426,7 +426,7 @@ export default function WithGuidesView() {
     toast.success(`${selected.length} guías descargadas en TXT`);
   };
 
-  // IMPRESIÓN PDF NORMAL (existente)
+  // IMPRESIÓN PDF NORMAL
   const printWithQR = () => {
     const selected = getSelectedOrders();
     if (selected.length === 0) { 
@@ -568,7 +568,7 @@ export default function WithGuidesView() {
     toast.success(`${selected.length} guías con QR listas para imprimir`);
   };
 
-  // IMPRESIÓN PARA IMPRESORA TÉRMICA - QR GRANDES (180x180)
+  // IMPRESIÓN PARA IMPRESORA TÉRMICA - QR MÁS PEQUEÑOS Y BIEN SEPARADOS
   const printThermal = () => {
     const selected = getSelectedOrders();
     if (selected.length === 0) {
@@ -584,7 +584,7 @@ export default function WithGuidesView() {
       
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
-        const productName = (it.title || it.sku || 'Item').substring(0, 28);
+        const productName = (it.title || it.sku || 'Item').substring(0, 25);
         const qty = it.qty || 1;
         const price = Number(it.sale_gs || 0);
         const subtotal = price * qty;
@@ -613,24 +613,21 @@ export default function WithGuidesView() {
       allTicketsHtml += `
         <div class="thermal-ticket">
           <div class="header">
-            <div class="title">🎫 GUÍA DE ENVÍO</div>
+            <div class="title">GUÍA DE ENVÍO</div>
             <div class="order-number">#${order.order_number || order.id.slice(0, 8)}</div>
-            <div class="date"><strong>📅 ${new Date(order.created_at).toLocaleDateString('es-PY')} ${new Date(order.created_at).toLocaleTimeString('es-PY')}</strong></div>
+            <div class="date">${new Date(order.created_at).toLocaleDateString('es-PY')} ${new Date(order.created_at).toLocaleTimeString('es-PY')}</div>
           </div>
 
           <div class="divider"></div>
 
           <div class="customer-box">
-            <div class="customer-label">CLIENTE:</div>
             <div class="customer-name">${(order.customer_name || '').toUpperCase()}</div>
-            <div class="customer-contact"><strong>📞 ${order.phone || 'Sin teléfono'}</strong></div>
-            ${order.email ? `<div class="customer-contact">✉️ ${order.email.substring(0, 35)}</div>` : ''}
+            <div class="customer-phone">${order.phone || 'Sin teléfono'}</div>
           </div>
 
           <div class="divider"></div>
 
           <div class="address-box">
-            <div class="address-label">📍 ENTREGA:</div>
             <div class="address-text">${order.departamento || ''} - ${order.city || ''}</div>
             <div class="address-text">${order.street || ''} ${order.district ? '- ' + order.district : ''}</div>
           </div>
@@ -648,45 +645,39 @@ export default function WithGuidesView() {
             ${itemsHtml}
           </div>
 
-          <div class="divider"></div>
-
           <div class="total-box">
             <span class="total-label">TOTAL:</span>
             <span class="total-amount">Gs ${nf(total)}</span>
           </div>
 
           ${order.obs ? `
-            <div class="divider"></div>
-            <div class="obs-box">
-              <span class="obs-label">📝 OBS:</span>
-              <span class="obs-text">${order.obs.substring(0, 50)}</span>
-            </div>
+            <div class="obs-text">📝 ${order.obs.substring(0, 50)}</div>
           ` : ''}
 
           <div class="divider"></div>
 
-          <!-- QR SECTION - TAMAÑO GRANDE -->
+          <!-- QR SECTION - MÁS PEQUEÑOS Y SEPARADOS -->
           <div class="qr-section">
             <div class="qr-item">
-              <div class="qr-label-large">📱 QR CLIENTE</div>
-              <div id="${waQrId}" data-url="${whatsappUrl}" class="qr-code-large"></div>
-              <div class="qr-hint">Escanea para enviar ubicación</div>
+              <div class="qr-label">📱 QR CLIENTE</div>
+              <div id="${waQrId}" data-url="${whatsappUrl}" class="qr-code"></div>
+              <div class="qr-hint">Envía ubicación</div>
             </div>
             <div class="qr-item">
-              <div class="qr-label-large">🚚 QR DELIVERY</div>
-              <div id="${deliveryQrId}" data-url="${deliveryUrl}" class="qr-code-large"></div>
-              <div class="qr-hint">Escanea para asignar pedido</div>
+              <div class="qr-label">🚚 QR DELIVERY</div>
+              <div id="${deliveryQrId}" data-url="${deliveryUrl}" class="qr-code"></div>
+              <div class="qr-hint">Asigna pedido</div>
             </div>
           </div>
 
           <div class="divider"></div>
 
           <div class="footer">
-            <div>${order.created_by ? `Vendedor: ${order.created_by}` : ''}</div>
-            <div>${order.provider_emails_list ? `Proveedor: ${order.provider_emails_list.substring(0, 30)}` : ''}</div>
+            <div>Vendedor: ${order.created_by || ''}</div>
+            <div>Proveedor: ${order.provider_emails_list ? order.provider_emails_list.substring(0, 30) : order.provider_email || '—'}</div>
           </div>
 
-          <div class="cut-line">- - - - - - - - - - - - - - - - - - - - - - - - - - - - - -</div>
+          <div class="cut-line">- - - - - - - - - - - - - - - - - - - - - - -</div>
         </div>
       `;
     }
@@ -718,9 +709,9 @@ export default function WithGuidesView() {
           .thermal-ticket {
             page-break-after: always;
             width: 100%;
-            padding: 3mm;
+            padding: 2mm;
             font-family: 'Courier New', 'Fira Code', monospace;
-            font-size: 12px;
+            font-size: 11px;
           }
         }
         
@@ -738,82 +729,63 @@ export default function WithGuidesView() {
         }
         
         .thermal-ticket {
-          padding: 3mm;
+          padding: 2mm;
           font-family: 'Courier New', 'Fira Code', monospace;
-          font-size: 12px;
-          line-height: 1.5;
+          font-size: 11px;
+          line-height: 1.4;
           background: white;
         }
         
         .header {
           text-align: center;
-          margin-bottom: 6px;
+          margin-bottom: 5px;
         }
         .title {
-          font-size: 16px;
-          font-weight: bold;
-          letter-spacing: 2px;
-        }
-        .order-number {
           font-size: 14px;
           font-weight: bold;
-          margin-top: 3px;
+          letter-spacing: 1px;
+        }
+        .order-number {
+          font-size: 12px;
+          font-weight: bold;
+          margin-top: 2px;
         }
         .date {
-          font-size: 10px;
-          font-weight: bold;
+          font-size: 9px;
           margin-top: 2px;
         }
         
         .divider {
           border-top: 1px dashed #000;
-          margin: 6px 0;
+          margin: 5px 0;
         }
         
         .customer-box {
-          margin: 6px 0;
-        }
-        .customer-label {
-          font-weight: bold;
-          font-size: 11px;
-          background: #f0f0f0;
-          display: inline-block;
-          padding: 0 4px;
+          margin: 5px 0;
         }
         .customer-name {
           font-weight: bold;
-          font-size: 13px;
-          margin-top: 4px;
+          font-size: 12px;
         }
-        .customer-contact {
+        .customer-phone {
           font-size: 11px;
           font-weight: bold;
-          margin-top: 3px;
         }
         
         .address-box {
-          margin: 6px 0;
-        }
-        .address-label {
-          font-weight: bold;
-          font-size: 11px;
-          background: #f0f0f0;
-          display: inline-block;
-          padding: 0 4px;
+          margin: 5px 0;
         }
         .address-text {
-          font-size: 11px;
-          font-weight: bold;
-          margin-top: 3px;
+          font-size: 10px;
         }
         
         .products-header {
           display: flex;
           font-weight: bold;
-          font-size: 11px;
-          border-bottom: 2px solid #000;
-          padding-bottom: 4px;
-          margin-bottom: 4px;
+          font-size: 10px;
+          border-bottom: 1px solid #000;
+          padding-bottom: 3px;
+          margin-bottom: 3px;
         }
         .col-product {
           flex: 3;
@@ -832,13 +804,12 @@ export default function WithGuidesView() {
         }
         
         .products-list {
-          margin: 4px 0;
+          margin: 3px 0;
         }
         .product-row {
           display: flex;
-          font-size: 11px;
-          font-weight: bold;
-          margin: 3px 0;
+          font-size: 10px;
+          margin: 2px 0;
         }
         .product-name {
           flex: 3;
@@ -863,80 +834,68 @@ export default function WithGuidesView() {
           display: flex;
           justify-content: space-between;
           font-weight: bold;
-          font-size: 15px;
-          margin: 6px 0;
-          padding-top: 4px;
-          border-top: 2px solid #000;
+          font-size: 13px;
+          margin: 5px 0;
+          padding-top: 3px;
+          border-top: 1px solid #000;
         }
         .total-label {
           font-weight: bold;
         }
         .total-amount {
           font-weight: bold;
-          font-size: 16px;
         }
         
-        .obs-box {
-          margin: 6px 0;
-          font-size: 10px;
-          font-weight: bold;
-          background: #f9f9f9;
-          padding: 4px;
-          border-left: 3px solid #ff9800;
-        }
-        .obs-label {
-          font-weight: bold;
+        .obs-text {
+          font-size: 9px;
+          margin: 4px 0;
+          padding: 3px;
+          background: #f5f5f5;
+          border-left: 2px solid #ff9800;
         }
         
-        /* QR SECTION - TAMAÑOS GRANDES */
+        /* QR SECTION - MÁS PEQUEÑOS Y SEPARADOS */
         .qr-section {
           display: flex;
           justify-content: space-between;
-          gap: 10px;
+          gap: 15px;
           margin: 10px 0;
         }
         .qr-item {
           text-align: center;
           width: 50%;
         }
-        .qr-label-large {
-          font-size: 11px;
+        .qr-label {
+          font-size: 9px;
           font-weight: bold;
-          margin-bottom: 6px;
+          margin-bottom: 5px;
           background: #f0f0f0;
-          padding: 3px 6px;
-          border-radius: 4px;
+          padding: 2px 4px;
+          display: inline-block;
+          border-radius: 3px;
         }
-        .qr-code-large {
-          width: 170px;
-          height: 170px;
+        .qr-code {
+          width: 80px;
+          height: 80px;
           margin: 0 auto;
         }
-        @media print {
-          .qr-code-large {
-            width: 165px;
-            height: 165px;
-          }
-        }
         .qr-hint {
-          font-size: 8px;
-          font-weight: normal;
-          margin-top: 4px;
+          font-size: 7px;
+          margin-top: 3px;
           color: #555;
         }
         
         .footer {
-          font-size: 9px;
-          font-weight: bold;
+          font-size: 8px;
           text-align: center;
-          margin: 6px 0;
+          margin: 5px 0;
         }
         
         .cut-line {
           text-align: center;
-          font-size: 10px;
+          font-size: 9px;
           letter-spacing: 2px;
-          margin: 8px 0 2px 0;
+          margin: 6px 0 2px 0;
         }
       </style>
       <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
@@ -956,12 +915,10 @@ export default function WithGuidesView() {
                 var url = el.getAttribute('data-url');
                 if (url && url !== '#') {
                   try {
-                    new QRCode(el, { text: url, width: 170, height: 170 });
+                    new QRCode(el, { text: url, width: 80, height: 80 });
                   } catch(e) {
-                    el.innerHTML = '<div style="font-size:8px;color:red;">Error QR</div>';
+                    el.innerHTML = '<div style="font-size:7px;color:red;">Error</div>';
                   }
-                } else if (!url || url === '#') {
-                  el.innerHTML = '<div style="font-size:8px;color:orange;">URL no disponible</div>';
                 }
               }
             });
@@ -971,12 +928,12 @@ export default function WithGuidesView() {
                 var url = el.getAttribute('data-url');
                 if (url && url !== '#') {
                   try {
-                    new QRCode(el, { text: url, width: 170, height: 170 });
+                    new QRCode(el, { text: url, width: 80, height: 80 });
                   } catch(e) {
-                    el.innerHTML = '<div style="font-size:8px;color:red;">Error QR</div>';
+                    el.innerHTML = '<div style="font-size:7px;color:red;">Error</div>';
                   }
                 } else if (url === '#') {
-                  el.innerHTML = '<div style="font-size:8px;color:orange;">Sin ID de pedido</div>';
+                  el.innerHTML = '<div style="font-size:7px;color:orange;">Sin ID</div>';
                 }
               }
             });
@@ -1002,7 +959,7 @@ export default function WithGuidesView() {
         printWindow.print();
       }, 1500);
     }
-    toast.success(`${selected.length} ticket(s) listos para imprimir en térmica con QR grandes`);
+    toast.success(`${selected.length} ticket(s) listos para imprimir en térmica`);
   };
 
   return (
