@@ -57,7 +57,7 @@ export default function AssignOrdersView() {
           console.log('🔍 Buscando por ID (UUID)...');
           const result = await supabase
             .from('orders')
-            .select('id, assigned_delivery, assigned_delivery_name, order_number, customer_name, phone')
+            .select('id, assigned_delivery, order_number, customer_name, phone') // Removed assigned_delivery_name
             .eq('id', orderValue)
             .maybeSingle();
           orderData = result.data;
@@ -66,7 +66,7 @@ export default function AssignOrdersView() {
           console.log('🔍 Buscando por order_number...');
           const result = await supabase
             .from('orders')
-            .select('id, assigned_delivery, assigned_delivery_name, order_number, customer_name, phone')
+            .select('id, assigned_delivery, order_number, customer_name, phone') // Removed assigned_delivery_name
             .eq('order_number', orderValue)
             .maybeSingle();
           orderData = result.data;
@@ -95,7 +95,14 @@ export default function AssignOrdersView() {
         
         // ✅ SOLO VERIFICAR SI YA ESTÁ ASIGNADO A ALGUIEN
         if (orderData.assigned_delivery && orderData.assigned_delivery !== profile?.email) {
-          toast.error(`❌ El pedido ${displayId} ya está asignado a ${orderData.assigned_delivery_name || orderData.assigned_delivery}`);
+          // Get delivery name from profiles table instead
+          const { data: deliveryProfile } = await supabase
+            .from('profiles')
+            .select('name')
+            .eq('email', orderData.assigned_delivery)
+            .single();
+          const deliveryName = deliveryProfile?.name || orderData.assigned_delivery;
+          toast.error(`❌ El pedido ${displayId} ya está asignado a ${deliveryName}`);
           window.location.hash = '/asignar-pedidos';
           setAutoAssignProcessing(false);
           return;
@@ -120,12 +127,11 @@ export default function AssignOrdersView() {
             return;
           }
           
-          // Proceder con la asignación
+          // Proceder con la asignación (removed assigned_delivery_name)
           const { error } = await supabase
             .from('orders')
             .update({ 
               assigned_delivery: deliveryEmail,
-              assigned_delivery_name: deliveryName,
               assigned_at: new Date().toISOString(),
               status: 'EN RUTA' 
             })
@@ -148,7 +154,13 @@ export default function AssignOrdersView() {
         else if (role === 'ADMIN' || role === 'PROVEEDOR') {
           // Para admin, mostrar advertencia si ya está asignado pero permitir selección
           if (orderData.assigned_delivery) {
-            toast.warning(`⚠️ Pedido ${displayId} ya está asignado a ${orderData.assigned_delivery_name || orderData.assigned_delivery}`);
+            const { data: deliveryProfile } = await supabase
+              .from('profiles')
+              .select('name')
+              .eq('email', orderData.assigned_delivery)
+              .single();
+            const deliveryName = deliveryProfile?.name || orderData.assigned_delivery;
+            toast.warning(`⚠️ Pedido ${displayId} ya está asignado a ${deliveryName}`);
           } else {
             toast.info(`📦 Pedido ${displayId} está libre para asignar`);
           }
@@ -296,12 +308,11 @@ export default function AssignOrdersView() {
         continue;
       }
       
-      // Si está libre o asignado al mismo delivery, proceder
+      // Si está libre o asignado al mismo delivery, proceder (removed assigned_delivery_name)
       const { error } = await supabase
         .from('orders')
         .update({ 
           assigned_delivery: deliveryEmail,
-          assigned_delivery_name: deliveryName,
           assigned_at: new Date().toISOString(),
           status: 'EN RUTA'
         })
@@ -384,7 +395,6 @@ export default function AssignOrdersView() {
           .from('orders')
           .update({ 
             assigned_delivery: deliveryEmail,
-            assigned_delivery_name: deliveryName,
             assigned_at: new Date().toISOString(),
             status: 'EN RUTA' 
           })
@@ -443,7 +453,6 @@ export default function AssignOrdersView() {
       .from('orders')
       .update({ 
         assigned_delivery: deliveryEmail,
-        assigned_delivery_name: deliveryName,
         assigned_at: new Date().toISOString(),
         status: 'EN RUTA'
       })
@@ -614,8 +623,8 @@ export default function AssignOrdersView() {
                     {o.assigned_delivery === profile?.email ? (
                       <span className="text-green-600 font-bold">✓ Vos</span>
                     ) : o.assigned_delivery ? (
-                      <span className="text-orange-600 font-bold" title={`Asignado a: ${o.assigned_delivery_name || o.assigned_delivery}`}>
-                        👤 {o.assigned_delivery_name || o.assigned_delivery.substring(0, 15)}
+                      <span className="text-orange-600 font-bold" title={`Asignado a: ${o.assigned_delivery}`}>
+                        👤 {o.assigned_delivery.substring(0, 20)}
                       </span>
                     ) : (
                       <span className="text-gray-400">— Libre —</span>
