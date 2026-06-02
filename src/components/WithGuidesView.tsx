@@ -77,14 +77,16 @@ export default function WithGuidesView() {
       if (qrDeliveryRef.current) qrDeliveryRef.current.innerHTML = '';
       
       const whatsappUrl = getWhatsAppUrl(currentOrder);
-      new window.QRCode(qrWaRef.current, {
-        text: whatsappUrl,
-        width: 120,
-        height: 120,
-        colorDark: '#000000',
-        colorLight: '#ffffff',
-        correctLevel: window.QRCode.CorrectLevel.L
-      });
+      if (whatsappUrl && whatsappUrl !== '#') {
+        new window.QRCode(qrWaRef.current, {
+          text: whatsappUrl,
+          width: 120,
+          height: 120,
+          colorDark: '#000000',
+          colorLight: '#ffffff',
+          correctLevel: window.QRCode.CorrectLevel.L
+        });
+      }
       
       const orderId = currentOrder.id;
       if (orderId) {
@@ -316,10 +318,19 @@ export default function WithGuidesView() {
   };
 
   const getWhatsAppUrl = (order: any) => {
+    if (!order.phone) return '#';
     const randomMessage = whatsappMessages[Math.floor(Math.random() * whatsappMessages.length)];
-    const phoneNumber = order.phone?.replace(/\D/g, '');
-    const fullNumber = '595' + phoneNumber;
-    return 'https://wa.me/' + fullNumber + '?text=' + encodeURIComponent(randomMessage);
+    let phoneNumber = order.phone.replace(/\D/g, '');
+    if (phoneNumber.startsWith('595')) {
+      phoneNumber = phoneNumber;
+    } else if (phoneNumber.startsWith('0')) {
+      phoneNumber = '595' + phoneNumber.substring(1);
+    } else if (phoneNumber.length === 9) {
+      phoneNumber = '595' + phoneNumber;
+    } else {
+      phoneNumber = '595' + phoneNumber;
+    }
+    return 'https://wa.me/' + phoneNumber + '?text=' + encodeURIComponent(randomMessage);
   };
 
   const openGuideModal = (order: any) => {
@@ -539,8 +550,10 @@ export default function WithGuidesView() {
             document.querySelectorAll('[id^="qr-wa-"]').forEach(function(el) {
               if (el.children.length === 0) {
                 var url = el.getAttribute('data-url');
-                if (url && url !== '#') {
-                  try { new QRCode(el, { text: url, width: 120, height: 120, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.L }); } catch(e) { el.innerHTML = '<div style="color: red; font-size: 10px;">Error</div>'; }
+                if (url && url !== '#' && url !== '') {
+                  try { new QRCode(el, { text: url, width: 120, height: 120, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.L }); } catch(e) { console.log('QR error:', e); el.innerHTML = '<div style="color: red; font-size: 10px;">Error QR</div>'; }
+                } else {
+                  el.innerHTML = '<div style="color: orange; font-size: 10px;">Sin teléfono</div>';
                 }
               }
             });
@@ -548,7 +561,7 @@ export default function WithGuidesView() {
               if (el.children.length === 0) {
                 var url = el.getAttribute('data-url');
                 if (url && url !== '#') {
-                  try { new QRCode(el, { text: url, width: 120, height: 120, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.L }); } catch(e) { el.innerHTML = '<div style="color: red; font-size: 10px;">Error</div>'; }
+                  try { new QRCode(el, { text: url, width: 120, height: 120, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.L }); } catch(e) { el.innerHTML = '<div style="color: red; font-size: 10px;">Error QR</div>'; }
                 } else if (url === '#') { el.innerHTML = '<div style="color: orange; font-size: 10px;">Sin ID</div>'; }
               }
             });
@@ -568,7 +581,7 @@ export default function WithGuidesView() {
     toast.success(`${selected.length} guías con QR listas para imprimir`);
   };
 
-  // IMPRESIÓN PARA IMPRESORA TÉRMICA - TODO EN NEGRITA, QR GRANDES (120x120), BIEN SEPARADOS
+  // IMPRESIÓN PARA IMPRESORA TÉRMICA - QR GRANDES (120x120) BIEN SEPARADOS
   const printThermal = () => {
     const selected = getSelectedOrders();
     if (selected.length === 0) {
@@ -938,12 +951,15 @@ export default function WithGuidesView() {
             document.querySelectorAll('[id^="qr-wa-thermal-"]').forEach(function(el) {
               if (el.children.length === 0) {
                 var url = el.getAttribute('data-url');
-                if (url && url !== '#') {
+                if (url && url !== '#' && url !== '') {
                   try {
                     new QRCode(el, { text: url, width: 120, height: 120 });
                   } catch(e) {
+                    console.log('QR WA error:', e);
                     el.innerHTML = '<div style="font-size:8px;color:red;">Error QR</div>';
                   }
+                } else {
+                  el.innerHTML = '<div style="font-size:8px;color:orange;">Sin teléfono</div>';
                 }
               }
             });
@@ -955,6 +971,7 @@ export default function WithGuidesView() {
                   try {
                     new QRCode(el, { text: url, width: 120, height: 120 });
                   } catch(e) {
+                    console.log('QR Delivery error:', e);
                     el.innerHTML = '<div style="font-size:8px;color:red;">Error QR</div>';
                   }
                 } else if (url === '#') {
