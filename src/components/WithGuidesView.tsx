@@ -70,7 +70,7 @@ export default function WithGuidesView() {
     }
   }, []);
 
-  // Generar QR en el modal cuando se abre
+  // Generar QR en el modal cuando se abre - MODIFICADO: usa order_number en lugar de id
   useEffect(() => {
     if (showGuideModal && currentOrder && qrLoaded) {
       if (qrWaRef.current) qrWaRef.current.innerHTML = '';
@@ -88,10 +88,12 @@ export default function WithGuidesView() {
         });
       }
       
-      const orderId = currentOrder.id;
-      if (orderId) {
-        const cleanOrderId = String(orderId).trim();
-        const deliveryUrl = window.location.origin + '/#/asignar-pedidos?id=' + encodeURIComponent(cleanOrderId);
+      // CAMBIO 1: Modal QR - usar order_number en lugar de id
+      const orderNumber = currentOrder.order_number;
+      
+      if (orderNumber) {
+        const cleanOrderNumber = String(orderNumber).trim();
+        const deliveryUrl = window.location.origin + '/#/asignar-pedidos?id=' + encodeURIComponent(cleanOrderNumber);
         new window.QRCode(qrDeliveryRef.current, {
           text: deliveryUrl,
           width: 120,
@@ -101,7 +103,7 @@ export default function WithGuidesView() {
           correctLevel: window.QRCode.CorrectLevel.L
         });
       } else {
-        toast.error('Este pedido no tiene ID');
+        toast.error('Este pedido no tiene número de orden');
       }
     }
   }, [showGuideModal, currentOrder, qrLoaded]);
@@ -437,7 +439,7 @@ export default function WithGuidesView() {
     toast.success(`${selected.length} guías descargadas en TXT`);
   };
 
-  // IMPRESIÓN PDF NORMAL
+  // IMPRESIÓN PDF NORMAL - CAMBIO 2: PDF con QR usa order_number
   const printWithQR = () => {
     const selected = getSelectedOrders();
     if (selected.length === 0) { 
@@ -463,10 +465,13 @@ export default function WithGuidesView() {
       }
 
       const whatsappUrl = getWhatsAppUrl(order);
-      const orderNumber = order.order_number;
-      const cleanOrderId = order.id ? String(order.id).trim() : '';
-      const deliveryUrl = cleanOrderId
-        ? window.location.origin + '/#/asignar-pedidos?id=' + encodeURIComponent(cleanOrderId)
+      // CAMBIO 2: usar order_number en lugar de id
+      const orderNumber = order.order_number
+        ? String(order.order_number).trim()
+        : '';
+
+      const deliveryUrl = orderNumber
+        ? window.location.origin + '/#/asignar-pedidos?id=' + encodeURIComponent(orderNumber)
         : '#';
 
       const waQrId = `qr-wa-${order.id.replace(/-/g, '')}`;
@@ -474,7 +479,7 @@ export default function WithGuidesView() {
 
       allGuidesHtml += `
         <div class="guide-page" style="page-break-after: always;">
-          <h3 style="color: #7c5cff; margin: 0 0 10px 0;">GUÍA DE ENVÍO — ${orderNumber || order.id.slice(0, 8)}</h3>
+          <h3 style="color: #7c5cff; margin: 0 0 10px 0;">GUÍA DE ENVÍO — ${order.order_number || order.id.slice(0, 8)}</h3>
           
           <table style="width: 100%; font-size: 12px; margin-bottom: 12px;">
             <tbody>
@@ -562,7 +567,7 @@ export default function WithGuidesView() {
                 var url = el.getAttribute('data-url');
                 if (url && url !== '#') {
                   try { new QRCode(el, { text: url, width: 120, height: 120, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.L }); } catch(e) { el.innerHTML = '<div style="color: red; font-size: 10px;">Error QR</div>'; }
-                } else if (url === '#') { el.innerHTML = '<div style="color: orange; font-size: 10px;">Sin ID</div>'; }
+                } else if (url === '#') { el.innerHTML = '<div style="color: orange; font-size: 10px;">Sin número de orden</div>'; }
               }
             });
           }
@@ -581,7 +586,7 @@ export default function WithGuidesView() {
     toast.success(`${selected.length} guías con QR listas para imprimir`);
   };
 
-  // IMPRESIÓN PARA IMPRESORA TÉRMICA - QR GRANDES (120x120) BIEN SEPARADOS
+  // IMPRESIÓN PARA IMPRESORA TÉRMICA - CAMBIO 3: QR con order_number
   const printThermal = () => {
     const selected = getSelectedOrders();
     if (selected.length === 0) {
@@ -614,9 +619,13 @@ export default function WithGuidesView() {
 
       const total = Number(order.total_gs || 0);
       const whatsappUrl = getWhatsAppUrl(order);
-      const cleanOrderId = order.id ? String(order.id).trim() : '';
-      const deliveryUrl = cleanOrderId
-        ? window.location.origin + '/#/asignar-pedidos?id=' + encodeURIComponent(cleanOrderId)
+      // CAMBIO 3: usar order_number en lugar de id
+      const orderNumber = order.order_number
+        ? String(order.order_number).trim()
+        : '';
+
+      const deliveryUrl = orderNumber
+        ? window.location.origin + '/#/asignar-pedidos?id=' + encodeURIComponent(orderNumber)
         : '#';
 
       const timestamp = Date.now();
@@ -975,7 +984,7 @@ export default function WithGuidesView() {
                     el.innerHTML = '<div style="font-size:8px;color:red;">Error QR</div>';
                   }
                 } else if (url === '#') {
-                  el.innerHTML = '<div style="font-size:8px;color:orange;">Sin ID</div>';
+                  el.innerHTML = '<div style="font-size:8px;color:orange;">Sin número de orden</div>';
                 }
               }
             });
@@ -1220,7 +1229,7 @@ export default function WithGuidesView() {
                     onChange={e => updateStatus2(o.id, e.target.value)}>
                     {state2Opts.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
-                </td>
+                 </td>
                 <td className="text-xs">
                   <div className="flex gap-1">
                     <button className="nav-btn px-2 py-1 text-[10px]" onClick={() => openGuideModal(o)} title="Ver guía con QR">📄</button>
@@ -1230,7 +1239,7 @@ export default function WithGuidesView() {
                       toast.success('Copiada');
                     }} title="Copiar guía">📋</button>
                   </div>
-                </td>
+                 </td>
               </tr>
             ))}
             {visibleOrders.length === 0 && (
