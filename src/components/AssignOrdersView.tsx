@@ -2,16 +2,12 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
-import { useParams, useNavigate } from 'react-router-dom';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
 export default function AssignOrdersView() {
   const { profile } = useAuth();
   const role = profile?.role;
-  const { id: urlId } = useParams();
-  const navigate = useNavigate();
-  
   const [orders, setOrders] = useState<any[]>([]);
   const [deliveries, setDeliveries] = useState<any[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -22,10 +18,38 @@ export default function AssignOrdersView() {
   const [idsInput, setIdsInput] = useState('');
   const [filterBy, setFilterBy] = useState<'created_at' | 'assigned_at'>('created_at');
   const [processingQR, setProcessingQR] = useState(false);
-  const [lastProcessedId, setLastProcessedId] = useState<string | null>(null);
   
   const processingRef = useRef(false);
+  const lastProcessedRef = useRef<string | null>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Obtener ID del hash (#/asignar-pedidos?id=12345 o #/asignar-pedidos?=A178042235595303124)
+  const getOrderIdFromHash = () => {
+    const hash = window.location.hash;
+    console.log('📍 Hash actual:', hash);
+    
+    // Buscar id=xxx
+    const match = hash.match(/[?&]id=([^&]+)/);
+    if (match && match[1]) {
+      return decodeURIComponent(match[1]);
+    }
+    
+    // También buscar después de ? sin nombre
+    const match2 = hash.match(/\?([^&]+)/);
+    if (match2 && match2[1] && !match2[1].includes('=')) {
+      return decodeURIComponent(match2[1]);
+    }
+    
+    return null;
+  };
+
+  // Limpiar el hash
+  const clearHash = () => {
+    const hash = window.location.hash.split('?')[0];
+    if (window.location.hash !== hash) {
+      window.location.hash = hash;
+    }
+  };
 
   const getDeliveryName = async (email: string): Promise<string> => {
     if (!email) return email;
@@ -81,97 +105,74 @@ export default function AssignOrdersView() {
     setProcessingQR(false);
   };
 
-  // ============================================
-  // ASIGNAR PEDIDO DESDE URL
-  // ============================================
-  const assignOrderFromUrl = async (orderValue: string) => {
+  // Asignar pedido desde el ID
+  const assignOrderFromId = async (orderIdValue: string) => {
     if (processingRef.current) {
-      console.log('⚠️ Ya procesando, ignorando...');
+      console.log('⚠️ Ya procesando...');
       return;
     }
     
-    if (lastProcessedId === orderValue) {
-      console.log('⚠️ ID ya procesado:', orderValue);
+    if (lastProcessedRef.current === orderIdValue) {
+      console.log('⚠️ Ya procesado:', orderIdValue);
       return;
     }
     
     processingRef.current = true;
     setProcessingQR(true);
     
-    // Timeout de seguridad (10 segundos)
     timeoutRef.current = setTimeout(() => {
-      console.error('❌ Timeout procesando');
-      toast.error('⏱️ Tiempo de espera agotado. Intentá de nuevo.');
+      toast.error('⏱️ Tiempo de espera agotado');
       resetProcessing();
-      navigate('/asignar-pedidos', { replace: true });
-    }, 10000);
+      clearHash();
+    }, 15000);
     
     try {
-      console.log('🔍 Procesando ID desde URL:', orderValue);
+      console.log('🔍 Buscando pedido:', orderIdValue);
       
+      // Buscar por order_number (como A178042235595303124) o por UUID
       let orderData = null;
-      const isUUID = orderValue.includes('-') && orderValue.length > 30;
+      const isUUID = orderIdValue.includes('-') && orderIdValue.length > 30;
       
       if (isUUID) {
         const { data } = await supabase
           .from('orders')
           .select('id, assigned_delivery, order_number, customer_name, phone')
-          .eq('id', orderValue)
+          .eq('id', orderIdValue)
           .maybeSingle();
         orderData = data;
       } else {
         const { data } = await supabase
           .from('orders')
           .select('id, assigned_delivery, order_number, customer_name, phone')
-          .eq('order_number', orderValue)
+          .eq('order_number', orderIdValue)
           .maybeSingle();
         orderData = data;
       }
       
       if (!orderData) {
-        toast.error(`❌ Pedido ${orderValue} no encontrado`);
+        toast.error(`❌ Pedido ${orderIdValue} no encontrado`);
+        clearHash();
         resetProcessing();
-        navigate('/asignar-pedidos', { replace: true });
         return;
       }
       
       const displayId = orderData.order_number || orderData.id.substring(0, 8);
       console.log('✅ Pedido encontrado:', displayId);
       
-      // Verificar si ya está asignado a otro delivery
+      // Verificar si ya está asignado
       if (orderData.assigned_delivery && orderData.assigned_delivery !== profile?.email) {
         const deliveryName = await getDeliveryName(orderData.assigned_delivery);
-        toast.error(`❌ El pedido ${displayId} ya pertenece a ${deliveryName}`);
+        toast.error(`❌ Pedido ${displayId} ya pertenece a ${deliveryName}`);
+        clearHash();
         resetProcessing();
-        navigate('/asignar-pedidos', { replace: true });
         return;
       }
       
-      // ============================================
-      // ASIGNACIÓN PARA ROL DELIVERY
-      // ============================================
+      // ASIGNAR (solo para DELIVERY)
       if (role === 'DELIVERY') {
         const deliveryEmail = profile?.email || '';
         const deliveryName = profile?.name || deliveryEmail;
         
-        console.log('📦 Asignando pedido:', orderData.id, 'a', deliveryEmail);
-        
-        // Verificar nuevamente antes de asignar
-        const { data: freshOrder } = await supabase
-          .from('orders')
-          .select('assigned_delivery')
-          .eq('id', orderData.id)
-          .single();
-        
-        if (freshOrder?.assigned_delivery && freshOrder.assigned_delivery !== deliveryEmail) {
-          const otherDeliveryName = await getDeliveryName(freshOrder.assigned_delivery);
-          toast.error(`❌ El pedido ${displayId} ya fue asignado a ${otherDeliveryName}`);
-          resetProcessing();
-          navigate('/asignar-pedidos', { replace: true });
-          return;
-        }
-        
-        // REALIZAR LA ASIGNACIÓN
         const { error } = await supabase
           .from('orders')
           .update({ 
@@ -182,28 +183,22 @@ export default function AssignOrdersView() {
           .eq('id', orderData.id);
         
         if (error) {
-          toast.error(`❌ Error al asignar: ${error.message}`);
-          console.error('Error de asignación:', error);
+          toast.error(`❌ Error: ${error.message}`);
         } else {
           toast.success(`✅ Pedido ${displayId} asignado a ${deliveryName}`);
-          setLastProcessedId(orderValue);
-          await load(); // Recargar la lista
-          
-          // Limpiar el ID de la URL y redirigir después de 2 segundos
-          navigate('/asignar-pedidos', { replace: true });
+          lastProcessedRef.current = orderIdValue;
+          await load();
+          clearHash();
           
           setTimeout(() => {
-            navigate('/');
+            window.location.href = '/';
           }, 2000);
         }
       } 
-      // ============================================
-      // SELECCIÓN PARA ADMIN/PROVEEDOR
-      // ============================================
       else if (role === 'ADMIN' || role === 'PROVEEDOR') {
         if (orderData.assigned_delivery) {
           const deliveryName = await getDeliveryName(orderData.assigned_delivery);
-          toast.warning(`⚠️ El pedido ${displayId} ya está asignado a ${deliveryName}`);
+          toast.warning(`⚠️ Pedido ${displayId} ya asignado a ${deliveryName}`);
         } else {
           setSelected(prev => {
             const next = new Set(prev);
@@ -213,32 +208,43 @@ export default function AssignOrdersView() {
           setIdsInput(prev => prev.trim() ? prev + ', ' + displayId : displayId);
           toast.success(`✅ Pedido ${displayId} seleccionado`);
         }
-        navigate('/asignar-pedidos', { replace: true });
+        clearHash();
       }
       
       resetProcessing();
       
-      // Permitir procesar el mismo ID después de 3 segundos
       setTimeout(() => {
-        if (lastProcessedId === orderValue) {
-          setLastProcessedId(null);
+        if (lastProcessedRef.current === orderIdValue) {
+          lastProcessedRef.current = null;
         }
       }, 3000);
       
     } catch (error) {
-      console.error('❌ Error inesperado:', error);
+      console.error(error);
       toast.error('❌ Error al procesar');
       resetProcessing();
-      navigate('/asignar-pedidos', { replace: true });
+      clearHash();
     }
   };
 
-  // Detectar ID en la URL al cargar
+  // Escuchar cambios en el hash
   useEffect(() => {
-    if (urlId && !processingRef.current && urlId !== lastProcessedId) {
-      assignOrderFromUrl(urlId);
-    }
-  }, [urlId]);
+    const checkHash = () => {
+      const orderId = getOrderIdFromHash();
+      if (orderId) {
+        console.log('📱 QR detectado - ID:', orderId);
+        assignOrderFromId(orderId);
+      }
+    };
+    
+    checkHash();
+    window.addEventListener('hashchange', checkHash);
+    
+    return () => {
+      window.removeEventListener('hashchange', checkHash);
+      if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    };
+  }, [profile?.email, role]);
 
   useEffect(() => {
     if (role === 'ADMIN' || role === 'PROVEEDOR') {
@@ -248,15 +254,7 @@ export default function AssignOrdersView() {
 
   useEffect(() => { load(); }, [filterBy, dateFrom, dateTo]);
 
-  // Limpiar timeout al desmontar
-  useEffect(() => {
-    return () => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-    };
-  }, []);
-
+  // Resto del código (filtros, tabla, etc.)
   const filtered = orders.filter(o => {
     if (!search) return true;
     const q = search.toLowerCase();
@@ -546,45 +544,23 @@ export default function AssignOrdersView() {
 
       {(role === 'ADMIN' || role === 'PROVEEDOR') && (
         <div className="flex flex-wrap gap-2 mb-3 items-center">
-          <span className="text-sm font-bold text-green-600 mr-2">
-            ✅ {selectedCount} pedido(s) seleccionado(s)
-          </span>
+          <span className="text-sm font-bold text-green-600 mr-2">✅ {selectedCount} pedido(s) seleccionado(s)</span>
           <select className="app-input !w-auto min-w-[200px]" value={assignDelivery} onChange={e => setAssignDelivery(e.target.value)}>
             <option value="">Seleccionar delivery...</option>
             {deliveries.map(d => <option key={d.email} value={d.email}>{d.name || d.email}</option>)}
           </select>
-          <button 
-            className="nav-btn active" 
-            onClick={assignSelected} 
-            disabled={selectedCount === 0 || !assignDelivery}
-            style={{ background: '#10b981', color: 'white' }}
-          >
-            📦 Asignar seleccionados ({selectedCount})
-          </button>
-          {selectedCount > 0 && (
-            <button className="nav-btn !bg-gray-500" onClick={clearSelection}>
-              ✖ Limpiar
-            </button>
-          )}
+          <button className="nav-btn active" onClick={assignSelected} disabled={selectedCount === 0 || !assignDelivery} style={{ background: '#10b981', color: 'white' }}>📦 Asignar seleccionados ({selectedCount})</button>
+          {selectedCount > 0 && <button className="nav-btn !bg-gray-500" onClick={clearSelection}>✖ Limpiar</button>}
         </div>
       )}
 
       {role === 'DELIVERY' && (
         <div className="flex flex-wrap gap-2 mb-3 items-center">
-          <span className="text-sm font-bold text-green-600 mr-2">
-            ✅ {selectedCount} de {selectableOrdersCount} disponible(s) seleccionado(s)
-          </span>
+          <span className="text-sm font-bold text-green-600 mr-2">✅ {selectedCount} de {selectableOrdersCount} disponible(s) seleccionado(s)</span>
           {selectedCount > 0 && (
             <>
-              <button 
-                className="nav-btn active bg-green-600 hover:bg-green-700" 
-                onClick={assignSelected}
-              >
-                ✅ Asignarme estos {selectedCount} pedido(s)
-              </button>
-              <button className="nav-btn !bg-gray-500" onClick={clearSelection}>
-                ✖ Limpiar selección
-              </button>
+              <button className="nav-btn active bg-green-600 hover:bg-green-700" onClick={assignSelected}>✅ Asignarme estos {selectedCount} pedido(s)</button>
+              <button className="nav-btn !bg-gray-500" onClick={clearSelection}>✖ Limpiar selección</button>
             </>
           )}
         </div>
@@ -594,17 +570,7 @@ export default function AssignOrdersView() {
         <table className="app-table">
           <thead>
             <tr>
-              {(role === 'ADMIN' || role === 'PROVEEDOR' || role === 'DELIVERY') && (
-                <th style={{ width: '40px' }}>
-                  <input 
-                    type="checkbox" 
-                    checked={selectedCount === selectableOrdersCount && selectableOrdersCount > 0}
-                    onChange={handleSelectAll}
-                    className="accent-brand"
-                    disabled={selectableOrdersCount === 0}
-                  />
-                </th>
-              )}
+              {(role === 'ADMIN' || role === 'PROVEEDOR' || role === 'DELIVERY') && (<th style={{ width: '40px' }}><input type="checkbox" checked={selectedCount === selectableOrdersCount && selectableOrdersCount > 0} onChange={handleSelectAll} className="accent-brand" disabled={selectableOrdersCount === 0} /></th>)}
               <th>{filterBy === 'created_at' ? 'Fecha venta' : 'Fecha asignación'}</th>
               <th>ID</th>
               <th>Ciudad</th>
@@ -620,74 +586,30 @@ export default function AssignOrdersView() {
               const isAssignedToOther = o.assigned_delivery && o.assigned_delivery !== profile?.email;
               const assignedToName = o.assigned_delivery_name || o.assigned_delivery;
               const isSelectable = !isAssignedToOther;
-              
               return (
                 <tr key={o.id} className={`${selected.has(o.id) ? 'bg-green-100' : ''} ${isAssignedToOther ? 'opacity-60 bg-gray-100' : ''}`}>
                   {(role === 'ADMIN' || role === 'PROVEEDOR' || role === 'DELIVERY') && (
-                    <td className="text-center">
-                      <input 
-                        type="checkbox" 
-                        checked={selected.has(o.id)} 
-                        onChange={() => toggleSelect(o.id)} 
-                        className="accent-brand"
-                        disabled={!isSelectable}
-                        title={!isSelectable ? `Pedido pertenece a ${assignedToName}` : ''}
-                      />
-                    </td>
+                    <td className="text-center"><input type="checkbox" checked={selected.has(o.id)} onChange={() => toggleSelect(o.id)} className="accent-brand" disabled={!isSelectable} title={!isSelectable ? `Pedido pertenece a ${assignedToName}` : ''} /></td>
                   )}
-                  <td className="text-xs whitespace-nowrap">
-                    {filterBy === 'created_at' 
-                      ? new Date(o.created_at).toLocaleDateString('es-PY')
-                      : o.assigned_at 
-                        ? new Date(o.assigned_at).toLocaleDateString('es-PY')
-                        : '—'}
-                  </td>
+                  <td className="text-xs whitespace-nowrap">{filterBy === 'created_at' ? new Date(o.created_at).toLocaleDateString('es-PY') : o.assigned_at ? new Date(o.assigned_at).toLocaleDateString('es-PY') : '—'}</td>
                   <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
                   <td className="text-xs">{o.city || '—'}</td>
                   <td className="text-xs">{o.customer_name || '—'}</td>
                   <td className="text-xs">{o.phone || '—'}</td>
-                  <td className="text-xs">
-                    <span className={`badge-status ${o.status === 'ENTREGADO' ? 'badge-entregado' : o.status === 'CANCELADO' ? 'badge-cancelado' : 'badge-pendiente'}`}>
-                      {o.status || 'PENDIENTE'}
-                    </span>
-                  </td>
-                  <td className="text-xs">
-                    {o.assigned_delivery === profile?.email ? (
-                      <span className="text-green-600 font-bold">✓ Vos</span>
-                    ) : o.assigned_delivery ? (
-                      <span className="text-orange-600 font-bold" title={`Asignado a: ${assignedToName}`}>
-                        👤 {assignedToName}
-                      </span>
-                    ) : (
-                      <span className="text-gray-400">— Libre —</span>
-                    )}
-                  </td>
+                  <td className="text-xs"><span className={`badge-status ${o.status === 'ENTREGADO' ? 'badge-entregado' : o.status === 'CANCELADO' ? 'badge-cancelado' : 'badge-pendiente'}`}>{o.status || 'PENDIENTE'}</span></td>
+                  <td className="text-xs">{o.assigned_delivery === profile?.email ? <span className="text-green-600 font-bold">✓ Vos</span> : o.assigned_delivery ? <span className="text-orange-600 font-bold" title={`Asignado a: ${assignedToName}`}>👤 {assignedToName}</span> : <span className="text-gray-400">— Libre —</span>}</td>
                   {(role === 'ADMIN' || role === 'PROVEEDOR') && (
                     <td className="text-xs">
-                      <select 
-                        className="app-input !w-auto !py-1 !px-2 text-xs" 
-                        value={o.assigned_delivery || ''}
-                        onChange={(e) => assignSingle(o.id, e.target.value)}
-                      >
+                      <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.assigned_delivery || ''} onChange={(e) => assignSingle(o.id, e.target.value)}>
                         <option value="">Sin asignar</option>
-                        {deliveries.map((d) => (
-                          <option key={d.email} value={d.email}>
-                            {d.name || d.email} {o.assigned_delivery === d.email ? '✓' : ''}
-                          </option>
-                        ))}
+                        {deliveries.map((d) => (<option key={d.email} value={d.email}>{d.name || d.email} {o.assigned_delivery === d.email ? '✓' : ''}</option>))}
                       </select>
                     </td>
                   )}
                 </tr>
               );
             })}
-            {filtered.length === 0 && (
-              <tr>
-                <td colSpan={role === 'ADMIN' || role === 'PROVEEDOR' ? 9 : 8} className="text-center text-muted-foreground py-8">
-                  {role === 'DELIVERY' ? 'No hay pedidos disponibles para asignarte' : 'Sin pedidos en este rango de fechas'}
-                </td>
-              </tr>
-            )}
+            {filtered.length === 0 && (<tr><td colSpan={role === 'ADMIN' || role === 'PROVEEDOR' ? 9 : 8} className="text-center text-muted-foreground py-8">{role === 'DELIVERY' ? 'No hay pedidos disponibles para asignarte' : 'Sin pedidos en este rango de fechas'}</td></tr>)}
           </tbody>
         </table>
       </div>
@@ -695,16 +617,8 @@ export default function AssignOrdersView() {
       {role === 'DELIVERY' && selectedCount > 0 && (
         <div className="mt-3 p-3 bg-green-50 rounded-lg border border-green-200">
           <div className="flex justify-between items-center">
-            <div>
-              <span className="text-sm font-bold text-green-800">✅ {selectedCount} pedido(s) seleccionado(s)</span>
-              <p className="text-xs text-green-600 mt-1">Se asignarán automáticamente a tu cuenta</p>
-            </div>
-            <button 
-              className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-green-700"
-              onClick={assignSelected}
-            >
-              Asignarme todo
-            </button>
+            <div><span className="text-sm font-bold text-green-800">✅ {selectedCount} pedido(s) seleccionado(s)</span><p className="text-xs text-green-600 mt-1">Se asignarán automáticamente a tu cuenta</p></div>
+            <button className="bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-green-700" onClick={assignSelected}>Asignarme todo</button>
           </div>
         </div>
       )}
