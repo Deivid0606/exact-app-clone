@@ -2,12 +2,16 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
 export default function AssignOrdersView() {
   const { profile } = useAuth();
   const role = profile?.role;
+  const location = useLocation();
+  const navigate = useNavigate();
+  
   const [orders, setOrders] = useState<any[]>([]);
   const [deliveries, setDeliveries] = useState<any[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -22,12 +26,9 @@ export default function AssignOrdersView() {
   const processingRef = useRef(false);
   const lastProcessedRef = useRef<string | null>(null);
 
-  // Obtener parámetros del hash
-  const getHashParams = () => {
-    const hash = window.location.hash;
-    const queryString = hash.split('?')[1];
-    if (!queryString) return {};
-    const params = new URLSearchParams(queryString);
+  // Obtener parámetros de la URL (query params, no hash)
+  const getQueryParams = () => {
+    const params = new URLSearchParams(location.search);
     const result: Record<string, string> = {};
     params.forEach((value, key) => {
       result[key] = value;
@@ -35,10 +36,9 @@ export default function AssignOrdersView() {
     return result;
   };
 
-  // Limpiar el hash después de procesar
-  const clearHash = () => {
-    const hash = window.location.hash.split('?')[0];
-    window.location.hash = hash;
+  // Limpiar los parámetros de la URL después de procesar
+  const clearQueryParams = () => {
+    navigate(location.pathname, { replace: true });
   };
 
   const getDeliveryName = async (email: string): Promise<string> => {
@@ -129,7 +129,7 @@ export default function AssignOrdersView() {
       
       if (!orderData) {
         toast.error(`❌ Pedido ${orderValue} no encontrado`);
-        clearHash();
+        clearQueryParams();
         processingRef.current = false;
         setProcessingQR(false);
         return;
@@ -142,7 +142,7 @@ export default function AssignOrdersView() {
       if (orderData.assigned_delivery && orderData.assigned_delivery !== profile?.email) {
         const deliveryName = await getDeliveryName(orderData.assigned_delivery);
         toast.error(`❌ El pedido ${displayId} ya pertenece a ${deliveryName}`);
-        clearHash();
+        clearQueryParams();
         processingRef.current = false;
         setProcessingQR(false);
         return;
@@ -167,7 +167,7 @@ export default function AssignOrdersView() {
         if (freshOrder?.assigned_delivery && freshOrder.assigned_delivery !== deliveryEmail) {
           const otherDeliveryName = await getDeliveryName(freshOrder.assigned_delivery);
           toast.error(`❌ El pedido ${displayId} ya fue asignado a ${otherDeliveryName}`);
-          clearHash();
+          clearQueryParams();
           processingRef.current = false;
           setProcessingQR(false);
           return;
@@ -191,8 +191,10 @@ export default function AssignOrdersView() {
           lastProcessedRef.current = orderValue;
           await load(); // Recargar la lista
           
-          // Limpiar el hash y redirigir después de 2 segundos
-          clearHash();
+          // Limpiar los parámetros de la URL
+          clearQueryParams();
+          
+          // Redirigir después de 2 segundos
           setTimeout(() => {
             window.location.href = '/';
           }, 2000);
@@ -214,7 +216,7 @@ export default function AssignOrdersView() {
           setIdsInput(prev => prev.trim() ? prev + ', ' + displayId : displayId);
           toast.success(`✅ Pedido ${displayId} seleccionado`);
         }
-        clearHash();
+        clearQueryParams();
       }
       
     } catch (error) {
@@ -230,34 +232,17 @@ export default function AssignOrdersView() {
   };
 
   // ============================================
-  // ESCUCHAR CAMBIOS EN EL HASH (QR ESCANEADO)
+  // DETECTAR QR EN QUERY PARAMS (NO EN HASH)
   // ============================================
   useEffect(() => {
-    const checkHashForQR = () => {
-      const params = getHashParams();
-      const orderValue = params.id;
-      
-      if (orderValue) {
-        console.log('📱 QR detectado en URL - ID:', orderValue);
-        assignOrderFromQR(orderValue);
-      }
-    };
+    const params = getQueryParams();
+    const orderValue = params.id;
     
-    // Verificar al cargar la página
-    checkHashForQR();
-    
-    // Escuchar cambios en el hash (cuando se escanea un QR)
-    const handleHashChange = () => {
-      console.log('🔄 Hash cambiado');
-      setTimeout(checkHashForQR, 100);
-    };
-    
-    window.addEventListener('hashchange', handleHashChange);
-    
-    return () => {
-      window.removeEventListener('hashchange', handleHashChange);
-    };
-  }, [profile?.email, role]); // Dependencias necesarias
+    if (orderValue) {
+      console.log('📱 QR detectado en URL - ID:', orderValue);
+      assignOrderFromQR(orderValue);
+    }
+  }, [location.search]); // Escucha cambios en la query string
 
   useEffect(() => {
     if (role === 'ADMIN' || role === 'PROVEEDOR') {
@@ -267,7 +252,7 @@ export default function AssignOrdersView() {
 
   useEffect(() => { load(); }, [filterBy, dateFrom, dateTo]);
 
-  // Resto del código (filtros, tabla, etc.) - se mantiene igual
+  // Resto del código (filtros, tabla, etc.)
   const filtered = orders.filter(o => {
     if (!search) return true;
     const q = search.toLowerCase();
