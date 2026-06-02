@@ -21,25 +21,25 @@ export default function AssignOrdersView() {
   
   const processingRef = useRef(false);
   const lastProcessedRef = useRef<string | null>(null);
-  const initialLoadRef = useRef(true);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Obtener parámetros del hash (para HashRouter)
   const getHashParams = () => {
     const hash = window.location.hash;
-    // El hash puede ser: "#/asignar-pedidos?id=123" o "#/asignar-pedidos?id=123"
-    const queryString = hash.includes('?') ? '?' + hash.split('?')[1] : '';
-    const params = new URLSearchParams(queryString);
-    const result: Record<string, string> = {};
-    params.forEach((value, key) => {
-      result[key] = value;
-    });
-    return result;
+    // Buscar id en el hash: #/asignar-pedidos?id=123 o #/asignar-pedidos?id=123
+    const match = hash.match(/[?&]id=([^&]+)/);
+    if (match && match[1]) {
+      return { id: decodeURIComponent(match[1]) };
+    }
+    return {};
   };
 
   // Limpiar el hash después de procesar
   const clearHash = () => {
     const hash = window.location.hash.split('?')[0];
-    window.location.hash = hash;
+    if (window.location.hash !== hash) {
+      window.location.hash = hash;
+    }
   };
 
   const getDeliveryName = async (email: string): Promise<string> => {
@@ -87,6 +87,16 @@ export default function AssignOrdersView() {
     }
   };
 
+  // Resetear estado de procesamiento
+  const resetProcessing = () => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+    processingRef.current = false;
+    setProcessingQR(false);
+  };
+
   // ============================================
   // FUNCIÓN PRINCIPAL PARA ASIGNAR EL PEDIDO
   // ============================================
@@ -104,6 +114,14 @@ export default function AssignOrdersView() {
     
     processingRef.current = true;
     setProcessingQR(true);
+    
+    // Timeout de seguridad (10 segundos)
+    timeoutRef.current = setTimeout(() => {
+      console.error('❌ Timeout procesando QR');
+      toast.error('⏱️ Tiempo de espera agotado. Intentá de nuevo.');
+      resetProcessing();
+      clearHash();
+    }, 10000);
     
     try {
       console.log('🔍 Procesando QR - Valor:', orderValue);
@@ -131,8 +149,7 @@ export default function AssignOrdersView() {
       if (!orderData) {
         toast.error(`❌ Pedido ${orderValue} no encontrado`);
         clearHash();
-        processingRef.current = false;
-        setProcessingQR(false);
+        resetProcessing();
         return;
       }
       
@@ -144,8 +161,7 @@ export default function AssignOrdersView() {
         const deliveryName = await getDeliveryName(orderData.assigned_delivery);
         toast.error(`❌ El pedido ${displayId} ya pertenece a ${deliveryName}`);
         clearHash();
-        processingRef.current = false;
-        setProcessingQR(false);
+        resetProcessing();
         return;
       }
       
@@ -158,7 +174,7 @@ export default function AssignOrdersView() {
         
         console.log('📦 Asignando pedido:', orderData.id, 'a', deliveryEmail);
         
-        // Verificar nuevamente antes de asignar (por si cambió)
+        // Verificar nuevamente antes de asignar
         const { data: freshOrder } = await supabase
           .from('orders')
           .select('assigned_delivery')
@@ -169,8 +185,7 @@ export default function AssignOrdersView() {
           const otherDeliveryName = await getDeliveryName(freshOrder.assigned_delivery);
           toast.error(`❌ El pedido ${displayId} ya fue asignado a ${otherDeliveryName}`);
           clearHash();
-          processingRef.current = false;
-          setProcessingQR(false);
+          resetProcessing();
           return;
         }
         
@@ -220,15 +235,20 @@ export default function AssignOrdersView() {
         clearHash();
       }
       
+      resetProcessing();
+      
+      // Permitir escanear el mismo QR después de 3 segundos
+      setTimeout(() => {
+        if (lastProcessedRef.current === orderValue) {
+          lastProcessedRef.current = null;
+        }
+      }, 3000);
+      
     } catch (error) {
       console.error('❌ Error inesperado:', error);
       toast.error('❌ Error al procesar el QR');
-    } finally {
-      // Resetear después de 2 segundos
-      setTimeout(() => {
-        processingRef.current = false;
-        setProcessingQR(false);
-      }, 2000);
+      resetProcessing();
+      clearHash();
     }
   };
 
@@ -246,17 +266,13 @@ export default function AssignOrdersView() {
       }
     };
     
-    // Verificar al cargar la página (solo una vez)
-    if (initialLoadRef.current) {
-      initialLoadRef.current = false;
-      setTimeout(checkHashForQR, 100);
-    } else {
-      checkHashForQR();
-    }
+    // Verificar al cargar la página
+    checkHashForQR();
     
-    // Escuchar cambios en el hash (cuando se escanea un QR)
+    // Escuchar cambios en el hash
     const handleHashChange = () => {
       console.log('🔄 Hash cambiado');
+      // Pequeño delay para asegurar que el hash se actualizó
       setTimeout(checkHashForQR, 100);
     };
     
@@ -264,8 +280,11 @@ export default function AssignOrdersView() {
     
     return () => {
       window.removeEventListener('hashchange', handleHashChange);
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
     };
-  }, []); // Solo se ejecuta una vez al montar
+  }, []); // Solo se ejecuta UNA vez al montar el componente
 
   useEffect(() => {
     if (role === 'ADMIN' || role === 'PROVEEDOR') {
