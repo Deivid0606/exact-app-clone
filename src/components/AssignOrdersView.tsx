@@ -33,6 +33,17 @@ export default function AssignOrdersView() {
     return result;
   };
 
+  // Función auxiliar para obtener el nombre de un delivery por email
+  const getDeliveryName = async (email: string): Promise<string> => {
+    if (!email) return email;
+    const { data } = await supabase
+      .from('profiles')
+      .select('name')
+      .eq('email', email)
+      .single();
+    return data?.name || email;
+  };
+
   // Manejo de QR - Busca por ID o order_number automáticamente
   useEffect(() => {
     const params = getHashParams();
@@ -57,7 +68,7 @@ export default function AssignOrdersView() {
           console.log('🔍 Buscando por ID (UUID)...');
           const result = await supabase
             .from('orders')
-            .select('id, assigned_delivery, order_number, customer_name, phone') // Removed assigned_delivery_name
+            .select('id, assigned_delivery, order_number, customer_name, phone')
             .eq('id', orderValue)
             .maybeSingle();
           orderData = result.data;
@@ -66,7 +77,7 @@ export default function AssignOrdersView() {
           console.log('🔍 Buscando por order_number...');
           const result = await supabase
             .from('orders')
-            .select('id, assigned_delivery, order_number, customer_name, phone') // Removed assigned_delivery_name
+            .select('id, assigned_delivery, order_number, customer_name, phone')
             .eq('order_number', orderValue)
             .maybeSingle();
           orderData = result.data;
@@ -93,16 +104,10 @@ export default function AssignOrdersView() {
         console.log('✅ Pedido encontrado:', orderData);
         const displayId = orderData.order_number || orderData.id.substring(0, 8);
         
-        // ✅ SOLO VERIFICAR SI YA ESTÁ ASIGNADO A ALGUIEN
+        // ✅ VERIFICAR SI YA ESTÁ ASIGNADO A ALGUIEN
         if (orderData.assigned_delivery && orderData.assigned_delivery !== profile?.email) {
-          // Get delivery name from profiles table instead
-          const { data: deliveryProfile } = await supabase
-            .from('profiles')
-            .select('name')
-            .eq('email', orderData.assigned_delivery)
-            .single();
-          const deliveryName = deliveryProfile?.name || orderData.assigned_delivery;
-          toast.error(`❌ El pedido ${displayId} ya está asignado a ${deliveryName}`);
+          const deliveryName = await getDeliveryName(orderData.assigned_delivery);
+          toast.error(`❌ El pedido ${displayId} no se puede asignar porque pertenece a ${deliveryName}`);
           window.location.hash = '/asignar-pedidos';
           setAutoAssignProcessing(false);
           return;
@@ -121,13 +126,14 @@ export default function AssignOrdersView() {
             .single();
           
           if (freshOrder?.assigned_delivery && freshOrder.assigned_delivery !== deliveryEmail) {
-            toast.error(`❌ El pedido ${displayId} ya fue asignado a otro delivery mientras escaneabas`);
+            const otherDeliveryName = await getDeliveryName(freshOrder.assigned_delivery);
+            toast.error(`❌ El pedido ${displayId} no se puede asignar porque pertenece a ${otherDeliveryName}`);
             window.location.hash = '/asignar-pedidos';
             setAutoAssignProcessing(false);
             return;
           }
           
-          // Proceder con la asignación (removed assigned_delivery_name)
+          // Proceder con la asignación
           const { error } = await supabase
             .from('orders')
             .update({ 
@@ -152,38 +158,32 @@ export default function AssignOrdersView() {
         } 
         // Para ADMIN/PROVEEDOR: SELECCIONAR automáticamente el pedido
         else if (role === 'ADMIN' || role === 'PROVEEDOR') {
-          // Para admin, mostrar advertencia si ya está asignado pero permitir selección
+          // Para admin, mostrar advertencia si ya está asignado
           if (orderData.assigned_delivery) {
-            const { data: deliveryProfile } = await supabase
-              .from('profiles')
-              .select('name')
-              .eq('email', orderData.assigned_delivery)
-              .single();
-            const deliveryName = deliveryProfile?.name || orderData.assigned_delivery;
-            toast.warning(`⚠️ Pedido ${displayId} ya está asignado a ${deliveryName}`);
+            const deliveryName = await getDeliveryName(orderData.assigned_delivery);
+            toast.warning(`⚠️ El pedido ${displayId} ya está asignado a ${deliveryName}. No se puede seleccionar.`);
           } else {
             toast.info(`📦 Pedido ${displayId} está libre para asignar`);
+            setSelected(prev => {
+              const next = new Set(prev);
+              if (next.has(orderData.id)) {
+                next.delete(orderData.id);
+                toast.info(`📦 Pedido ${displayId} deseleccionado`);
+              } else {
+                next.add(orderData.id);
+                toast.success(`✅ Pedido ${displayId} seleccionado`);
+              }
+              return next;
+            });
+            
+            setIdsInput(prev => {
+              const currentIds = prev.split(/[,\s\n]+/).filter(i => i.trim());
+              if (!currentIds.includes(displayId)) {
+                return prev.trim() ? prev + ', ' + displayId : displayId;
+              }
+              return prev;
+            });
           }
-          
-          setSelected(prev => {
-            const next = new Set(prev);
-            if (next.has(orderData.id)) {
-              next.delete(orderData.id);
-              toast.info(`📦 Pedido ${displayId} deseleccionado`);
-            } else {
-              next.add(orderData.id);
-              toast.success(`✅ Pedido ${displayId} seleccionado`);
-            }
-            return next;
-          });
-          
-          setIdsInput(prev => {
-            const currentIds = prev.split(/[,\s\n]+/).filter(i => i.trim());
-            if (!currentIds.includes(displayId)) {
-              return prev.trim() ? prev + ', ' + displayId : displayId;
-            }
-            return prev;
-          });
           
           window.location.hash = '/asignar-pedidos';
           setAutoAssignProcessing(false);
@@ -211,7 +211,29 @@ export default function AssignOrdersView() {
     }
     
     const { data } = await query;
-    setOrders(data || []);
+    
+    // Enriquecer los pedidos con los nombres de los deliveries asignados
+    if (data && data.length > 0) {
+      const emails = [...new Set(data.map(o => o.assigned_delivery).filter(Boolean))];
+      const deliveryNamesMap: Record<string, string> = {};
+      
+      for (const email of emails) {
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('name')
+          .eq('email', email)
+          .single();
+        deliveryNamesMap[email] = profileData?.name || email;
+      }
+      
+      const enrichedData = data.map(order => ({
+        ...order,
+        assigned_delivery_name: order.assigned_delivery ? deliveryNamesMap[order.assigned_delivery] : null
+      }));
+      setOrders(enrichedData);
+    } else {
+      setOrders(data || []);
+    }
   };
 
   useEffect(() => { load(); }, [filterBy, dateFrom, dateTo]);
@@ -226,11 +248,11 @@ export default function AssignOrdersView() {
       (o.id || '').toLowerCase().includes(q);
   });
 
-  const toggleSelect = (id: string) => {
-    // Verificar si el pedido está disponible para seleccionar
+  const toggleSelect = async (id: string) => {
     const order = orders.find(o => o.id === id);
-    if (order && role === 'DELIVERY' && order.assigned_delivery && order.assigned_delivery !== profile?.email) {
-      toast.error(`❌ No puedes seleccionar este pedido, ya está asignado a otro delivery`);
+    if (order && order.assigned_delivery && order.assigned_delivery !== profile?.email) {
+      const deliveryName = order.assigned_delivery_name || await getDeliveryName(order.assigned_delivery);
+      toast.error(`❌ No puedes seleccionar este pedido porque pertenece a ${deliveryName}`);
       return;
     }
     
@@ -260,7 +282,8 @@ export default function AssignOrdersView() {
       const allIds = selectableOrders.map(o => o.id);
       setSelected(new Set(allIds));
       if (role === 'DELIVERY' && selectableOrders.length < filtered.length) {
-        toast.info(`Se seleccionaron ${selectableOrders.length} pedidos disponibles (${filtered.length - selectableOrders.length} ya estaban asignados a otros)`);
+        const assignedCount = filtered.length - selectableOrders.length;
+        toast.info(`Se seleccionaron ${selectableOrders.length} pedidos disponibles (${assignedCount} ya pertenecen a otros deliveries)`);
       }
     }
   };
@@ -293,22 +316,26 @@ export default function AssignOrdersView() {
     let successCount = 0;
     let errorCount = 0;
     let alreadyAssignedCount = 0;
+    const alreadyAssignedDetails: string[] = [];
 
     for (const id of selected) {
-      // ✅ SOLO VERIFICAR SI YA ESTÁ ASIGNADO A OTRO DELIVERY
+      // ✅ VERIFICAR SI YA ESTÁ ASIGNADO A OTRO DELIVERY
       const { data: orderData } = await supabase
         .from('orders')
-        .select('assigned_delivery')
+        .select('assigned_delivery, order_number')
         .eq('id', id)
         .single();
       
       // Verificar si ya está asignado a otro delivery
       if (orderData?.assigned_delivery && orderData.assigned_delivery !== deliveryEmail) {
+        const otherDeliveryName = await getDeliveryName(orderData.assigned_delivery);
+        const displayId = orderData.order_number || id.substring(0, 8);
+        alreadyAssignedDetails.push(`${displayId} (${otherDeliveryName})`);
         alreadyAssignedCount++;
         continue;
       }
       
-      // Si está libre o asignado al mismo delivery, proceder (removed assigned_delivery_name)
+      // Si está libre o asignado al mismo delivery, proceder
       const { error } = await supabase
         .from('orders')
         .update({ 
@@ -332,7 +359,9 @@ export default function AssignOrdersView() {
       toast.success(`✅ ${successCount} pedido(s) asignado(s) a ${deliveryName}`);
     }
     if (alreadyAssignedCount > 0) {
-      toast.warning(`⚠️ ${alreadyAssignedCount} pedido(s) ya estaban asignados a otro delivery`);
+      const detailsMessage = alreadyAssignedDetails.slice(0, 3).join(', ');
+      const moreCount = alreadyAssignedCount > 3 ? ` y ${alreadyAssignedCount - 3} más` : '';
+      toast.warning(`⚠️ ${alreadyAssignedCount} pedido(s) ya pertenecen a otros deliveries: ${detailsMessage}${moreCount}`);
     }
     if (errorCount > 0) {
       toast.error(`❌ Error en ${errorCount} pedido(s)`);
@@ -376,17 +405,20 @@ export default function AssignOrdersView() {
     let count = 0;
     let notFound = 0;
     let alreadyAssigned = 0;
+    const alreadyAssignedDetails: string[] = [];
 
     for (const id of ids) {
       const { data } = await supabase
         .from('orders')
-        .select('id, assigned_delivery')
+        .select('id, assigned_delivery, order_number')
         .eq('order_number', id)
         .limit(1);
       
       if (data && data[0]) {
-        // ✅ SOLO VERIFICAR SI YA ESTÁ ASIGNADO A OTRO DELIVERY
+        // ✅ VERIFICAR SI YA ESTÁ ASIGNADO A OTRO DELIVERY
         if (data[0].assigned_delivery && data[0].assigned_delivery !== deliveryEmail) {
+          const otherDeliveryName = await getDeliveryName(data[0].assigned_delivery);
+          alreadyAssignedDetails.push(`${id} (${otherDeliveryName})`);
           alreadyAssigned++;
           continue;
         }
@@ -414,7 +446,9 @@ export default function AssignOrdersView() {
       toast.success(`✅ ${count} pedido(s) asignado(s) a ${deliveryName}`);
     }
     if (alreadyAssigned > 0) {
-      toast.warning(`⚠️ ${alreadyAssigned} pedido(s) ya estaban asignados a otro delivery`);
+      const detailsMessage = alreadyAssignedDetails.slice(0, 3).join(', ');
+      const moreCount = alreadyAssigned > 3 ? ` y ${alreadyAssigned - 3} más` : '';
+      toast.warning(`⚠️ ${alreadyAssigned} pedido(s) ya pertenecen a otros deliveries: ${detailsMessage}${moreCount}`);
     }
     if (notFound > 0) {
       toast.warning(`❓ ${notFound} ID(s) no encontrados`);
@@ -431,8 +465,10 @@ export default function AssignOrdersView() {
     }
     
     const deliveryName = deliveries.find(d => d.email === deliveryEmail)?.name || deliveryEmail;
+    const order = orders.find(o => o.id === orderId);
+    const displayId = order?.order_number || orderId.substring(0, 8);
     
-    // ✅ SOLO VERIFICAR SI YA ESTÁ ASIGNADO A OTRO
+    // ✅ VERIFICAR SI YA ESTÁ ASIGNADO A OTRO
     const { data: orderData } = await supabase
       .from('orders')
       .select('assigned_delivery')
@@ -440,12 +476,8 @@ export default function AssignOrdersView() {
       .single();
     
     if (orderData?.assigned_delivery && orderData.assigned_delivery !== deliveryEmail) {
-      const { data: assignedProfile } = await supabase
-        .from('profiles')
-        .select('name')
-        .eq('email', orderData.assigned_delivery)
-        .single();
-      toast.error(`❌ Este pedido ya está asignado a ${assignedProfile?.name || orderData.assigned_delivery}`);
+      const otherDeliveryName = await getDeliveryName(orderData.assigned_delivery);
+      toast.error(`❌ El pedido ${displayId} no se puede asignar porque pertenece a ${otherDeliveryName}`);
       return;
     }
     
@@ -462,7 +494,7 @@ export default function AssignOrdersView() {
       toast.error('Error al asignar delivery');
       console.error(error);
     } else {
-      toast.success(`✅ Delivery asignado correctamente a ${deliveryName}`);
+      toast.success(`✅ Pedido ${displayId} asignado correctamente a ${deliveryName}`);
       load();
     }
   };
@@ -588,6 +620,7 @@ export default function AssignOrdersView() {
           <tbody>
             {filtered.map((o) => {
               const isAssignedToOther = o.assigned_delivery && o.assigned_delivery !== profile?.email;
+              const assignedToName = o.assigned_delivery_name || o.assigned_delivery;
               const isSelectable = !isAssignedToOther;
               
               return (
@@ -600,6 +633,7 @@ export default function AssignOrdersView() {
                         onChange={() => toggleSelect(o.id)} 
                         className="accent-brand"
                         disabled={!isSelectable}
+                        title={!isSelectable ? `Pedido pertenece a ${assignedToName}` : ''}
                       />
                     </td>
                   )}
@@ -623,8 +657,8 @@ export default function AssignOrdersView() {
                     {o.assigned_delivery === profile?.email ? (
                       <span className="text-green-600 font-bold">✓ Vos</span>
                     ) : o.assigned_delivery ? (
-                      <span className="text-orange-600 font-bold" title={`Asignado a: ${o.assigned_delivery}`}>
-                        👤 {o.assigned_delivery.substring(0, 20)}
+                      <span className="text-orange-600 font-bold" title={`Asignado a: ${assignedToName}`}>
+                        👤 {assignedToName}
                       </span>
                     ) : (
                       <span className="text-gray-400">— Libre —</span>
