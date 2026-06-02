@@ -20,11 +20,9 @@ export default function AssignOrdersView() {
   const [autoAssignProcessing, setAutoAssignProcessing] = useState(false);
   const [lastScannedId, setLastScannedId] = useState<string | null>(null);
   
-  // Refs para evitar problemas de concurrencia
   const processingRef = useRef(false);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Función para obtener parámetros del hash (para HashRouter)
   const getHashParams = () => {
     const hash = window.location.hash;
     const queryString = hash.split('?')[1];
@@ -37,7 +35,6 @@ export default function AssignOrdersView() {
     return result;
   };
 
-  // Limpiar el hash sin causar eventos adicionales
   const clearHashParams = () => {
     const hash = window.location.hash;
     const basePath = hash.split('?')[0];
@@ -46,7 +43,6 @@ export default function AssignOrdersView() {
     }
   };
 
-  // Función auxiliar para obtener el nombre de un delivery por email
   const getDeliveryName = async (email: string): Promise<string> => {
     if (!email) return email;
     const { data } = await supabase
@@ -57,7 +53,6 @@ export default function AssignOrdersView() {
     return data?.name || email;
   };
 
-  // Resetear estado de procesamiento después de un timeout
   const resetProcessing = () => {
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
@@ -67,215 +62,7 @@ export default function AssignOrdersView() {
     processingRef.current = false;
   };
 
-  // Función principal para procesar el QR
-  const processQRCode = async (orderValue: string) => {
-    // Evitar procesamiento concurrente
-    if (processingRef.current) {
-      console.log('⚠️ Ya hay un proceso en curso, ignorando...');
-      return;
-    }
-    
-    processingRef.current = true;
-    setAutoAssignProcessing(true);
-    
-    // Timeout de seguridad: si tarda más de 10 segundos, resetear
-    timeoutRef.current = setTimeout(() => {
-      console.error('❌ Timeout procesando QR');
-      toast.error('⏱️ Tiempo de espera agotado. Intentá de nuevo.');
-      resetProcessing();
-      clearHashParams();
-    }, 10000);
-    
-    try {
-      console.log('🔍 Procesando QR - Valor:', orderValue);
-      
-      let orderData = null;
-      let findError = null;
-      
-      // Determinar si es UUID (tiene guiones y longitud > 30) o número de orden
-      const isUUID = orderValue.includes('-') && orderValue.length > 30;
-      
-      console.log('🔍 Es UUID?', isUUID);
-      
-      if (isUUID) {
-        console.log('🔍 Buscando por ID (UUID)...');
-        const result = await supabase
-          .from('orders')
-          .select('id, assigned_delivery, order_number, customer_name, phone')
-          .eq('id', orderValue)
-          .maybeSingle();
-        orderData = result.data;
-        findError = result.error;
-      } else {
-        console.log('🔍 Buscando por order_number...');
-        const result = await supabase
-          .from('orders')
-          .select('id, assigned_delivery, order_number, customer_name, phone')
-          .eq('order_number', orderValue)
-          .maybeSingle();
-        orderData = result.data;
-        findError = result.error;
-      }
-      
-      console.log('📦 Resultado de búsqueda:', orderData);
-      
-      if (findError) {
-        console.error('❌ Error de Supabase:', findError);
-        toast.error(`❌ Error: ${findError.message}`);
-        resetProcessing();
-        clearHashParams();
-        return;
-      }
-      
-      if (!orderData) {
-        toast.error(`❌ Pedido ${orderValue} no encontrado`);
-        resetProcessing();
-        clearHashParams();
-        return;
-      }
-      
-      console.log('✅ Pedido encontrado:', orderData);
-      const displayId = orderData.order_number || orderData.id.substring(0, 8);
-      
-      // ✅ VERIFICAR SI YA ESTÁ ASIGNADO A ALGUIEN
-      if (orderData.assigned_delivery && orderData.assigned_delivery !== profile?.email) {
-        const deliveryName = await getDeliveryName(orderData.assigned_delivery);
-        toast.error(`❌ El pedido ${displayId} no se puede asignar porque pertenece a ${deliveryName}`);
-        resetProcessing();
-        clearHashParams();
-        return;
-      }
-      
-      // Si es DELIVERY, asignar automáticamente
-      if (role === 'DELIVERY') {
-        const deliveryEmail = profile?.email || '';
-        const deliveryName = profile?.name || deliveryEmail;
-        
-        // Doble verificación antes de asignar
-        const { data: freshOrder } = await supabase
-          .from('orders')
-          .select('assigned_delivery')
-          .eq('id', orderData.id)
-          .single();
-        
-        if (freshOrder?.assigned_delivery && freshOrder.assigned_delivery !== deliveryEmail) {
-          const otherDeliveryName = await getDeliveryName(freshOrder.assigned_delivery);
-          toast.error(`❌ El pedido ${displayId} no se puede asignar porque pertenece a ${otherDeliveryName}`);
-          resetProcessing();
-          clearHashParams();
-          return;
-        }
-        
-        // Proceder con la asignación
-        const { error } = await supabase
-          .from('orders')
-          .update({ 
-            assigned_delivery: deliveryEmail,
-            assigned_at: new Date().toISOString(),
-            status: 'EN RUTA' 
-          })
-          .eq('id', orderData.id);
-        
-        if (error) {
-          toast.error('❌ Error al asignar: ' + error.message);
-        } else {
-          toast.success(`✅ Pedido ${displayId} asignado correctamente a ${deliveryName}`);
-          load();
-          setTimeout(() => {
-            window.location.href = '/';
-          }, 2000);
-        }
-        
-        resetProcessing();
-        clearHashParams();
-      } 
-      // Para ADMIN/PROVEEDOR: SELECCIONAR automáticamente el pedido
-      else if (role === 'ADMIN' || role === 'PROVEEDOR') {
-        // Para admin, mostrar advertencia si ya está asignado
-        if (orderData.assigned_delivery) {
-          const deliveryName = await getDeliveryName(orderData.assigned_delivery);
-          toast.warning(`⚠️ El pedido ${displayId} ya está asignado a ${deliveryName}. No se puede seleccionar.`);
-        } else {
-          toast.info(`📦 Pedido ${displayId} está libre para asignar`);
-          setSelected(prev => {
-            const next = new Set(prev);
-            if (next.has(orderData.id)) {
-              next.delete(orderData.id);
-              toast.info(`📦 Pedido ${displayId} deseleccionado`);
-            } else {
-              next.add(orderData.id);
-              toast.success(`✅ Pedido ${displayId} seleccionado`);
-            }
-            return next;
-          });
-          
-          setIdsInput(prev => {
-            const currentIds = prev.split(/[,\s\n]+/).filter(i => i.trim());
-            if (!currentIds.includes(displayId)) {
-              return prev.trim() ? prev + ', ' + displayId : displayId;
-            }
-            return prev;
-          });
-        }
-        
-        resetProcessing();
-        clearHashParams();
-      } else {
-        resetProcessing();
-        clearHashParams();
-      }
-    } catch (error) {
-      console.error('❌ Error inesperado:', error);
-      toast.error('❌ Error inesperado al procesar el QR');
-      resetProcessing();
-      clearHashParams();
-    }
-  };
-
-  // Manejo de QR - Escucha cambios en el hash
-  useEffect(() => {
-    // Función para verificar y procesar QR
-    const checkForQR = () => {
-      const params = getHashParams();
-      const orderValue = params.id;
-      
-      console.log('🔍 Verificando QR en URL:', orderValue);
-      
-      if (orderValue && !processingRef.current && orderValue !== lastScannedId) {
-        setLastScannedId(orderValue);
-        processQRCode(orderValue);
-      }
-    };
-    
-    // Verificar al montar el componente
-    checkForQR();
-    
-    // Escuchar eventos de hashchange
-    const handleHashChange = () => {
-      // Pequeño delay para asegurar que el hash se actualizó completamente
-      setTimeout(checkForQR, 100);
-    };
-    
-    window.addEventListener('hashchange', handleHashChange);
-    
-    // También escuchar popstate por si acaso
-    window.addEventListener('popstate', handleHashChange);
-    
-    return () => {
-      window.removeEventListener('hashchange', handleHashChange);
-      window.removeEventListener('popstate', handleHashChange);
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-    };
-  }, [role, profile?.email, profile?.name, lastScannedId]);
-
-  useEffect(() => {
-    if (role === 'ADMIN' || role === 'PROVEEDOR') {
-      supabase.from('profiles').select('email, name').then(({ data }) => setDeliveries(data || []));
-    }
-  }, [role]);
-
+  // Función para recargar los pedidos
   const load = async () => {
     let query = supabase.from('orders').select('*')
       .gte(filterBy, dateFrom + 'T00:00:00')
@@ -288,7 +75,6 @@ export default function AssignOrdersView() {
     
     const { data } = await query;
     
-    // Enriquecer los pedidos con los nombres de los deliveries asignados
     if (data && data.length > 0) {
       const emails = [...new Set(data.map(o => o.assigned_delivery).filter(Boolean))];
       const deliveryNamesMap: Record<string, string> = {};
@@ -312,7 +98,206 @@ export default function AssignOrdersView() {
     }
   };
 
-  // Resto del código igual...
+  // Función principal para procesar el QR y ASIGNAR
+  const processQRCode = async (orderValue: string) => {
+    if (processingRef.current) {
+      console.log('⚠️ Ya hay un proceso en curso, ignorando...');
+      return;
+    }
+    
+    processingRef.current = true;
+    setAutoAssignProcessing(true);
+    
+    timeoutRef.current = setTimeout(() => {
+      console.error('❌ Timeout procesando QR');
+      toast.error('⏱️ Tiempo de espera agotado. Intentá de nuevo.');
+      resetProcessing();
+      clearHashParams();
+    }, 15000);
+    
+    try {
+      console.log('🔍 Procesando QR - Valor:', orderValue);
+      
+      let orderData = null;
+      let findError = null;
+      
+      const isUUID = orderValue.includes('-') && orderValue.length > 30;
+      
+      if (isUUID) {
+        const result = await supabase
+          .from('orders')
+          .select('id, assigned_delivery, order_number, customer_name, phone')
+          .eq('id', orderValue)
+          .maybeSingle();
+        orderData = result.data;
+        findError = result.error;
+      } else {
+        const result = await supabase
+          .from('orders')
+          .select('id, assigned_delivery, order_number, customer_name, phone')
+          .eq('order_number', orderValue)
+          .maybeSingle();
+        orderData = result.data;
+        findError = result.error;
+      }
+      
+      if (findError) {
+        console.error('❌ Error de Supabase:', findError);
+        toast.error(`❌ Error: ${findError.message}`);
+        resetProcessing();
+        clearHashParams();
+        return;
+      }
+      
+      if (!orderData) {
+        toast.error(`❌ Pedido ${orderValue} no encontrado`);
+        resetProcessing();
+        clearHashParams();
+        return;
+      }
+      
+      const displayId = orderData.order_number || orderData.id.substring(0, 8);
+      
+      // Verificar si ya está asignado a otro
+      if (orderData.assigned_delivery && orderData.assigned_delivery !== profile?.email) {
+        const deliveryName = await getDeliveryName(orderData.assigned_delivery);
+        toast.error(`❌ El pedido ${displayId} pertenece a ${deliveryName}. No puedes asignarlo.`);
+        resetProcessing();
+        clearHashParams();
+        return;
+      }
+      
+      // ============================================
+      // ASIGNACIÓN PARA DELIVERY
+      // ============================================
+      if (role === 'DELIVERY') {
+        const deliveryEmail = profile?.email || '';
+        const deliveryName = profile?.name || deliveryEmail;
+        
+        // Doble verificación antes de asignar
+        const { data: freshOrder } = await supabase
+          .from('orders')
+          .select('assigned_delivery')
+          .eq('id', orderData.id)
+          .single();
+        
+        if (freshOrder?.assigned_delivery && freshOrder.assigned_delivery !== deliveryEmail) {
+          const otherDeliveryName = await getDeliveryName(freshOrder.assigned_delivery);
+          toast.error(`❌ El pedido ${displayId} ya fue asignado a ${otherDeliveryName}`);
+          resetProcessing();
+          clearHashParams();
+          return;
+        }
+        
+        // ✅ ASIGNAR EL PEDIDO
+        const { error } = await supabase
+          .from('orders')
+          .update({ 
+            assigned_delivery: deliveryEmail,
+            assigned_at: new Date().toISOString(),
+            status: 'EN RUTA' 
+          })
+          .eq('id', orderData.id);
+        
+        if (error) {
+          toast.error('❌ Error al asignar: ' + error.message);
+          console.error(error);
+        } else {
+          toast.success(`✅ Pedido ${displayId} asignado correctamente a ${deliveryName}`);
+          await load(); // Recargar la lista
+          
+          // Opcional: redirigir después de 2 segundos
+          setTimeout(() => {
+            window.location.href = '/';
+          }, 2000);
+        }
+        
+        resetProcessing();
+        clearHashParams();
+      } 
+      // ============================================
+      // SELECCIÓN PARA ADMIN/PROVEEDOR
+      // ============================================
+      else if (role === 'ADMIN' || role === 'PROVEEDOR') {
+        if (orderData.assigned_delivery) {
+          const deliveryName = await getDeliveryName(orderData.assigned_delivery);
+          toast.warning(`⚠️ El pedido ${displayId} ya está asignado a ${deliveryName}`);
+        } else {
+          toast.info(`📦 Pedido ${displayId} está libre para asignar`);
+          
+          setSelected(prev => {
+            const next = new Set(prev);
+            if (next.has(orderData.id)) {
+              next.delete(orderData.id);
+            } else {
+              next.add(orderData.id);
+            }
+            return next;
+          });
+          
+          setIdsInput(prev => {
+            const currentIds = prev.split(/[,\s\n]+/).filter(i => i.trim());
+            if (!currentIds.includes(displayId)) {
+              return prev.trim() ? prev + ', ' + displayId : displayId;
+            }
+            return prev;
+          });
+          
+          toast.success(`✅ Pedido ${displayId} seleccionado`);
+        }
+        
+        resetProcessing();
+        clearHashParams();
+      } else {
+        resetProcessing();
+        clearHashParams();
+      }
+    } catch (error) {
+      console.error('❌ Error inesperado:', error);
+      toast.error('❌ Error inesperado al procesar el QR');
+      resetProcessing();
+      clearHashParams();
+    }
+  };
+
+  // Escucha de QR
+  useEffect(() => {
+    const checkForQR = () => {
+      const params = getHashParams();
+      const orderValue = params.id;
+      
+      console.log('🔍 Verificando QR en URL:', orderValue);
+      
+      if (orderValue && !processingRef.current && orderValue !== lastScannedId) {
+        setLastScannedId(orderValue);
+        processQRCode(orderValue);
+      }
+    };
+    
+    checkForQR();
+    
+    const handleHashChange = () => {
+      setTimeout(checkForQR, 100);
+    };
+    
+    window.addEventListener('hashchange', handleHashChange);
+    window.addEventListener('popstate', handleHashChange);
+    
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange);
+      window.removeEventListener('popstate', handleHashChange);
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, [role, profile?.email, profile?.name]);
+
+  useEffect(() => {
+    if (role === 'ADMIN' || role === 'PROVEEDOR') {
+      supabase.from('profiles').select('email, name').then(({ data }) => setDeliveries(data || []));
+    }
+  }, [role]);
+
   useEffect(() => { load(); }, [filterBy, dateFrom, dateTo]);
 
   const filtered = orders.filter(o => {
@@ -575,13 +560,7 @@ export default function AssignOrdersView() {
     toast.info('Selección limpiada');
   };
 
-  const clearIdsInput = () => {
-    setIdsInput('');
-    toast.info('Lista de IDs limpiada');
-  };
-
   const selectedCount = selected.size;
-  
   const selectableOrdersCount = filtered.filter(o => {
     if (role === 'DELIVERY') {
       return !o.assigned_delivery || o.assigned_delivery === profile?.email;
@@ -599,7 +578,6 @@ export default function AssignOrdersView() {
         </div>
       )}
 
-      {/* Resto del JSX igual */}
       <div className="flex flex-wrap gap-2 mb-3">
         <label className="app-label !mt-0">Desde</label>
         <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
