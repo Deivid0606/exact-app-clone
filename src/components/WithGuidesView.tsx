@@ -84,9 +84,9 @@ export default function WithGuidesView() {
       const orderId = currentOrder.id;
       if (orderId) {
         const cleanOrderId = String(orderId).trim();
-        // ✅ URL CORRECTA - Ruta con parámetro (sin hash ni query params)
-        const deliveryUrl = window.location.origin + '/asignar-pedidos/' + encodeURIComponent(cleanOrderId);
-        console.log('📱 QR generado URL:', deliveryUrl);
+        // ✅ URL RELATIVA - Funciona en cualquier entorno (local, producción, celular)
+        const deliveryUrl = '/asignar-pedidos/' + encodeURIComponent(cleanOrderId);
+        console.log('📱 QR generado URL:', window.location.origin + deliveryUrl);
         new window.QRCode(qrDeliveryRef.current, {
           text: deliveryUrl,
           width: 120,
@@ -422,8 +422,8 @@ export default function WithGuidesView() {
       const whatsappUrl = getWhatsAppUrl(order);
       const orderNumber = order.order_number;
       const cleanOrderId = order.id ? String(order.id).trim() : '';
-      // ✅ URL CORRECTA - Ruta con parámetro
-      const deliveryUrl = cleanOrderId ? window.location.origin + '/asignar-pedidos/' + encodeURIComponent(cleanOrderId) : '#';
+      // ✅ URL RELATIVA - Funciona en cualquier entorno
+      const deliveryUrl = cleanOrderId ? '/asignar-pedidos/' + encodeURIComponent(cleanOrderId) : '#';
 
       const waQrId = `qr-wa-${order.id.replace(/-/g, '')}`;
       const deliveryQrId = `qr-delivery-${order.id.replace(/-/g, '')}`;
@@ -571,8 +571,8 @@ export default function WithGuidesView() {
       const total = Number(order.total_gs || 0);
       const whatsappUrl = getWhatsAppUrl(order);
       const cleanOrderId = order.id ? String(order.id).trim() : '';
-      // ✅ URL CORRECTA - Ruta con parámetro
-      const deliveryUrl = cleanOrderId ? window.location.origin + '/asignar-pedidos/' + encodeURIComponent(cleanOrderId) : '#';
+      // ✅ URL RELATIVA - Funciona en cualquier entorno
+      const deliveryUrl = cleanOrderId ? '/asignar-pedidos/' + encodeURIComponent(cleanOrderId) : '#';
 
       const timestamp = Date.now();
       const waQrId = `qr-wa-thermal-${timestamp}-${order.id.slice(0, 8)}`;
