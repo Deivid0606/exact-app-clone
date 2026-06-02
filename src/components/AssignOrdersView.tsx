@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
@@ -17,14 +17,26 @@ export default function AssignOrdersView() {
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [idsInput, setIdsInput] = useState('');
   const [filterBy, setFilterBy] = useState<'created_at' | 'assigned_at'>('created_at');
-  const [showScanner, setShowScanner] = useState(false);
-  const [processingQR, setProcessingQR] = useState(false);
-  const [cameraError, setCameraError] = useState<string | null>(null);
-  
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const processingRef = useRef(false);
-  const lastScannedRef = useRef<string | null>(null);
+  const [autoAssignProcessing, setAutoAssignProcessing] = useState(false);
+
+  // Función para obtener parámetros del hash
+  const getHashParams = () => {
+    const hash = window.location.hash;
+    const queryString = hash.split('?')[1];
+    if (!queryString) return {};
+    const params = new URLSearchParams(queryString);
+    const result: Record<string, string> = {};
+    params.forEach((value, key) => {
+      result[key] = value;
+    });
+    return result;
+  };
+
+  // Limpiar el hash después de procesar
+  const clearHash = () => {
+    const hash = window.location.hash.split('?')[0];
+    window.location.hash = hash;
+  };
 
   const getDeliveryName = async (email: string): Promise<string> => {
     if (!email) return email;
@@ -71,204 +83,136 @@ export default function AssignOrdersView() {
     }
   };
 
-  // Procesar el QR escaneado
-  const processQRCode = async (orderValue: string) => {
-    if (processingRef.current || orderValue === lastScannedRef.current) {
-      return;
-    }
-    
-    processingRef.current = true;
-    setProcessingQR(true);
-    lastScannedRef.current = orderValue;
-    
-    try {
-      console.log('📷 QR escaneado:', orderValue);
-      
-      let orderData = null;
-      const isUUID = orderValue.includes('-') && orderValue.length > 30;
-      
-      if (isUUID) {
-        const result = await supabase
-          .from('orders')
-          .select('id, assigned_delivery, order_number, customer_name, phone')
-          .eq('id', orderValue)
-          .maybeSingle();
-        orderData = result.data;
-      } else {
-        const result = await supabase
-          .from('orders')
-          .select('id, assigned_delivery, order_number, customer_name, phone')
-          .eq('order_number', orderValue)
-          .maybeSingle();
-        orderData = result.data;
-      }
-      
-      if (!orderData) {
-        toast.error(`❌ Pedido ${orderValue} no encontrado`);
-        processingRef.current = false;
-        setProcessingQR(false);
+  // Procesar el QR desde el hash
+  useEffect(() => {
+    const processQRFromHash = async () => {
+      // Evitar procesar si ya estamos procesando
+      if (autoAssignProcessing) {
+        console.log('⚠️ Ya procesando, ignorando...');
         return;
       }
-      
-      const displayId = orderData.order_number || orderData.id.substring(0, 8);
-      
-      if (orderData.assigned_delivery && orderData.assigned_delivery !== profile?.email) {
-        const deliveryName = await getDeliveryName(orderData.assigned_delivery);
-        toast.error(`❌ El pedido ${displayId} pertenece a ${deliveryName}`);
-        processingRef.current = false;
-        setProcessingQR(false);
-        return;
-      }
-      
-      if (role === 'DELIVERY') {
-        const deliveryEmail = profile?.email || '';
-        const deliveryName = profile?.name || deliveryEmail;
-        
-        const { error } = await supabase
-          .from('orders')
-          .update({ 
-            assigned_delivery: deliveryEmail,
-            assigned_at: new Date().toISOString(),
-            status: 'EN RUTA' 
-          })
-          .eq('id', orderData.id);
-        
-        if (error) {
-          toast.error('❌ Error al asignar: ' + error.message);
-        } else {
-          toast.success(`✅ Pedido ${displayId} asignado correctamente a ${deliveryName}`);
-          await load();
-          stopCamera();
-          setShowScanner(false);
-          
-          setTimeout(() => {
-            window.location.href = '/';
-          }, 2000);
-        }
-      } 
-      else if (role === 'ADMIN' || role === 'PROVEEDOR') {
-        if (orderData.assigned_delivery) {
-          const deliveryName = await getDeliveryName(orderData.assigned_delivery);
-          toast.warning(`⚠️ El pedido ${displayId} ya está asignado a ${deliveryName}`);
-        } else {
-          setSelected(prev => {
-            const next = new Set(prev);
-            next.add(orderData.id);
-            return next;
-          });
-          setIdsInput(prev => prev.trim() ? prev + ', ' + displayId : displayId);
-          toast.success(`✅ Pedido ${displayId} seleccionado`);
-        }
-      }
-      
-      processingRef.current = false;
-      setProcessingQR(false);
-      
-      setTimeout(() => {
-        lastScannedRef.current = null;
-      }, 2000);
-      
-    } catch (error) {
-      console.error(error);
-      toast.error('❌ Error al procesar el QR');
-      processingRef.current = false;
-      setProcessingQR(false);
-    }
-  };
 
-  // Iniciar la cámara
-  const startCamera = async () => {
-    setCameraError(null);
-    setShowScanner(true);
-    
-    // Pequeño delay para asegurar que el videoRef esté montado
-    setTimeout(async () => {
+      const params = getHashParams();
+      const orderValue = params.id;
+      
+      if (!orderValue) return;
+      
+      console.log('🔍 QR detectado:', orderValue);
+      setAutoAssignProcessing(true);
+      
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { facingMode: 'environment' } 
-        });
+        let orderData = null;
+        const isUUID = orderValue.includes('-') && orderValue.length > 30;
         
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play();
-          streamRef.current = stream;
-          
-          // Iniciar el escaneo cuando el video esté listo
-          videoRef.current.onloadedmetadata = () => {
-            startScanning();
-          };
-        }
-      } catch (err: any) {
-        console.error('Error de cámara:', err);
-        if (err.name === 'NotAllowedError') {
-          setCameraError('Permiso denegado. Permití el acceso a la cámara.');
-        } else if (err.name === 'NotFoundError') {
-          setCameraError('No se encontró ninguna cámara en este dispositivo.');
+        if (isUUID) {
+          const result = await supabase
+            .from('orders')
+            .select('id, assigned_delivery, order_number, customer_name, phone')
+            .eq('id', orderValue)
+            .maybeSingle();
+          orderData = result.data;
         } else {
-          setCameraError('No se pudo iniciar la cámara. Verificá los permisos.');
+          const result = await supabase
+            .from('orders')
+            .select('id, assigned_delivery, order_number, customer_name, phone')
+            .eq('order_number', orderValue)
+            .maybeSingle();
+          orderData = result.data;
         }
-        setShowScanner(false);
-      }
-    }, 100);
-  };
-
-  // Escanear QR usando la API nativa
-  const startScanning = () => {
-    if (!videoRef.current) return;
-    
-    const scanFrame = () => {
-      if (!videoRef.current || !streamRef.current || processingRef.current) {
-        requestAnimationFrame(scanFrame);
-        return;
-      }
-      
-      const video = videoRef.current;
-      if (video.readyState !== 4 || video.videoWidth === 0) {
-        requestAnimationFrame(scanFrame);
-        return;
-      }
-      
-      const canvas = document.createElement('canvas');
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      const ctx = canvas.getContext('2d');
-      
-      if (ctx) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
         
-        // Usar BarcodeDetector si está disponible
-        if ('BarcodeDetector' in window) {
-          // @ts-ignore
-          const detector = new BarcodeDetector({ formats: ['qr_code'] });
-          detector.detect(canvas)
-            .then((barcodes: any[]) => {
-              if (barcodes.length > 0 && !processingRef.current) {
-                const value = barcodes[0].rawValue;
-                if (value && value !== lastScannedRef.current) {
-                  processQRCode(value);
-                }
-              }
-            })
-            .catch((err: any) => console.error('Error detectando QR:', err));
+        if (!orderData) {
+          toast.error(`❌ Pedido ${orderValue} no encontrado`);
+          clearHash();
+          setAutoAssignProcessing(false);
+          return;
         }
+        
+        const displayId = orderData.order_number || orderData.id.substring(0, 8);
+        
+        // Verificar si ya está asignado a otro
+        if (orderData.assigned_delivery && orderData.assigned_delivery !== profile?.email) {
+          const deliveryName = await getDeliveryName(orderData.assigned_delivery);
+          toast.error(`❌ El pedido ${displayId} pertenece a ${deliveryName}`);
+          clearHash();
+          setAutoAssignProcessing(false);
+          return;
+        }
+        
+        // ASIGNACIÓN PARA DELIVERY
+        if (role === 'DELIVERY') {
+          const deliveryEmail = profile?.email || '';
+          const deliveryName = profile?.name || deliveryEmail;
+          
+          // Verificar nuevamente antes de asignar
+          const { data: freshOrder } = await supabase
+            .from('orders')
+            .select('assigned_delivery')
+            .eq('id', orderData.id)
+            .single();
+          
+          if (freshOrder?.assigned_delivery && freshOrder.assigned_delivery !== deliveryEmail) {
+            const otherDeliveryName = await getDeliveryName(freshOrder.assigned_delivery);
+            toast.error(`❌ El pedido ${displayId} ya fue asignado a ${otherDeliveryName}`);
+            clearHash();
+            setAutoAssignProcessing(false);
+            return;
+          }
+          
+          // Asignar
+          const { error } = await supabase
+            .from('orders')
+            .update({ 
+              assigned_delivery: deliveryEmail,
+              assigned_at: new Date().toISOString(),
+              status: 'EN RUTA' 
+            })
+            .eq('id', orderData.id);
+          
+          if (error) {
+            toast.error('❌ Error al asignar: ' + error.message);
+          } else {
+            toast.success(`✅ Pedido ${displayId} asignado a ${deliveryName}`);
+            await load();
+            
+            // Limpiar el hash y redirigir
+            clearHash();
+            
+            setTimeout(() => {
+              window.location.href = '/';
+            }, 2000);
+          }
+        } 
+        // SELECCIÓN PARA ADMIN
+        else if (role === 'ADMIN' || role === 'PROVEEDOR') {
+          if (orderData.assigned_delivery) {
+            const deliveryName = await getDeliveryName(orderData.assigned_delivery);
+            toast.warning(`⚠️ Pedido ${displayId} ya asignado a ${deliveryName}`);
+          } else {
+            setSelected(prev => {
+              const next = new Set(prev);
+              next.add(orderData.id);
+              return next;
+            });
+            setIdsInput(prev => prev.trim() ? prev + ', ' + displayId : displayId);
+            toast.success(`✅ Pedido ${displayId} seleccionado`);
+          }
+        }
+        
+        clearHash();
+        
+      } catch (error) {
+        console.error('Error:', error);
+        toast.error('❌ Error al procesar el QR');
+      } finally {
+        // Limpiar el estado de procesamiento después de un tiempo
+        setTimeout(() => {
+          setAutoAssignProcessing(false);
+        }, 3000);
       }
-      
-      requestAnimationFrame(scanFrame);
     };
     
-    requestAnimationFrame(scanFrame);
-  };
-
-  // Detener la cámara
-  const stopCamera = () => {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-  };
+    processQRFromHash();
+  }, [profile, role]); // Solo depende de profile y role
 
   useEffect(() => {
     if (role === 'ADMIN' || role === 'PROVEEDOR') {
@@ -277,12 +221,6 @@ export default function AssignOrdersView() {
   }, [role]);
 
   useEffect(() => { load(); }, [filterBy, dateFrom, dateTo]);
-
-  useEffect(() => {
-    return () => {
-      stopCamera();
-    };
-  }, []);
 
   const filtered = orders.filter(o => {
     if (!search) return true;
@@ -326,6 +264,10 @@ export default function AssignOrdersView() {
     } else {
       const allIds = selectableOrders.map(o => o.id);
       setSelected(new Set(allIds));
+      if (role === 'DELIVERY' && selectableOrders.length < filtered.length) {
+        const assignedCount = filtered.length - selectableOrders.length;
+        toast.info(`Se seleccionaron ${selectableOrders.length} pedidos disponibles (${assignedCount} ya pertenecen a otros deliveries)`);
+      }
     }
   };
 
@@ -381,6 +323,7 @@ export default function AssignOrdersView() {
       
       if (error) {
         errorCount++;
+        console.error(`Error asignando pedido ${id}:`, error);
       } else {
         successCount++;
       }
@@ -392,7 +335,7 @@ export default function AssignOrdersView() {
       toast.success(`✅ ${successCount} pedido(s) asignado(s) a ${deliveryName}`);
     }
     if (alreadyAssignedCount > 0) {
-      toast.warning(`⚠️ ${alreadyAssignedCount} pedido(s) ya estaban asignados`);
+      toast.warning(`⚠️ ${alreadyAssignedCount} pedido(s) ya pertenecen a otros deliveries`);
     }
     if (errorCount > 0) {
       toast.error(`❌ Error en ${errorCount} pedido(s)`);
@@ -516,6 +459,7 @@ export default function AssignOrdersView() {
     
     if (error) {
       toast.error('Error al asignar delivery');
+      console.error(error);
     } else {
       toast.success(`✅ Pedido ${displayId} asignado a ${deliveryName}`);
       load();
@@ -539,59 +483,18 @@ export default function AssignOrdersView() {
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Asignar Pedidos</h3>
 
-      {/* Botón para escanear QR */}
-      <div className="mb-4">
-        {!showScanner ? (
-          <button
-            onClick={startCamera}
-            className="bg-blue-600 text-white px-4 py-3 rounded-lg text-sm font-bold hover:bg-blue-700 flex items-center justify-center gap-2 w-full md:w-auto"
-          >
-            📷 Escanear código QR
-          </button>
-        ) : (
-          <div className="border-2 border-blue-500 rounded-lg overflow-hidden bg-black">
-            <div className="relative" style={{ minHeight: '300px' }}>
-              <video
-                ref={videoRef}
-                className="w-full h-auto min-h-[300px] object-cover"
-                autoPlay
-                playsInline
-                muted
-                style={{ transform: 'scaleX(-1)' }}
-              />
-              <button
-                onClick={() => {
-                  stopCamera();
-                  setShowScanner(false);
-                }}
-                className="absolute top-2 right-2 bg-red-600 text-white px-3 py-1 rounded-lg text-xs font-bold z-10"
-              >
-                ✖ Cerrar
-              </button>
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div className="w-64 h-64 border-2 border-yellow-400 rounded-lg"></div>
-              </div>
-              <div className="absolute bottom-2 left-0 right-0 text-center text-white text-xs bg-black bg-opacity-50 py-1">
-                📍 Centrá el código QR en el cuadro amarillo
-              </div>
-            </div>
-          </div>
-        )}
-        
-        {cameraError && (
-          <div className="mt-2 p-2 bg-red-100 text-red-800 rounded-lg text-sm">
-            ⚠️ {cameraError}
-          </div>
-        )}
-        
-        {processingQR && (
-          <div className="mt-2 p-2 bg-blue-100 text-blue-800 rounded-lg text-sm text-center animate-pulse">
-            ⏳ Procesando código QR...
-          </div>
-        )}
+      {/* Indicador de procesamiento */}
+      {autoAssignProcessing && (
+        <div className="mb-3 p-2 bg-blue-100 text-blue-800 rounded-lg text-sm text-center animate-pulse">
+          ⏳ Procesando código QR...
+        </div>
+      )}
+
+      {/* Instrucciones para el QR */}
+      <div className="mb-3 p-2 bg-gray-100 text-gray-700 rounded-lg text-xs text-center">
+        📱 Para asignar un pedido, escaneá el código QR desde la app de delivery
       </div>
 
-      {/* Filtros y tabla - resto del código igual */}
       <div className="flex flex-wrap gap-2 mb-3">
         <label className="app-label !mt-0">Desde</label>
         <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
