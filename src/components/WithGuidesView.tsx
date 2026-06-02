@@ -468,7 +468,7 @@ export default function WithGuidesView() {
           <table style="width: 100%; font-size: 12px; margin-bottom: 12px;">
             <tbody>
               <tr><td style="width: 100px; padding: 2px 0; color: #666;">Cliente:</td><td style="font-weight: bold;">${(order.customer_name || '').replace(/</g, '&lt;')}</td></tr>
-              <tr><td style="padding: 2px 0; color: #666;">Teléfono:</td><td>${order.phone || ''}</td></tr>
+              <tr><td style="padding: 2px 0; color: #666;">Teléfono:</td><td style="font-weight: bold;">${order.phone || ''}</td></tr>
               <tr><td style="padding: 2px 0; color: #666;">Email:</td><td>${(order.email || '').replace(/</g, '&lt;')}</td></tr>
               <tr><td style="padding: 2px 0; color: #666;">Departamento:</td><td>${order.departamento || ''}</td></tr>
               <tr><td style="padding: 2px 0; color: #666;">Ciudad:</td><td>${order.city || ''}</td></tr>
@@ -568,7 +568,7 @@ export default function WithGuidesView() {
     toast.success(`${selected.length} guías con QR listas para imprimir`);
   };
 
-  // IMPRESIÓN PARA IMPRESORA TÉRMICA - VERSIÓN CON TEXTO GRANDE Y NEGRITA
+  // IMPRESIÓN PARA IMPRESORA TÉRMICA - VERSIÓN FINAL CON NEGRITA Y QR GRANDES
   const printThermal = () => {
     const selected = getSelectedOrders();
     if (selected.length === 0) {
@@ -615,7 +615,7 @@ export default function WithGuidesView() {
           <div class="header">
             <div class="title">🎫 GUÍA DE ENVÍO</div>
             <div class="order-number">#${order.order_number || order.id.slice(0, 8)}</div>
-            <div class="date">${new Date(order.created_at).toLocaleDateString('es-PY')} ${new Date(order.created_at).toLocaleTimeString('es-PY')}</div>
+            <div class="date"><strong>📅 ${new Date(order.created_at).toLocaleDateString('es-PY')} ${new Date(order.created_at).toLocaleTimeString('es-PY')}</strong></div>
           </div>
 
           <div class="divider"></div>
@@ -623,7 +623,7 @@ export default function WithGuidesView() {
           <div class="customer-box">
             <div class="customer-label">CLIENTE:</div>
             <div class="customer-name">${(order.customer_name || '').toUpperCase()}</div>
-            <div class="customer-contact">📞 ${order.phone || 'Sin teléfono'}</div>
+            <div class="customer-contact"><strong>📞 ${order.phone || 'Sin teléfono'}</strong></div>
             ${order.email ? `<div class="customer-contact">✉️ ${order.email.substring(0, 35)}</div>` : ''}
           </div>
 
@@ -760,7 +760,7 @@ export default function WithGuidesView() {
         }
         .date {
           font-size: 10px;
-          font-weight: normal;
+          font-weight: bold;
           margin-top: 2px;
         }
         
@@ -786,6 +786,7 @@ export default function WithGuidesView() {
         }
         .customer-contact {
           font-size: 11px;
+          font-weight: bold;
           margin-top: 3px;
         }
         
@@ -902,8 +903,8 @@ export default function WithGuidesView() {
           margin-bottom: 6px;
         }
         .qr-code {
-          width: 80px;
-          height: 80px;
+          width: 90px;
+          height: 90px;
           margin: 0 auto;
         }
         .qr-hint {
@@ -943,7 +944,7 @@ export default function WithGuidesView() {
                 var url = el.getAttribute('data-url');
                 if (url && url !== '#') {
                   try {
-                    new QRCode(el, { text: url, width: 80, height: 80 });
+                    new QRCode(el, { text: url, width: 90, height: 90 });
                   } catch(e) {
                     el.innerHTML = '<div style="font-size:8px;color:red;">Error</div>';
                   }
@@ -956,7 +957,7 @@ export default function WithGuidesView() {
                 var url = el.getAttribute('data-url');
                 if (url && url !== '#') {
                   try {
-                    new QRCode(el, { text: url, width: 80, height: 80 });
+                    new QRCode(el, { text: url, width: 90, height: 90 });
                   } catch(e) {
                     el.innerHTML = '<div style="font-size:8px;color:red;">Error</div>';
                   }
