@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { HashRouter, Route, Routes } from "react-router-dom"; // 👈 HashRouter
+import { HashRouter, Route, Routes } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -11,13 +11,43 @@ import QRScannerView from "./components/QRScannerView.tsx";
 
 const queryClient = new QueryClient();
 
+/**
+ * Corrige URLs abiertas desde scanners QR externos en Android
+ * para que funcionen con HashRouter.
+ */
+const normalizeExternalQRUrl = () => {
+  const { pathname, search, hash } = window.location;
+
+  // Ejemplo:
+  // https://midominio.com/asignar-pedidos?id=123
+  // ↓
+  // https://midominio.com/#/asignar-pedidos?id=123
+  if (!hash && pathname.includes("/asignar-pedidos") && search.includes("id=")) {
+    window.location.replace(
+      `${window.location.origin}/#/asignar-pedidos${search}`
+    );
+    return;
+  }
+
+  // Si el QR apunta a /qr?id=123
+  if (!hash && pathname.includes("/qr") && search.includes("id=")) {
+    window.location.replace(
+      `${window.location.origin}/#/asignar-pedidos${search}`
+    );
+    return;
+  }
+};
+
+normalizeExternalQRUrl();
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <AuthProvider>
         <Toaster />
         <Sonner />
-        <HashRouter> {/* 👈 HashRouter */}
+
+        <HashRouter>
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/asignar-pedidos" element={<AssignOrdersView />} />
@@ -25,6 +55,7 @@ const App = () => (
             <Route path="*" element={<NotFound />} />
           </Routes>
         </HashRouter>
+
       </AuthProvider>
     </TooltipProvider>
   </QueryClientProvider>
