@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
@@ -17,9 +17,11 @@ export default function AssignOrdersView() {
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [idsInput, setIdsInput] = useState('');
   const [filterBy, setFilterBy] = useState<'created_at' | 'assigned_at'>('created_at');
-  const [autoAssignProcessing, setAutoAssignProcessing] = useState(false);
+  
+  // Usar useRef para evitar problemas de estado
+  const processingRef = useRef(false);
+  const lastProcessedRef = useRef<string | null>(null);
 
-  // Función para obtener parámetros del hash
   const getHashParams = () => {
     const hash = window.location.hash;
     const queryString = hash.split('?')[1];
@@ -32,7 +34,6 @@ export default function AssignOrdersView() {
     return result;
   };
 
-  // Limpiar el hash después de procesar
   const clearHash = () => {
     const hash = window.location.hash.split('?')[0];
     window.location.hash = hash;
@@ -83,136 +84,143 @@ export default function AssignOrdersView() {
     }
   };
 
-  // Procesar el QR desde el hash
-  useEffect(() => {
-    const processQRFromHash = async () => {
-      // Evitar procesar si ya estamos procesando
-      if (autoAssignProcessing) {
-        console.log('⚠️ Ya procesando, ignorando...');
+  // Función principal para asignar el pedido
+  const assignOrder = async (orderValue: string) => {
+    // Evitar procesamiento duplicado
+    if (processingRef.current) {
+      console.log('⚠️ Ya procesando, ignorando...');
+      return;
+    }
+    
+    if (lastProcessedRef.current === orderValue) {
+      console.log('⚠️ QR ya procesado:', orderValue);
+      return;
+    }
+    
+    processingRef.current = true;
+    
+    try {
+      console.log('🔍 Procesando QR:', orderValue);
+      
+      // Buscar el pedido
+      let orderData = null;
+      const isUUID = orderValue.includes('-') && orderValue.length > 30;
+      
+      if (isUUID) {
+        const { data } = await supabase
+          .from('orders')
+          .select('id, assigned_delivery, order_number, customer_name')
+          .eq('id', orderValue)
+          .maybeSingle();
+        orderData = data;
+      } else {
+        const { data } = await supabase
+          .from('orders')
+          .select('id, assigned_delivery, order_number, customer_name')
+          .eq('order_number', orderValue)
+          .maybeSingle();
+        orderData = data;
+      }
+      
+      if (!orderData) {
+        toast.error(`❌ Pedido ${orderValue} no encontrado`);
+        clearHash();
+        processingRef.current = false;
         return;
       }
+      
+      const displayId = orderData.order_number || orderData.id.substring(0, 8);
+      
+      // Verificar si ya está asignado a otro delivery
+      if (orderData.assigned_delivery && orderData.assigned_delivery !== profile?.email) {
+        const deliveryName = await getDeliveryName(orderData.assigned_delivery);
+        toast.error(`❌ Pedido ${displayId} pertenece a ${deliveryName}`);
+        clearHash();
+        processingRef.current = false;
+        return;
+      }
+      
+      // ASIGNAR EL PEDIDO (solo para DELIVERY)
+      if (role === 'DELIVERY') {
+        const deliveryEmail = profile?.email || '';
+        const deliveryName = profile?.name || deliveryEmail;
+        
+        console.log('📦 Asignando pedido:', orderData.id, 'a', deliveryEmail);
+        
+        const { error } = await supabase
+          .from('orders')
+          .update({ 
+            assigned_delivery: deliveryEmail,
+            assigned_at: new Date().toISOString(),
+            status: 'EN RUTA'
+          })
+          .eq('id', orderData.id);
+        
+        if (error) {
+          toast.error(`❌ Error: ${error.message}`);
+          console.error(error);
+        } else {
+          toast.success(`✅ Pedido ${displayId} asignado a ${deliveryName}`);
+          lastProcessedRef.current = orderValue;
+          await load(); // Recargar la lista
+          
+          // Redirigir después de 2 segundos
+          setTimeout(() => {
+            window.location.href = '/';
+          }, 2000);
+        }
+      } 
+      // Para ADMIN/PROVEEDOR: seleccionar
+      else if (role === 'ADMIN' || role === 'PROVEEDOR') {
+        if (orderData.assigned_delivery) {
+          const deliveryName = await getDeliveryName(orderData.assigned_delivery);
+          toast.warning(`⚠️ Pedido ${displayId} ya asignado a ${deliveryName}`);
+        } else {
+          setSelected(prev => {
+            const next = new Set(prev);
+            next.add(orderData.id);
+            return next;
+          });
+          setIdsInput(prev => prev.trim() ? prev + ', ' + displayId : displayId);
+          toast.success(`✅ Pedido ${displayId} seleccionado`);
+        }
+      }
+      
+      clearHash();
+      
+    } catch (error) {
+      console.error('❌ Error:', error);
+      toast.error('❌ Error al procesar');
+    } finally {
+      // Resetear después de 2 segundos
+      setTimeout(() => {
+        processingRef.current = false;
+      }, 2000);
+    }
+  };
 
+  // Escuchar cambios en el hash
+  useEffect(() => {
+    const checkHash = () => {
       const params = getHashParams();
       const orderValue = params.id;
       
-      if (!orderValue) return;
-      
-      console.log('🔍 QR detectado:', orderValue);
-      setAutoAssignProcessing(true);
-      
-      try {
-        let orderData = null;
-        const isUUID = orderValue.includes('-') && orderValue.length > 30;
-        
-        if (isUUID) {
-          const result = await supabase
-            .from('orders')
-            .select('id, assigned_delivery, order_number, customer_name, phone')
-            .eq('id', orderValue)
-            .maybeSingle();
-          orderData = result.data;
-        } else {
-          const result = await supabase
-            .from('orders')
-            .select('id, assigned_delivery, order_number, customer_name, phone')
-            .eq('order_number', orderValue)
-            .maybeSingle();
-          orderData = result.data;
-        }
-        
-        if (!orderData) {
-          toast.error(`❌ Pedido ${orderValue} no encontrado`);
-          clearHash();
-          setAutoAssignProcessing(false);
-          return;
-        }
-        
-        const displayId = orderData.order_number || orderData.id.substring(0, 8);
-        
-        // Verificar si ya está asignado a otro
-        if (orderData.assigned_delivery && orderData.assigned_delivery !== profile?.email) {
-          const deliveryName = await getDeliveryName(orderData.assigned_delivery);
-          toast.error(`❌ El pedido ${displayId} pertenece a ${deliveryName}`);
-          clearHash();
-          setAutoAssignProcessing(false);
-          return;
-        }
-        
-        // ASIGNACIÓN PARA DELIVERY
-        if (role === 'DELIVERY') {
-          const deliveryEmail = profile?.email || '';
-          const deliveryName = profile?.name || deliveryEmail;
-          
-          // Verificar nuevamente antes de asignar
-          const { data: freshOrder } = await supabase
-            .from('orders')
-            .select('assigned_delivery')
-            .eq('id', orderData.id)
-            .single();
-          
-          if (freshOrder?.assigned_delivery && freshOrder.assigned_delivery !== deliveryEmail) {
-            const otherDeliveryName = await getDeliveryName(freshOrder.assigned_delivery);
-            toast.error(`❌ El pedido ${displayId} ya fue asignado a ${otherDeliveryName}`);
-            clearHash();
-            setAutoAssignProcessing(false);
-            return;
-          }
-          
-          // Asignar
-          const { error } = await supabase
-            .from('orders')
-            .update({ 
-              assigned_delivery: deliveryEmail,
-              assigned_at: new Date().toISOString(),
-              status: 'EN RUTA' 
-            })
-            .eq('id', orderData.id);
-          
-          if (error) {
-            toast.error('❌ Error al asignar: ' + error.message);
-          } else {
-            toast.success(`✅ Pedido ${displayId} asignado a ${deliveryName}`);
-            await load();
-            
-            // Limpiar el hash y redirigir
-            clearHash();
-            
-            setTimeout(() => {
-              window.location.href = '/';
-            }, 2000);
-          }
-        } 
-        // SELECCIÓN PARA ADMIN
-        else if (role === 'ADMIN' || role === 'PROVEEDOR') {
-          if (orderData.assigned_delivery) {
-            const deliveryName = await getDeliveryName(orderData.assigned_delivery);
-            toast.warning(`⚠️ Pedido ${displayId} ya asignado a ${deliveryName}`);
-          } else {
-            setSelected(prev => {
-              const next = new Set(prev);
-              next.add(orderData.id);
-              return next;
-            });
-            setIdsInput(prev => prev.trim() ? prev + ', ' + displayId : displayId);
-            toast.success(`✅ Pedido ${displayId} seleccionado`);
-          }
-        }
-        
-        clearHash();
-        
-      } catch (error) {
-        console.error('Error:', error);
-        toast.error('❌ Error al procesar el QR');
-      } finally {
-        // Limpiar el estado de procesamiento después de un tiempo
-        setTimeout(() => {
-          setAutoAssignProcessing(false);
-        }, 3000);
+      if (orderValue) {
+        console.log('📱 QR detectado en URL:', orderValue);
+        assignOrder(orderValue);
       }
     };
     
-    processQRFromHash();
-  }, [profile, role]); // Solo depende de profile y role
+    // Verificar al cargar
+    checkHash();
+    
+    // Escuchar cambios
+    window.addEventListener('hashchange', checkHash);
+    
+    return () => {
+      window.removeEventListener('hashchange', checkHash);
+    };
+  }, [profile?.email, role]); // Solo depende de lo necesario
 
   useEffect(() => {
     if (role === 'ADMIN' || role === 'PROVEEDOR') {
@@ -483,17 +491,11 @@ export default function AssignOrdersView() {
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Asignar Pedidos</h3>
 
-      {/* Indicador de procesamiento */}
-      {autoAssignProcessing && (
+      {processingRef.current && (
         <div className="mb-3 p-2 bg-blue-100 text-blue-800 rounded-lg text-sm text-center animate-pulse">
-          ⏳ Procesando código QR...
+          ⏳ Procesando QR...
         </div>
       )}
-
-      {/* Instrucciones para el QR */}
-      <div className="mb-3 p-2 bg-gray-100 text-gray-700 rounded-lg text-xs text-center">
-        📱 Para asignar un pedido, escaneá el código QR desde la app de delivery
-      </div>
 
       <div className="flex flex-wrap gap-2 mb-3">
         <label className="app-label !mt-0">Desde</label>
