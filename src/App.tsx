@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { HashRouter, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Route, Routes } from "react-router-dom"; // 👈 Cambiado
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -17,14 +17,14 @@ const App = () => (
       <AuthProvider>
         <Toaster />
         <Sonner />
-        <HashRouter>
+        <BrowserRouter> {/* 👈 Cambiado de HashRouter a BrowserRouter */}
           <Routes>
             <Route path="/" element={<Index />} />
             <Route path="/asignar-pedidos" element={<AssignOrdersView />} />
             <Route path="/qr" element={<QRScannerView />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
-        </HashRouter>
+        </BrowserRouter>
       </AuthProvider>
     </TooltipProvider>
   </QueryClientProvider>
