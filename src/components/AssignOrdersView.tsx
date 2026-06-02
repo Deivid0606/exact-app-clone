@@ -5,14 +5,6 @@ import { toast } from 'sonner';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
-// Declarar la variable global para la cámara
-declare global {
-  interface Window {
-    initCamera?: () => void;
-    stopCamera?: () => void;
-  }
-}
-
 export default function AssignOrdersView() {
   const { profile } = useAuth();
   const role = profile?.role;
@@ -27,14 +19,13 @@ export default function AssignOrdersView() {
   const [filterBy, setFilterBy] = useState<'created_at' | 'assigned_at'>('created_at');
   const [scanning, setScanning] = useState(false);
   const [processingQR, setProcessingQR] = useState(false);
-  const [cameraSupported, setCameraSupported] = useState(true);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   
   const videoRef = useRef<HTMLVideoElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const processingRef = useRef(false);
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastScannedRef = useRef<string | null>(null);
+  const scanIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const getDeliveryName = async (email: string): Promise<string> => {
     if (!email) return email;
@@ -46,16 +37,6 @@ export default function AssignOrdersView() {
     return data?.name || email;
   };
 
-  const resetProcessing = () => {
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-    }
-    setProcessingQR(false);
-    processingRef.current = false;
-  };
-
-  // Función para recargar los pedidos
   const load = async () => {
     let query = supabase.from('orders').select('*')
       .gte(filterBy, dateFrom + 'T00:00:00')
@@ -91,11 +72,9 @@ export default function AssignOrdersView() {
     }
   };
 
-  // Función para procesar el QR escaneado y ASIGNAR
+  // Procesar el QR escaneado
   const processQRCode = async (orderValue: string) => {
-    // Evitar escaneos duplicados o mientras se procesa
     if (processingRef.current || orderValue === lastScannedRef.current) {
-      console.log('⚠️ Escaneo duplicado o en proceso, ignorando...');
       return;
     }
     
@@ -103,20 +82,10 @@ export default function AssignOrdersView() {
     setProcessingQR(true);
     lastScannedRef.current = orderValue;
     
-    // Timeout de seguridad
-    timeoutRef.current = setTimeout(() => {
-      console.error('❌ Timeout procesando QR');
-      toast.error('⏱️ Tiempo de espera agotado. Intentá de nuevo.');
-      resetProcessing();
-    }, 15000);
-    
     try {
-      console.log('🔍 Procesando QR escaneado - Valor:', orderValue);
+      console.log('📷 QR escaneado:', orderValue);
       
       let orderData = null;
-      let findError = null;
-      
-      // Determinar si es UUID (tiene guiones y longitud > 30) o número de orden
       const isUUID = orderValue.includes('-') && orderValue.length > 30;
       
       if (isUUID) {
@@ -126,7 +95,6 @@ export default function AssignOrdersView() {
           .eq('id', orderValue)
           .maybeSingle();
         orderData = result.data;
-        findError = result.error;
       } else {
         const result = await supabase
           .from('orders')
@@ -134,19 +102,12 @@ export default function AssignOrdersView() {
           .eq('order_number', orderValue)
           .maybeSingle();
         orderData = result.data;
-        findError = result.error;
-      }
-      
-      if (findError) {
-        console.error('❌ Error de Supabase:', findError);
-        toast.error(`❌ Error: ${findError.message}`);
-        resetProcessing();
-        return;
       }
       
       if (!orderData) {
         toast.error(`❌ Pedido ${orderValue} no encontrado`);
-        resetProcessing();
+        processingRef.current = false;
+        setProcessingQR(false);
         return;
       }
       
@@ -155,33 +116,17 @@ export default function AssignOrdersView() {
       // Verificar si ya está asignado a otro
       if (orderData.assigned_delivery && orderData.assigned_delivery !== profile?.email) {
         const deliveryName = await getDeliveryName(orderData.assigned_delivery);
-        toast.error(`❌ El pedido ${displayId} pertenece a ${deliveryName}. No puedes asignarlo.`);
-        resetProcessing();
+        toast.error(`❌ El pedido ${displayId} pertenece a ${deliveryName}`);
+        processingRef.current = false;
+        setProcessingQR(false);
         return;
       }
       
-      // ============================================
       // ASIGNACIÓN PARA DELIVERY
-      // ============================================
       if (role === 'DELIVERY') {
         const deliveryEmail = profile?.email || '';
         const deliveryName = profile?.name || deliveryEmail;
         
-        // Doble verificación antes de asignar
-        const { data: freshOrder } = await supabase
-          .from('orders')
-          .select('assigned_delivery')
-          .eq('id', orderData.id)
-          .single();
-        
-        if (freshOrder?.assigned_delivery && freshOrder.assigned_delivery !== deliveryEmail) {
-          const otherDeliveryName = await getDeliveryName(freshOrder.assigned_delivery);
-          toast.error(`❌ El pedido ${displayId} ya fue asignado a ${otherDeliveryName}`);
-          resetProcessing();
-          return;
-        }
-        
-        // ✅ ASIGNAR EL PEDIDO
         const { error } = await supabase
           .from('orders')
           .update({ 
@@ -193,77 +138,96 @@ export default function AssignOrdersView() {
         
         if (error) {
           toast.error('❌ Error al asignar: ' + error.message);
-          console.error(error);
         } else {
           toast.success(`✅ Pedido ${displayId} asignado correctamente a ${deliveryName}`);
-          await load(); // Recargar la lista
+          await load();
           
-          // Reproducir sonido de éxito (opcional)
-          try {
-            const audio = new Audio('/beep.mp3');
-            audio.play().catch(() => {});
-          } catch(e) {}
+          // Detener la cámara después de asignar
+          stopCamera();
+          
+          // Opcional: redirigir después de 2 segundos
+          setTimeout(() => {
+            window.location.href = '/';
+          }, 2000);
         }
-        
-        resetProcessing();
       } 
-      // ============================================
-      // SELECCIÓN PARA ADMIN/PROVEEDOR
-      // ============================================
+      // SELECCIÓN PARA ADMIN
       else if (role === 'ADMIN' || role === 'PROVEEDOR') {
         if (orderData.assigned_delivery) {
           const deliveryName = await getDeliveryName(orderData.assigned_delivery);
           toast.warning(`⚠️ El pedido ${displayId} ya está asignado a ${deliveryName}`);
         } else {
-          toast.info(`📦 Pedido ${displayId} está libre para asignar`);
-          
           setSelected(prev => {
             const next = new Set(prev);
-            if (next.has(orderData.id)) {
-              next.delete(orderData.id);
-            } else {
-              next.add(orderData.id);
-            }
+            next.add(orderData.id);
             return next;
           });
-          
-          setIdsInput(prev => {
-            const currentIds = prev.split(/[,\s\n]+/).filter(i => i.trim());
-            if (!currentIds.includes(displayId)) {
-              return prev.trim() ? prev + ', ' + displayId : displayId;
-            }
-            return prev;
-          });
-          
+          setIdsInput(prev => prev.trim() ? prev + ', ' + displayId : displayId);
           toast.success(`✅ Pedido ${displayId} seleccionado`);
         }
-        
-        resetProcessing();
-      } else {
-        resetProcessing();
       }
       
-      // Pequeña pausa antes de permitir otro escaneo
+      processingRef.current = false;
+      setProcessingQR(false);
+      
+      // Esperar 2 segundos antes de permitir otro escaneo
       setTimeout(() => {
         lastScannedRef.current = null;
       }, 2000);
       
     } catch (error) {
-      console.error('❌ Error inesperado:', error);
-      toast.error('❌ Error inesperado al procesar el QR');
-      resetProcessing();
+      console.error(error);
+      toast.error('❌ Error al procesar el QR');
+      processingRef.current = false;
+      setProcessingQR(false);
+    }
+  };
+
+  // Leer QR usando la cámara con jsQR (biblioteca ligera embebida)
+  const scanQRFromVideo = () => {
+    if (!videoRef.current || !scanning || processingRef.current) return;
+    
+    const video = videoRef.current;
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    
+    if (!context || video.readyState !== 4) return;
+    
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+    
+    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+    
+    // Función simple para detectar QR (usando la API nativa si existe)
+    if ('BarcodeDetector' in window) {
+      // @ts-ignore
+      const detector = new BarcodeDetector({ formats: ['qr_code'] });
+      detector.detect(canvas)
+        .then((barcodes: any[]) => {
+          if (barcodes.length > 0 && !processingRef.current) {
+            const value = barcodes[0].rawValue;
+            if (value && value !== lastScannedRef.current) {
+              processQRCode(value);
+            }
+          }
+        })
+        .catch((err: any) => console.error('Error detectando QR:', err));
+    } else {
+      // Si no hay BarcodeDetector, mostrar mensaje
+      if (cameraError === null) {
+        setCameraError('Tu navegador no soporta escaneo automático. Usá la búsqueda manual.');
+      }
     }
   };
 
   // Iniciar la cámara
   const startCamera = async () => {
-    if (streamRef.current) {
-      stopCamera();
-    }
+    setCameraError(null);
     
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'environment' } // Usar cámara trasera
+        video: { facingMode: 'environment' } 
       });
       
       if (videoRef.current) {
@@ -271,87 +235,43 @@ export default function AssignOrdersView() {
         videoRef.current.play();
         streamRef.current = stream;
         setScanning(true);
-        startScanning();
+        
+        // Iniciar el escaneo periódico
+        if (scanIntervalRef.current) {
+          clearInterval(scanIntervalRef.current);
+        }
+        scanIntervalRef.current = setInterval(scanQRFromVideo, 500);
       }
-    } catch (err) {
-      console.error('Error al acceder a la cámara:', err);
-      toast.error('No se pudo acceder a la cámara. Verificá los permisos.');
-      setCameraSupported(false);
+    } catch (err: any) {
+      console.error('Error de cámara:', err);
+      if (err.name === 'NotAllowedError') {
+        setCameraError('Permiso denegado. Permití el acceso a la cámara.');
+      } else if (err.name === 'NotFoundError') {
+        setCameraError('No se encontró ninguna cámara.');
+      } else {
+        setCameraError('No se pudo iniciar la cámara.');
+      }
     }
   };
 
   // Detener la cámara
   const stopCamera = () => {
+    if (scanIntervalRef.current) {
+      clearInterval(scanIntervalRef.current);
+      scanIntervalRef.current = null;
+    }
+    
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
+    
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
+    
     setScanning(false);
   };
-
-  // Escanear continuamente
-  const startScanning = () => {
-    if (!videoRef.current || !canvasRef.current) return;
-    
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const context = canvas.getContext('2d');
-    
-    if (!context) return;
-    
-    const scanInterval = setInterval(() => {
-      if (!scanning || processingRef.current || !video.videoWidth) return;
-      
-      // Dibujar el frame actual en el canvas
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      context.drawImage(video, 0, 0, canvas.width, canvas.height);
-      
-      // Obtener los datos de la imagen
-      const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-      
-      // Usar la API de Barcode Detector si está disponible
-      if ('BarcodeDetector' in window) {
-        // @ts-ignore - BarcodeDetector no está en los tipos por defecto
-        const barcodeDetector = new BarcodeDetector({ formats: ['qr_code'] });
-        barcodeDetector.detect(canvas)
-          .then((barcodes: any[]) => {
-            if (barcodes.length > 0 && !processingRef.current) {
-              const qrValue = barcodes[0].rawValue;
-              if (qrValue && qrValue !== lastScannedRef.current) {
-                processQRCode(qrValue);
-              }
-            }
-          })
-          .catch((err: any) => {
-            console.error('Error detectando código:', err);
-          });
-      } else {
-        // Fallback: mostrar mensaje de que el navegador no soporta detección de códigos
-        if (cameraSupported) {
-          toast.error('Tu navegador no soporta detección automática de QR. Usá la opción de carga manual.');
-          setCameraSupported(false);
-          stopCamera();
-        }
-      }
-    }, 500); // Escanear cada 500ms
-    
-    // Guardar el intervalo para limpiarlo después
-    return () => clearInterval(scanInterval);
-  };
-
-  // Limpiar al desmontar
-  useEffect(() => {
-    return () => {
-      stopCamera();
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-      }
-    };
-  }, []);
 
   useEffect(() => {
     if (role === 'ADMIN' || role === 'PROVEEDOR') {
@@ -360,6 +280,12 @@ export default function AssignOrdersView() {
   }, [role]);
 
   useEffect(() => { load(); }, [filterBy, dateFrom, dateTo]);
+
+  useEffect(() => {
+    return () => {
+      stopCamera();
+    };
+  }, []);
 
   const filtered = orders.filter(o => {
     if (!search) return true;
@@ -403,10 +329,6 @@ export default function AssignOrdersView() {
     } else {
       const allIds = selectableOrders.map(o => o.id);
       setSelected(new Set(allIds));
-      if (role === 'DELIVERY' && selectableOrders.length < filtered.length) {
-        const assignedCount = filtered.length - selectableOrders.length;
-        toast.info(`Se seleccionaron ${selectableOrders.length} pedidos disponibles (${assignedCount} ya pertenecen a otros deliveries)`);
-      }
     }
   };
 
@@ -438,7 +360,6 @@ export default function AssignOrdersView() {
     let successCount = 0;
     let errorCount = 0;
     let alreadyAssignedCount = 0;
-    const alreadyAssignedDetails: string[] = [];
 
     for (const id of selected) {
       const { data: orderData } = await supabase
@@ -448,9 +369,6 @@ export default function AssignOrdersView() {
         .single();
       
       if (orderData?.assigned_delivery && orderData.assigned_delivery !== deliveryEmail) {
-        const otherDeliveryName = await getDeliveryName(orderData.assigned_delivery);
-        const displayId = orderData.order_number || id.substring(0, 8);
-        alreadyAssignedDetails.push(`${displayId} (${otherDeliveryName})`);
         alreadyAssignedCount++;
         continue;
       }
@@ -466,7 +384,6 @@ export default function AssignOrdersView() {
       
       if (error) {
         errorCount++;
-        console.error(`Error asignando pedido ${id}:`, error);
       } else {
         successCount++;
       }
@@ -478,9 +395,7 @@ export default function AssignOrdersView() {
       toast.success(`✅ ${successCount} pedido(s) asignado(s) a ${deliveryName}`);
     }
     if (alreadyAssignedCount > 0) {
-      const detailsMessage = alreadyAssignedDetails.slice(0, 3).join(', ');
-      const moreCount = alreadyAssignedCount > 3 ? ` y ${alreadyAssignedCount - 3} más` : '';
-      toast.warning(`⚠️ ${alreadyAssignedCount} pedido(s) ya pertenecen a otros deliveries: ${detailsMessage}${moreCount}`);
+      toast.warning(`⚠️ ${alreadyAssignedCount} pedido(s) ya estaban asignados`);
     }
     if (errorCount > 0) {
       toast.error(`❌ Error en ${errorCount} pedido(s)`);
@@ -524,7 +439,6 @@ export default function AssignOrdersView() {
     let count = 0;
     let notFound = 0;
     let alreadyAssigned = 0;
-    const alreadyAssignedDetails: string[] = [];
 
     for (const id of ids) {
       const { data } = await supabase
@@ -535,8 +449,6 @@ export default function AssignOrdersView() {
       
       if (data && data[0]) {
         if (data[0].assigned_delivery && data[0].assigned_delivery !== deliveryEmail) {
-          const otherDeliveryName = await getDeliveryName(data[0].assigned_delivery);
-          alreadyAssignedDetails.push(`${id} (${otherDeliveryName})`);
           alreadyAssigned++;
           continue;
         }
@@ -564,9 +476,7 @@ export default function AssignOrdersView() {
       toast.success(`✅ ${count} pedido(s) asignado(s) a ${deliveryName}`);
     }
     if (alreadyAssigned > 0) {
-      const detailsMessage = alreadyAssignedDetails.slice(0, 3).join(', ');
-      const moreCount = alreadyAssigned > 3 ? ` y ${alreadyAssigned - 3} más` : '';
-      toast.warning(`⚠️ ${alreadyAssigned} pedido(s) ya pertenecen a otros deliveries: ${detailsMessage}${moreCount}`);
+      toast.warning(`⚠️ ${alreadyAssigned} pedido(s) ya estaban asignados`);
     }
     if (notFound > 0) {
       toast.warning(`❓ ${notFound} ID(s) no encontrados`);
@@ -594,7 +504,7 @@ export default function AssignOrdersView() {
     
     if (orderData?.assigned_delivery && orderData.assigned_delivery !== deliveryEmail) {
       const otherDeliveryName = await getDeliveryName(orderData.assigned_delivery);
-      toast.error(`❌ El pedido ${displayId} no se puede asignar porque pertenece a ${otherDeliveryName}`);
+      toast.error(`❌ El pedido ${displayId} pertenece a ${otherDeliveryName}`);
       return;
     }
     
@@ -609,9 +519,8 @@ export default function AssignOrdersView() {
     
     if (error) {
       toast.error('Error al asignar delivery');
-      console.error(error);
     } else {
-      toast.success(`✅ Pedido ${displayId} asignado correctamente a ${deliveryName}`);
+      toast.success(`✅ Pedido ${displayId} asignado a ${deliveryName}`);
       load();
     }
   };
@@ -633,57 +542,55 @@ export default function AssignOrdersView() {
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Asignar Pedidos</h3>
 
-      {/* Scanner QR integrado */}
+      {/* Escáner QR integrado - SIN DEPENDENCIAS EXTERNAS */}
       <div className="mb-4">
-        <div className="flex gap-2 mb-2">
-          {!scanning ? (
-            <button
-              onClick={startCamera}
-              className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 flex items-center gap-2"
-            >
-              📷 Escanear QR
-            </button>
-          ) : (
-            <button
-              onClick={stopCamera}
-              className="bg-red-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-red-700 flex items-center gap-2"
-            >
-              🛑 Detener escáner
-            </button>
-          )}
-          {processingQR && (
-            <span className="bg-yellow-100 text-yellow-800 px-3 py-2 rounded-lg text-sm">
-              ⏳ Procesando...
-            </span>
-          )}
-        </div>
-        
-        {scanning && (
-          <div className="relative border-2 border-blue-500 rounded-lg overflow-hidden bg-black">
-            <video
-              ref={videoRef}
-              className="w-full max-h-[300px] object-cover"
-              autoPlay
-              playsInline
-              muted
-            />
-            <canvas ref={canvasRef} className="hidden" />
-            <div className="absolute inset-0 border-2 border-blue-400 pointer-events-none rounded-lg">
-              <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-48 h-48 border-2 border-blue-400 rounded-lg"></div>
-            </div>
-            <div className="absolute bottom-2 left-0 right-0 text-center text-white text-xs bg-black bg-opacity-50 py-1">
-              📍 Centrá el código QR en el cuadro
+        {!scanning ? (
+          <button
+            onClick={startCamera}
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 flex items-center gap-2"
+          >
+            📷 Escanear QR con la cámara
+          </button>
+        ) : (
+          <div className="border-2 border-blue-500 rounded-lg overflow-hidden bg-black">
+            <div className="relative">
+              <video
+                ref={videoRef}
+                className="w-full max-h-[300px] object-cover"
+                autoPlay
+                playsInline
+                muted
+              />
+              <button
+                onClick={stopCamera}
+                className="absolute top-2 right-2 bg-red-600 text-white px-3 py-1 rounded-lg text-xs font-bold"
+              >
+                ✖ Cerrar
+              </button>
+              <div className="absolute inset-0 border-2 border-blue-400 pointer-events-none rounded-lg">
+                <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-48 h-48 border-2 border-yellow-400 rounded-lg"></div>
+              </div>
+              <div className="absolute bottom-2 left-0 right-0 text-center text-white text-xs bg-black bg-opacity-50 py-1">
+                📍 Centrá el código QR en el cuadro amarillo
+              </div>
             </div>
           </div>
         )}
         
-        {!cameraSupported && (
-          <div className="mt-2 p-2 bg-yellow-100 text-yellow-800 rounded-lg text-sm">
-            ⚠️ Tu navegador no soporta escáner automático. Usá la búsqueda manual o la carga por ID.
+        {cameraError && (
+          <div className="mt-2 p-2 bg-red-100 text-red-800 rounded-lg text-sm">
+            ⚠️ {cameraError}
+          </div>
+        )}
+        
+        {processingQR && (
+          <div className="mt-2 p-2 bg-blue-100 text-blue-800 rounded-lg text-sm text-center animate-pulse">
+            ⏳ Procesando QR... Por favor esperá
           </div>
         )}
       </div>
 
+      {/* Resto del código igual */}
       <div className="flex flex-wrap gap-2 mb-3">
         <label className="app-label !mt-0">Desde</label>
         <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
