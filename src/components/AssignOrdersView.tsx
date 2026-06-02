@@ -17,7 +17,7 @@ export default function AssignOrdersView() {
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [idsInput, setIdsInput] = useState('');
   const [filterBy, setFilterBy] = useState<'created_at' | 'assigned_at'>('created_at');
-  const [scanning, setScanning] = useState(false);
+  const [showScanner, setShowScanner] = useState(false);
   const [processingQR, setProcessingQR] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   
@@ -25,7 +25,6 @@ export default function AssignOrdersView() {
   const streamRef = useRef<MediaStream | null>(null);
   const processingRef = useRef(false);
   const lastScannedRef = useRef<string | null>(null);
-  const scanIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   const getDeliveryName = async (email: string): Promise<string> => {
     if (!email) return email;
@@ -113,7 +112,6 @@ export default function AssignOrdersView() {
       
       const displayId = orderData.order_number || orderData.id.substring(0, 8);
       
-      // Verificar si ya está asignado a otro
       if (orderData.assigned_delivery && orderData.assigned_delivery !== profile?.email) {
         const deliveryName = await getDeliveryName(orderData.assigned_delivery);
         toast.error(`❌ El pedido ${displayId} pertenece a ${deliveryName}`);
@@ -122,7 +120,6 @@ export default function AssignOrdersView() {
         return;
       }
       
-      // ASIGNACIÓN PARA DELIVERY
       if (role === 'DELIVERY') {
         const deliveryEmail = profile?.email || '';
         const deliveryName = profile?.name || deliveryEmail;
@@ -141,17 +138,14 @@ export default function AssignOrdersView() {
         } else {
           toast.success(`✅ Pedido ${displayId} asignado correctamente a ${deliveryName}`);
           await load();
-          
-          // Detener la cámara después de asignar
           stopCamera();
+          setShowScanner(false);
           
-          // Opcional: redirigir después de 2 segundos
           setTimeout(() => {
             window.location.href = '/';
           }, 2000);
         }
       } 
-      // SELECCIÓN PARA ADMIN
       else if (role === 'ADMIN' || role === 'PROVEEDOR') {
         if (orderData.assigned_delivery) {
           const deliveryName = await getDeliveryName(orderData.assigned_delivery);
@@ -170,7 +164,6 @@ export default function AssignOrdersView() {
       processingRef.current = false;
       setProcessingQR(false);
       
-      // Esperar 2 segundos antes de permitir otro escaneo
       setTimeout(() => {
         lastScannedRef.current = null;
       }, 2000);
@@ -183,94 +176,98 @@ export default function AssignOrdersView() {
     }
   };
 
-  // Leer QR usando la cámara con jsQR (biblioteca ligera embebida)
-  const scanQRFromVideo = () => {
-    if (!videoRef.current || !scanning || processingRef.current) return;
-    
-    const video = videoRef.current;
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    
-    if (!context || video.readyState !== 4) return;
-    
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-    
-    const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-    
-    // Función simple para detectar QR (usando la API nativa si existe)
-    if ('BarcodeDetector' in window) {
-      // @ts-ignore
-      const detector = new BarcodeDetector({ formats: ['qr_code'] });
-      detector.detect(canvas)
-        .then((barcodes: any[]) => {
-          if (barcodes.length > 0 && !processingRef.current) {
-            const value = barcodes[0].rawValue;
-            if (value && value !== lastScannedRef.current) {
-              processQRCode(value);
-            }
-          }
-        })
-        .catch((err: any) => console.error('Error detectando QR:', err));
-    } else {
-      // Si no hay BarcodeDetector, mostrar mensaje
-      if (cameraError === null) {
-        setCameraError('Tu navegador no soporta escaneo automático. Usá la búsqueda manual.');
-      }
-    }
-  };
-
   // Iniciar la cámara
   const startCamera = async () => {
     setCameraError(null);
+    setShowScanner(true);
     
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ 
-        video: { facingMode: 'environment' } 
-      });
-      
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play();
-        streamRef.current = stream;
-        setScanning(true);
+    // Pequeño delay para asegurar que el videoRef esté montado
+    setTimeout(async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { facingMode: 'environment' } 
+        });
         
-        // Iniciar el escaneo periódico
-        if (scanIntervalRef.current) {
-          clearInterval(scanIntervalRef.current);
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play();
+          streamRef.current = stream;
+          
+          // Iniciar el escaneo cuando el video esté listo
+          videoRef.current.onloadedmetadata = () => {
+            startScanning();
+          };
         }
-        scanIntervalRef.current = setInterval(scanQRFromVideo, 500);
+      } catch (err: any) {
+        console.error('Error de cámara:', err);
+        if (err.name === 'NotAllowedError') {
+          setCameraError('Permiso denegado. Permití el acceso a la cámara.');
+        } else if (err.name === 'NotFoundError') {
+          setCameraError('No se encontró ninguna cámara en este dispositivo.');
+        } else {
+          setCameraError('No se pudo iniciar la cámara. Verificá los permisos.');
+        }
+        setShowScanner(false);
       }
-    } catch (err: any) {
-      console.error('Error de cámara:', err);
-      if (err.name === 'NotAllowedError') {
-        setCameraError('Permiso denegado. Permití el acceso a la cámara.');
-      } else if (err.name === 'NotFoundError') {
-        setCameraError('No se encontró ninguna cámara.');
-      } else {
-        setCameraError('No se pudo iniciar la cámara.');
+    }, 100);
+  };
+
+  // Escanear QR usando la API nativa
+  const startScanning = () => {
+    if (!videoRef.current) return;
+    
+    const scanFrame = () => {
+      if (!videoRef.current || !streamRef.current || processingRef.current) {
+        requestAnimationFrame(scanFrame);
+        return;
       }
-    }
+      
+      const video = videoRef.current;
+      if (video.readyState !== 4 || video.videoWidth === 0) {
+        requestAnimationFrame(scanFrame);
+        return;
+      }
+      
+      const canvas = document.createElement('canvas');
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      
+      if (ctx) {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        // Usar BarcodeDetector si está disponible
+        if ('BarcodeDetector' in window) {
+          // @ts-ignore
+          const detector = new BarcodeDetector({ formats: ['qr_code'] });
+          detector.detect(canvas)
+            .then((barcodes: any[]) => {
+              if (barcodes.length > 0 && !processingRef.current) {
+                const value = barcodes[0].rawValue;
+                if (value && value !== lastScannedRef.current) {
+                  processQRCode(value);
+                }
+              }
+            })
+            .catch((err: any) => console.error('Error detectando QR:', err));
+        }
+      }
+      
+      requestAnimationFrame(scanFrame);
+    };
+    
+    requestAnimationFrame(scanFrame);
   };
 
   // Detener la cámara
   const stopCamera = () => {
-    if (scanIntervalRef.current) {
-      clearInterval(scanIntervalRef.current);
-      scanIntervalRef.current = null;
-    }
-    
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
-    
     if (videoRef.current) {
       videoRef.current.srcObject = null;
     }
-    
-    setScanning(false);
   };
 
   useEffect(() => {
@@ -542,33 +539,37 @@ export default function AssignOrdersView() {
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Asignar Pedidos</h3>
 
-      {/* Escáner QR integrado - SIN DEPENDENCIAS EXTERNAS */}
+      {/* Botón para escanear QR */}
       <div className="mb-4">
-        {!scanning ? (
+        {!showScanner ? (
           <button
             onClick={startCamera}
-            className="bg-blue-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-blue-700 flex items-center gap-2"
+            className="bg-blue-600 text-white px-4 py-3 rounded-lg text-sm font-bold hover:bg-blue-700 flex items-center justify-center gap-2 w-full md:w-auto"
           >
-            📷 Escanear QR con la cámara
+            📷 Escanear código QR
           </button>
         ) : (
           <div className="border-2 border-blue-500 rounded-lg overflow-hidden bg-black">
-            <div className="relative">
+            <div className="relative" style={{ minHeight: '300px' }}>
               <video
                 ref={videoRef}
-                className="w-full max-h-[300px] object-cover"
+                className="w-full h-auto min-h-[300px] object-cover"
                 autoPlay
                 playsInline
                 muted
+                style={{ transform: 'scaleX(-1)' }}
               />
               <button
-                onClick={stopCamera}
-                className="absolute top-2 right-2 bg-red-600 text-white px-3 py-1 rounded-lg text-xs font-bold"
+                onClick={() => {
+                  stopCamera();
+                  setShowScanner(false);
+                }}
+                className="absolute top-2 right-2 bg-red-600 text-white px-3 py-1 rounded-lg text-xs font-bold z-10"
               >
                 ✖ Cerrar
               </button>
-              <div className="absolute inset-0 border-2 border-blue-400 pointer-events-none rounded-lg">
-                <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-48 h-48 border-2 border-yellow-400 rounded-lg"></div>
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div className="w-64 h-64 border-2 border-yellow-400 rounded-lg"></div>
               </div>
               <div className="absolute bottom-2 left-0 right-0 text-center text-white text-xs bg-black bg-opacity-50 py-1">
                 📍 Centrá el código QR en el cuadro amarillo
@@ -585,12 +586,12 @@ export default function AssignOrdersView() {
         
         {processingQR && (
           <div className="mt-2 p-2 bg-blue-100 text-blue-800 rounded-lg text-sm text-center animate-pulse">
-            ⏳ Procesando QR... Por favor esperá
+            ⏳ Procesando código QR...
           </div>
         )}
       </div>
 
-      {/* Resto del código igual */}
+      {/* Filtros y tabla - resto del código igual */}
       <div className="flex flex-wrap gap-2 mb-3">
         <label className="app-label !mt-0">Desde</label>
         <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
