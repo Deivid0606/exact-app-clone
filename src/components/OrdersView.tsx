@@ -147,21 +147,21 @@ function StatusChangeModal({
 
   return createPortal(
     <div className="fixed inset-0 bg-black/70 z-[10000] flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-4">
-          <h3 className="text-xl font-bold">
+          <h3 className="text-xl font-bold text-gray-900 dark:text-white">
             Cambiar a {newStatus}
           </h3>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">✕</button>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">✕</button>
         </div>
         
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-2">
+            <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">
               Comentario <span className="text-red-500">*</span>
             </label>
             <textarea
-              className="app-input w-full min-h-[100px]"
+              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white min-h-[100px]"
               placeholder="Ej: Llamé 3 veces y no contestó..."
               value={message}
               onChange={e => setMessage(e.target.value)}
@@ -170,12 +170,12 @@ function StatusChangeModal({
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-2">
+            <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">
               Captura de pantalla <span className="text-red-500">*</span>
             </label>
             <div
               className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors ${
-                isDragging ? 'border-primary bg-primary/10' : 'border-border'
+                isDragging ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-300 dark:border-gray-600'
               }`}
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
@@ -193,10 +193,10 @@ function StatusChangeModal({
                 className="cursor-pointer flex flex-col items-center gap-2"
               >
                 <span className="text-2xl">📸</span>
-                <span className="text-sm text-muted-foreground">
+                <span className="text-sm text-gray-500 dark:text-gray-400">
                   Haz clic o arrastra una imagen aquí
                 </span>
-                <span className="text-xs text-muted-foreground">
+                <span className="text-xs text-gray-400 dark:text-gray-500">
                   PNG, JPG, GIF hasta 5MB
                 </span>
               </label>
@@ -225,10 +225,10 @@ function StatusChangeModal({
         </div>
 
         <div className="flex gap-2 justify-end mt-6">
-          <button className="nav-btn" onClick={onClose} disabled={uploading}>
+          <button className="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors" onClick={onClose} disabled={uploading}>
             Cancelar
           </button>
-          <button className="nav-btn active" onClick={handleSubmit} disabled={uploading}>
+          <button className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors" onClick={handleSubmit} disabled={uploading}>
             {uploading ? 'Subiendo...' : 'Confirmar cambio'}
           </button>
         </div>
@@ -238,7 +238,7 @@ function StatusChangeModal({
   );
 }
 
-// Modal de historial SIMPLIFICADO con imágenes visibles
+// Modal de historial MEJORADO con buen contraste y manejo de imágenes
 function HistoryModal({ isOpen, onClose, order, history, loading }: { 
   isOpen: boolean; 
   onClose: () => void; 
@@ -247,12 +247,13 @@ function HistoryModal({ isOpen, onClose, order, history, loading }: {
   loading: boolean;
 }) {
   const [fullImageUrl, setFullImageUrl] = useState<string | null>(null);
+  const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
 
   const statusClass = (s: string) => {
-    if (s === 'ENTREGADO' || s === 'ENCOMIENDA ENTREGADA') return 'badge-entregado';
-    if (['CANCELADO', 'RECHAZADO', 'RECHAZADO EN EL LUGAR', 'NO DESEA', 'CANCELÓ POR WHATSAPP', 'NO CONTESTA'].includes(s)) return 'badge-cancelado';
-    if (s === 'EN RUTA') return 'badge-entregado';
-    return 'badge-pendiente';
+    if (s === 'ENTREGADO' || s === 'ENCOMIENDA ENTREGADA') return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
+    if (['CANCELADO', 'RECHAZADO', 'RECHAZADO EN EL LUGAR', 'NO DESEA', 'CANCELÓ POR WHATSAPP', 'NO CONTESTA'].includes(s)) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
+    if (s === 'EN RUTA') return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
+    return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400';
   };
 
   // Estadísticas simplificadas
@@ -268,32 +269,32 @@ function HistoryModal({ isOpen, onClose, order, history, loading }: {
 
   return createPortal(
     <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-2 sm:p-4" onClick={() => { onClose(); setFullImageUrl(null); }}>
-      <div className="bg-card border border-border rounded-2xl p-4 sm:p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl p-4 sm:p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         {/* Header */}
-        <div className="flex justify-between items-start mb-6 sticky top-0 bg-card pb-2 z-10">
+        <div className="flex justify-between items-start mb-6 sticky top-0 bg-white dark:bg-gray-900 pb-2 z-10">
           <div>
-            <h4 className="text-xl font-extrabold flex items-center gap-2">
+            <h4 className="text-xl font-extrabold flex items-center gap-2 text-gray-900 dark:text-white">
               📜 Historial de Estados
-              <span className="text-sm font-normal text-muted-foreground">
+              <span className="text-sm font-normal text-gray-500 dark:text-gray-400">
                 Pedido #{order?.order_number || order?.id?.slice(0, 8)}
               </span>
             </h4>
-            <p className="text-sm text-muted-foreground mt-1">
+            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
               Cliente: {order?.customer_name} | Ciudad: {order?.city}
             </p>
           </div>
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground text-2xl leading-none">✕</button>
+          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl leading-none">✕</button>
         </div>
 
         {loading ? (
-          <div className="text-center py-12">Cargando historial...</div>
+          <div className="text-center py-12 text-gray-500">Cargando historial...</div>
         ) : history.length === 0 ? (
-          <div className="text-center text-muted-foreground py-12">
+          <div className="text-center text-gray-500 py-12">
             No hay cambios registrados en este pedido
           </div>
         ) : (
           <>
-            {/* KPIs SIMPLIFICADOS - solo 3 tarjetas */}
+            {/* KPIs SIMPLIFICADOS */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
               <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-4 text-white shadow-lg">
                 <div className="text-2xl font-bold">{totalChanges}</div>
@@ -310,63 +311,63 @@ function HistoryModal({ isOpen, onClose, order, history, loading }: {
               </div>
             </div>
 
-            {/* Timeline de cambios con FOTOS VISIBLES */}
+            {/* Timeline de cambios */}
             <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
               {history.map((item) => (
-                <div key={item.id} className="relative pl-8 pb-6 last:pb-0 before:content-[''] before:absolute before:left-3 before:top-0 before:bottom-0 before:w-0.5 before:bg-gradient-to-b before:from-primary before:to-transparent">
+                <div key={item.id} className="relative pl-8 pb-6 last:pb-0 before:content-[''] before:absolute before:left-3 before:top-0 before:bottom-0 before:w-0.5 before:bg-gradient-to-b before:from-blue-500 before:to-transparent">
                   {/* Círculo de timeline */}
-                  <div className="absolute left-0 top-1 w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center ring-4 ring-background">
-                    <div className="w-2 h-2 rounded-full bg-primary"></div>
+                  <div className="absolute left-0 top-1 w-6 h-6 rounded-full bg-blue-500/20 flex items-center justify-center ring-4 ring-white dark:ring-gray-900">
+                    <div className="w-2 h-2 rounded-full bg-blue-500"></div>
                   </div>
                   
-                  <div className="bg-background border border-border rounded-xl p-4 hover:shadow-lg transition-all duration-200">
+                  <div className="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl p-4 hover:shadow-lg transition-all duration-200">
                     {/* Header */}
                     <div className="flex flex-wrap justify-between items-start gap-2 mb-3">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-mono bg-muted px-2 py-1 rounded-md">
+                        <span className="text-xs font-mono bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded-md text-gray-700 dark:text-gray-300">
                           {new Date(item.created_at).toLocaleString('es-PY', {
                             day: '2-digit', month: '2-digit', year: 'numeric',
                             hour: '2-digit', minute: '2-digit'
                           })}
                         </span>
                         <span className={`text-xs px-2 py-1 rounded-full font-medium ${
-                          item.changed_by_role === 'ADMIN' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
-                          item.changed_by_role === 'DELIVERY' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
-                          item.changed_by_role === 'PROVEEDOR' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
-                          'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400'
+                          item.changed_by_role === 'ADMIN' ? 'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300' :
+                          item.changed_by_role === 'DELIVERY' ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300' :
+                          item.changed_by_role === 'PROVEEDOR' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300' :
+                          'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
                         }`}>
                           {item.changed_by_role || 'Usuario'}
                         </span>
                       </div>
-                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
                         <span>👤</span>
                         <span className="font-mono truncate max-w-[150px]">{item.changed_by_email}</span>
                       </div>
                     </div>
                     
                     {/* Cambio de estado */}
-                    <div className="flex items-center gap-2 flex-wrap mb-3 p-2 rounded-lg bg-muted/20">
+                    <div className="flex items-center gap-2 flex-wrap mb-3 p-2 rounded-lg bg-gray-100 dark:bg-gray-800">
                       <span className={`text-sm font-medium px-2 py-0.5 rounded-full ${statusClass(item.previous_status || 'PENDIENTE')}`}>
                         {item.previous_status || '—'}
                       </span>
-                      <span className="text-muted-foreground">→</span>
+                      <span className="text-gray-500 dark:text-gray-400">→</span>
                       <span className={`text-sm font-bold px-2 py-0.5 rounded-full ${statusClass(item.new_status)}`}>
                         {item.new_status}
                       </span>
                     </div>
                     
-                    {/* Mensaje */}
+                    {/* Mensaje - CON BUEN CONTRASTE */}
                     {item.message && (
-                      <div className="mt-2 p-2 bg-amber-50 dark:bg-amber-950/20 rounded-lg border-l-3 border-amber-500">
+                      <div className="mt-2 p-3 bg-amber-100 dark:bg-amber-900/40 rounded-lg border-l-4 border-amber-500">
                         <div className="flex items-start gap-2">
-                          <span className="text-sm">💬</span>
-                          <p className="text-sm flex-1">{item.message}</p>
+                          <span className="text-base">💬</span>
+                          <p className="text-sm text-gray-800 dark:text-gray-200 flex-1">{item.message}</p>
                         </div>
                       </div>
                     )}
                     
-                    {/* FOTO - visible directamente */}
-                    {item.attachment_url && (
+                    {/* FOTO - con manejo de errores */}
+                    {item.attachment_url && !imageErrors[item.id] && (
                       <div className="mt-3">
                         <div 
                           className="cursor-pointer group inline-block"
@@ -378,13 +379,34 @@ function HistoryModal({ isOpen, onClose, order, history, loading }: {
                             className="max-h-48 rounded-lg border shadow-sm object-cover hover:opacity-90 transition-opacity"
                             onError={(e) => {
                               console.error('Error cargando imagen:', item.attachment_url);
+                              setImageErrors(prev => ({ ...prev, [item.id]: true }));
                               e.currentTarget.style.display = 'none';
                             }}
                           />
-                          <div className="text-xs text-center text-muted-foreground mt-1 group-hover:text-primary">
+                          <div className="text-xs text-center text-gray-500 dark:text-gray-400 mt-1 group-hover:text-blue-500">
                             🔍 Click para ampliar
                           </div>
                         </div>
+                      </div>
+                    )}
+                    
+                    {/* Mensaje de error si la imagen no carga */}
+                    {item.attachment_url && imageErrors[item.id] && (
+                      <div className="mt-3 p-3 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
+                        <p className="text-sm text-red-600 dark:text-red-400 flex items-center gap-2">
+                          <span>⚠️</span> No se pudo cargar la imagen adjunta
+                        </p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 break-all font-mono">
+                          URL: {item.attachment_url}
+                        </p>
+                        <button
+                          onClick={() => {
+                            setImageErrors(prev => ({ ...prev, [item.id]: false }));
+                          }}
+                          className="mt-2 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                        >
+                          Intentar recargar
+                        </button>
                       </div>
                     )}
                   </div>
@@ -395,10 +417,12 @@ function HistoryModal({ isOpen, onClose, order, history, loading }: {
         )}
         
         {/* Footer */}
-        <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border sticky bottom-0 bg-card">
-          <button className="nav-btn" onClick={onClose}>Cerrar</button>
+        <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-gray-200 dark:border-gray-700 sticky bottom-0 bg-white dark:bg-gray-900">
+          <button className="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors" onClick={onClose}>
+            Cerrar
+          </button>
           <button 
-            className="nav-btn active"
+            className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
             onClick={() => {
               const historyText = history.map(h => 
                 `[${new Date(h.created_at).toLocaleString('es-PY')}] ${h.changed_by_role} (${h.changed_by_email}): ${h.previous_status || '—'} → ${h.new_status}${h.message ? `\n  💬 ${h.message}` : ''}${h.attachment_url ? `\n  📎 Captura: ${h.attachment_url}` : ''}`
@@ -420,6 +444,11 @@ function HistoryModal({ isOpen, onClose, order, history, loading }: {
               src={fullImageUrl} 
               alt="Captura ampliada" 
               className="max-w-full max-h-[90vh] object-contain rounded-lg"
+              onError={(e) => {
+                console.error('Error cargando imagen ampliada:', fullImageUrl);
+                toast.error('No se pudo cargar la imagen');
+                setFullImageUrl(null);
+              }}
             />
             <button
               onClick={() => setFullImageUrl(null)}
@@ -1232,20 +1261,20 @@ export default function OrdersView() {
       {/* Modales */}
       {editOrder && createPortal(
         <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-2 sm:p-4" onClick={() => setEditOrder(null)}>
-          <div className="bg-card border border-border rounded-2xl p-4 sm:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto space-y-3" onClick={e => e.stopPropagation()}>
-            <h4 className="text-lg font-extrabold">Editar Pedido</h4>
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl p-4 sm:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto space-y-3" onClick={e => e.stopPropagation()}>
+            <h4 className="text-lg font-extrabold text-gray-900 dark:text-white">Editar Pedido</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="app-label">Cliente *</label>
-                <input className="app-input" value={editOrder.customer_name} onChange={e => setEditOrder({ ...editOrder, customer_name: e.target.value })} />
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Cliente *</label>
+                <input className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white" value={editOrder.customer_name} onChange={e => setEditOrder({ ...editOrder, customer_name: e.target.value })} />
               </div>
               <div>
-                <label className="app-label">Teléfono *</label>
-                <input className="app-input" value={editOrder.phone} onChange={e => setEditOrder({ ...editOrder, phone: e.target.value })} />
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Teléfono *</label>
+                <input className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white" value={editOrder.phone} onChange={e => setEditOrder({ ...editOrder, phone: e.target.value })} />
               </div>
               <div>
-                <label className="app-label">Ciudad *</label>
-                <select className="app-input" value={editOrder.city} onChange={e => setEditOrder({ ...editOrder, city: e.target.value })}>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Ciudad *</label>
+                <select className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white" value={editOrder.city} onChange={e => setEditOrder({ ...editOrder, city: e.target.value })}>
                   <option value="">Seleccionar ciudad…</option>
                   {clientPrices.map(c => <option key={c.id} value={c.city}>{c.city}</option>)}
                   {editOrder.city && !clientPrices.find(c => c.city === editOrder.city) && (
@@ -1254,21 +1283,21 @@ export default function OrdersView() {
                 </select>
               </div>
               <div>
-                <label className="app-label">Calle</label>
-                <input className="app-input" value={editOrder.street} onChange={e => setEditOrder({ ...editOrder, street: e.target.value })} />
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Calle</label>
+                <input className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white" value={editOrder.street} onChange={e => setEditOrder({ ...editOrder, street: e.target.value })} />
               </div>
               <div>
-                <label className="app-label">Barrio</label>
-                <input className="app-input" value={editOrder.district} onChange={e => setEditOrder({ ...editOrder, district: e.target.value })} />
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Barrio</label>
+                <input className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white" value={editOrder.district} onChange={e => setEditOrder({ ...editOrder, district: e.target.value })} />
               </div>
               <div className="col-span-2">
-                <label className="app-label">Observaciones</label>
-                <textarea className="app-input min-h-[60px]" value={editOrder.obs} onChange={e => setEditOrder({ ...editOrder, obs: e.target.value })} />
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Observaciones</label>
+                <textarea className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white min-h-[60px]" value={editOrder.obs} onChange={e => setEditOrder({ ...editOrder, obs: e.target.value })} />
               </div>
             </div>
             <div className="flex gap-2 justify-end">
-              <button className="nav-btn" onClick={() => setEditOrder(null)}>Cancelar</button>
-              <button className="nav-btn active" onClick={saveEdit}>Guardar</button>
+              <button className="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors" onClick={() => setEditOrder(null)}>Cancelar</button>
+              <button className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors" onClick={saveEdit}>Guardar</button>
             </div>
           </div>
         </div>,
@@ -1277,12 +1306,12 @@ export default function OrdersView() {
 
       {guideText && createPortal(
         <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-2 sm:p-4" onClick={() => setGuideText('')}>
-          <div className="bg-card border border-border rounded-2xl p-4 sm:p-6 w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
-            <h4 className="text-lg font-extrabold mb-3">Guía — {guideOrderId}</h4>
-            <pre className="text-xs sm:text-sm whitespace-pre-wrap bg-background p-3 sm:p-5 rounded-xl border border-border max-h-[60vh] overflow-auto leading-relaxed">{guideText}</pre>
+          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl p-4 sm:p-6 w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h4 className="text-lg font-extrabold mb-3 text-gray-900 dark:text-white">Guía — {guideOrderId}</h4>
+            <pre className="text-xs sm:text-sm whitespace-pre-wrap bg-gray-100 dark:bg-gray-800 p-3 sm:p-5 rounded-xl border border-gray-200 dark:border-gray-700 max-h-[60vh] overflow-auto leading-relaxed text-gray-800 dark:text-gray-200">{guideText}</pre>
             <div className="flex gap-2 justify-end mt-4">
-              <button className="nav-btn" onClick={() => setGuideText('')}>Cerrar</button>
-              <button className="nav-btn active" onClick={copyGuide}>Copiar</button>
+              <button className="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors" onClick={() => setGuideText('')}>Cerrar</button>
+              <button className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors" onClick={copyGuide}>Copiar</button>
             </div>
           </div>
         </div>,
