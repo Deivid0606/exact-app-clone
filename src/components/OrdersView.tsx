@@ -63,6 +63,65 @@ function isProviderAllowed(order: any, userEmail: string): boolean {
   return norm(orderProviderEmail) === norm(userEmail);
 }
 
+// Componente de gráfico de torta simple
+function SimplePieChart({ data }: { data: Record<string, number> }) {
+  const colors = [
+    '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', 
+    '#ec4899', '#06b6d4', '#84cc16', '#f97316', '#6366f1'
+  ];
+  
+  const total = Object.values(data).reduce((a, b) => a + b, 0);
+  let currentAngle = 0;
+  
+  const segments = Object.entries(data).map(([label, value], index) => {
+    const percentage = (value / total) * 100;
+    const angle = (value / total) * 360;
+    const startAngle = currentAngle;
+    const endAngle = currentAngle + angle;
+    currentAngle = endAngle;
+    
+    // Calcular coordenadas para el arco
+    const startRad = (startAngle - 90) * Math.PI / 180;
+    const endRad = (endAngle - 90) * Math.PI / 180;
+    
+    const x1 = 50 + 40 * Math.cos(startRad);
+    const y1 = 50 + 40 * Math.sin(startRad);
+    const x2 = 50 + 40 * Math.cos(endRad);
+    const y2 = 50 + 40 * Math.sin(endRad);
+    
+    const largeArc = angle > 180 ? 1 : 0;
+    
+    const pathData = `M 50 50 L ${x1} ${y1} A 40 40 0 ${largeArc} 1 ${x2} ${y2} Z`;
+    
+    return { pathData, color: colors[index % colors.length], label, percentage, value };
+  });
+  
+  return (
+    <div className="flex flex-col items-center">
+      <svg width="180" height="180" viewBox="0 0 100 100" className="mb-3">
+        {segments.map((segment, idx) => (
+          <path key={idx} d={segment.pathData} fill={segment.color} stroke="#fff" strokeWidth="1" />
+        ))}
+        <circle cx="50" cy="50" r="25" fill="white" className="dark:fill-gray-900" />
+        <text x="50" y="45" textAnchor="middle" fontSize="10" fill="currentColor" fontWeight="bold">
+          {total}
+        </text>
+        <text x="50" y="57" textAnchor="middle" fontSize="6" fill="currentColor">
+          total
+        </text>
+      </svg>
+      <div className="flex flex-wrap justify-center gap-2 text-xs">
+        {segments.map((segment, idx) => (
+          <div key={idx} className="flex items-center gap-1">
+            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: segment.color }} />
+            <span>{segment.label}: {segment.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // Modal para solicitar comentario y captura MEJORADO
 function StatusChangeModal({ 
   isOpen, 
@@ -227,10 +286,13 @@ function StatusChangeModal({
   );
 }
 
-// Componente de Timeline para el historial
-function HistoryTimelineItem({ item, statusClass }: { item: HistoryEntry; statusClass: (s: string) => string }) {
+// Componente de Timeline para el historial MEJORADO
+function HistoryTimelineItem({ item, statusClass, onImageClick }: { 
+  item: HistoryEntry; 
+  statusClass: (s: string) => string;
+  onImageClick: (url: string) => void;
+}) {
   const [imageLoaded, setImageLoaded] = useState(false);
-  const [showFullImage, setShowFullImage] = useState(false);
 
   return (
     <div className="relative pl-8 pb-6 last:pb-0 before:content-[''] before:absolute before:left-3 before:top-0 before:bottom-0 before:w-0.5 before:bg-gradient-to-b before:from-primary before:to-transparent">
@@ -265,8 +327,8 @@ function HistoryTimelineItem({ item, statusClass }: { item: HistoryEntry; status
         </div>
         
         {/* Cambio de estado */}
-        <div className="flex items-center gap-3 flex-wrap mb-3 p-3 bg-muted/20 rounded-lg">
-          <span className={`text-sm font-medium px-3 py-1 rounded-full ${statusClass(item.previous_status || 'PENDIENTE')} bg-opacity-20`}>
+        <div className="flex items-center gap-3 flex-wrap mb-3 p-3 rounded-lg" style={{ background: 'linear-gradient(135deg, rgba(59,130,246,0.1) 0%, rgba(139,92,246,0.1) 100%)' }}>
+          <span className={`text-sm font-medium px-3 py-1 rounded-full ${statusClass(item.previous_status || 'PENDIENTE')}`}>
             {item.previous_status || '—'}
           </span>
           <span className="text-muted-foreground text-lg">→</span>
@@ -275,61 +337,45 @@ function HistoryTimelineItem({ item, statusClass }: { item: HistoryEntry; status
           </span>
         </div>
         
-        {/* Mensaje si existe */}
+        {/* Mensaje si existe - CON COLOR MEJORADO */}
         {item.message && (
-          <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-950/30 rounded-lg border-l-4 border-blue-500">
+          <div className="mt-3 p-3 rounded-lg border-l-4 border-amber-500" style={{ background: 'linear-gradient(135deg, rgba(245,158,11,0.1) 0%, rgba(245,158,11,0.05) 100%)' }}>
             <div className="flex items-start gap-2">
               <span className="text-base">💬</span>
               <div className="flex-1">
-                <div className="text-xs font-medium text-muted-foreground mb-1">Comentario:</div>
+                <div className="text-xs font-medium text-amber-600 dark:text-amber-400 mb-1">Comentario:</div>
                 <div className="text-sm whitespace-pre-wrap">{item.message}</div>
               </div>
             </div>
           </div>
         )}
         
-        {/* Adjunto si existe */}
+        {/* Adjunto si existe - CON MINIATURA VISIBLE */}
         {item.attachment_url && (
           <div className="mt-3">
-            {!showFullImage ? (
-              <div 
-                className="relative cursor-pointer group"
-                onClick={() => setShowFullImage(true)}
-              >
-                <img 
-                  src={item.attachment_url} 
-                  alt="Captura adjunta" 
-                  className="max-h-32 rounded-lg border shadow-sm object-cover"
-                  onLoad={() => setImageLoaded(true)}
-                />
-                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center">
-                  <span className="text-white text-sm">🔍 Ampliar</span>
-                </div>
-              </div>
-            ) : (
-              <div className="fixed inset-0 bg-black/90 z-[10001] flex items-center justify-center p-4" onClick={() => setShowFullImage(false)}>
-                <div className="relative max-w-4xl max-h-[90vh]">
-                  <img 
-                    src={item.attachment_url} 
-                    alt="Captura adjunta ampliada" 
-                    className="max-w-full max-h-[90vh] object-contain rounded-lg"
-                  />
-                  <button
-                    onClick={() => setShowFullImage(false)}
-                    className="absolute -top-10 right-0 text-white hover:text-gray-300 text-2xl"
-                  >
-                    ✕
-                  </button>
-                </div>
-              </div>
-            )}
-            <button
-              onClick={() => window.open(item.attachment_url!, '_blank')}
-              className="mt-2 flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 bg-blue-50 dark:bg-blue-950/30 px-3 py-1.5 rounded-lg transition-colors"
+            <div 
+              className="relative cursor-pointer group inline-block rounded-lg overflow-hidden border border-border"
+              onClick={() => onImageClick(item.attachment_url!)}
             >
-              <span>🖼️</span>
-              <span>Abrir en nueva pestaña</span>
-            </button>
+              <img 
+                src={item.attachment_url} 
+                alt="Captura adjunta" 
+                className="max-h-48 w-auto rounded-lg object-cover transition-transform duration-200 group-hover:scale-105"
+                onLoad={() => setImageLoaded(true)}
+              />
+              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                <span className="text-white text-sm font-medium">🔍 Ampliar</span>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-2">
+              <button
+                onClick={() => window.open(item.attachment_url!, '_blank')}
+                className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 px-2 py-1 rounded bg-blue-50 dark:bg-blue-950/30"
+              >
+                <span>🖼️</span>
+                <span>Abrir en nueva pestaña</span>
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -363,6 +409,7 @@ export default function OrdersView() {
   const [orderHistory, setOrderHistory] = useState<HistoryEntry[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
+  const [fullImageUrl, setFullImageUrl] = useState<string | null>(null);
   
   // Estados para el modal de cambio de estado
   const [statusChangeModal, setStatusChangeModal] = useState<{
@@ -884,14 +931,17 @@ export default function OrdersView() {
     const uniqueUsers = new Set(orderHistory.map(h => h.changed_by_email)).size;
     const statusCounts: Record<string, number> = {};
     const userChanges: Record<string, number> = {};
+    const roleCounts: Record<string, number> = {};
     
     orderHistory.forEach(h => {
       statusCounts[h.new_status] = (statusCounts[h.new_status] || 0) + 1;
       userChanges[h.changed_by_email] = (userChanges[h.changed_by_email] || 0) + 1;
+      roleCounts[h.changed_by_role || 'USUARIO'] = (roleCounts[h.changed_by_role || 'USUARIO'] || 0) + 1;
     });
     
     const mostCommonStatus = Object.entries(statusCounts).sort((a, b) => b[1] - a[1])[0];
     const mostActiveUser = Object.entries(userChanges).sort((a, b) => b[1] - a[1])[0];
+    const mostActiveRole = Object.entries(roleCounts).sort((a, b) => b[1] - a[1])[0];
     
     // Calcular tiempo promedio entre cambios
     let avgTimeBetweenChanges = 0;
@@ -909,7 +959,9 @@ export default function OrdersView() {
       uniqueUsers, 
       mostCommonStatus,
       mostActiveUser,
-      avgTimeBetweenChanges
+      mostActiveRole,
+      avgTimeBetweenChanges,
+      statusDistribution: statusCounts
     };
   };
 
@@ -949,7 +1001,7 @@ export default function OrdersView() {
         {filtered.length} pedidos {allOrders.length > 0 && `(Total en BD: ${allOrders.length})`}
       </div>
 
-      {/* Vista Desktop/Tablet - Tabla */}
+      {/* Vista Desktop/Tablet - Tabla (igual que antes, no cambio) */}
       <div className="hidden md:block overflow-x-auto">
         <table className="app-table min-w-[1000px]">
           <thead>
@@ -1107,7 +1159,7 @@ export default function OrdersView() {
         </table>
       </div>
 
-      {/* Vista Celular - Tarjetas */}
+      {/* Vista Celular - Tarjetas (igual que antes, no cambio) */}
       <div className="md:hidden space-y-3">
         {filtered.length === 0 && (
           <div className="text-center text-muted-foreground py-8">Sin pedidos</div>
@@ -1133,26 +1185,20 @@ export default function OrdersView() {
                 <div className="grid grid-cols-2 gap-1">
                   <span className="font-medium">Cliente:</span>
                   <span className="text-right">{o.customer_name}</span>
-
                   <span className="font-medium">Ciudad:</span>
                   <span className="text-right">{o.city}</span>
-
                   <span className="font-medium">Vendedor:</span>
                   <span className="text-right">{o.created_by}</span>
-
                   <span className="font-medium">Proveedor:</span>
                   <span className="text-right font-medium text-blue-600">{o.provider_email || '—'}</span>
-
                   {role !== 'DESPACHANTE' && (
                     <>
                       <span className="font-medium">Delivery:</span>
                       <span className="text-right">{o.assigned_delivery || '—'}</span>
                     </>
                   )}
-
                   <span className="font-medium">Total:</span>
                   <span className="text-right font-bold">Gs {nf(Number(o.total_gs || 0))}</span>
-
                   <span className="font-medium">{role === 'DELIVERY' ? 'Tarifa:' : 'Comisión:'}</span>
                   <span className="text-right">Gs {nf(commVal)}</span>
                 </div>
@@ -1266,7 +1312,7 @@ export default function OrdersView() {
         })}
       </div>
 
-      {/* Modal Editar Pedido */}
+      {/* Modales (Editar, Guía, StatusChange - iguales que antes) */}
       {editOrder && createPortal(
         <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-2 sm:p-4" onClick={() => setEditOrder(null)}>
           <div className="bg-card border border-border rounded-2xl p-4 sm:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto space-y-3" onClick={e => e.stopPropagation()}>
@@ -1336,7 +1382,6 @@ export default function OrdersView() {
         document.body
       )}
 
-      {/* Modal Guía */}
       {guideText && createPortal(
         <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-2 sm:p-4" onClick={() => setGuideText('')}>
           <div className="bg-card border border-border rounded-2xl p-4 sm:p-6 w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
@@ -1351,7 +1396,6 @@ export default function OrdersView() {
         document.body
       )}
 
-      {/* Modal para solicitar comentario y captura al Delivery */}
       <StatusChangeModal
         isOpen={statusChangeModal.isOpen}
         onClose={() => setStatusChangeModal({ isOpen: false, orderId: '', newStatus: '', oldStatus: '' })}
@@ -1360,12 +1404,12 @@ export default function OrdersView() {
         uploading={uploadingFile}
       />
 
-      {/* Modal Historial de Estados con Dashboard Profesional MEJORADO */}
+      {/* Modal Historial ULTRA PRO con gráfico de torta */}
       {historyModalOpen && selectedOrder && createPortal(
         <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-2 sm:p-4" onClick={() => setHistoryModalOpen(false)}>
-          <div className="bg-card border border-border rounded-2xl p-4 sm:p-6 w-full max-w-5xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+          <div className="bg-card border border-border rounded-2xl p-4 sm:p-6 w-full max-w-6xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             {/* Header */}
-            <div className="flex justify-between items-start mb-6">
+            <div className="flex justify-between items-start mb-6 sticky top-0 bg-card pb-2 z-10">
               <div>
                 <h4 className="text-xl font-extrabold flex items-center gap-2">
                   📜 Historial de Estados
@@ -1388,70 +1432,87 @@ export default function OrdersView() {
               </div>
             ) : (
               <>
-                {/* Dashboard de Estadísticas MEJORADO */}
+                {/* Dashboard de Estadísticas con GRÁFICO DE TORTA */}
                 {(() => {
                   const stats = getHistoryStats();
                   const formatTime = (ms: number) => {
                     const hours = Math.floor(ms / (1000 * 60 * 60));
                     const minutes = Math.floor((ms % (1000 * 60 * 60)) / (1000 * 60));
-                    if (hours > 24) return `${Math.floor(hours / 24)} días ${hours % 24} hs`;
-                    if (hours > 0) return `${hours} hs ${minutes} min`;
-                    return `${minutes} min`;
+                    if (hours > 24) return `${Math.floor(hours / 24)}d ${hours % 24}h`;
+                    if (hours > 0) return `${hours}h ${minutes}m`;
+                    return `${minutes}m`;
                   };
                   
                   return (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                      <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-4 text-white shadow-lg">
-                        <div className="text-3xl font-bold">{stats.totalChanges}</div>
-                        <div className="text-sm opacity-90">Cambios totales</div>
-                      </div>
-                      <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl p-4 text-white shadow-lg">
-                        <div className="text-3xl font-bold">{stats.uniqueUsers}</div>
-                        <div className="text-sm opacity-90">Usuarios distintos</div>
-                      </div>
-                      <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl p-4 text-white shadow-lg">
-                        <div className="text-3xl font-bold">{stats.mostCommonStatus?.[1] || 0}</div>
-                        <div className="text-sm opacity-90">Estado más usado</div>
-                        <div className="text-xs font-mono mt-1 truncate">{stats.mostCommonStatus?.[0] || '—'}</div>
-                      </div>
-                      <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl p-4 text-white shadow-lg">
-                        <div className="text-3xl font-bold">{orderHistory[0]?.new_status || '—'}</div>
-                        <div className="text-sm opacity-90">Estado actual</div>
-                      </div>
-                      {stats.mostActiveUser && (
-                        <div className="bg-gradient-to-br from-teal-500 to-teal-600 rounded-xl p-4 text-white shadow-lg col-span-1 sm:col-span-2">
-                          <div className="flex items-center justify-between">
-                            <div>
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+                      {/* Tarjetas de estadísticas - columna izquierda */}
+                      <div className="lg:col-span-2">
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-4 text-white shadow-lg">
+                            <div className="text-3xl font-bold">{stats.totalChanges}</div>
+                            <div className="text-sm opacity-90">Cambios totales</div>
+                          </div>
+                          <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl p-4 text-white shadow-lg">
+                            <div className="text-3xl font-bold">{stats.uniqueUsers}</div>
+                            <div className="text-sm opacity-90">Usuarios distintos</div>
+                          </div>
+                          <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl p-4 text-white shadow-lg">
+                            <div className="text-3xl font-bold">{stats.mostCommonStatus?.[1] || 0}</div>
+                            <div className="text-sm opacity-90">Estado más usado</div>
+                            <div className="text-xs font-mono mt-1 truncate">{stats.mostCommonStatus?.[0] || '—'}</div>
+                          </div>
+                          <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl p-4 text-white shadow-lg">
+                            <div className="text-3xl font-bold">{orderHistory[0]?.new_status || '—'}</div>
+                            <div className="text-sm opacity-90">Estado actual</div>
+                          </div>
+                          {stats.mostActiveUser && (
+                            <div className="bg-gradient-to-br from-teal-500 to-teal-600 rounded-xl p-4 text-white shadow-lg">
                               <div className="text-sm opacity-90">Usuario más activo</div>
                               <div className="text-lg font-bold truncate">{stats.mostActiveUser[0]}</div>
+                              <div className="text-2xl font-bold mt-1">{stats.mostActiveUser[1]} cambios</div>
                             </div>
-                            <div className="text-3xl font-bold">{stats.mostActiveUser[1]}</div>
-                          </div>
+                          )}
+                          {stats.mostActiveRole && (
+                            <div className="bg-gradient-to-br from-pink-500 to-pink-600 rounded-xl p-4 text-white shadow-lg">
+                              <div className="text-sm opacity-90">Rol más activo</div>
+                              <div className="text-lg font-bold">{stats.mostActiveRole[0]}</div>
+                              <div className="text-2xl font-bold mt-1">{stats.mostActiveRole[1]} cambios</div>
+                            </div>
+                          )}
+                          {stats.avgTimeBetweenChanges > 0 && (
+                            <div className="bg-gradient-to-br from-indigo-500 to-indigo-600 rounded-xl p-4 text-white shadow-lg col-span-1 sm:col-span-2">
+                              <div className="text-sm opacity-90">Tiempo promedio entre cambios</div>
+                              <div className="text-2xl font-bold">{formatTime(stats.avgTimeBetweenChanges)}</div>
+                            </div>
+                          )}
                         </div>
-                      )}
-                      {stats.avgTimeBetweenChanges > 0 && (
-                        <div className="bg-gradient-to-br from-pink-500 to-pink-600 rounded-xl p-4 text-white shadow-lg col-span-1 sm:col-span-2">
-                          <div>
-                            <div className="text-sm opacity-90">Tiempo promedio entre cambios</div>
-                            <div className="text-2xl font-bold">{formatTime(stats.avgTimeBetweenChanges)}</div>
-                          </div>
-                        </div>
-                      )}
+                      </div>
+                      
+                      {/* GRÁFICO DE TORTA - columna derecha */}
+                      <div className="bg-gradient-to-br from-gray-800 to-gray-900 dark:from-gray-900 dark:to-gray-950 rounded-xl p-4 shadow-lg flex flex-col items-center justify-center">
+                        <h5 className="text-white text-sm font-medium mb-3">Distribución de Estados</h5>
+                        <SimplePieChart data={stats.statusDistribution} />
+                      </div>
                     </div>
                   );
                 })()}
 
                 {/* Timeline de cambios */}
-                <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
+                <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2 mt-4">
                   {orderHistory.map((item) => (
-                    <HistoryTimelineItem key={item.id} item={item} statusClass={statusClass} />
+                    <HistoryTimelineItem 
+                      key={item.id} 
+                      item={item} 
+                      statusClass={statusClass}
+                      onImageClick={(url) => setFullImageUrl(url)}
+                    />
                   ))}
                 </div>
               </>
             )}
             
             {/* Footer */}
-            <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
+            <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border sticky bottom-0 bg-card">
               <button className="nav-btn" onClick={() => setHistoryModalOpen(false)}>
                 Cerrar
               </button>
@@ -1471,6 +1532,25 @@ export default function OrdersView() {
           </div>
         </div>,
         document.body
+      )}
+
+      {/* Modal de imagen ampliada */}
+      {fullImageUrl && (
+        <div className="fixed inset-0 bg-black/90 z-[10001] flex items-center justify-center p-4" onClick={() => setFullImageUrl(null)}>
+          <div className="relative max-w-5xl max-h-[90vh]">
+            <img 
+              src={fullImageUrl} 
+              alt="Captura ampliada" 
+              className="max-w-full max-h-[90vh] object-contain rounded-lg"
+            />
+            <button
+              onClick={() => setFullImageUrl(null)}
+              className="absolute -top-10 right-0 text-white hover:text-gray-300 text-2xl"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
