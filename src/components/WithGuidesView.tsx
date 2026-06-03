@@ -42,53 +42,105 @@ export default function WithGuidesView() {
   const [qrLoaded, setQrLoaded] = useState(false);
   const qrWaRef = useRef<HTMLDivElement>(null);
   const qrDeliveryRef = useRef<HTMLDivElement>(null);
+  const [qrGenerationAttempts, setQrGenerationAttempts] = useState(0);
 
+  // Cargar script de QRCode
   useEffect(() => {
     if (typeof window !== 'undefined' && !window.QRCode) {
       const script = document.createElement('script');
       script.src = 'https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js';
       script.async = true;
-      script.onload = () => { setQrLoaded(true); };
+      script.onload = () => { 
+        console.log('QRCode script loaded');
+        setQrLoaded(true); 
+      };
+      script.onerror = () => {
+        console.error('Failed to load QRCode script');
+        toast.error('Error cargando el generador de QR');
+      };
       document.body.appendChild(script);
     } else if (window.QRCode) {
+      console.log('QRCode already loaded');
       setQrLoaded(true);
     }
   }, []);
 
+  // Generar QR cuando se abre el modal
   useEffect(() => {
     if (showGuideModal && currentOrder && qrLoaded) {
-      if (qrWaRef.current) qrWaRef.current.innerHTML = '';
-      if (qrDeliveryRef.current) qrDeliveryRef.current.innerHTML = '';
-      
+      // Pequeño delay para asegurar que el DOM está listo
+      setTimeout(() => {
+        generateQRCodes();
+      }, 100);
+    }
+  }, [showGuideModal, currentOrder, qrLoaded, qrGenerationAttempts]);
+
+  const generateQRCodes = () => {
+    try {
+      // Limpiar contenedores
+      if (qrWaRef.current) {
+        qrWaRef.current.innerHTML = '';
+      }
+      if (qrDeliveryRef.current) {
+        qrDeliveryRef.current.innerHTML = '';
+      }
+
+      // Generar QR de WhatsApp
       const whatsappUrl = getWhatsAppUrl(currentOrder);
-      if (whatsappUrl && whatsappUrl !== '#') {
-        new window.QRCode(qrWaRef.current, {
-          text: whatsappUrl,
-          width: 120,
-          height: 120,
-          colorDark: '#000000',
-          colorLight: '#ffffff',
-          correctLevel: window.QRCode.CorrectLevel.L
-        });
+      console.log('WhatsApp URL:', whatsappUrl);
+      
+      if (whatsappUrl && whatsappUrl !== '#' && qrWaRef.current && window.QRCode) {
+        try {
+          new window.QRCode(qrWaRef.current, {
+            text: whatsappUrl,
+            width: 150, // Aumentado para mejor legibilidad
+            height: 150,
+            colorDark: '#000000',
+            colorLight: '#ffffff',
+            correctLevel: window.QRCode.CorrectLevel.H // Mayor nivel de corrección
+          });
+          console.log('WhatsApp QR generado correctamente');
+        } catch (err) {
+          console.error('Error generando QR de WhatsApp:', err);
+          qrWaRef.current.innerHTML = '<div class="text-red-500 text-xs">Error al generar QR</div>';
+        }
+      } else {
+        if (qrWaRef.current) {
+          qrWaRef.current.innerHTML = '<div class="text-orange-500 text-xs">Sin número de teléfono válido</div>';
+        }
       }
       
+      // Generar QR de Delivery
       const orderNumber = currentOrder.order_number;
-      if (orderNumber) {
+      if (orderNumber && qrDeliveryRef.current && window.QRCode) {
         const cleanOrderNumber = String(orderNumber).trim();
         const deliveryUrl = window.location.origin + '/#/asignar-pedidos?id=' + encodeURIComponent(cleanOrderNumber);
-        new window.QRCode(qrDeliveryRef.current, {
-          text: deliveryUrl,
-          width: 120,
-          height: 120,
-          colorDark: '#000000',
-          colorLight: '#ffffff',
-          correctLevel: window.QRCode.CorrectLevel.L
-        });
+        console.log('Delivery URL:', deliveryUrl);
+        
+        try {
+          new window.QRCode(qrDeliveryRef.current, {
+            text: deliveryUrl,
+            width: 150,
+            height: 150,
+            colorDark: '#000000',
+            colorLight: '#ffffff',
+            correctLevel: window.QRCode.CorrectLevel.H
+          });
+          console.log('Delivery QR generado correctamente');
+        } catch (err) {
+          console.error('Error generando QR de Delivery:', err);
+          qrDeliveryRef.current.innerHTML = '<div class="text-red-500 text-xs">Error al generar QR</div>';
+        }
       } else {
-        toast.error('Este pedido no tiene número de orden');
+        if (qrDeliveryRef.current) {
+          qrDeliveryRef.current.innerHTML = '<div class="text-orange-500 text-xs">Sin número de orden</div>';
+        }
       }
+    } catch (error) {
+      console.error('Error general generando QRs:', error);
+      toast.error('Error al generar los códigos QR');
     }
-  }, [showGuideModal, currentOrder, qrLoaded]);
+  };
 
   const load = async () => {
     setLoading(true);
@@ -120,6 +172,172 @@ export default function WithGuidesView() {
 
   useEffect(() => { load(); }, [dateFrom, dateTo, status2Filter]);
   useEffect(() => { if (search && search.trim()) load(); }, [search]);
+
+  // MEJORA: Función mejorada para el mensaje de WhatsApp
+  const getWhatsAppUrl = (order: any) => {
+    if (!order.phone) {
+      console.warn('Pedido sin teléfono:', order.id);
+      return '#';
+    }
+
+    // Limpiar y validar el número de teléfono
+    let phoneNumber = order.phone.replace(/\D/g, '');
+    
+    // Formatear número para Paraguay
+    if (!phoneNumber.startsWith('595')) {
+      if (phoneNumber.startsWith('0')) {
+        phoneNumber = '595' + phoneNumber.substring(1);
+      } else if (phoneNumber.length === 9) {
+        phoneNumber = '595' + phoneNumber;
+      } else if (phoneNumber.length === 8) {
+        phoneNumber = '5959' + phoneNumber;
+      } else {
+        phoneNumber = '595' + phoneNumber;
+      }
+    }
+
+    // Verificar que el número tenga al menos 12 dígitos (595 + 9 dígitos)
+    if (phoneNumber.length < 12) {
+      console.warn('Número de teléfono inválido:', phoneNumber);
+      return '#';
+    }
+
+    // Crear mensaje más simple y limpio para evitar problemas
+    const items = typeof order.items_json === 'string' ? JSON.parse(order.items_json) : (order.items_json || []);
+    const totalItems = items.reduce((sum: number, it: any) => sum + (Number(it.qty) || 1), 0);
+    
+    // Mensaje más corto y conciso para evitar problemas de codificación
+    const message = `Hola ${order.customer_name || 'cliente'}, soy del delivery. Para entregarte tu pedido #${order.order_number || order.id.slice(0, 8)} (${totalItems} producto${totalItems !== 1 ? 's' : ''}), necesito tu ubicación exacta.`;
+
+    const encodedMessage = encodeURIComponent(message);
+    const whatsappUrl = `https://wa.me/${phoneNumber}?text=${encodedMessage}`;
+    
+    console.log('WhatsApp URL generada:', whatsappUrl);
+    return whatsappUrl;
+  };
+
+  const buildGuideText = (o: any) => {
+    const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
+    const itemsText = items.map((it: any, i: number) =>
+      `${i + 1}. ${it.title || it.sku || 'Item'} x${it.qty || 1} — Gs ${nf(Number(it.sale_gs || 0) * Number(it.qty || 1))}`
+    ).join('\n');
+
+    return [
+      `GUÍA DE ENVÍO — ${o.order_number || o.id.slice(0, 8)}`,
+      `━━━━━━━━━━━━━━━━━━`,
+      `Cliente: ${o.customer_name || ''}`,
+      `Teléfono: ${o.phone || ''}`,
+      `Email: ${o.email || ''}`,
+      `Departamento: ${o.departamento || ''}`,
+      `Ciudad: ${o.city || ''}`,
+      `Dirección: ${o.street || ''} ${o.district ? '- ' + o.district : ''}`,
+      `━━━━━━━━━━━━━━━━━━`,
+      `Productos:`,
+      itemsText,
+      `━━━━━━━━━━━━━━━━━━`,
+      `Total: Gs ${nf(Number(o.total_gs || 0))}`,
+      o.obs ? `Observación: ${o.obs}` : '',
+      `━━━━━━━━━━━━━━━━━━`,
+      `Vendedor: ${o.created_by || ''}`,
+      `Proveedor: ${o.provider_emails_list || o.provider_email || '—'}`,
+    ].filter(Boolean).join('\n');
+  };
+
+  const openGuideModal = (order: any) => {
+    setCurrentOrder(order);
+    setShowGuideModal(true);
+    // Incrementar contador para forzar regeneración si es necesario
+    setQrGenerationAttempts(prev => prev + 1);
+  };
+
+  // Resto de tus funciones (copyGuide, toggleSelect, etc.) se mantienen igual...
+  const copyGuide = () => {
+    if (currentOrder) {
+      const text = buildGuideText(currentOrder);
+      navigator.clipboard.writeText(text);
+      toast.success('Guía copiada al portapapeles');
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
+  };
+
+  const getSelectedOrders = () => visibleOrders.filter(o => selectedIds.has(o.id));
+
+  const bulkCopyGuides = () => {
+    const selected = getSelectedOrders();
+    if (selected.length === 0) { toast.error('Seleccioná pedidos primero'); return; }
+    const allText = selected.map(o => buildGuideText(o)).join('\n\n════════════════════\n\n');
+    navigator.clipboard.writeText(allText);
+    toast.success(`${selected.length} guías copiadas`);
+  };
+
+  const bulkMarkAsGuiaGenerada = async () => {
+    const selected = getSelectedOrders();
+    if (selected.length === 0) { toast.error('Seleccioná pedidos primero'); return; }
+    const toastId = toast.loading(`Actualizando ${selected.length} pedido${selected.length > 1 ? 's' : ''}...`);
+    try {
+      const updates = selected.map(order =>
+        supabase.from('orders').update({ status2: 'GUIA GENERADA', updated_at: new Date().toISOString() }).eq('id', order.id)
+      );
+      const results = await Promise.all(updates);
+      const errors = results.filter(r => r.error);
+      if (errors.length > 0) {
+        toast.error(`${errors.length} error${errors.length > 1 ? 'es' : ''} al actualizar`, { id: toastId });
+      } else {
+        toast.success(`${selected.length} pedido${selected.length > 1 ? 's' : ''} marcado${selected.length > 1 ? 's' : ''} como GUIA GENERADA`, { id: toastId });
+        setOrders(prev => prev.map(o => selectedIds.has(o.id) ? { ...o, status2: 'GUIA GENERADA' } : o));
+        setSelectedIds(new Set());
+      }
+    } catch (error) {
+      toast.error('Error al actualizar los pedidos', { id: toastId });
+    }
+  };
+
+  const selectAllPending = () => {
+    const allPendingIds = pendingGuides.map(o => o.id);
+    if (allPendingIds.length === 0) { toast.error('No hay pedidos pendientes'); return; }
+    setSelectedIds(new Set(allPendingIds));
+    toast.success(`${allPendingIds.length} pedido${allPendingIds.length > 1 ? 's' : ''} pendiente${allPendingIds.length > 1 ? 's' : ''} seleccionado${allPendingIds.length > 1 ? 's' : ''}`);
+  };
+
+  const clearSelection = () => {
+    if (selectedIds.size === 0) return;
+    setSelectedIds(new Set());
+    toast.success('Selección limpiada');
+  };
+
+  const downloadFile = (content: string, filename: string, mime: string) => {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click();
+    document.body.removeChild(a); URL.revokeObjectURL(url);
+  };
+
+  const downloadTxt = () => {
+    const selected = getSelectedOrders();
+    if (selected.length === 0) { toast.error('Seleccioná pedidos primero'); return; }
+    const content = selected.map(o => buildGuideText(o)).join('\n\n════════════════════\n\n');
+    downloadFile(content, `guias_${new Date().toISOString().slice(0, 10)}.txt`, 'text/plain');
+    toast.success(`${selected.length} guías descargadas en TXT`);
+  };
+
+  // Función para probar el QR manualmente
+  const testWhatsAppLink = () => {
+    if (currentOrder && currentOrder.phone) {
+      const url = getWhatsAppUrl(currentOrder);
+      if (url && url !== '#') {
+        window.open(url, '_blank');
+      } else {
+        toast.error('No se pudo generar el enlace de WhatsApp');
+      }
+    }
+  };
+
+  // Mantén todas tus funciones de impresión (printWithQR, printThermal) igual...
 
   const allProviders = useMemo(() => {
     if (role === 'PROVEEDOR') return [];
@@ -211,132 +429,7 @@ export default function WithGuidesView() {
     }
   };
 
-  const buildGuideText = (o: any) => {
-    const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
-    const itemsText = items.map((it: any, i: number) =>
-      `${i + 1}. ${it.title || it.sku || 'Item'} x${it.qty || 1} — Gs ${nf(Number(it.sale_gs || 0) * Number(it.qty || 1))}`
-    ).join('\n');
-
-    return [
-      `GUÍA DE ENVÍO — ${o.order_number || o.id.slice(0, 8)}`,
-      `━━━━━━━━━━━━━━━━━━`,
-      `Cliente: ${o.customer_name || ''}`,
-      `Teléfono: ${o.phone || ''}`,
-      `Email: ${o.email || ''}`,
-      `Departamento: ${o.departamento || ''}`,
-      `Ciudad: ${o.city || ''}`,
-      `Dirección: ${o.street || ''} ${o.district ? '- ' + o.district : ''}`,
-      `━━━━━━━━━━━━━━━━━━`,
-      `Productos:`,
-      itemsText,
-      `━━━━━━━━━━━━━━━━━━`,
-      `Total: Gs ${nf(Number(o.total_gs || 0))}`,
-      o.obs ? `Observación: ${o.obs}` : '',
-      `━━━━━━━━━━━━━━━━━━`,
-      `Vendedor: ${o.created_by || ''}`,
-      `Proveedor: ${o.provider_emails_list || o.provider_email || '—'}`,
-    ].filter(Boolean).join('\n');
-  };
-
-  // ─── CAMBIO PRINCIPAL: getWhatsAppUrl ahora incluye la guía completa ─────
-  const getWhatsAppUrl = (order: any) => {
-    if (!order.phone) return '#';
-
-    const guideDetails = buildGuideText(order);
-    const message = `Buenas, le escribo del área de delivery para entregarle su pedido. Por favor, ¿me podría enviar su ubicación exacta?\n\nDetalle de su pedido:\n\n${guideDetails}`;
-
-    let phoneNumber = order.phone.replace(/\D/g, '');
-    if (!phoneNumber.startsWith('595')) {
-      if (phoneNumber.startsWith('0')) {
-        phoneNumber = '595' + phoneNumber.substring(1);
-      } else if (phoneNumber.length === 9) {
-        phoneNumber = '595' + phoneNumber;
-      } else {
-        phoneNumber = '595' + phoneNumber;
-      }
-    }
-    return 'https://wa.me/' + phoneNumber + '?text=' + encodeURIComponent(message);
-  };
-
-  const openGuideModal = (order: any) => {
-    setCurrentOrder(order);
-    setShowGuideModal(true);
-  };
-
-  const copyGuide = () => {
-    if (currentOrder) {
-      const text = buildGuideText(currentOrder);
-      navigator.clipboard.writeText(text);
-      toast.success('Guía copiada al portapapeles');
-    }
-  };
-
-  const toggleSelect = (id: string) => {
-    setSelectedIds(prev => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
-  };
-
-  const getSelectedOrders = () => visibleOrders.filter(o => selectedIds.has(o.id));
-
-  const bulkCopyGuides = () => {
-    const selected = getSelectedOrders();
-    if (selected.length === 0) { toast.error('Seleccioná pedidos primero'); return; }
-    const allText = selected.map(o => buildGuideText(o)).join('\n\n════════════════════\n\n');
-    navigator.clipboard.writeText(allText);
-    toast.success(`${selected.length} guías copiadas`);
-  };
-
-  const bulkMarkAsGuiaGenerada = async () => {
-    const selected = getSelectedOrders();
-    if (selected.length === 0) { toast.error('Seleccioná pedidos primero'); return; }
-    const toastId = toast.loading(`Actualizando ${selected.length} pedido${selected.length > 1 ? 's' : ''}...`);
-    try {
-      const updates = selected.map(order =>
-        supabase.from('orders').update({ status2: 'GUIA GENERADA', updated_at: new Date().toISOString() }).eq('id', order.id)
-      );
-      const results = await Promise.all(updates);
-      const errors = results.filter(r => r.error);
-      if (errors.length > 0) {
-        toast.error(`${errors.length} error${errors.length > 1 ? 'es' : ''} al actualizar`, { id: toastId });
-      } else {
-        toast.success(`${selected.length} pedido${selected.length > 1 ? 's' : ''} marcado${selected.length > 1 ? 's' : ''} como GUIA GENERADA`, { id: toastId });
-        setOrders(prev => prev.map(o => selectedIds.has(o.id) ? { ...o, status2: 'GUIA GENERADA' } : o));
-        setSelectedIds(new Set());
-      }
-    } catch (error) {
-      toast.error('Error al actualizar los pedidos', { id: toastId });
-    }
-  };
-
-  const selectAllPending = () => {
-    const allPendingIds = pendingGuides.map(o => o.id);
-    if (allPendingIds.length === 0) { toast.error('No hay pedidos pendientes'); return; }
-    setSelectedIds(new Set(allPendingIds));
-    toast.success(`${allPendingIds.length} pedido${allPendingIds.length > 1 ? 's' : ''} pendiente${allPendingIds.length > 1 ? 's' : ''} seleccionado${allPendingIds.length > 1 ? 's' : ''}`);
-  };
-
-  const clearSelection = () => {
-    if (selectedIds.size === 0) return;
-    setSelectedIds(new Set());
-    toast.success('Selección limpiada');
-  };
-
-  const downloadFile = (content: string, filename: string, mime: string) => {
-    const blob = new Blob([content], { type: mime });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = filename;
-    document.body.appendChild(a); a.click();
-    document.body.removeChild(a); URL.revokeObjectURL(url);
-  };
-
-  const downloadTxt = () => {
-    const selected = getSelectedOrders();
-    if (selected.length === 0) { toast.error('Seleccioná pedidos primero'); return; }
-    const content = selected.map(o => buildGuideText(o)).join('\n\n════════════════════\n\n');
-    downloadFile(content, `guias_${new Date().toISOString().slice(0, 10)}.txt`, 'text/plain');
-    toast.success(`${selected.length} guías descargadas en TXT`);
-  };
-
+  // Funciones de impresión (mantenerlas como estaban)
   const printWithQR = () => {
     const selected = getSelectedOrders();
     if (selected.length === 0) { toast.error('Seleccioná pedidos primero'); return; }
@@ -437,7 +530,7 @@ export default function WithGuidesView() {
               if (el.children.length === 0) {
                 var url = el.getAttribute('data-url');
                 if (url && url !== '#' && url !== '') {
-                  try { new QRCode(el, { text: url, width: 120, height: 120, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.L }); }
+                  try { new QRCode(el, { text: url, width: 120, height: 120, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.H }); }
                   catch(e) { el.innerHTML = '<div style="color:red;font-size:10px;">Error QR</div>'; }
                 } else { el.innerHTML = '<div style="color:orange;font-size:10px;">Sin teléfono</div>'; }
               }
@@ -446,7 +539,7 @@ export default function WithGuidesView() {
               if (el.children.length === 0) {
                 var url = el.getAttribute('data-url');
                 if (url && url !== '#') {
-                  try { new QRCode(el, { text: url, width: 120, height: 120, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.L }); }
+                  try { new QRCode(el, { text: url, width: 120, height: 120, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.H }); }
                   catch(e) { el.innerHTML = '<div style="color:red;font-size:10px;">Error QR</div>'; }
                 } else { el.innerHTML = '<div style="color:orange;font-size:10px;">Sin número de orden</div>'; }
               }
@@ -604,7 +697,7 @@ export default function WithGuidesView() {
               if (el.children.length === 0) {
                 var url = el.getAttribute('data-url');
                 if (url && url !== '#' && url !== '') {
-                  try { new QRCode(el, { text: url, width: 120, height: 120 }); }
+                  try { new QRCode(el, { text: url, width: 120, height: 120, correctLevel: QRCode.CorrectLevel.H }); }
                   catch(e) { el.innerHTML = '<div style="font-size:8px;color:red;">Error QR</div>'; }
                 } else { el.innerHTML = '<div style="font-size:8px;color:orange;">Sin teléfono</div>'; }
               }
@@ -613,7 +706,7 @@ export default function WithGuidesView() {
               if (el.children.length === 0) {
                 var url = el.getAttribute('data-url');
                 if (url && url !== '#') {
-                  try { new QRCode(el, { text: url, width: 120, height: 120 }); }
+                  try { new QRCode(el, { text: url, width: 120, height: 120, correctLevel: QRCode.CorrectLevel.H }); }
                   catch(e) { el.innerHTML = '<div style="font-size:8px;color:red;">Error QR</div>'; }
                 } else { el.innerHTML = '<div style="font-size:8px;color:orange;">Sin número de orden</div>'; }
               }
@@ -846,7 +939,7 @@ export default function WithGuidesView() {
         </table>
       </div>
 
-      {/* MODAL DE GUÍA CON QR */}
+      {/* MODAL DE GUÍA CON QR MEJORADO */}
       {showGuideModal && currentOrder && (
         <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-4" onClick={() => setShowGuideModal(false)}>
           <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
@@ -880,12 +973,12 @@ export default function WithGuidesView() {
               <div className="flex justify-center gap-8">
                 <div className="text-center">
                   <div className="text-sm font-semibold text-green-600 mb-2">📱 QR Cliente</div>
-                  <div ref={qrWaRef} style={{ width: 120, height: 120, margin: '0 auto' }}></div>
+                  <div ref={qrWaRef} style={{ width: 150, height: 150, margin: '0 auto' }}></div>
                   <div className="text-xs text-gray-500 mt-2">WhatsApp con detalles del pedido + ubicación</div>
                 </div>
                 <div className="text-center">
                   <div className="text-sm font-semibold text-orange-600 mb-2">🚚 QR Delivery</div>
-                  <div ref={qrDeliveryRef} style={{ width: 120, height: 120, margin: '0 auto' }}></div>
+                  <div ref={qrDeliveryRef} style={{ width: 150, height: 150, margin: '0 auto' }}></div>
                   <div className="text-xs text-gray-500 mt-2">Escanea para asignar pedido</div>
                 </div>
               </div>
@@ -897,6 +990,13 @@ export default function WithGuidesView() {
                 const text = buildGuideText(currentOrder);
                 downloadFile(text, `guia_${currentOrder.order_number || currentOrder.id.slice(0, 8)}.txt`, 'text/plain');
               }}>📥 TXT</button>
+              <button 
+                className="nav-btn" 
+                onClick={testWhatsAppLink}
+                style={{ background: '#25D366', color: 'white' }}
+              >
+                📱 Probar QR WhatsApp
+              </button>
             </div>
           </div>
         </div>
