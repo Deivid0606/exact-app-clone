@@ -63,7 +63,7 @@ function isProviderAllowed(order: any, userEmail: string): boolean {
   return norm(orderProviderEmail) === norm(userEmail);
 }
 
-// Modal para solicitar comentario y captura
+// Modal para solicitar comentario y captura MEJORADO
 function StatusChangeModal({ 
   isOpen, 
   onClose, 
@@ -80,6 +80,7 @@ function StatusChangeModal({
   const [message, setMessage] = useState('');
   const [attachment, setAttachment] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
 
   if (!isOpen) return null;
 
@@ -92,6 +93,32 @@ function StatusChangeModal({
         setPreview(reader.result as string);
       };
       reader.readAsDataURL(file);
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.type.startsWith('image/')) {
+      setAttachment(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    } else {
+      toast.error('Por favor, sube un archivo de imagen válido');
     }
   };
 
@@ -110,9 +137,12 @@ function StatusChangeModal({
   return createPortal(
     <div className="fixed inset-0 bg-black/70 z-[10000] flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
-        <h3 className="text-xl font-bold mb-4">
-          Cambiar a {newStatus}
-        </h3>
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-xl font-bold">
+            Cambiar a {newStatus}
+          </h3>
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground">✕</button>
+        </div>
         
         <div className="space-y-4">
           <div>
@@ -132,15 +162,52 @@ function StatusChangeModal({
             <label className="block text-sm font-medium mb-2">
               Captura de pantalla <span className="text-red-500">*</span>
             </label>
-            <input
-              type="file"
-              accept="image/*"
-              onChange={handleFileChange}
-              className="app-input w-full"
-            />
+            <div
+              className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors ${
+                isDragging ? 'border-primary bg-primary/10' : 'border-border'
+              }`}
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+            >
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleFileChange}
+                className="hidden"
+                id="file-upload"
+              />
+              <label
+                htmlFor="file-upload"
+                className="cursor-pointer flex flex-col items-center gap-2"
+              >
+                <span className="text-2xl">📸</span>
+                <span className="text-sm text-muted-foreground">
+                  Haz clic o arrastra una imagen aquí
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  PNG, JPG, GIF hasta 5MB
+                </span>
+              </label>
+            </div>
             {preview && (
-              <div className="mt-2">
-                <img src={preview} alt="Preview" className="max-h-32 rounded-lg border" />
+              <div className="mt-3">
+                <div className="relative inline-block">
+                  <img 
+                    src={preview} 
+                    alt="Preview" 
+                    className="max-h-40 rounded-lg border shadow-sm"
+                  />
+                  <button
+                    onClick={() => {
+                      setAttachment(null);
+                      setPreview(null);
+                    }}
+                    className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600"
+                  >
+                    ✕
+                  </button>
+                </div>
               </div>
             )}
           </div>
@@ -157,6 +224,116 @@ function StatusChangeModal({
       </div>
     </div>,
     document.body
+  );
+}
+
+// Componente de Timeline para el historial
+function HistoryTimelineItem({ item, statusClass }: { item: HistoryEntry; statusClass: (s: string) => string }) {
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const [showFullImage, setShowFullImage] = useState(false);
+
+  return (
+    <div className="relative pl-8 pb-6 last:pb-0 before:content-[''] before:absolute before:left-3 before:top-0 before:bottom-0 before:w-0.5 before:bg-gradient-to-b before:from-primary before:to-transparent">
+      {/* Círculo de timeline */}
+      <div className="absolute left-0 top-1 w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center ring-4 ring-background">
+        <div className="w-2 h-2 rounded-full bg-primary"></div>
+      </div>
+      
+      <div className="bg-background border border-border rounded-xl p-4 hover:shadow-lg transition-all duration-200">
+        {/* Header del cambio */}
+        <div className="flex flex-wrap justify-between items-start gap-2 mb-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-mono bg-muted px-2 py-1 rounded-md">
+              {new Date(item.created_at).toLocaleString('es-PY', {
+                day: '2-digit', month: '2-digit', year: 'numeric',
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+              })}
+            </span>
+            <span className={`text-xs px-2 py-1 rounded-full font-medium ${
+              item.changed_by_role === 'ADMIN' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+              item.changed_by_role === 'DELIVERY' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+              item.changed_by_role === 'PROVEEDOR' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
+              'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400'
+            }`}>
+              {item.changed_by_role || 'Usuario'}
+            </span>
+          </div>
+          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+            <span>👤</span>
+            <span className="font-mono">{item.changed_by_email}</span>
+          </div>
+        </div>
+        
+        {/* Cambio de estado */}
+        <div className="flex items-center gap-3 flex-wrap mb-3 p-3 bg-muted/20 rounded-lg">
+          <span className={`text-sm font-medium px-3 py-1 rounded-full ${statusClass(item.previous_status || 'PENDIENTE')} bg-opacity-20`}>
+            {item.previous_status || '—'}
+          </span>
+          <span className="text-muted-foreground text-lg">→</span>
+          <span className={`text-sm font-bold px-3 py-1 rounded-full ${statusClass(item.new_status)}`}>
+            {item.new_status}
+          </span>
+        </div>
+        
+        {/* Mensaje si existe */}
+        {item.message && (
+          <div className="mt-3 p-3 bg-blue-50 dark:bg-blue-950/30 rounded-lg border-l-4 border-blue-500">
+            <div className="flex items-start gap-2">
+              <span className="text-base">💬</span>
+              <div className="flex-1">
+                <div className="text-xs font-medium text-muted-foreground mb-1">Comentario:</div>
+                <div className="text-sm whitespace-pre-wrap">{item.message}</div>
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {/* Adjunto si existe */}
+        {item.attachment_url && (
+          <div className="mt-3">
+            {!showFullImage ? (
+              <div 
+                className="relative cursor-pointer group"
+                onClick={() => setShowFullImage(true)}
+              >
+                <img 
+                  src={item.attachment_url} 
+                  alt="Captura adjunta" 
+                  className="max-h-32 rounded-lg border shadow-sm object-cover"
+                  onLoad={() => setImageLoaded(true)}
+                />
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-lg flex items-center justify-center">
+                  <span className="text-white text-sm">🔍 Ampliar</span>
+                </div>
+              </div>
+            ) : (
+              <div className="fixed inset-0 bg-black/90 z-[10001] flex items-center justify-center p-4" onClick={() => setShowFullImage(false)}>
+                <div className="relative max-w-4xl max-h-[90vh]">
+                  <img 
+                    src={item.attachment_url} 
+                    alt="Captura adjunta ampliada" 
+                    className="max-w-full max-h-[90vh] object-contain rounded-lg"
+                  />
+                  <button
+                    onClick={() => setShowFullImage(false)}
+                    className="absolute -top-10 right-0 text-white hover:text-gray-300 text-2xl"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            )}
+            <button
+              onClick={() => window.open(item.attachment_url!, '_blank')}
+              className="mt-2 flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 bg-blue-50 dark:bg-blue-950/30 px-3 py-1.5 rounded-lg transition-colors"
+            >
+              <span>🖼️</span>
+              <span>Abrir en nueva pestaña</span>
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -701,17 +878,39 @@ export default function OrdersView() {
     return 'badge-pendiente';
   };
 
-  // Función para obtener estadísticas del historial
+  // Función para obtener estadísticas del historial MEJORADA
   const getHistoryStats = () => {
     const totalChanges = orderHistory.length;
     const uniqueUsers = new Set(orderHistory.map(h => h.changed_by_email)).size;
     const statusCounts: Record<string, number> = {};
+    const userChanges: Record<string, number> = {};
+    
     orderHistory.forEach(h => {
       statusCounts[h.new_status] = (statusCounts[h.new_status] || 0) + 1;
+      userChanges[h.changed_by_email] = (userChanges[h.changed_by_email] || 0) + 1;
     });
-    const mostCommonStatus = Object.entries(statusCounts).sort((a, b) => b[1] - a[1])[0];
     
-    return { totalChanges, uniqueUsers, mostCommonStatus };
+    const mostCommonStatus = Object.entries(statusCounts).sort((a, b) => b[1] - a[1])[0];
+    const mostActiveUser = Object.entries(userChanges).sort((a, b) => b[1] - a[1])[0];
+    
+    // Calcular tiempo promedio entre cambios
+    let avgTimeBetweenChanges = 0;
+    if (orderHistory.length > 1) {
+      let totalDiff = 0;
+      for (let i = 0; i < orderHistory.length - 1; i++) {
+        const diff = new Date(orderHistory[i].created_at).getTime() - new Date(orderHistory[i + 1].created_at).getTime();
+        totalDiff += Math.abs(diff);
+      }
+      avgTimeBetweenChanges = totalDiff / (orderHistory.length - 1);
+    }
+    
+    return { 
+      totalChanges, 
+      uniqueUsers, 
+      mostCommonStatus,
+      mostActiveUser,
+      avgTimeBetweenChanges
+    };
   };
 
   const canEditStatus1 = role !== 'VENDEDOR';
@@ -1161,10 +1360,11 @@ export default function OrdersView() {
         uploading={uploadingFile}
       />
 
-      {/* Modal Historial de Estados con Dashboard Profesional */}
+      {/* Modal Historial de Estados con Dashboard Profesional MEJORADO */}
       {historyModalOpen && selectedOrder && createPortal(
         <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-2 sm:p-4" onClick={() => setHistoryModalOpen(false)}>
           <div className="bg-card border border-border rounded-2xl p-4 sm:p-6 w-full max-w-5xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            {/* Header */}
             <div className="flex justify-between items-start mb-6">
               <div>
                 <h4 className="text-xl font-extrabold flex items-center gap-2">
@@ -1188,101 +1388,69 @@ export default function OrdersView() {
               </div>
             ) : (
               <>
+                {/* Dashboard de Estadísticas MEJORADO */}
                 {(() => {
                   const stats = getHistoryStats();
+                  const formatTime = (ms: number) => {
+                    const hours = Math.floor(ms / (1000 * 60 * 60));
+                    const minutes = Math.floor((ms % (1000 * 60 * 60)) / (1000 * 60));
+                    if (hours > 24) return `${Math.floor(hours / 24)} días ${hours % 24} hs`;
+                    if (hours > 0) return `${hours} hs ${minutes} min`;
+                    return `${minutes} min`;
+                  };
+                  
                   return (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-                      <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-4 text-white">
+                      <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-4 text-white shadow-lg">
                         <div className="text-3xl font-bold">{stats.totalChanges}</div>
                         <div className="text-sm opacity-90">Cambios totales</div>
                       </div>
-                      <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl p-4 text-white">
+                      <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl p-4 text-white shadow-lg">
                         <div className="text-3xl font-bold">{stats.uniqueUsers}</div>
                         <div className="text-sm opacity-90">Usuarios distintos</div>
                       </div>
-                      <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl p-4 text-white">
+                      <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl p-4 text-white shadow-lg">
                         <div className="text-3xl font-bold">{stats.mostCommonStatus?.[1] || 0}</div>
                         <div className="text-sm opacity-90">Estado más usado</div>
-                        <div className="text-xs font-mono mt-1">{stats.mostCommonStatus?.[0] || '—'}</div>
+                        <div className="text-xs font-mono mt-1 truncate">{stats.mostCommonStatus?.[0] || '—'}</div>
                       </div>
-                      <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl p-4 text-white">
+                      <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl p-4 text-white shadow-lg">
                         <div className="text-3xl font-bold">{orderHistory[0]?.new_status || '—'}</div>
                         <div className="text-sm opacity-90">Estado actual</div>
                       </div>
+                      {stats.mostActiveUser && (
+                        <div className="bg-gradient-to-br from-teal-500 to-teal-600 rounded-xl p-4 text-white shadow-lg col-span-1 sm:col-span-2">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <div className="text-sm opacity-90">Usuario más activo</div>
+                              <div className="text-lg font-bold truncate">{stats.mostActiveUser[0]}</div>
+                            </div>
+                            <div className="text-3xl font-bold">{stats.mostActiveUser[1]}</div>
+                          </div>
+                        </div>
+                      )}
+                      {stats.avgTimeBetweenChanges > 0 && (
+                        <div className="bg-gradient-to-br from-pink-500 to-pink-600 rounded-xl p-4 text-white shadow-lg col-span-1 sm:col-span-2">
+                          <div>
+                            <div className="text-sm opacity-90">Tiempo promedio entre cambios</div>
+                            <div className="text-2xl font-bold">{formatTime(stats.avgTimeBetweenChanges)}</div>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })()}
 
+                {/* Timeline de cambios */}
                 <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
                   {orderHistory.map((item) => (
-                    <div key={item.id} className="relative pl-8 before:content-[''] before:absolute before:left-3 before:top-0 before:bottom-0 before:w-0.5 before:bg-border">
-                      <div className="absolute left-0 top-1 w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center">
-                        <div className="w-2 h-2 rounded-full bg-primary"></div>
-                      </div>
-                      
-                      <div className="bg-background border border-border rounded-lg p-4 hover:shadow-md transition-shadow">
-                        <div className="flex flex-wrap justify-between items-start gap-2 mb-3">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs font-mono bg-muted px-2 py-1 rounded">
-                              {new Date(item.created_at).toLocaleString('es-PY', {
-                                day: '2-digit', month: '2-digit', year: 'numeric',
-                                hour: '2-digit', minute: '2-digit', second: '2-digit'
-                              })}
-                            </span>
-                            <span className={`text-xs px-2 py-1 rounded-full ${
-                              item.changed_by_role === 'ADMIN' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
-                              item.changed_by_role === 'DELIVERY' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
-                              item.changed_by_role === 'PROVEEDOR' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
-                              'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400'
-                            }`}>
-                              {item.changed_by_role || 'Usuario'}
-                            </span>
-                          </div>
-                          <span className="text-xs text-muted-foreground font-mono">
-                            {item.changed_by_email}
-                          </span>
-                        </div>
-                        
-                        <div className="flex items-center gap-3 flex-wrap mb-3">
-                          <span className={`text-sm font-medium px-3 py-1 rounded-lg ${statusClass(item.previous_status || 'PENDIENTE')}`}>
-                            {item.previous_status || '—'}
-                          </span>
-                          <span className="text-muted-foreground text-lg">→</span>
-                          <span className={`text-sm font-bold px-3 py-1 rounded-lg ${statusClass(item.new_status)}`}>
-                            {item.new_status}
-                          </span>
-                        </div>
-                        
-                        {item.message && (
-                          <div className="mt-2 p-3 bg-muted/30 rounded-lg border-l-4 border-blue-500">
-                            <div className="flex items-start gap-2">
-                              <span className="text-base">💬</span>
-                              <div>
-                                <div className="text-xs font-medium text-muted-foreground mb-1">Mensaje:</div>
-                                <div className="text-sm">{item.message}</div>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                        
-                        {item.attachment_url && (
-                          <div className="mt-3">
-                            <button
-                              onClick={() => window.open(item.attachment_url!, '_blank')}
-                              className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 bg-blue-50 dark:bg-blue-950/30 px-3 py-2 rounded-lg transition-colors"
-                            >
-                              <span>🖼️</span>
-                              <span>Ver captura adjunta</span>
-                            </button>
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                    <HistoryTimelineItem key={item.id} item={item} statusClass={statusClass} />
                   ))}
                 </div>
               </>
             )}
             
+            {/* Footer */}
             <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
               <button className="nav-btn" onClick={() => setHistoryModalOpen(false)}>
                 Cerrar
@@ -1290,11 +1458,10 @@ export default function OrdersView() {
               <button 
                 className="nav-btn active"
                 onClick={() => {
-                  navigator.clipboard.writeText(
-                    orderHistory.map(h => 
-                      `[${new Date(h.created_at).toLocaleString('es-PY')}] ${h.changed_by_role} (${h.changed_by_email}): ${h.previous_status || '—'} → ${h.new_status}${h.message ? ` - Mensaje: ${h.message}` : ''}`
-                    ).join('\n')
-                  );
+                  const historyText = orderHistory.map(h => 
+                    `[${new Date(h.created_at).toLocaleString('es-PY')}] ${h.changed_by_role} (${h.changed_by_email}): ${h.previous_status || '—'} → ${h.new_status}${h.message ? `\n  💬 ${h.message}` : ''}${h.attachment_url ? `\n  📎 Ver captura: ${h.attachment_url}` : ''}`
+                  ).join('\n\n');
+                  navigator.clipboard.writeText(historyText);
                   toast.success('Historial copiado al portapapeles');
                 }}
               >
