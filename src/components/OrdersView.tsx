@@ -238,7 +238,7 @@ function StatusChangeModal({
   );
 }
 
-// Modal de historial SIMPLIFICADO
+// Modal de historial SIMPLIFICADO con imágenes visibles
 function HistoryModal({ isOpen, onClose, order, history, loading }: { 
   isOpen: boolean; 
   onClose: () => void; 
@@ -374,8 +374,12 @@ function HistoryModal({ isOpen, onClose, order, history, loading }: {
                         >
                           <img 
                             src={item.attachment_url} 
-                            alt="Captura" 
+                            alt="Captura del delivery" 
                             className="max-h-48 rounded-lg border shadow-sm object-cover hover:opacity-90 transition-opacity"
+                            onError={(e) => {
+                              console.error('Error cargando imagen:', item.attachment_url);
+                              e.currentTarget.style.display = 'none';
+                            }}
                           />
                           <div className="text-xs text-center text-muted-foreground mt-1 group-hover:text-primary">
                             🔍 Click para ampliar
@@ -397,7 +401,7 @@ function HistoryModal({ isOpen, onClose, order, history, loading }: {
             className="nav-btn active"
             onClick={() => {
               const historyText = history.map(h => 
-                `[${new Date(h.created_at).toLocaleString('es-PY')}] ${h.changed_by_role} (${h.changed_by_email}): ${h.previous_status || '—'} → ${h.new_status}${h.message ? `\n  💬 ${h.message}` : ''}`
+                `[${new Date(h.created_at).toLocaleString('es-PY')}] ${h.changed_by_role} (${h.changed_by_email}): ${h.previous_status || '—'} → ${h.new_status}${h.message ? `\n  💬 ${h.message}` : ''}${h.attachment_url ? `\n  📎 Captura: ${h.attachment_url}` : ''}`
               ).join('\n\n');
               navigator.clipboard.writeText(historyText);
               toast.success('Historial copiado al portapapeles');
@@ -979,6 +983,7 @@ export default function OrdersView() {
             const last3 = getLast3Days();
             setDateFrom(last3.from);
             setDateTo(last3.to);
+            loadOrders();
           }}
           title="Últimos 3 días"
         >
@@ -1000,7 +1005,7 @@ export default function OrdersView() {
         {filtered.length} pedidos (últimos 3 días: {dateFrom} a {dateTo})
       </div>
 
-      {/* Tabla Desktop - igual que antes */}
+      {/* Tabla Desktop */}
       <div className="hidden md:block overflow-x-auto">
         <table className="app-table min-w-[1000px]">
           <thead>
