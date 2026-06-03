@@ -63,6 +63,103 @@ function isProviderAllowed(order: any, userEmail: string): boolean {
   return norm(orderProviderEmail) === norm(userEmail);
 }
 
+// Modal para solicitar comentario y captura
+function StatusChangeModal({ 
+  isOpen, 
+  onClose, 
+  onConfirm, 
+  newStatus,
+  uploading 
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  onConfirm: (message: string, attachmentUrl: string | null) => void; 
+  newStatus: string;
+  uploading: boolean;
+}) {
+  const [message, setMessage] = useState('');
+  const [attachment, setAttachment] = useState<File | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+
+  if (!isOpen) return null;
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setAttachment(file);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setPreview(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleSubmit = () => {
+    if (!message.trim()) {
+      toast.error('Debes escribir un comentario');
+      return;
+    }
+    if (!attachment) {
+      toast.error('Debes adjuntar una captura de pantalla');
+      return;
+    }
+    onConfirm(message, null); // La URL se procesará después
+  };
+
+  return createPortal(
+    <div className="fixed inset-0 bg-black/70 z-[10000] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+        <h3 className="text-xl font-bold mb-4">
+          Cambiar a {newStatus}
+        </h3>
+        
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium mb-2">
+              Comentario <span className="text-red-500">*</span>
+            </label>
+            <textarea
+              className="app-input w-full min-h-[100px]"
+              placeholder="Ej: Llamé 3 veces y no contestó..."
+              value={message}
+              onChange={e => setMessage(e.target.value)}
+              autoFocus
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-2">
+              Captura de pantalla <span className="text-red-500">*</span>
+            </label>
+            <input
+              type="file"
+              accept="image/*"
+              onChange={handleFileChange}
+              className="app-input w-full"
+            />
+            {preview && (
+              <div className="mt-2">
+                <img src={preview} alt="Preview" className="max-h-32 rounded-lg border" />
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex gap-2 justify-end mt-6">
+          <button className="nav-btn" onClick={onClose} disabled={uploading}>
+            Cancelar
+          </button>
+          <button className="nav-btn active" onClick={handleSubmit} disabled={uploading}>
+            {uploading ? 'Subiendo...' : 'Confirmar cambio'}
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+}
+
 export default function OrdersView() {
   const { profile } = useAuth();
   const role = profile?.role || '';
@@ -89,6 +186,19 @@ export default function OrdersView() {
   const [orderHistory, setOrderHistory] = useState<HistoryEntry[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
+  
+  // Estados para el modal de cambio de estado
+  const [statusChangeModal, setStatusChangeModal] = useState<{
+    isOpen: boolean;
+    orderId: string;
+    newStatus: string;
+    oldStatus: string;
+  }>({
+    isOpen: false,
+    orderId: '',
+    newStatus: '',
+    oldStatus: ''
+  });
 
   const fetchAllOrdersPaginated = async () => {
     const pageSize = 1000;
@@ -258,50 +368,44 @@ export default function OrdersView() {
     
     if (error) {
       console.error('Error guardando en historial:', error);
+      return false;
     }
+    return true;
   };
 
-  const handleStatus1Change = async (orderId: string, newStatus: string) => {
+  // Función principal para cambiar estado con validación para Delivery
+  const handleStatusChangeWithValidation = async (orderId: string, newStatus: string) => {
+    // Verificar si es Delivery y el estado requiere comentario y captura
+    if (role === 'DELIVERY' && (newStatus === 'NO CONTESTA' || newStatus === 'CANCELADO')) {
+      const order = orders.find(o => o.id === orderId);
+      setStatusChangeModal({
+        isOpen: true,
+        orderId,
+        newStatus,
+        oldStatus: order?.status || 'PENDIENTE'
+      });
+      return;
+    }
+    
+    // Si no es Delivery o no requiere validación, proceder normalmente
+    await executeStatusChange(orderId, newStatus, '', null);
+  };
+
+  // Ejecutar el cambio de estado
+  const executeStatusChange = async (
+    orderId: string, 
+    newStatus: string, 
+    message: string = '', 
+    attachmentUrl: string | null = null
+  ) => {
     if (role === 'DELIVERY' && newStatus === 'DEVUELTO A DEPÓSITO') {
       toast.error('No podés usar DEVUELTO A DEPÓSITO');
-      return;
+      return false;
     }
     
     const order = orders.find(o => o.id === orderId);
     const oldStatus = order?.status || 'PENDIENTE';
     const orderNum = order?.order_number || orderId.slice(0, 8);
-    
-    let message = '';
-    let attachmentUrl = '';
-    
-    // Si es "NO CONTESTA", pedir mensaje y posible captura
-    if (newStatus === 'NO CONTESTA') {
-      const userMessage = prompt('Escribí un mensaje (ej: "Llamé 3 veces, no contestó"):');
-      if (userMessage) message = userMessage;
-      
-      // Opción de subir captura
-      const wantsAttachment = confirm('¿Deseas adjuntar una captura de pantalla?');
-      if (wantsAttachment) {
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = 'image/*';
-        input.onchange = async (e) => {
-          const file = (e.target as HTMLInputElement).files?.[0];
-          if (file) {
-            setUploadingFile(true);
-            const url = await uploadAttachment(file, orderId);
-            if (url) {
-              attachmentUrl = url;
-              toast.success('Captura adjuntada correctamente');
-            }
-            setUploadingFile(false);
-          }
-        };
-        input.click();
-        // Esperar un poco para que se suba el archivo
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
-    }
     
     const updates: any = { 
       status: newStatus, 
@@ -313,18 +417,43 @@ export default function OrdersView() {
     }
     
     // Guardar en historial
-    await saveToHistory(orderId, oldStatus, newStatus, message, attachmentUrl);
+    await saveToHistory(orderId, oldStatus, newStatus, message, attachmentUrl || undefined);
     
     const { error } = await supabase.from('orders').update(updates).eq('id', orderId);
     if (error) { 
       toast.error(error.message); 
-      return; 
+      return false;
     }
     
     toast.success(`Estado → ${newStatus}`);
     setAllOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updates } : o));
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updates } : o));
     postNews(`Pedido ${orderNum} cambió a ${newStatus} por ${myEmail}`, orderNum);
+    return true;
+  };
+
+  // Procesar el cambio con comentario y captura
+  const processStatusChangeWithData = async (message: string, attachment: File | null) => {
+    setUploadingFile(true);
+    
+    let attachmentUrl = null;
+    if (attachment) {
+      attachmentUrl = await uploadAttachment(attachment, statusChangeModal.orderId);
+    }
+    
+    await executeStatusChange(
+      statusChangeModal.orderId,
+      statusChangeModal.newStatus,
+      message,
+      attachmentUrl
+    );
+    
+    setUploadingFile(false);
+    setStatusChangeModal({ isOpen: false, orderId: '', newStatus: '', oldStatus: '' });
+  };
+
+  const handleStatus1Change = async (orderId: string, newStatus: string) => {
+    await handleStatusChangeWithValidation(orderId, newStatus);
   };
 
   const handleStatus2Change = async (orderId: string, newStatus2: string) => {
@@ -663,7 +792,7 @@ export default function OrdersView() {
                 <tr key={o.id}>
                   <td className="text-center">
                     <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
-                  </td>
+                  </tr>
                   <td className="whitespace-nowrap text-xs">{dateShown}</td>
                   <td className="font-bold text-xs">{o.order_number || o.id.slice(0, 8)}</td>
                   <td className="text-xs">{o.city}</td>
@@ -1023,6 +1152,15 @@ export default function OrdersView() {
         </div>,
         document.body
       )}
+
+      {/* Modal para solicitar comentario y captura al Delivery */}
+      <StatusChangeModal
+        isOpen={statusChangeModal.isOpen}
+        onClose={() => setStatusChangeModal({ isOpen: false, orderId: '', newStatus: '', oldStatus: '' })}
+        onConfirm={processStatusChangeWithData}
+        newStatus={statusChangeModal.newStatus}
+        uploading={uploadingFile}
+      />
 
       {/* Modal Historial de Estados con Dashboard Profesional */}
       {historyModalOpen && selectedOrder && createPortal(
