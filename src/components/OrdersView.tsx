@@ -146,22 +146,22 @@ function StatusChangeModal({
   };
 
   return createPortal(
-    <div className="fixed inset-0 bg-black/70 z-[10000] flex items-center justify-center p-4" onClick={onClose}>
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-black/80 z-[10000] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-4">
-          <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+          <h3 className="text-xl font-bold text-white">
             Cambiar a {newStatus}
           </h3>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">✕</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-200">✕</button>
         </div>
         
         <div className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">
+            <label className="block text-sm font-medium mb-2 text-gray-300">
               Comentario <span className="text-red-500">*</span>
             </label>
             <textarea
-              className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white min-h-[100px]"
+              className="w-full px-3 py-2 border border-gray-600 rounded-lg bg-gray-800 text-white min-h-[100px] focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               placeholder="Ej: Llamé 3 veces y no contestó..."
               value={message}
               onChange={e => setMessage(e.target.value)}
@@ -170,12 +170,12 @@ function StatusChangeModal({
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-2 text-gray-700 dark:text-gray-300">
+            <label className="block text-sm font-medium mb-2 text-gray-300">
               Captura de pantalla <span className="text-red-500">*</span>
             </label>
             <div
               className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors ${
-                isDragging ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-gray-300 dark:border-gray-600'
+                isDragging ? 'border-blue-500 bg-blue-500/10' : 'border-gray-600'
               }`}
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
@@ -193,10 +193,10 @@ function StatusChangeModal({
                 className="cursor-pointer flex flex-col items-center gap-2"
               >
                 <span className="text-2xl">📸</span>
-                <span className="text-sm text-gray-500 dark:text-gray-400">
+                <span className="text-sm text-gray-400">
                   Haz clic o arrastra una imagen aquí
                 </span>
-                <span className="text-xs text-gray-400 dark:text-gray-500">
+                <span className="text-xs text-gray-500">
                   PNG, JPG, GIF hasta 5MB
                 </span>
               </label>
@@ -207,7 +207,7 @@ function StatusChangeModal({
                   <img 
                     src={preview} 
                     alt="Preview" 
-                    className="max-h-40 rounded-lg border shadow-sm"
+                    className="max-h-40 rounded-lg border border-gray-600"
                   />
                   <button
                     onClick={() => {
@@ -225,7 +225,7 @@ function StatusChangeModal({
         </div>
 
         <div className="flex gap-2 justify-end mt-6">
-          <button className="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors" onClick={onClose} disabled={uploading}>
+          <button className="px-4 py-2 rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors" onClick={onClose} disabled={uploading}>
             Cancelar
           </button>
           <button className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors" onClick={handleSubmit} disabled={uploading}>
@@ -238,7 +238,7 @@ function StatusChangeModal({
   );
 }
 
-// Modal de historial MEJORADO con buen contraste y manejo de imágenes
+// Modal de historial CON FONDO OSCURO y BOTÓN VER ARCHIVO
 function HistoryModal({ isOpen, onClose, order, history, loading }: { 
   isOpen: boolean; 
   onClose: () => void; 
@@ -250,10 +250,10 @@ function HistoryModal({ isOpen, onClose, order, history, loading }: {
   const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
 
   const statusClass = (s: string) => {
-    if (s === 'ENTREGADO' || s === 'ENCOMIENDA ENTREGADA') return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
-    if (['CANCELADO', 'RECHAZADO', 'RECHAZADO EN EL LUGAR', 'NO DESEA', 'CANCELÓ POR WHATSAPP', 'NO CONTESTA'].includes(s)) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
-    if (s === 'EN RUTA') return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
-    return 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400';
+    if (s === 'ENTREGADO' || s === 'ENCOMIENDA ENTREGADA') return 'bg-green-500/20 text-green-400 border-green-500/30';
+    if (['CANCELADO', 'RECHAZADO', 'RECHAZADO EN EL LUGAR', 'NO DESEA', 'CANCELÓ POR WHATSAPP', 'NO CONTESTA'].includes(s)) return 'bg-red-500/20 text-red-400 border-red-500/30';
+    if (s === 'EN RUTA') return 'bg-blue-500/20 text-blue-400 border-blue-500/30';
+    return 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30';
   };
 
   // Estadísticas simplificadas
@@ -268,43 +268,43 @@ function HistoryModal({ isOpen, onClose, order, history, loading }: {
   if (!isOpen) return null;
 
   return createPortal(
-    <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-2 sm:p-4" onClick={() => { onClose(); setFullImageUrl(null); }}>
-      <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl p-4 sm:p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-2 sm:p-4" onClick={() => { onClose(); setFullImageUrl(null); }}>
+      <div className="bg-gray-900 border border-gray-700 rounded-2xl p-4 sm:p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         {/* Header */}
-        <div className="flex justify-between items-start mb-6 sticky top-0 bg-white dark:bg-gray-900 pb-2 z-10">
+        <div className="flex justify-between items-start mb-6 sticky top-0 bg-gray-900 pb-2 z-10">
           <div>
-            <h4 className="text-xl font-extrabold flex items-center gap-2 text-gray-900 dark:text-white">
+            <h4 className="text-xl font-extrabold flex items-center gap-2 text-white">
               📜 Historial de Estados
-              <span className="text-sm font-normal text-gray-500 dark:text-gray-400">
+              <span className="text-sm font-normal text-gray-400">
                 Pedido #{order?.order_number || order?.id?.slice(0, 8)}
               </span>
             </h4>
-            <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            <p className="text-sm text-gray-400 mt-1">
               Cliente: {order?.customer_name} | Ciudad: {order?.city}
             </p>
           </div>
-          <button onClick={onClose} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 text-2xl leading-none">✕</button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-200 text-2xl leading-none">✕</button>
         </div>
 
         {loading ? (
-          <div className="text-center py-12 text-gray-500">Cargando historial...</div>
+          <div className="text-center py-12 text-gray-400">Cargando historial...</div>
         ) : history.length === 0 ? (
-          <div className="text-center text-gray-500 py-12">
+          <div className="text-center text-gray-400 py-12">
             No hay cambios registrados en este pedido
           </div>
         ) : (
           <>
             {/* KPIs SIMPLIFICADOS */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
-              <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-4 text-white shadow-lg">
+              <div className="bg-gradient-to-br from-blue-600 to-blue-700 rounded-xl p-4 text-white shadow-lg">
                 <div className="text-2xl font-bold">{totalChanges}</div>
                 <div className="text-xs opacity-90">Cambios totales</div>
               </div>
-              <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl p-4 text-white shadow-lg">
+              <div className="bg-gradient-to-br from-green-600 to-green-700 rounded-xl p-4 text-white shadow-lg">
                 <div className="text-2xl font-bold">{uniqueUsers}</div>
                 <div className="text-xs opacity-90">Usuarios distintos</div>
               </div>
-              <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl p-4 text-white shadow-lg">
+              <div className="bg-gradient-to-br from-purple-600 to-purple-700 rounded-xl p-4 text-white shadow-lg">
                 <div className="text-2xl font-bold">{mostCommonStatus?.[1] || 0}</div>
                 <div className="text-xs opacity-90">Estado más usado</div>
                 <div className="text-xs font-mono mt-1 truncate">{mostCommonStatus?.[0] || '—'}</div>
@@ -316,97 +316,86 @@ function HistoryModal({ isOpen, onClose, order, history, loading }: {
               {history.map((item) => (
                 <div key={item.id} className="relative pl-8 pb-6 last:pb-0 before:content-[''] before:absolute before:left-3 before:top-0 before:bottom-0 before:w-0.5 before:bg-gradient-to-b before:from-blue-500 before:to-transparent">
                   {/* Círculo de timeline */}
-                  <div className="absolute left-0 top-1 w-6 h-6 rounded-full bg-blue-500/20 flex items-center justify-center ring-4 ring-white dark:ring-gray-900">
+                  <div className="absolute left-0 top-1 w-6 h-6 rounded-full bg-blue-500/30 flex items-center justify-center ring-4 ring-gray-900">
                     <div className="w-2 h-2 rounded-full bg-blue-500"></div>
                   </div>
                   
-                  <div className="bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl p-4 hover:shadow-lg transition-all duration-200">
+                  <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-4 hover:bg-gray-800 transition-all duration-200">
                     {/* Header */}
                     <div className="flex flex-wrap justify-between items-start gap-2 mb-3">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-mono bg-gray-200 dark:bg-gray-700 px-2 py-1 rounded-md text-gray-700 dark:text-gray-300">
+                        <span className="text-xs font-mono bg-gray-700 px-2 py-1 rounded-md text-gray-300">
                           {new Date(item.created_at).toLocaleString('es-PY', {
                             day: '2-digit', month: '2-digit', year: 'numeric',
                             hour: '2-digit', minute: '2-digit'
                           })}
                         </span>
                         <span className={`text-xs px-2 py-1 rounded-full font-medium ${
-                          item.changed_by_role === 'ADMIN' ? 'bg-red-100 text-red-700 dark:bg-red-900/50 dark:text-red-300' :
-                          item.changed_by_role === 'DELIVERY' ? 'bg-green-100 text-green-700 dark:bg-green-900/50 dark:text-green-300' :
-                          item.changed_by_role === 'PROVEEDOR' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300' :
-                          'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'
+                          item.changed_by_role === 'ADMIN' ? 'bg-red-500/20 text-red-400' :
+                          item.changed_by_role === 'DELIVERY' ? 'bg-green-500/20 text-green-400' :
+                          item.changed_by_role === 'PROVEEDOR' ? 'bg-blue-500/20 text-blue-400' :
+                          'bg-gray-500/20 text-gray-400'
                         }`}>
                           {item.changed_by_role || 'Usuario'}
                         </span>
                       </div>
-                      <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                      <div className="flex items-center gap-1 text-xs text-gray-400">
                         <span>👤</span>
                         <span className="font-mono truncate max-w-[150px]">{item.changed_by_email}</span>
                       </div>
                     </div>
                     
                     {/* Cambio de estado */}
-                    <div className="flex items-center gap-2 flex-wrap mb-3 p-2 rounded-lg bg-gray-100 dark:bg-gray-800">
-                      <span className={`text-sm font-medium px-2 py-0.5 rounded-full ${statusClass(item.previous_status || 'PENDIENTE')}`}>
+                    <div className="flex items-center gap-2 flex-wrap mb-3 p-2 rounded-lg bg-gray-900/50">
+                      <span className={`text-sm font-medium px-2 py-0.5 rounded-full border ${statusClass(item.previous_status || 'PENDIENTE')}`}>
                         {item.previous_status || '—'}
                       </span>
-                      <span className="text-gray-500 dark:text-gray-400">→</span>
-                      <span className={`text-sm font-bold px-2 py-0.5 rounded-full ${statusClass(item.new_status)}`}>
+                      <span className="text-gray-500">→</span>
+                      <span className={`text-sm font-bold px-2 py-0.5 rounded-full border ${statusClass(item.new_status)}`}>
                         {item.new_status}
                       </span>
                     </div>
                     
-                    {/* Mensaje - CON BUEN CONTRASTE */}
+                    {/* Mensaje */}
                     {item.message && (
-                      <div className="mt-2 p-3 bg-amber-100 dark:bg-amber-900/40 rounded-lg border-l-4 border-amber-500">
+                      <div className="mt-2 p-3 bg-amber-500/10 rounded-lg border-l-4 border-amber-500">
                         <div className="flex items-start gap-2">
                           <span className="text-base">💬</span>
-                          <p className="text-sm text-gray-800 dark:text-gray-200 flex-1">{item.message}</p>
+                          <p className="text-sm text-gray-300 flex-1">{item.message}</p>
                         </div>
                       </div>
                     )}
                     
-                    {/* FOTO - con manejo de errores */}
-                    {item.attachment_url && !imageErrors[item.id] && (
+                    {/* BOTÓN VER ARCHIVO ADJUNTO */}
+                    {item.attachment_url && (
                       <div className="mt-3">
-                        <div 
-                          className="cursor-pointer group inline-block"
-                          onClick={() => setFullImageUrl(item.attachment_url)}
-                        >
-                          <img 
-                            src={item.attachment_url} 
-                            alt="Captura del delivery" 
-                            className="max-h-48 rounded-lg border shadow-sm object-cover hover:opacity-90 transition-opacity"
-                            onError={(e) => {
-                              console.error('Error cargando imagen:', item.attachment_url);
-                              setImageErrors(prev => ({ ...prev, [item.id]: true }));
-                              e.currentTarget.style.display = 'none';
-                            }}
-                          />
-                          <div className="text-xs text-center text-gray-500 dark:text-gray-400 mt-1 group-hover:text-blue-500">
-                            🔍 Click para ampliar
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                    
-                    {/* Mensaje de error si la imagen no carga */}
-                    {item.attachment_url && imageErrors[item.id] && (
-                      <div className="mt-3 p-3 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
-                        <p className="text-sm text-red-600 dark:text-red-400 flex items-center gap-2">
-                          <span>⚠️</span> No se pudo cargar la imagen adjunta
-                        </p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 break-all font-mono">
-                          URL: {item.attachment_url}
-                        </p>
                         <button
-                          onClick={() => {
-                            setImageErrors(prev => ({ ...prev, [item.id]: false }));
-                          }}
-                          className="mt-2 text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                          onClick={() => window.open(item.attachment_url!, '_blank')}
+                          className="flex items-center gap-2 px-3 py-2 bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 rounded-lg transition-colors text-sm"
                         >
-                          Intentar recargar
+                          <span>📎</span>
+                          <span>Ver archivo adjunto</span>
                         </button>
+                        {!imageErrors[item.id] && (
+                          <div 
+                            className="cursor-pointer group mt-2 inline-block"
+                            onClick={() => setFullImageUrl(item.attachment_url!)}
+                          >
+                            <img 
+                              src={item.attachment_url} 
+                              alt="Vista previa" 
+                              className="max-h-32 rounded-lg border border-gray-600 object-cover hover:opacity-90 transition-opacity"
+                              onError={(e) => {
+                                console.error('Error cargando previsualización:', item.attachment_url);
+                                setImageErrors(prev => ({ ...prev, [item.id]: true }));
+                                e.currentTarget.style.display = 'none';
+                              }}
+                            />
+                            <div className="text-xs text-center text-gray-500 mt-1 group-hover:text-blue-400">
+                              🔍 Click para ampliar
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -417,15 +406,15 @@ function HistoryModal({ isOpen, onClose, order, history, loading }: {
         )}
         
         {/* Footer */}
-        <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-gray-200 dark:border-gray-700 sticky bottom-0 bg-white dark:bg-gray-900">
-          <button className="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors" onClick={onClose}>
+        <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-gray-700 sticky bottom-0 bg-gray-900">
+          <button className="px-4 py-2 rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 transition-colors" onClick={onClose}>
             Cerrar
           </button>
           <button 
             className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
             onClick={() => {
               const historyText = history.map(h => 
-                `[${new Date(h.created_at).toLocaleString('es-PY')}] ${h.changed_by_role} (${h.changed_by_email}): ${h.previous_status || '—'} → ${h.new_status}${h.message ? `\n  💬 ${h.message}` : ''}${h.attachment_url ? `\n  📎 Captura: ${h.attachment_url}` : ''}`
+                `[${new Date(h.created_at).toLocaleString('es-PY')}] ${h.changed_by_role} (${h.changed_by_email}): ${h.previous_status || '—'} → ${h.new_status}${h.message ? `\n  💬 ${h.message}` : ''}${h.attachment_url ? `\n  📎 Archivo adjunto: ${h.attachment_url}` : ''}`
               ).join('\n\n');
               navigator.clipboard.writeText(historyText);
               toast.success('Historial copiado al portapapeles');
@@ -438,8 +427,8 @@ function HistoryModal({ isOpen, onClose, order, history, loading }: {
 
       {/* Modal de imagen ampliada */}
       {fullImageUrl && (
-        <div className="fixed inset-0 bg-black/90 z-[10001] flex items-center justify-center p-4" onClick={() => setFullImageUrl(null)}>
-          <div className="relative max-w-4xl max-h-[90vh]">
+        <div className="fixed inset-0 bg-black/95 z-[10001] flex items-center justify-center p-4" onClick={() => setFullImageUrl(null)}>
+          <div className="relative max-w-5xl max-h-[90vh]">
             <img 
               src={fullImageUrl} 
               alt="Captura ampliada" 
@@ -452,9 +441,15 @@ function HistoryModal({ isOpen, onClose, order, history, loading }: {
             />
             <button
               onClick={() => setFullImageUrl(null)}
-              className="absolute -top-10 right-0 text-white hover:text-gray-300 text-2xl"
+              className="absolute -top-12 right-0 text-white hover:text-gray-300 text-2xl bg-black/50 rounded-full w-8 h-8 flex items-center justify-center"
             >
               ✕
+            </button>
+            <button
+              onClick={() => window.open(fullImageUrl, '_blank')}
+              className="absolute -bottom-12 right-0 text-white hover:text-gray-300 text-sm bg-black/50 px-3 py-1 rounded-lg"
+            >
+              Abrir en nueva pestaña
             </button>
           </div>
         </div>
@@ -476,7 +471,6 @@ export default function OrdersView() {
   const [clientPrices, setClientPrices] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  // Fecha por defecto: últimos 3 días
   const last3Days = getLast3Days();
   const [dateFrom, setDateFrom] = useState(() => last3Days.from);
   const [dateTo, setDateTo] = useState(() => last3Days.to);
@@ -486,14 +480,12 @@ export default function OrdersView() {
   const [guideOrderId, setGuideOrderId] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   
-  // Estados para el historial
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
   const [orderHistory, setOrderHistory] = useState<HistoryEntry[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [uploadingFile, setUploadingFile] = useState(false);
   
-  // Estados para el modal de cambio de estado
   const [statusChangeModal, setStatusChangeModal] = useState<{
     isOpen: boolean;
     orderId: string;
@@ -1261,20 +1253,20 @@ export default function OrdersView() {
       {/* Modales */}
       {editOrder && createPortal(
         <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-2 sm:p-4" onClick={() => setEditOrder(null)}>
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl p-4 sm:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto space-y-3" onClick={e => e.stopPropagation()}>
-            <h4 className="text-lg font-extrabold text-gray-900 dark:text-white">Editar Pedido</h4>
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-4 sm:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto space-y-3" onClick={e => e.stopPropagation()}>
+            <h4 className="text-lg font-extrabold text-white">Editar Pedido</h4>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Cliente *</label>
-                <input className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white" value={editOrder.customer_name} onChange={e => setEditOrder({ ...editOrder, customer_name: e.target.value })} />
+                <label className="block text-sm font-medium text-gray-300 mb-1">Cliente *</label>
+                <input className="w-full px-3 py-2 border border-gray-600 rounded-lg bg-gray-800 text-white" value={editOrder.customer_name} onChange={e => setEditOrder({ ...editOrder, customer_name: e.target.value })} />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Teléfono *</label>
-                <input className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white" value={editOrder.phone} onChange={e => setEditOrder({ ...editOrder, phone: e.target.value })} />
+                <label className="block text-sm font-medium text-gray-300 mb-1">Teléfono *</label>
+                <input className="w-full px-3 py-2 border border-gray-600 rounded-lg bg-gray-800 text-white" value={editOrder.phone} onChange={e => setEditOrder({ ...editOrder, phone: e.target.value })} />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Ciudad *</label>
-                <select className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white" value={editOrder.city} onChange={e => setEditOrder({ ...editOrder, city: e.target.value })}>
+                <label className="block text-sm font-medium text-gray-300 mb-1">Ciudad *</label>
+                <select className="w-full px-3 py-2 border border-gray-600 rounded-lg bg-gray-800 text-white" value={editOrder.city} onChange={e => setEditOrder({ ...editOrder, city: e.target.value })}>
                   <option value="">Seleccionar ciudad…</option>
                   {clientPrices.map(c => <option key={c.id} value={c.city}>{c.city}</option>)}
                   {editOrder.city && !clientPrices.find(c => c.city === editOrder.city) && (
@@ -1283,21 +1275,21 @@ export default function OrdersView() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Calle</label>
-                <input className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white" value={editOrder.street} onChange={e => setEditOrder({ ...editOrder, street: e.target.value })} />
+                <label className="block text-sm font-medium text-gray-300 mb-1">Calle</label>
+                <input className="w-full px-3 py-2 border border-gray-600 rounded-lg bg-gray-800 text-white" value={editOrder.street} onChange={e => setEditOrder({ ...editOrder, street: e.target.value })} />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Barrio</label>
-                <input className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white" value={editOrder.district} onChange={e => setEditOrder({ ...editOrder, district: e.target.value })} />
+                <label className="block text-sm font-medium text-gray-300 mb-1">Barrio</label>
+                <input className="w-full px-3 py-2 border border-gray-600 rounded-lg bg-gray-800 text-white" value={editOrder.district} onChange={e => setEditOrder({ ...editOrder, district: e.target.value })} />
               </div>
               <div className="col-span-2">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Observaciones</label>
-                <textarea className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white min-h-[60px]" value={editOrder.obs} onChange={e => setEditOrder({ ...editOrder, obs: e.target.value })} />
+                <label className="block text-sm font-medium text-gray-300 mb-1">Observaciones</label>
+                <textarea className="w-full px-3 py-2 border border-gray-600 rounded-lg bg-gray-800 text-white min-h-[60px]" value={editOrder.obs} onChange={e => setEditOrder({ ...editOrder, obs: e.target.value })} />
               </div>
             </div>
             <div className="flex gap-2 justify-end">
-              <button className="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors" onClick={() => setEditOrder(null)}>Cancelar</button>
-              <button className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors" onClick={saveEdit}>Guardar</button>
+              <button className="px-4 py-2 rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600" onClick={() => setEditOrder(null)}>Cancelar</button>
+              <button className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700" onClick={saveEdit}>Guardar</button>
             </div>
           </div>
         </div>,
@@ -1306,12 +1298,12 @@ export default function OrdersView() {
 
       {guideText && createPortal(
         <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-2 sm:p-4" onClick={() => setGuideText('')}>
-          <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl p-4 sm:p-6 w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
-            <h4 className="text-lg font-extrabold mb-3 text-gray-900 dark:text-white">Guía — {guideOrderId}</h4>
-            <pre className="text-xs sm:text-sm whitespace-pre-wrap bg-gray-100 dark:bg-gray-800 p-3 sm:p-5 rounded-xl border border-gray-200 dark:border-gray-700 max-h-[60vh] overflow-auto leading-relaxed text-gray-800 dark:text-gray-200">{guideText}</pre>
+          <div className="bg-gray-900 border border-gray-700 rounded-2xl p-4 sm:p-6 w-full max-w-xl max-h-[90vh] overflow-y-auto shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h4 className="text-lg font-extrabold mb-3 text-white">Guía — {guideOrderId}</h4>
+            <pre className="text-xs sm:text-sm whitespace-pre-wrap bg-gray-800 p-3 sm:p-5 rounded-xl border border-gray-700 max-h-[60vh] overflow-auto leading-relaxed text-gray-300">{guideText}</pre>
             <div className="flex gap-2 justify-end mt-4">
-              <button className="px-4 py-2 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-colors" onClick={() => setGuideText('')}>Cerrar</button>
-              <button className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors" onClick={copyGuide}>Copiar</button>
+              <button className="px-4 py-2 rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600" onClick={() => setGuideText('')}>Cerrar</button>
+              <button className="px-4 py-2 rounded-lg bg-blue-600 text-white hover:bg-blue-700" onClick={copyGuide}>Copiar</button>
             </div>
           </div>
         </div>,
