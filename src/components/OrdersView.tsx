@@ -104,7 +104,7 @@ function StatusChangeModal({
       toast.error('Debes adjuntar una captura de pantalla');
       return;
     }
-    onConfirm(message, null); // La URL se procesará después
+    onConfirm(message, null);
   };
 
   return createPortal(
@@ -368,9 +368,7 @@ export default function OrdersView() {
     
     if (error) {
       console.error('Error guardando en historial:', error);
-      return false;
     }
-    return true;
   };
 
   // Función principal para cambiar estado con validación para Delivery
@@ -698,7 +696,7 @@ export default function OrdersView() {
 
   const statusClass = (s: string) => {
     if (s === 'ENTREGADO' || s === 'ENCOMIENDA ENTREGADA') return 'badge-entregado';
-    if (['CANCELADO', 'RECHAZADO', 'RECHAZADO EN EL LUGAR', 'NO DESEA', 'CANCELÓ POR WHATSAPP'].includes(s)) return 'badge-cancelado';
+    if (['CANCELADO', 'RECHAZADO', 'RECHAZADO EN EL LUGAR', 'NO DESEA', 'CANCELÓ POR WHATSAPP', 'NO CONTESTA'].includes(s)) return 'badge-cancelado';
     if (s === 'EN RUTA') return 'badge-entregado';
     return 'badge-pendiente';
   };
@@ -792,7 +790,7 @@ export default function OrdersView() {
                 <tr key={o.id}>
                   <td className="text-center">
                     <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
-                  </tr>
+                  </td>
                   <td className="whitespace-nowrap text-xs">{dateShown}</td>
                   <td className="font-bold text-xs">{o.order_number || o.id.slice(0, 8)}</td>
                   <td className="text-xs">{o.city}</td>
@@ -1070,7 +1068,7 @@ export default function OrdersView() {
       </div>
 
       {/* Modal Editar Pedido */}
-      {editOrder && (
+      {editOrder && createPortal(
         <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-2 sm:p-4" onClick={() => setEditOrder(null)}>
           <div className="bg-card border border-border rounded-2xl p-4 sm:p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto space-y-3" onClick={e => e.stopPropagation()}>
             <h4 className="text-lg font-extrabold">Editar Pedido</h4>
@@ -1135,7 +1133,8 @@ export default function OrdersView() {
               <button className="nav-btn active" onClick={saveEdit}>Guardar</button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* Modal Guía */}
@@ -1166,7 +1165,6 @@ export default function OrdersView() {
       {historyModalOpen && selectedOrder && createPortal(
         <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-2 sm:p-4" onClick={() => setHistoryModalOpen(false)}>
           <div className="bg-card border border-border rounded-2xl p-4 sm:p-6 w-full max-w-5xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            {/* Header */}
             <div className="flex justify-between items-start mb-6">
               <div>
                 <h4 className="text-xl font-extrabold flex items-center gap-2">
@@ -1190,14 +1188,8 @@ export default function OrdersView() {
               </div>
             ) : (
               <>
-                {/* Dashboard de Estadísticas */}
                 {(() => {
                   const stats = getHistoryStats();
-                  const statusCounts: Record<string, number> = {};
-                  orderHistory.forEach(h => {
-                    statusCounts[h.new_status] = (statusCounts[h.new_status] || 0) + 1;
-                  });
-                  
                   return (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
                       <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-4 text-white">
@@ -1221,17 +1213,14 @@ export default function OrdersView() {
                   );
                 })()}
 
-                {/* Timeline de cambios */}
                 <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
-                  {orderHistory.map((item, idx) => (
+                  {orderHistory.map((item) => (
                     <div key={item.id} className="relative pl-8 before:content-[''] before:absolute before:left-3 before:top-0 before:bottom-0 before:w-0.5 before:bg-border">
-                      {/* Círculo de timeline */}
                       <div className="absolute left-0 top-1 w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center">
                         <div className="w-2 h-2 rounded-full bg-primary"></div>
                       </div>
                       
                       <div className="bg-background border border-border rounded-lg p-4 hover:shadow-md transition-shadow">
-                        {/* Header del cambio */}
                         <div className="flex flex-wrap justify-between items-start gap-2 mb-3">
                           <div className="flex items-center gap-2">
                             <span className="text-xs font-mono bg-muted px-2 py-1 rounded">
@@ -1254,9 +1243,8 @@ export default function OrdersView() {
                           </span>
                         </div>
                         
-                        {/* Cambio de estado */}
                         <div className="flex items-center gap-3 flex-wrap mb-3">
-                          <span className={`text-sm font-medium px-3 py-1 rounded-lg ${statusClass(item.previous_status || 'PENDIENTE')} bg-opacity-20`}>
+                          <span className={`text-sm font-medium px-3 py-1 rounded-lg ${statusClass(item.previous_status || 'PENDIENTE')}`}>
                             {item.previous_status || '—'}
                           </span>
                           <span className="text-muted-foreground text-lg">→</span>
@@ -1265,7 +1253,6 @@ export default function OrdersView() {
                           </span>
                         </div>
                         
-                        {/* Mensaje si existe */}
                         {item.message && (
                           <div className="mt-2 p-3 bg-muted/30 rounded-lg border-l-4 border-blue-500">
                             <div className="flex items-start gap-2">
@@ -1278,7 +1265,6 @@ export default function OrdersView() {
                           </div>
                         )}
                         
-                        {/* Adjunto si existe */}
                         {item.attachment_url && (
                           <div className="mt-3">
                             <button
@@ -1297,7 +1283,6 @@ export default function OrdersView() {
               </>
             )}
             
-            {/* Footer con botones de acción */}
             <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
               <button className="nav-btn" onClick={() => setHistoryModalOpen(false)}>
                 Cerrar
