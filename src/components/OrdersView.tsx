@@ -98,7 +98,7 @@ function StatusChangeModal({
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      console.log('Archivo seleccionado:', { name: file.name, size: file.size, type: file.type });
+      console.log('📁 Archivo seleccionado:', { name: file.name, size: file.size, type: file.type });
       setAttachment(file);
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -123,7 +123,7 @@ function StatusChangeModal({
     setIsDragging(false);
     const file = e.dataTransfer.files?.[0];
     if (file && file.type.startsWith('image/')) {
-      console.log('Archivo arrastrado:', { name: file.name, size: file.size, type: file.type });
+      console.log('📁 Archivo arrastrado:', { name: file.name, size: file.size, type: file.type });
       setAttachment(file);
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -144,7 +144,7 @@ function StatusChangeModal({
       toast.error('Debes adjuntar una captura de pantalla');
       return;
     }
-    console.log('Enviando archivo al padre:', { message, attachmentName: attachment.name });
+    console.log('📤 Enviando al padre:', { message, attachmentName: attachment.name });
     onConfirm(message, attachment);
   };
 
@@ -677,7 +677,7 @@ export default function OrdersView() {
     
     if (error) {
       console.error('Error guardando en historial:', error);
-      toast.error('Error al guardar el historial');
+      toast.error('Error al guardar el historial: ' + error.message);
     } else {
       console.log('Historial guardado exitosamente:', data);
     }
@@ -752,6 +752,12 @@ export default function OrdersView() {
       console.log('Subiendo attachment...');
       attachmentUrl = await uploadAttachment(attachment, statusChangeModal.orderId);
       console.log('URL obtenida:', attachmentUrl);
+      
+      if (!attachmentUrl) {
+        console.error('No se pudo obtener la URL del archivo');
+        setUploadingFile(false);
+        return;
+      }
     }
     
     console.log('Ejecutando cambio de estado con:', { message, attachmentUrl });
