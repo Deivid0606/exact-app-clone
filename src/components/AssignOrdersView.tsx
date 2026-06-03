@@ -46,6 +46,15 @@ export default function AssignOrdersView() {
     return data?.name || email;
   };
 
+  // Función auxiliar para formatear fecha de asignación
+  const formatAssignedDate = (dateStr: string | null | undefined): string => {
+    if (!dateStr) return 'fecha desconocida';
+    return new Date(dateStr).toLocaleString('es-PY', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    });
+  };
+
   // ─── EFECTO 1: Solo captura el ?id= del hash al montar ───────────────────
   // Corre una sola vez. No depende de role ni profile.
   useEffect(() => {
@@ -79,7 +88,7 @@ export default function AssignOrdersView() {
         console.log('🔍 Buscando por ID (UUID)...');
         const result = await supabase
           .from('orders')
-          .select('id, assigned_delivery, order_number, customer_name, phone')
+          .select('id, assigned_delivery, assigned_at, order_number, customer_name, phone')
           .eq('id', pendingQrId)
           .maybeSingle();
         orderData = result.data;
@@ -88,7 +97,7 @@ export default function AssignOrdersView() {
         console.log('🔍 Buscando por order_number...');
         const result = await supabase
           .from('orders')
-          .select('id, assigned_delivery, order_number, customer_name, phone')
+          .select('id, assigned_delivery, assigned_at, order_number, customer_name, phone')
           .eq('order_number', pendingQrId)
           .maybeSingle();
         orderData = result.data;
@@ -118,7 +127,8 @@ export default function AssignOrdersView() {
       // Verificar si ya está asignado a alguien distinto
       if (orderData.assigned_delivery && orderData.assigned_delivery !== profile?.email) {
         const deliveryName = await getDeliveryName(orderData.assigned_delivery);
-        toast.error(`❌ El pedido ${displayId} no se puede asignar porque pertenece a ${deliveryName}`);
+        const fechaAsignacion = formatAssignedDate(orderData.assigned_at);
+        toast.error(`❌ El pedido ${displayId} está asignado a ${deliveryName} desde el ${fechaAsignacion}`, { duration: 6000 });
         setPendingQrId(null);
         setAutoAssignProcessing(false);
         return;
@@ -132,13 +142,14 @@ export default function AssignOrdersView() {
         // Doble verificación antes de asignar
         const { data: freshOrder } = await supabase
           .from('orders')
-          .select('assigned_delivery')
+          .select('assigned_delivery, assigned_at')
           .eq('id', orderData.id)
           .single();
 
         if (freshOrder?.assigned_delivery && freshOrder.assigned_delivery !== deliveryEmail) {
           const otherDeliveryName = await getDeliveryName(freshOrder.assigned_delivery);
-          toast.error(`❌ El pedido ${displayId} no se puede asignar porque pertenece a ${otherDeliveryName}`);
+          const fechaAsignacion = formatAssignedDate(freshOrder.assigned_at);
+          toast.error(`❌ El pedido ${displayId} está asignado a ${otherDeliveryName} desde el ${fechaAsignacion}`, { duration: 6000 });
           setPendingQrId(null);
           setAutoAssignProcessing(false);
           return;
@@ -328,14 +339,15 @@ export default function AssignOrdersView() {
     for (const id of selected) {
       const { data: orderData } = await supabase
         .from('orders')
-        .select('assigned_delivery, order_number')
+        .select('assigned_delivery, assigned_at, order_number')
         .eq('id', id)
         .single();
 
       if (orderData?.assigned_delivery && orderData.assigned_delivery !== deliveryEmail) {
         const otherDeliveryName = await getDeliveryName(orderData.assigned_delivery);
+        const fechaAsignacion = formatAssignedDate(orderData.assigned_at);
         const displayId = orderData.order_number || id.substring(0, 8);
-        alreadyAssignedDetails.push(`${displayId} (${otherDeliveryName})`);
+        alreadyAssignedDetails.push(`${displayId} → ${otherDeliveryName} (${fechaAsignacion})`);
         alreadyAssignedCount++;
         continue;
       }
@@ -414,14 +426,15 @@ export default function AssignOrdersView() {
     for (const id of ids) {
       const { data } = await supabase
         .from('orders')
-        .select('id, assigned_delivery, order_number')
+        .select('id, assigned_delivery, assigned_at, order_number')
         .eq('order_number', id)
         .limit(1);
 
       if (data && data[0]) {
         if (data[0].assigned_delivery && data[0].assigned_delivery !== deliveryEmail) {
           const otherDeliveryName = await getDeliveryName(data[0].assigned_delivery);
-          alreadyAssignedDetails.push(`${id} (${otherDeliveryName})`);
+          const fechaAsignacion = formatAssignedDate(data[0].assigned_at);
+          alreadyAssignedDetails.push(`${id} → ${otherDeliveryName} (${fechaAsignacion})`);
           alreadyAssigned++;
           continue;
         }
@@ -473,13 +486,14 @@ export default function AssignOrdersView() {
 
     const { data: orderData } = await supabase
       .from('orders')
-      .select('assigned_delivery')
+      .select('assigned_delivery, assigned_at')
       .eq('id', orderId)
       .single();
 
     if (orderData?.assigned_delivery && orderData.assigned_delivery !== deliveryEmail) {
       const otherDeliveryName = await getDeliveryName(orderData.assigned_delivery);
-      toast.error(`❌ El pedido ${displayId} no se puede asignar porque pertenece a ${otherDeliveryName}`);
+      const fechaAsignacion = formatAssignedDate(orderData.assigned_at);
+      toast.error(`❌ El pedido ${displayId} está asignado a ${otherDeliveryName} desde el ${fechaAsignacion}`, { duration: 6000 });
       return;
     }
 
