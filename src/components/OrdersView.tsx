@@ -1097,7 +1097,11 @@ export default function OrdersView() {
           </thead>
           <tbody>
             {filtered.length === 0 && (
-              <tr><td colSpan={16} className="text-center text-muted-foreground py-8">Sin pedidos en los últimos 3 días</td>
+              <tr>
+                <td colSpan={16} className="text-center text-muted-foreground py-8">
+                  Sin pedidos en los últimos 3 días
+                </td>
+              </tr>
             )}
             {filtered.map(o => {
               const feeStored = Number(o.delivery_fee_gs || 0);
