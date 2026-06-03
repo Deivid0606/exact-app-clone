@@ -46,6 +46,17 @@ interface EditOrder {
   provider_email?: string;
 }
 
+interface HistoryEntry {
+  id: string;
+  previous_status: string | null;
+  new_status: string;
+  changed_by_email: string;
+  changed_by_role: string;
+  message: string | null;
+  attachment_url: string | null;
+  created_at: string;
+}
+
 function isProviderAllowed(order: any, userEmail: string): boolean {
   const orderProviderEmail = order.provider_email;
   if (!orderProviderEmail) return false;
@@ -64,16 +75,20 @@ export default function OrdersView() {
   const [clientPrices, setClientPrices] = useState<any[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
-  const [dateFrom, setDateFrom] = useState(() => {
-    // Mostrar desde enero 2024 para ver pedidos antiguos
-    return '2024-01-01';
-  });
+  const [dateFrom, setDateFrom] = useState(() => '2024-01-01');
   const [dateTo, setDateTo] = useState(() => getLocalDate(new Date().toISOString()));
   const [loading, setLoading] = useState(false);
   const [editOrder, setEditOrder] = useState<EditOrder | null>(null);
   const [guideText, setGuideText] = useState('');
   const [guideOrderId, setGuideOrderId] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  
+  // Estados para el historial
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState<any>(null);
+  const [orderHistory, setOrderHistory] = useState<HistoryEntry[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [uploadingFile, setUploadingFile] = useState(false);
 
   const fetchAllOrdersPaginated = async () => {
     const pageSize = 1000;
@@ -121,7 +136,6 @@ export default function OrdersView() {
 
     console.log('TOTAL DE PEDIDOS CARGADOS:', allOrdersData?.length);
 
-    // Mostrar las fechas más antigua y más reciente
     if (allOrdersData && allOrdersData.length > 0) {
       const fechas = allOrdersData.map(o => o.created_at).sort();
       console.log('Pedido más antiguo:', fechas[0]);
@@ -140,7 +154,6 @@ export default function OrdersView() {
 
     setAllOrders(allOrdersData || []);
 
-    // Filtrar por fecha en el frontend, soportando fechas invertidas
     const { from, to } = getSafeDateRange(dateFrom, dateTo);
 
     const filteredByDate = (allOrdersData || []).filter(order => {
@@ -159,7 +172,6 @@ export default function OrdersView() {
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
   };
 
-  // Aplicar filtros de fecha cuando cambien
   useEffect(() => {
     if (allOrders.length > 0) {
       const { from, to } = getSafeDateRange(dateFrom, dateTo);
@@ -174,7 +186,6 @@ export default function OrdersView() {
     }
   }, [dateFrom, dateTo, allOrders]);
 
-  // Cargar datos iniciales
   useEffect(() => {
     loadOrders();
   }, []);
@@ -203,19 +214,113 @@ export default function OrdersView() {
     });
   };
 
+  // Función para subir archivo a Supabase Storage
+  const uploadAttachment = async (file: File, orderId: string): Promise<string | null> => {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${orderId}_${Date.now()}.${fileExt}`;
+    const filePath = `order_attachments/${fileName}`;
+    
+    const { error: uploadError } = await supabase.storage
+      .from('order_attachments')
+      .upload(filePath, file);
+      
+    if (uploadError) {
+      toast.error('Error al subir la imagen: ' + uploadError.message);
+      return null;
+    }
+    
+    const { data: urlData } = supabase.storage
+      .from('order_attachments')
+      .getPublicUrl(filePath);
+      
+    return urlData.publicUrl;
+  };
+
+  // Función para guardar en el historial
+  const saveToHistory = async (
+    orderId: string, 
+    previousStatus: string, 
+    newStatus: string, 
+    message?: string, 
+    attachmentUrl?: string
+  ) => {
+    const { error } = await supabase
+      .from('order_status_history')
+      .insert({
+        order_id: orderId,
+        previous_status: previousStatus,
+        new_status: newStatus,
+        changed_by_email: myEmail,
+        changed_by_role: role,
+        message: message || null,
+        attachment_url: attachmentUrl || null
+      });
+    
+    if (error) {
+      console.error('Error guardando en historial:', error);
+    }
+  };
+
   const handleStatus1Change = async (orderId: string, newStatus: string) => {
     if (role === 'DELIVERY' && newStatus === 'DEVUELTO A DEPÓSITO') {
       toast.error('No podés usar DEVUELTO A DEPÓSITO');
       return;
     }
+    
     const order = orders.find(o => o.id === orderId);
+    const oldStatus = order?.status || 'PENDIENTE';
     const orderNum = order?.order_number || orderId.slice(0, 8);
-    const updates: any = { status: newStatus, updated_at: new Date().toISOString() };
+    
+    let message = '';
+    let attachmentUrl = '';
+    
+    // Si es "NO CONTESTA", pedir mensaje y posible captura
+    if (newStatus === 'NO CONTESTA') {
+      const userMessage = prompt('Escribí un mensaje (ej: "Llamé 3 veces, no contestó"):');
+      if (userMessage) message = userMessage;
+      
+      // Opción de subir captura
+      const wantsAttachment = confirm('¿Deseas adjuntar una captura de pantalla?');
+      if (wantsAttachment) {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = 'image/*';
+        input.onchange = async (e) => {
+          const file = (e.target as HTMLInputElement).files?.[0];
+          if (file) {
+            setUploadingFile(true);
+            const url = await uploadAttachment(file, orderId);
+            if (url) {
+              attachmentUrl = url;
+              toast.success('Captura adjuntada correctamente');
+            }
+            setUploadingFile(false);
+          }
+        };
+        input.click();
+        // Esperar un poco para que se suba el archivo
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
+    
+    const updates: any = { 
+      status: newStatus, 
+      updated_at: new Date().toISOString() 
+    };
+    
     if (newStatus === 'ENTREGADO' || newStatus === 'ENCOMIENDA ENTREGADA') {
       updates.delivered_at = new Date().toISOString();
     }
+    
+    // Guardar en historial
+    await saveToHistory(orderId, oldStatus, newStatus, message, attachmentUrl);
+    
     const { error } = await supabase.from('orders').update(updates).eq('id', orderId);
-    if (error) { toast.error(error.message); return; }
+    if (error) { 
+      toast.error(error.message); 
+      return; 
+    }
+    
     toast.success(`Estado → ${newStatus}`);
     setAllOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updates } : o));
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updates } : o));
@@ -296,6 +401,28 @@ export default function OrdersView() {
     }
   };
 
+  // Función para cargar el historial de un pedido
+  const loadOrderHistory = async (order: any) => {
+    setLoadingHistory(true);
+    setSelectedOrder(order);
+    
+    const { data, error } = await supabase
+      .from('order_status_history')
+      .select('*')
+      .eq('order_id', order.id)
+      .order('created_at', { ascending: false });
+      
+    if (error) {
+      toast.error('Error cargando historial: ' + error.message);
+      setOrderHistory([]);
+    } else {
+      setOrderHistory(data || []);
+    }
+    
+    setLoadingHistory(false);
+    setHistoryModalOpen(true);
+  };
+
   const openEdit = (o: any) => {
     setEditOrder({
       id: o.id,
@@ -332,6 +459,10 @@ export default function OrdersView() {
   const cancelOrder = async (orderId: string) => {
     const order = orders.find(o => o.id === orderId);
     const orderNum = order?.order_number || orderId.slice(0, 8);
+    
+    // Guardar en historial antes de cancelar
+    await saveToHistory(orderId, order?.status || 'PENDIENTE', 'CANCELADO', 'Pedido cancelado por usuario');
+    
     const { error } = await supabase.from('orders').update({ status: 'CANCELADO', updated_at: new Date().toISOString() }).eq('id', orderId);
     if (error) { toast.error(error.message); return; }
     toast.success('Pedido cancelado');
@@ -441,6 +572,19 @@ export default function OrdersView() {
     if (['CANCELADO', 'RECHAZADO', 'RECHAZADO EN EL LUGAR', 'NO DESEA', 'CANCELÓ POR WHATSAPP'].includes(s)) return 'badge-cancelado';
     if (s === 'EN RUTA') return 'badge-entregado';
     return 'badge-pendiente';
+  };
+
+  // Función para obtener estadísticas del historial
+  const getHistoryStats = () => {
+    const totalChanges = orderHistory.length;
+    const uniqueUsers = new Set(orderHistory.map(h => h.changed_by_email)).size;
+    const statusCounts: Record<string, number> = {};
+    orderHistory.forEach(h => {
+      statusCounts[h.new_status] = (statusCounts[h.new_status] || 0) + 1;
+    });
+    const mostCommonStatus = Object.entries(statusCounts).sort((a, b) => b[1] - a[1])[0];
+    
+    return { totalChanges, uniqueUsers, mostCommonStatus };
   };
 
   const canEditStatus1 = role !== 'VENDEDOR';
@@ -594,6 +738,13 @@ export default function OrdersView() {
                     <div className="flex gap-1">
                       <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={() => generateGuide(o)} title="Ver guía">📄</button>
                       <button className="nav-btn !px-2 !py-1 !text-[10px]" onClick={() => { generateGuide(o); setTimeout(copyGuide, 100); }} title="Copiar guía">📋</button>
+                      <button 
+                        className="nav-btn !px-2 !py-1 !text-[10px] !bg-blue-600/20 hover:!bg-blue-600/40 text-blue-700"
+                        onClick={() => loadOrderHistory(o)}
+                        title="Ver historial de cambios"
+                      >
+                        📜 Historial
+                      </button>
                     </div>
                   </td>
                   {canEdit && (
@@ -755,6 +906,12 @@ export default function OrdersView() {
                   <button className="nav-btn flex-1 !py-2 !text-sm" onClick={() => { generateGuide(o); setTimeout(copyGuide, 100); }}>
                     📋 Copiar
                   </button>
+                  <button 
+                    className="nav-btn flex-1 !py-2 !text-sm !bg-blue-600/20 text-blue-700"
+                    onClick={() => loadOrderHistory(o)}
+                  >
+                    📜 Historial
+                  </button>
                   {canEdit && (
                     <>
                       <button className="nav-btn flex-1 !py-2 !text-sm" onClick={() => openEdit(o)}>
@@ -861,6 +1018,165 @@ export default function OrdersView() {
             <div className="flex gap-2 justify-end mt-4">
               <button className="nav-btn" onClick={() => setGuideText('')}>Cerrar</button>
               <button className="nav-btn active" onClick={copyGuide}>Copiar</button>
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* Modal Historial de Estados con Dashboard Profesional */}
+      {historyModalOpen && selectedOrder && createPortal(
+        <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-2 sm:p-4" onClick={() => setHistoryModalOpen(false)}>
+          <div className="bg-card border border-border rounded-2xl p-4 sm:p-6 w-full max-w-5xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            {/* Header */}
+            <div className="flex justify-between items-start mb-6">
+              <div>
+                <h4 className="text-xl font-extrabold flex items-center gap-2">
+                  📜 Historial de Estados
+                  <span className="text-sm font-normal text-muted-foreground">
+                    Pedido #{selectedOrder.order_number || selectedOrder.id.slice(0, 8)}
+                  </span>
+                </h4>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Cliente: {selectedOrder.customer_name} | Ciudad: {selectedOrder.city}
+                </p>
+              </div>
+              <button onClick={() => setHistoryModalOpen(false)} className="text-muted-foreground hover:text-foreground text-2xl leading-none">✕</button>
+            </div>
+
+            {loadingHistory ? (
+              <div className="text-center py-12">Cargando historial...</div>
+            ) : orderHistory.length === 0 ? (
+              <div className="text-center text-muted-foreground py-12">
+                No hay cambios registrados en este pedido
+              </div>
+            ) : (
+              <>
+                {/* Dashboard de Estadísticas */}
+                {(() => {
+                  const stats = getHistoryStats();
+                  const statusCounts: Record<string, number> = {};
+                  orderHistory.forEach(h => {
+                    statusCounts[h.new_status] = (statusCounts[h.new_status] || 0) + 1;
+                  });
+                  
+                  return (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                      <div className="bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl p-4 text-white">
+                        <div className="text-3xl font-bold">{stats.totalChanges}</div>
+                        <div className="text-sm opacity-90">Cambios totales</div>
+                      </div>
+                      <div className="bg-gradient-to-br from-green-500 to-green-600 rounded-xl p-4 text-white">
+                        <div className="text-3xl font-bold">{stats.uniqueUsers}</div>
+                        <div className="text-sm opacity-90">Usuarios distintos</div>
+                      </div>
+                      <div className="bg-gradient-to-br from-purple-500 to-purple-600 rounded-xl p-4 text-white">
+                        <div className="text-3xl font-bold">{stats.mostCommonStatus?.[1] || 0}</div>
+                        <div className="text-sm opacity-90">Estado más usado</div>
+                        <div className="text-xs font-mono mt-1">{stats.mostCommonStatus?.[0] || '—'}</div>
+                      </div>
+                      <div className="bg-gradient-to-br from-orange-500 to-orange-600 rounded-xl p-4 text-white">
+                        <div className="text-3xl font-bold">{orderHistory[0]?.new_status || '—'}</div>
+                        <div className="text-sm opacity-90">Estado actual</div>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                {/* Timeline de cambios */}
+                <div className="space-y-4 max-h-[500px] overflow-y-auto pr-2">
+                  {orderHistory.map((item, idx) => (
+                    <div key={item.id} className="relative pl-8 before:content-[''] before:absolute before:left-3 before:top-0 before:bottom-0 before:w-0.5 before:bg-border">
+                      {/* Círculo de timeline */}
+                      <div className="absolute left-0 top-1 w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center">
+                        <div className="w-2 h-2 rounded-full bg-primary"></div>
+                      </div>
+                      
+                      <div className="bg-background border border-border rounded-lg p-4 hover:shadow-md transition-shadow">
+                        {/* Header del cambio */}
+                        <div className="flex flex-wrap justify-between items-start gap-2 mb-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs font-mono bg-muted px-2 py-1 rounded">
+                              {new Date(item.created_at).toLocaleString('es-PY', {
+                                day: '2-digit', month: '2-digit', year: 'numeric',
+                                hour: '2-digit', minute: '2-digit', second: '2-digit'
+                              })}
+                            </span>
+                            <span className={`text-xs px-2 py-1 rounded-full ${
+                              item.changed_by_role === 'ADMIN' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400' :
+                              item.changed_by_role === 'DELIVERY' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
+                              item.changed_by_role === 'PROVEEDOR' ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400' :
+                              'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400'
+                            }`}>
+                              {item.changed_by_role || 'Usuario'}
+                            </span>
+                          </div>
+                          <span className="text-xs text-muted-foreground font-mono">
+                            {item.changed_by_email}
+                          </span>
+                        </div>
+                        
+                        {/* Cambio de estado */}
+                        <div className="flex items-center gap-3 flex-wrap mb-3">
+                          <span className={`text-sm font-medium px-3 py-1 rounded-lg ${statusClass(item.previous_status || 'PENDIENTE')} bg-opacity-20`}>
+                            {item.previous_status || '—'}
+                          </span>
+                          <span className="text-muted-foreground text-lg">→</span>
+                          <span className={`text-sm font-bold px-3 py-1 rounded-lg ${statusClass(item.new_status)}`}>
+                            {item.new_status}
+                          </span>
+                        </div>
+                        
+                        {/* Mensaje si existe */}
+                        {item.message && (
+                          <div className="mt-2 p-3 bg-muted/30 rounded-lg border-l-4 border-blue-500">
+                            <div className="flex items-start gap-2">
+                              <span className="text-base">💬</span>
+                              <div>
+                                <div className="text-xs font-medium text-muted-foreground mb-1">Mensaje:</div>
+                                <div className="text-sm">{item.message}</div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* Adjunto si existe */}
+                        {item.attachment_url && (
+                          <div className="mt-3">
+                            <button
+                              onClick={() => window.open(item.attachment_url!, '_blank')}
+                              className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 bg-blue-50 dark:bg-blue-950/30 px-3 py-2 rounded-lg transition-colors"
+                            >
+                              <span>🖼️</span>
+                              <span>Ver captura adjunta</span>
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+            
+            {/* Footer con botones de acción */}
+            <div className="flex justify-end gap-2 mt-6 pt-4 border-t border-border">
+              <button className="nav-btn" onClick={() => setHistoryModalOpen(false)}>
+                Cerrar
+              </button>
+              <button 
+                className="nav-btn active"
+                onClick={() => {
+                  navigator.clipboard.writeText(
+                    orderHistory.map(h => 
+                      `[${new Date(h.created_at).toLocaleString('es-PY')}] ${h.changed_by_role} (${h.changed_by_email}): ${h.previous_status || '—'} → ${h.new_status}${h.message ? ` - Mensaje: ${h.message}` : ''}`
+                    ).join('\n')
+                  );
+                  toast.success('Historial copiado al portapapeles');
+                }}
+              >
+                📋 Copiar historial
+              </button>
             </div>
           </div>
         </div>,
