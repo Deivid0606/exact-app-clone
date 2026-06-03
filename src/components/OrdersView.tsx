@@ -84,7 +84,7 @@ function StatusChangeModal({
 }: { 
   isOpen: boolean; 
   onClose: () => void; 
-  onConfirm: (message: string, attachmentUrl: string | null) => void; 
+  onConfirm: (message: string, attachment: File | null) => void; 
   newStatus: string;
   uploading: boolean;
 }) {
@@ -98,6 +98,7 @@ function StatusChangeModal({
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      console.log('Archivo seleccionado:', { name: file.name, size: file.size, type: file.type });
       setAttachment(file);
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -122,6 +123,7 @@ function StatusChangeModal({
     setIsDragging(false);
     const file = e.dataTransfer.files?.[0];
     if (file && file.type.startsWith('image/')) {
+      console.log('Archivo arrastrado:', { name: file.name, size: file.size, type: file.type });
       setAttachment(file);
       const reader = new FileReader();
       reader.onloadend = () => {
@@ -142,7 +144,8 @@ function StatusChangeModal({
       toast.error('Debes adjuntar una captura de pantalla');
       return;
     }
-    onConfirm(message, null);
+    console.log('Enviando archivo al padre:', { message, attachmentName: attachment.name });
+    onConfirm(message, attachment);
   };
 
   return createPortal(
@@ -612,24 +615,42 @@ export default function OrdersView() {
   };
 
   const uploadAttachment = async (file: File, orderId: string): Promise<string | null> => {
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${orderId}_${Date.now()}.${fileExt}`;
-    const filePath = `order_attachments/${fileName}`;
-    
-    const { error: uploadError } = await supabase.storage
-      .from('order_attachments')
-      .upload(filePath, file);
+    try {
+      console.log('1. Iniciando subida de archivo:', { fileName: file.name, fileSize: file.size, orderId });
       
-    if (uploadError) {
-      toast.error('Error al subir la imagen: ' + uploadError.message);
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${orderId}_${Date.now()}.${fileExt}`;
+      const filePath = `order_attachments/${fileName}`;
+      
+      console.log('2. Path del archivo:', filePath);
+      
+      const { error: uploadError, data } = await supabase.storage
+        .from('order_attachments')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: true
+        });
+        
+      if (uploadError) {
+        console.error('3. Error en upload:', uploadError);
+        toast.error('Error al subir la imagen: ' + uploadError.message);
+        return null;
+      }
+      
+      console.log('3. Archivo subido exitosamente:', data);
+      
+      const { data: urlData } = supabase.storage
+        .from('order_attachments')
+        .getPublicUrl(filePath);
+      
+      console.log('4. URL pública generada:', urlData.publicUrl);
+      
+      return urlData.publicUrl;
+    } catch (error) {
+      console.error('Error en uploadAttachment:', error);
+      toast.error('Error inesperado al subir la imagen');
       return null;
     }
-    
-    const { data: urlData } = supabase.storage
-      .from('order_attachments')
-      .getPublicUrl(filePath);
-      
-    return urlData.publicUrl;
   };
 
   const saveToHistory = async (
@@ -639,7 +660,9 @@ export default function OrdersView() {
     message?: string, 
     attachmentUrl?: string
   ) => {
-    const { error } = await supabase
+    console.log('Guardando en historial:', { orderId, previousStatus, newStatus, message, attachmentUrl });
+    
+    const { data, error } = await supabase
       .from('order_status_history')
       .insert({
         order_id: orderId,
@@ -649,16 +672,23 @@ export default function OrdersView() {
         changed_by_role: role,
         message: message || null,
         attachment_url: attachmentUrl || null
-      });
+      })
+      .select();
     
     if (error) {
       console.error('Error guardando en historial:', error);
+      toast.error('Error al guardar el historial');
+    } else {
+      console.log('Historial guardado exitosamente:', data);
     }
   };
 
   const handleStatusChangeWithValidation = async (orderId: string, newStatus: string) => {
+    console.log('handleStatusChangeWithValidation:', { orderId, newStatus, role });
+    
     if (role === 'DELIVERY' && (newStatus === 'NO CONTESTA' || newStatus === 'CANCELADO')) {
       const order = orders.find(o => o.id === orderId);
+      console.log('Abriendo modal para delivery con estado requerido');
       setStatusChangeModal({
         isOpen: true,
         orderId,
@@ -677,6 +707,8 @@ export default function OrdersView() {
     message: string = '', 
     attachmentUrl: string | null = null
   ) => {
+    console.log('executeStatusChange:', { orderId, newStatus, message, attachmentUrl });
+    
     if (role === 'DELIVERY' && newStatus === 'DEVUELTO A DEPÓSITO') {
       toast.error('No podés usar DEVUELTO A DEPÓSITO');
       return false;
@@ -695,10 +727,11 @@ export default function OrdersView() {
       updates.delivered_at = new Date().toISOString();
     }
     
-    await saveToHistory(orderId, oldStatus, newStatus, message, attachmentUrl || undefined);
+    await saveToHistory(orderId, oldStatus, newStatus, message, attachmentUrl);
     
     const { error } = await supabase.from('orders').update(updates).eq('id', orderId);
     if (error) { 
+      console.error('Error actualizando pedido:', error);
       toast.error(error.message); 
       return false;
     }
@@ -711,13 +744,17 @@ export default function OrdersView() {
   };
 
   const processStatusChangeWithData = async (message: string, attachment: File | null) => {
+    console.log('processStatusChangeWithData iniciado:', { message, hasAttachment: !!attachment });
     setUploadingFile(true);
     
     let attachmentUrl = null;
     if (attachment) {
+      console.log('Subiendo attachment...');
       attachmentUrl = await uploadAttachment(attachment, statusChangeModal.orderId);
+      console.log('URL obtenida:', attachmentUrl);
     }
     
+    console.log('Ejecutando cambio de estado con:', { message, attachmentUrl });
     await executeStatusChange(
       statusChangeModal.orderId,
       statusChangeModal.newStatus,
@@ -821,6 +858,7 @@ export default function OrdersView() {
       toast.error('Error cargando historial: ' + error.message);
       setOrderHistory([]);
     } else {
+      console.log('Historial cargado:', data?.length, 'registros');
       setOrderHistory(data || []);
     }
     
