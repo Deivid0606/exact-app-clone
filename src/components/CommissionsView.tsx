@@ -166,6 +166,27 @@ export default function CommissionsView() {
     return s + Number(req.amount_gs || 0);
   }, 0);
 
+  // ── CORRECCIÓN: solicitudes PENDIENTES por proveedor (bloquean el disponible) ──
+  const pendingByProvider = useMemo(() => {
+    const map: Record<string, number> = {};
+    commissionRequests
+      .filter(r => {
+        if (r.status !== 'PENDIENTE') return false;
+        // Para VENDEDOR solo las suyas; para ADMIN/PROVEEDOR aplicar filtros activos
+        if (role === 'VENDEDOR' && r.vendor_email?.toLowerCase() !== myEmail.toLowerCase()) return false;
+        if (role === 'PROVEEDOR' && r.provider_email?.toLowerCase() !== myEmail.toLowerCase()) return false;
+        if ((role === 'ADMIN' || role === 'PROVEEDOR') && filterVendor && r.vendor_email?.toLowerCase() !== filterVendor.toLowerCase()) return false;
+        if (role === 'ADMIN' && filterProvider && r.provider_email?.toLowerCase() !== filterProvider.toLowerCase()) return false;
+        return true;
+      })
+      .forEach(r => {
+        const prov = String(r.provider_email || '').toLowerCase().trim();
+        if (!prov) return;
+        map[prov] = (map[prov] || 0) + Number(r.amount_gs || 0);
+      });
+    return map;
+  }, [commissionRequests, myEmail, role, filterVendor, filterProvider]);
+
   const providerBalances = useMemo(() => {
     const skuProvider: Record<string, string> = {};
     products.forEach(p => {
@@ -282,7 +303,11 @@ export default function CommissionsView() {
     ? totalAprobadoSolicitudes
     : providerBalances.reduce((s, b) => s + b.yaSolicitado, 0);
 
-  const totalDisponible = providerBalances.reduce((s, b) => s + b.disponible, 0);
+  // ── CORRECCIÓN: disponible total resta solicitudes PENDIENTES ──
+  const totalDisponible = providerBalances.reduce((s, b) => {
+    const pending = pendingByProvider[b.provider] || 0;
+    return s + Math.max(0, b.disponible - pending);
+  }, 0);
   
   const sumaComisionNeta = filterStatus === 'PAGADO'
     ? totalAprobadoSolicitudes
@@ -387,8 +412,14 @@ export default function CommissionsView() {
                 const providerName = providerProfile?.name || b.provider;
                 const providerLogo = providerProfile?.logo_url || '';
                 const providerPhone = cleanPhoneForWhatsApp(providerProfile?.phone || '');
+
+                // ── CORRECCIÓN: restar solicitudes PENDIENTES del disponible ──
+                const pendingAmount = pendingByProvider[b.provider] || 0;
                 const rendido = filterStatus === 'PAGADO' ? b.yaSolicitado : b.rendido;
-                const disponible = filterStatus === 'PAGADO' ? 0 : b.disponible;
+                const disponible = filterStatus === 'PAGADO'
+                  ? 0
+                  : Math.max(0, b.disponible - pendingAmount);
+
                 const cardStatus = filterStatus === 'PAGADO'
                   ? 'PAGADO'
                   : disponible > 0
@@ -441,6 +472,13 @@ export default function CommissionsView() {
                         <span className="text-sm font-bold text-orange-600">Gs {nf(b.yaSolicitado)}</span>
                       </div>
 
+                      {pendingAmount > 0 && (
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-xs text-muted-foreground">⏳ Solicitud pendiente</span>
+                          <span className="text-sm font-bold text-orange-500">Gs {nf(pendingAmount)}</span>
+                        </div>
+                      )}
+
                       <div className="pt-2 border-t border-border flex items-center justify-between gap-3">
                         <span className="text-xs font-bold">Disponible para solicitar</span>
                         <span className="text-base font-extrabold text-blue-600">Gs {nf(disponible)}</span>
@@ -475,6 +513,7 @@ export default function CommissionsView() {
                     )}
                     <th className="text-right">Rendido disponible (Gs)</th>
                     <th className="text-right">Ya solicitado (Gs)</th>
+                    <th className="text-right">⏳ Pendiente aprobación (Gs)</th>
                     <th className="text-right">Disponible para solicitar (Gs)</th>
                    </tr>
                 </thead>
@@ -483,6 +522,12 @@ export default function CommissionsView() {
                     const providerProfile = providers.find(p => p.email?.toLowerCase() === b.provider);
                     const providerName = providerProfile?.name || b.provider;
                     const providerLogo = providerProfile?.logo_url || '';
+
+                    // ── CORRECCIÓN: restar solicitudes PENDIENTES del disponible ──
+                    const pendingAmount = pendingByProvider[b.provider] || 0;
+                    const disponibleReal = filterStatus === 'PAGADO'
+                      ? 0
+                      : Math.max(0, b.disponible - pendingAmount);
 
                     return (
                       <tr key={b.provider}>
@@ -509,7 +554,8 @@ export default function CommissionsView() {
                         )}
                         <td className="text-right text-xs text-green-600">{nf(filterStatus === 'PAGADO' ? b.yaSolicitado : b.rendido)}</td>
                         <td className="text-right text-xs text-orange-600">{nf(b.yaSolicitado)}</td>
-                        <td className="text-right text-xs font-bold text-blue-600">{nf(filterStatus === 'PAGADO' ? 0 : b.disponible)}</td>
+                        <td className="text-right text-xs text-orange-500">{nf(filterStatus === 'PAGADO' ? 0 : pendingAmount)}</td>
+                        <td className="text-right text-xs font-bold text-blue-600">{nf(disponibleReal)}</td>
                       </tr>
                     );
                   })}
@@ -524,6 +570,9 @@ export default function CommissionsView() {
                     )}
                     <td className="text-right font-bold">{nf(filterStatus === 'PAGADO' ? totalAprobadoSolicitudes : totalRendido)}</td>
                     <td className="text-right font-bold">{nf(totalSolicitado)}</td>
+                    <td className="text-right font-bold">
+                      {nf(filterStatus === 'PAGADO' ? 0 : providerBalances.reduce((s, b) => s + (pendingByProvider[b.provider] || 0), 0))}
+                    </td>
                     <td className="text-right font-bold">{nf(filterStatus === 'PAGADO' ? 0 : saldoDisponible)}</td>
                   </tr>
                 </tfoot>
