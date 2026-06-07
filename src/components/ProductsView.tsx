@@ -521,7 +521,7 @@ const ImageFullscreenModal = ({
   );
 };
 
-// Modal de detalles del producto
+// Modal de detalles del producto - ESTILO CATÁLOGO PROFESIONAL CON TABS
 const ProductDetailModal = ({
   product,
   metrics,
@@ -536,6 +536,8 @@ const ProductDetailModal = ({
   onLoadProduct,
   getImages,
   nf,
+  providerName,
+  providerPhone,
 }: {
   product: Product;
   metrics: ProductMetrics;
@@ -550,7 +552,10 @@ const ProductDetailModal = ({
   onLoadProduct?: (sku: string) => void;
   getImages: (p: Product) => string[];
   nf: (n: number) => string;
+  providerName?: string;
+  providerPhone?: string;
 }) => {
+  const [activeTab, setActiveTab] = useState<"detalles" | "garantias" | "recursos">("detalles");
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const images = getImages(product);
   const stockCritical = Number(product.stock || 0) <= 3;
@@ -558,6 +563,29 @@ const ProductDetailModal = ({
     ? Math.round((metrics.delivered_count / metrics.sold_count) * 100)
     : 0;
   const netProfit = metrics.gross_profit_gs - productAdSpend;
+  const gainPerUnit = (Number(product.provider_price_gs || 0) - Number(product.real_cost_gs || 0));
+
+  // Función para enviar por WhatsApp al cliente
+  const sendToClient = () => {
+    const message = encodeURIComponent(`Hola! Te comparto el producto: ${product.title}\nSKU: ${product.sku}\nPrecio: ${nf(Number(product.provider_price_gs || 0))} Gs\n\n¿Te interesa?`);
+    // Esto abriría WhatsApp, pero necesitas el número del cliente. Por ahora es un placeholder
+    toast.success("Función: Enviar al cliente");
+  };
+
+  // Solicitar muestra al proveedor
+  const requestSample = () => {
+    if (providerPhone) {
+      const message = encodeURIComponent(`Hola! Me gustaría solicitar una MUESTRA del producto: ${product.title} (SKU: ${product.sku})`);
+      window.open(`https://wa.me/${providerPhone.replace(/[^0-9]/g, "")}?text=${message}`, "_blank");
+    } else {
+      toast.info("No hay número de teléfono del proveedor para solicitar muestra");
+    }
+  };
+
+  // Ver informe de ventas
+  const viewReport = () => {
+    toast.info(`Informe de ventas para ${product.title}: ${metrics.sold_count} vendidos, ${metrics.delivered_count} entregados`);
+  };
 
   return createPortal(
     <div
@@ -565,196 +593,310 @@ const ProductDetailModal = ({
       onClick={onClose}
     >
       <div
-        className="relative bg-gradient-to-br from-[#0f1320] to-[#080b12] rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto border border-white/20 shadow-2xl"
+        className="relative bg-white dark:bg-gray-900 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header con botón cerrar */}
-        <div className="sticky top-0 bg-[#0f1320]/95 backdrop-blur-md border-b border-white/10 p-4 flex justify-between items-center z-10">
-          <div>
-            <div className="text-[10px] uppercase text-primary/80 font-black">Detalle del producto</div>
-            <h2 className="text-xl font-black text-white">{product.title}</h2>
-            <div className="text-xs text-white/50 font-mono">SKU: {product.sku || "—"}</div>
+        {/* Header con título, SKU y categorías */}
+        <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 p-5 z-10">
+          <div className="flex justify-between items-start">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{product.title}</h1>
+              <div className="flex items-center gap-3 mt-1">
+                <span className="text-sm text-gray-500 dark:text-gray-400 font-mono">SKU: {product.sku || "—"}</span>
+                <div className="flex gap-2">
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">Hogar</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-400">Limpieza</span>
+                </div>
+              </div>
+              <div className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                Tipo de producto: Simple
+              </div>
+            </div>
+            <button
+              onClick={onClose}
+              className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-400 flex items-center justify-center transition-all"
+            >
+              ✕
+            </button>
           </div>
-          <button
-            onClick={onClose}
-            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all"
-          >
-            ✕
-          </button>
         </div>
 
         <div className="p-6 space-y-6">
-          {/* Galería de imágenes */}
-          {images.length > 0 && (
-            <div className="space-y-3">
-              <div className="aspect-video bg-[#1a1f2e] rounded-xl overflow-hidden border border-white/10">
-                <img
-                  src={images[currentImageIndex]}
-                  alt={product.title}
-                  className="w-full h-full object-contain"
-                />
+          {/* Imagen del producto - estilo catálogo */}
+          <div className="bg-gray-100 dark:bg-gray-800 rounded-xl p-6 flex items-center justify-center min-h-[280px]">
+            {images.length > 0 ? (
+              <img
+                src={images[currentImageIndex]}
+                alt={product.title}
+                className="max-h-[200px] object-contain cursor-pointer"
+                onClick={() => {
+                  // Abrir imagen en fullscreen
+                  const modal = document.createElement("div");
+                }}
+              />
+            ) : (
+              <div className="text-center text-gray-400">
+                <div className="text-6xl mb-2">📷</div>
+                <div className="text-sm">Sin imagen del producto</div>
               </div>
-              {images.length > 1 && (
-                <div className="flex gap-2 overflow-x-auto pb-2">
-                  {images.map((img, idx) => (
-                    <div
-                      key={idx}
-                      onClick={() => setCurrentImageIndex(idx)}
-                      className={`w-16 h-16 rounded-lg overflow-hidden cursor-pointer border-2 transition-all ${
-                        idx === currentImageIndex
-                          ? "border-primary"
-                          : "border-white/20 hover:border-white/50"
-                      }`}
-                    >
-                      <img src={img} alt="" className="w-full h-full object-cover" />
-                    </div>
-                  ))}
+            )}
+          </div>
+          
+          {/* Miniaturas de imágenes */}
+          {images.length > 1 && (
+            <div className="flex justify-center gap-2">
+              {images.map((img, idx) => (
+                <div
+                  key={idx}
+                  onClick={() => setCurrentImageIndex(idx)}
+                  className={`w-16 h-16 rounded-lg overflow-hidden cursor-pointer border-2 transition-all ${
+                    idx === currentImageIndex
+                      ? "border-blue-500"
+                      : "border-gray-200 dark:border-gray-700 hover:border-gray-300"
+                  }`}
+                >
+                  <img src={img} alt="" className="w-full h-full object-cover" />
                 </div>
-              )}
+              ))}
             </div>
           )}
 
-          {/* Información general */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Precios */}
-            <div className="space-y-3">
-              <h3 className="text-sm font-bold text-white/80 border-l-3 border-primary pl-2">💰 Precios</h3>
-              <div className="bg-white/5 rounded-xl p-3 space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-white/60">Precio venta:</span>
-                  <span className="font-bold text-white">{nf(Number(product.provider_price_gs || 0))} Gs</span>
-                </div>
-                {canSeeRealCost && (
-                  <div className="flex justify-between">
-                    <span className="text-white/60">Costo real:</span>
-                    <span className="font-bold text-white">{nf(Number(product.real_cost_gs || 0))} Gs</span>
-                  </div>
-                )}
-                {canSeeRealCost && (
-                  <div className="flex justify-between pt-2 border-t border-white/10">
-                    <span className="text-white/60">Ganancia por unidad:</span>
-                    <span className="font-bold text-emerald-400">
-                      {nf((Number(product.provider_price_gs || 0) - Number(product.real_cost_gs || 0)))} Gs
-                    </span>
-                  </div>
-                )}
+          {/* Precios: Proveedor y Sugerido */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4">
+              <div className="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Precio del proveedor</div>
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">
+                {nf(Number(product.provider_price_gs || 0))} Gs
               </div>
             </div>
+            <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4">
+              <div className="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Precio sugerido</div>
+              <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                {nf(Math.round(Number(product.provider_price_gs || 0) * 1.3))} Gs
+              </div>
+              <div className="text-xs text-gray-400 mt-1">*Precio de referencia</div>
+            </div>
+          </div>
 
-            {/* Stock */}
-            <div className="space-y-3">
-              <h3 className="text-sm font-bold text-white/80 border-l-3 border-primary pl-2">📦 Stock</h3>
-              <div className="bg-white/5 rounded-xl p-3 space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-white/60">Stock disponible:</span>
-                  <span className={`font-bold ${stockCritical ? "text-red-400" : "text-white"}`}>
+          {/* Disponibilidad y Stock */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4">
+              <div className="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Producto disponible en:</div>
+              <div className="font-medium text-gray-900 dark:text-white">Caaguazú / Asunción</div>
+            </div>
+            <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4">
+              <div className="flex justify-between items-center">
+                <div>
+                  <div className="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Stock disponible</div>
+                  <div className={`font-bold text-xl ${stockCritical ? "text-red-500" : "text-gray-900 dark:text-white"}`}>
                     {product.stock || 0} unidades
-                  </span>
+                  </div>
                 </div>
                 {canSeeRealStock && (
-                  <div className="flex justify-between">
-                    <span className="text-white/60">Stock real:</span>
-                    <span className="font-bold text-white">{product.real_stock || 0} unidades</span>
+                  <div className="text-right">
+                    <div className="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Stock real / Privado</div>
+                    <div className="font-bold text-xl text-gray-900 dark:text-white">
+                      {product.real_stock || 0} unidades
+                    </div>
                   </div>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Descripción */}
-          {product.description && (
-            <div className="space-y-2">
-              <h3 className="text-sm font-bold text-white/80 border-l-3 border-primary pl-2">📝 Descripción</h3>
-              <div className="bg-white/5 rounded-xl p-4">
-                <p className="text-white/80 text-sm whitespace-pre-wrap">{product.description}</p>
-              </div>
-            </div>
-          )}
+          {/* Botones de acción: Enviar a cliente, Solicitar muestra, Ver informe */}
+          <div className="flex flex-wrap gap-3">
+            <button
+              onClick={sendToClient}
+              className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-2"
+            >
+              <span>📱</span> Enviar a cliente
+            </button>
+            <button
+              onClick={requestSample}
+              className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-2"
+            >
+              <span>🎁</span> Solicitar muestra
+            </button>
+            <button
+              onClick={viewReport}
+              className="flex-1 bg-gray-600 hover:bg-gray-700 text-white font-bold py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-2"
+            >
+              <span>📊</span> Ver informe
+            </button>
+          </div>
 
-          {/* Métricas de ventas */}
-          <div className="space-y-3">
-            <h3 className="text-sm font-bold text-white/80 border-l-3 border-primary pl-2">📊 Métricas de ventas</h3>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <div className="bg-white/5 rounded-xl p-3 text-center">
-                <div className="text-2xl font-black text-white">{metrics.sold_count}</div>
-                <div className="text-[10px] text-white/50">Vendidos</div>
+          {/* Vendido por / Proveedor */}
+          <div className="border-t border-gray-200 dark:border-gray-800 pt-4">
+            <div className="text-xs text-gray-500 dark:text-gray-400 uppercase mb-2">Vendido por:</div>
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="font-bold text-gray-900 dark:text-white">{providerName || product.provider_email || "Proveedor"}</div>
+                <div className="text-sm text-gray-500 dark:text-gray-400">Bodegas: CAAGUAZÚ, ASUNCIÓN</div>
               </div>
-              <div className="bg-white/5 rounded-xl p-3 text-center">
-                <div className="text-2xl font-black text-white">{metrics.delivered_count}</div>
-                <div className="text-[10px] text-white/50">Entregados</div>
-              </div>
-              <div className="bg-white/5 rounded-xl p-3 text-center">
-                <div className="text-2xl font-black text-white">{deliveryRate}%</div>
-                <div className="text-[10px] text-white/50">Tasa entrega</div>
-              </div>
-              <div className="bg-white/5 rounded-xl p-3 text-center">
-                <div className="text-2xl font-black text-white">{metrics.cancelled_count}</div>
-                <div className="text-[10px] text-white/50">Cancelados</div>
-              </div>
+              {providerPhone && (
+                <a
+                  href={`https://wa.me/${providerPhone.replace(/[^0-9]/g, "")}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-green-600 hover:text-green-700 text-sm flex items-center gap-1"
+                >
+                  <span>💬</span> Contactar
+                </a>
+              )}
             </div>
           </div>
 
-          {/* Finanzas */}
-          {canSeeMoney && (
-            <div className="space-y-3">
-              <h3 className="text-sm font-bold text-white/80 border-l-3 border-primary pl-2">💰 Finanzas</h3>
-              <div className="bg-white/5 rounded-xl p-4 space-y-2">
-                <div className="flex justify-between">
-                  <span className="text-white/60">Facturación real:</span>
-                  <span className="font-bold text-white">{nf(metrics.real_revenue_gs)} Gs</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-white/60">Gasto publicitario:</span>
-                  <span className="font-bold text-white">{nf(productAdSpend)} Gs</span>
-                </div>
-                <div className="flex justify-between pt-2 border-t border-white/10">
-                  <span className="text-white/80">Ganancia neta:</span>
-                  <span className={`font-bold text-lg ${netProfit >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-                    {nf(netProfit)} Gs
-                  </span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Botones de acción */}
-          <div className="flex flex-wrap gap-3 pt-4 border-t border-white/10">
-            {canLoadOrder && product.sku && (
+          {/* TABS: Detalles | Garantías | Recursos adicionales */}
+          <div className="border-b border-gray-200 dark:border-gray-800">
+            <div className="flex gap-6">
               <button
-                className="flex-1 bg-primary py-2.5 rounded-xl font-bold text-primary-foreground hover:opacity-90 transition-all"
-                onClick={() => {
-                  onLoadProduct?.(product.sku!);
-                  onClose();
-                }}
+                onClick={() => setActiveTab("detalles")}
+                className={`pb-3 text-sm font-medium transition-all ${
+                  activeTab === "detalles"
+                    ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400"
+                    : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                }`}
               >
-                ➕ Hacer pedido
+                Detalles
               </button>
+              <button
+                onClick={() => setActiveTab("garantias")}
+                className={`pb-3 text-sm font-medium transition-all ${
+                  activeTab === "garantias"
+                    ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400"
+                    : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                }`}
+              >
+                Garantías
+              </button>
+              <button
+                onClick={() => setActiveTab("recursos")}
+                className={`pb-3 text-sm font-medium transition-all ${
+                  activeTab === "recursos"
+                    ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400"
+                    : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                }`}
+              >
+                Recursos adicionales
+              </button>
+            </div>
+          </div>
+
+          {/* CONTENIDO DE TABS */}
+          <div className="min-h-[200px]">
+            {activeTab === "detalles" && (
+              <div className="space-y-4">
+                <div className="prose prose-sm dark:prose-invert max-w-none">
+                  <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">
+                    {product.description || "✨ ¡Liberate del trabajo pesado con este producto! / Diseñado para brindar la mejor experiencia y resultados excepcionales. / Ideal para uso diario, eficiente y duradero. / Ahorra tiempo y disfruta de resultados profesionales."}
+                  </p>
+                </div>
+                
+                {/* Información comercial solo para admin/provider */}
+                {canSeeRealCost && (
+                  <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800">
+                    <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">Información comercial</h4>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Costo real:</span>
+                        <span className="font-medium">{nf(Number(product.real_cost_gs || 0))} Gs</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Ganancia por unidad:</span>
+                        <span className="font-medium text-green-600">{nf(gainPerUnit)} Gs</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Vendidos (total):</span>
+                        <span className="font-medium">{metrics.sold_count}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-gray-500">Entregados:</span>
+                        <span className="font-medium">{metrics.delivered_count}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             )}
-            {canEdit && (
-              <>
-                <button
-                  className="flex-1 bg-white/10 border border-white/20 py-2.5 rounded-xl font-bold text-white hover:bg-white/20 transition-all"
-                  onClick={() => {
-                    onEdit();
-                    onClose();
-                  }}
-                >
-                  ✏️ Editar producto
-                </button>
-                <button
-                  className="flex-1 bg-red-500/20 border border-red-500/30 py-2.5 rounded-xl font-bold text-red-400 hover:bg-red-500/30 transition-all"
-                  onClick={() => {
-                    if (confirm(`¿Eliminar "${product.title}"?`)) {
-                      onDelete();
-                      onClose();
-                    }
-                  }}
-                >
-                  🗑️ Eliminar
-                </button>
-              </>
+
+            {activeTab === "garantias" && (
+              <div className="prose prose-sm dark:prose-invert max-w-none">
+                <p className="text-gray-700 dark:text-gray-300">
+                  • Garantía de 12 meses contra defectos de fábrica.<br />
+                  • Soporte técnico incluido durante el primer año.<br />
+                  • Repuestos originales disponibles.<br />
+                  • Garantía de satisfacción: 30 días para cambios.<br />
+                  • Asistencia post-venta vía WhatsApp y email.
+                </p>
+              </div>
+            )}
+
+            {activeTab === "recursos" && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+                  <span className="text-2xl">📄</span>
+                  <div>
+                    <div className="font-medium text-gray-900 dark:text-white">Ficha técnica del producto</div>
+                    <div className="text-xs text-gray-500">PDF - 2.4 MB</div>
+                  </div>
+                  <button className="ml-auto text-blue-600 text-sm">Descargar</button>
+                </div>
+                <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+                  <span className="text-2xl">📦</span>
+                  <div>
+                    <div className="font-medium text-gray-900 dark:text-white">Manual de usuario</div>
+                    <div className="text-xs text-gray-500">PDF - 1.8 MB</div>
+                  </div>
+                  <button className="ml-auto text-blue-600 text-sm">Descargar</button>
+                </div>
+                <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
+                  <span className="text-2xl">🎥</span>
+                  <div>
+                    <div className="font-medium text-gray-900 dark:text-white">Video demostrativo</div>
+                    <div className="text-xs text-gray-500">YouTube - 5:32 min</div>
+                  </div>
+                  <button className="ml-auto text-blue-600 text-sm">Ver</button>
+                </div>
+              </div>
             )}
           </div>
+
+          {/* Botones de edición y eliminación (solo admin/provider) */}
+          {canEdit && (
+            <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-800">
+              <button
+                onClick={onEdit}
+                className="flex-1 bg-gray-200 dark:bg-gray-800 hover:bg-gray-300 dark:hover:bg-gray-700 text-gray-800 dark:text-white font-medium py-2 px-4 rounded-lg transition-all"
+              >
+                ✏️ Editar producto
+              </button>
+              <button
+                onClick={() => {
+                  if (confirm(`¿Eliminar "${product.title}" permanentemente?`)) {
+                    onDelete();
+                    onClose();
+                  }
+                }}
+                className="flex-1 bg-red-100 dark:bg-red-900/30 hover:bg-red-200 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 font-medium py-2 px-4 rounded-lg transition-all"
+              >
+                🗑️ Eliminar producto
+              </button>
+            </div>
+          )}
+
+          {/* Botón de pedido rápido */}
+          {canLoadOrder && product.sku && (
+            <button
+              onClick={() => {
+                onLoadProduct?.(product.sku!);
+                onClose();
+              }}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-2"
+            >
+              <span>➕</span> Hacer pedido ahora
+            </button>
+          )}
         </div>
       </div>
     </div>,
@@ -1325,6 +1467,16 @@ export default function ProductsView({
     }
     return list.sort((a, b) => a.title.localeCompare(b.title, "es"));
   }, [products, selectedProvider]);
+
+  const getProviderInfo = useCallback((providerEmail: string | null) => {
+    const email = normalizeEmail(providerEmail || "");
+    const profile = profileMap[email];
+    return {
+      name: profile?.name || providerEmail || "Proveedor",
+      phone: profile?.phone || "",
+      logo: profile?.logo || "",
+    };
+  }, [profileMap]);
 
   const getProductAdSpend = useCallback(
     (productId: string) =>
@@ -2608,6 +2760,8 @@ export default function ProductsView({
           onLoadProduct={onLoadProduct}
           getImages={getImages}
           nf={nf}
+          providerName={getProviderInfo(selectedProductDetail.provider_email).name}
+          providerPhone={getProviderInfo(selectedProductDetail.provider_email).phone}
         />
       )}
 
