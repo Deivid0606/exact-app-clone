@@ -587,7 +587,6 @@ const AssignDeliveryStockModal = ({
           </p>
         </div>
 
-        {/* Sub tabs */}
         <div className="flex border-b border-white/10 px-5">
           <button
             onClick={() => setActiveSubTab("asignar")}
@@ -614,37 +613,43 @@ const AssignDeliveryStockModal = ({
         <div className="p-5 space-y-4 max-h-[500px] overflow-y-auto">
           {activeSubTab === "asignar" && (
             <>
-              {deliveries.map((delivery) => {
-                const assignment = assignments.find(a => a.delivery_email === delivery.email);
-                return (
-                  <div key={delivery.email} className="flex items-center justify-between gap-4 p-3 bg-white/5 rounded-xl border border-white/10">
-                    <div className="flex-1">
-                      <div className="font-medium text-white">{delivery.name}</div>
-                      <div className="text-xs text-white/40">{delivery.email}</div>
+              {deliveries.length === 0 ? (
+                <div className="text-center py-8 text-white/40">
+                  No hay deliveries registrados en el sistema
+                </div>
+              ) : (
+                deliveries.map((delivery) => {
+                  const assignment = assignments.find(a => a.delivery_email === delivery.email);
+                  return (
+                    <div key={delivery.email} className="flex items-center justify-between gap-4 p-3 bg-white/5 rounded-xl border border-white/10">
+                      <div className="flex-1">
+                        <div className="font-medium text-white">{delivery.name}</div>
+                        <div className="text-xs text-white/40">{delivery.email}</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => updateQuantity(delivery.email, (assignment?.quantity || 0) - 1)}
+                          className="w-8 h-8 rounded-full bg-white/10 text-white/80 hover:bg-white/20 transition-all"
+                        >
+                          -
+                        </button>
+                        <input
+                          type="number"
+                          className="w-20 text-center py-2 rounded-lg bg-white/10 border border-white/20 text-white font-mono focus:outline-none focus:border-primary"
+                          value={assignment?.quantity || 0}
+                          onChange={(e) => updateQuantity(delivery.email, parseInt(e.target.value) || 0)}
+                        />
+                        <button
+                          onClick={() => updateQuantity(delivery.email, (assignment?.quantity || 0) + 1)}
+                          className="w-8 h-8 rounded-full bg-white/10 text-white/80 hover:bg-white/20 transition-all"
+                        >
+                          +
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => updateQuantity(delivery.email, (assignment?.quantity || 0) - 1)}
-                        className="w-8 h-8 rounded-full bg-white/10 text-white/80 hover:bg-white/20 transition-all"
-                      >
-                        -
-                      </button>
-                      <input
-                        type="number"
-                        className="w-20 text-center py-2 rounded-lg bg-white/10 border border-white/20 text-white font-mono focus:outline-none focus:border-primary"
-                        value={assignment?.quantity || 0}
-                        onChange={(e) => updateQuantity(delivery.email, parseInt(e.target.value) || 0)}
-                      />
-                      <button
-                        onClick={() => updateQuantity(delivery.email, (assignment?.quantity || 0) + 1)}
-                        className="w-8 h-8 rounded-full bg-white/10 text-white/80 hover:bg-white/20 transition-all"
-                      >
-                        +
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })
+              )}
             </>
           )}
 
@@ -1226,7 +1231,6 @@ const ProductDetailModal = ({
 
             {activeTab === "delivery_stock" && showDeliveryStock && (
               <div className="space-y-4">
-                {/* Botón para asignar stock */}
                 <div className="flex justify-end">
                   <button
                     onClick={onOpenAssignStock}
@@ -1236,7 +1240,6 @@ const ProductDetailModal = ({
                   </button>
                 </div>
 
-                {/* Tabla de stock por delivery */}
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead className="bg-white/5 border-b border-white/10">
@@ -1287,7 +1290,6 @@ const ProductDetailModal = ({
                   </table>
                 </div>
 
-                {/* Movimientos recientes */}
                 {deliveryMovements && deliveryMovements.length > 0 && (
                   <div className="mt-4">
                     <h4 className="text-sm font-semibold text-white mb-3">📋 Últimos movimientos</h4>
