@@ -75,37 +75,52 @@ function isProviderAllowed(order: any, userEmail: string): boolean {
 }
 
 // ============================================
-// FUNCIÓN PARA DESCONTAR STOCK (MEJORADA)
+// FUNCIÓN PARA DESCONTAR STOCK (MEJORADA - VERSIÓN FINAL)
 // ============================================
 const decreaseDeliveryStock = async (order: any, loadDeliveryStocksCallback?: () => Promise<void>, loadOrdersCallback?: () => Promise<void>) => {
   console.log('🔄 INICIANDO DESCUENTO DE STOCK');
   console.log('Pedido ID:', order.id);
-  console.log('SKU del pedido:', order.sku);
-  console.log('Cantidad (pack_qty):', order.pack_qty);
-  console.log('Delivery email:', order.delivery_email);
-  console.log('Estado:', order.status || order.status2);
   console.log('Pedido completo:', order);
   
-  // 🔥 INTENTAR OBTENER SKU DE MÚLTIPLES FUENTES 🔥
+  // 🔥 BUSCAR EL EMAIL DEL DELIVERY EN MÚLTIPLES CAMPOS 🔥
+  let deliveryEmail = order.delivery_email || order.assigned_delivery || order.assigned_to || order.delivery;
+  
+  if (!deliveryEmail) {
+    console.log('❌ No se encontró email de delivery en el pedido');
+    console.log('Campos disponibles:', {
+      delivery_email: order.delivery_email,
+      assigned_delivery: order.assigned_delivery,
+      assigned_to: order.assigned_to,
+      delivery: order.delivery
+    });
+    toast.error('No se puede descontar stock: el pedido no tiene delivery asignado');
+    return false;
+  }
+  
+  console.log('✅ Delivery email encontrado:', deliveryEmail);
+  
+  // 🔥 BUSCAR EL SKU EN MÚLTIPLES FUENTES 🔥
   let productSku = order.sku;
   
   // Si no hay SKU directo, buscar en items_json
   if (!productSku && order.items_json) {
     try {
       const items = typeof order.items_json === 'string' ? JSON.parse(order.items_json) : order.items_json;
-      if (items && items.length > 0 && items[0].sku) {
-        productSku = items[0].sku;
-        console.log('✅ SKU obtenido de items_json:', productSku);
-      } else if (items && items.length > 0 && items[0].product_sku) {
-        productSku = items[0].product_sku;
-        console.log('✅ SKU obtenido de items_json.product_sku:', productSku);
+      if (items && items.length > 0) {
+        if (items[0].sku) {
+          productSku = items[0].sku;
+          console.log('✅ SKU obtenido de items_json.sku:', productSku);
+        } else if (items[0].product_sku) {
+          productSku = items[0].product_sku;
+          console.log('✅ SKU obtenido de items_json.product_sku:', productSku);
+        }
       }
     } catch (e) {
       console.error('Error parseando items_json:', e);
     }
   }
   
-  // Si no hay SKU, buscar en product_sku directo
+  // Si no hay SKU, buscar en product_sku
   if (!productSku && order.product_sku) {
     productSku = order.product_sku;
     console.log('✅ SKU obtenido de product_sku:', productSku);
@@ -133,12 +148,6 @@ const decreaseDeliveryStock = async (order: any, loadDeliveryStocksCallback?: ()
     return false;
   }
   
-  if (!order.delivery_email) {
-    console.log('❌ No hay delivery_email');
-    toast.error('No se puede descontar stock: falta delivery_email');
-    return false;
-  }
-  
   try {
     // 1. Buscar el producto por SKU
     const { data: product, error: productError } = await supabase
@@ -162,7 +171,7 @@ const decreaseDeliveryStock = async (order: any, loadDeliveryStocksCallback?: ()
     const { data: deliveryStock, error: deliveryError } = await supabase
       .from('delivery_stock')
       .select('id, quantity')
-      .eq('delivery_email', order.delivery_email)
+      .eq('delivery_email', deliveryEmail)
       .eq('product_id', product.id)
       .single();
     
@@ -209,14 +218,14 @@ const decreaseDeliveryStock = async (order: any, loadDeliveryStocksCallback?: ()
       }
     } else {
       console.log('⚠️ No hay stock asignado para este delivery, no se descuenta');
-      toast.warning(`⚠️ El delivery ${order.delivery_email} no tiene stock asignado para este producto. No se descuenta stock.`);
+      toast.warning(`⚠️ El delivery ${deliveryEmail} no tiene stock asignado para este producto. No se descuenta stock.`);
     }
     
     // 5. Registrar movimiento
     const { error: movementError } = await supabase
       .from('delivery_stock_movements')
       .insert({
-        delivery_email: order.delivery_email,
+        delivery_email: deliveryEmail,
         product_id: product.id,
         quantity_change: -quantity,
         reason: '📦 ' + (order.status || order.status2 || 'ENTREGADO'),
@@ -1007,7 +1016,6 @@ export default function OrdersView() {
       const updatedOrder = { ...order, ...updates, status: newStatus };
       await decreaseDeliveryStock(updatedOrder, async () => {
         // Recargar delivery_stock después de descontar
-        // No necesitamos hacer nada aquí porque ya se recarga en la función
       }, loadOrders);
     }
     
@@ -1072,7 +1080,7 @@ export default function OrdersView() {
         } else {
           console.error('❌ No se encontró el pedido para descontar stock');
         }
-      }, 100); // Pequeño delay para asegurar que el estado 'orders' se haya actualizado
+      }, 100);
     }
     
     setUploadingFile(false);
