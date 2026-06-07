@@ -180,14 +180,18 @@ const canUserSeeProduct = (
   if (!userEmail || !role) return false;
   if (role === "admin") return true;
   if (role === "provider") return providerEmail === userEmail;
+  
+  // CLAVE: Delivery SOLO ve productos donde tiene stock > 0
   if (role === "delivery") {
-    return deliveryStocks.some(
+    const hasStock = deliveryStocks.some(
       (ds) =>
         ds.delivery_email === userEmail &&
         ds.product_id === p.id &&
         ds.quantity > 0
     );
+    return hasStock;
   }
+  
   if (["seller", "despachante"].includes(role)) {
     if (!isPrivate) return true;
     return privateEmails.includes(userEmail);
@@ -1125,7 +1129,9 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
     const allProducts = (prodRes.data || []) as Product[];
     const deliveryStocksData = (stockRes.data || []) as DeliveryStock[];
     setDeliveryStocks(deliveryStocksData);
+    // IMPORTANTE: Pasar deliveryStocksData a la función de filtrado
     const visibleProducts = allProducts.filter((p) => canUserSeeProduct(p, role, myEmail, deliveryStocksData));
+    console.log(`📦 Productos visibles para ${role}: ${visibleProducts.length}`);
     setProducts(visibleProducts);
     setProfiles(profRes.data || []);
     setLoading(false);
@@ -1443,7 +1449,6 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
   
   const openEdit = (p: Product) => {
     setEditProduct({ ...p });
-    // Cargar stocks actuales para este producto
     const currentStocks = deliveryStocks
       .filter(ds => ds.product_id === p.id)
       .map(ds => ({ delivery_email: ds.delivery_email, quantity: ds.quantity }));
@@ -1469,11 +1474,8 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
       toast.success("Producto actualizado");
     }
 
-    // Guardar stocks de delivery
     if (savedProductId && canAssignStock) {
-      // Eliminar stocks existentes
       await supabase.from("delivery_stock").delete().eq("product_id", savedProductId);
-      // Insertar nuevos stocks
       for (const stock of deliveryStocksForEdit) {
         if (stock.quantity > 0) {
           await supabase.from("delivery_stock").insert({
@@ -1481,7 +1483,6 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
             product_id: savedProductId,
             quantity: stock.quantity
           });
-          // Registrar movimiento
           await supabase.from("delivery_stock_movements").insert({
             delivery_email: stock.delivery_email,
             product_id: savedProductId,
