@@ -894,26 +894,32 @@ export default function ProductsView({
 
     for (const product of products) {
       try {
-        // Obtener todas las órdenes ENTREGADAS de este producto con status2 = ENCOMIENDA ENTREGADA
         const { data, error } = await supabase
           .from("orders")
-          .select("quantity, status, status2")
-          .eq("product_id", product.id);
+          .select("items_json, sku, quantity")
+          .eq("status", "ENTREGADO");
 
         if (error) {
           errorCount++;
           continue;
         }
 
-        // Sumar cantidades de órdenes entregadas Y con encomienda entregada
-        const deliveredQty = (data || [])
-          .filter((order) => isDeliveredStatus(order.status) && order.status2 === "ENCOMIENDA ENTREGADA")
-          .reduce((sum, order) => sum + getOrderQuantity(order), 0);
+        let deliveredQty = 0;
+        
+        for (const order of data || []) {
+          if (order.items_json && Array.isArray(order.items_json)) {
+            for (const item of order.items_json) {
+              if (item.sku === product.sku) {
+                deliveredQty += (item.qty || item.quantity || 1);
+              }
+            }
+          } else if (order.sku === product.sku) {
+            deliveredQty += (order.quantity || 1);
+          }
+        }
 
-        // Calcular stocks basados en entregados
         const syncedStock = Math.max(0, deliveredQty);
 
-        // Actualizar en Supabase solo si es necesario
         if (syncedStock !== (product.stock || 0)) {
           const { error: updateError } = await supabase
             .from("products")
@@ -925,7 +931,6 @@ export default function ProductsView({
 
           if (!updateError) {
             updatedCount++;
-            // Actualizar estado local
             setProducts((prev) =>
               prev.map((p) =>
                 p.id === product.id
@@ -953,10 +958,11 @@ export default function ProductsView({
     setSyncingStock(false);
   }, [products]);
 
-  // Listener para actualizar stock y real_stock automáticamente
-  // cuando un pedido cambia a ENTREGADO y ENCOMIENDA ENTREGADA
+  // Listener para actualizar stock automáticamente cuando un pedido cambia a ENTREGADO
   useEffect(() => {
     if (!role || !myEmail) return;
+
+    console.log("🔊 [STOCK] Iniciando listener de stock para pedidos ENTREGADOS...");
 
     const channel = supabase
       .channel("orders-stock-updates")
@@ -971,66 +977,52 @@ export default function ProductsView({
           const oldOrder = payload.old;
           const newOrder = payload.new;
 
-          // Verificar estado ENTREGADO
           const wasDelivered = isDeliveredStatus(oldOrder?.status);
           const isNowDelivered = isDeliveredStatus(newOrder?.status);
-          
-          // Verificar ENCOMIENDA ENTREGADA
-          const wasEncomiendaDelivered = oldOrder?.status2 === "ENCOMIENDA ENTREGADA";
-          const isNowEncomiendaDelivered = newOrder?.status2 === "ENCOMIENDA ENTREGADA";
 
-          // Condición CORRECTA: Ambas condiciones deben cumplirse
-          const shouldUpdateStock = 
-            !wasDelivered && isNowDelivered && 
-            !wasEncomiendaDelivered && isNowEncomiendaDelivered;
-          
-          // Opción 2: Ya estaba entregado pero recién ahora se marca la encomienda
-          const shouldUpdateStockV2 = 
-            isNowDelivered && isNowEncomiendaDelivered && 
-            (newOrder.provider_stock_applied === false || newOrder.provider_stock_applied === null);
+          console.log(`📊 [STOCK] Cambio de estado: ${oldOrder?.status} → ${newOrder?.status}`);
 
-          if (shouldUpdateStock || shouldUpdateStockV2) {
-            // Extraer la información del pedido
-            const orderSku = getOrderSku(newOrder);
-            const orderProductId = getOrderProductId(newOrder);
-            const quantity = getOrderQuantity(newOrder);
+          // Solo cuando cambia de NO entregado a ENTREGADO
+          if (!wasDelivered && isNowDelivered) {
+            console.log("🎯 [STOCK] Pedido marcado como ENTREGADO, descontando stock...");
             
-            // Soporte para items_json (si tiene múltiples productos)
-            let itemsToUpdate: { sku: string; quantity: number; productId?: string }[] = [];
+            // Extraer items del pedido
+            let itemsToUpdate: { sku: string; quantity: number }[] = [];
             
+            // Si tiene items_json con múltiples productos
             if (newOrder.items_json && Array.isArray(newOrder.items_json) && newOrder.items_json.length > 0) {
               itemsToUpdate = newOrder.items_json.map((item: any) => ({
                 sku: item.sku || item.product_sku,
-                quantity: item.quantity || item.qty || 1,
-                productId: item.product_id
+                quantity: item.qty || item.quantity || 1
               }));
-            } else if (orderSku) {
+            } 
+            // Fallback a SKU directo
+            else if (newOrder.sku) {
               itemsToUpdate = [{
-                sku: orderSku,
-                quantity: quantity,
-                productId: orderProductId
+                sku: newOrder.sku,
+                quantity: newOrder.quantity || 1
               }];
             }
-
+            
+            if (itemsToUpdate.length === 0) {
+              console.log("⚠️ [STOCK] No se encontraron items para descontar stock");
+              return;
+            }
+            
             let successCount = 0;
-            let errorCount = 0;
-
-            // Procesar cada producto del pedido
+            
             for (const item of itemsToUpdate) {
-              if (!item.sku && !item.productId) continue;
-
-              // Buscar el producto por SKU o ID
-              let product = products.find((p) => p.sku === item.sku);
-              if (!product && item.productId) {
-                product = products.find((p) => p.id === item.productId);
-              }
-
+              if (!item.sku) continue;
+              
+              // Buscar el producto
+              let product = products.find(p => p.sku === item.sku);
+              
               if (product) {
-                // Calcular nuevos stocks (nunca negativos)
                 const newStock = Math.max(0, (product.stock || 0) - item.quantity);
                 const newRealStock = Math.max(0, (product.real_stock || 0) - item.quantity);
-
-                // Actualizar en Supabase
+                
+                console.log(`📦 [STOCK] ${product.title}: stock ${product.stock} → ${newStock} ( -${item.quantity})`);
+                
                 const { error } = await supabase
                   .from("products")
                   .update({
@@ -1039,41 +1031,33 @@ export default function ProductsView({
                     updated_at: new Date().toISOString()
                   })
                   .eq("id", product.id);
-
+                
                 if (!error) {
                   successCount++;
                   // Actualizar estado local
-                  setProducts((prev) =>
-                    prev.map((p) =>
-                      p.id === product!.id
+                  setProducts(prev =>
+                    prev.map(p =>
+                      p.id === product.id
                         ? { ...p, stock: newStock, real_stock: newRealStock }
-                        : p,
-                    ),
+                        : p
+                    )
                   );
                 } else {
-                  errorCount++;
-                  console.error(`Error actualizando stock para ${product.title}:`, error);
+                  console.error(`❌ [STOCK] Error actualizando ${product.title}:`, error);
                 }
               } else {
-                console.warn(`Producto no encontrado: SKU=${item.sku}, ID=${item.productId}`);
-                errorCount++;
+                console.warn(`⚠️ [STOCK] Producto no encontrado: ${item.sku}`);
               }
             }
-
-            // Marcar el pedido como ya procesado (evita doble descuento)
+            
             if (successCount > 0) {
-              const { error: markError } = await supabase
+              // Marcar pedido como procesado para evitar doble descuento
+              await supabase
                 .from("orders")
                 .update({ provider_stock_applied: true })
                 .eq("id", newOrder.id);
-
-              if (!markError) {
-                toast.success(
-                  `✅ Stock actualizado por entrega\n` +
-                  `📦 Se descontaron ${successCount} producto(s)\n` +
-                  `${errorCount > 0 ? `⚠️ ${errorCount} errores` : ''}`
-                );
-              }
+              
+              toast.success(`✅ Stock actualizado: -${successCount} producto(s) entregados`);
             }
           }
         },
@@ -1088,50 +1072,47 @@ export default function ProductsView({
         async (payload) => {
           const newOrder = payload.new;
           const isDelivered = isDeliveredStatus(newOrder?.status);
-          const isEncomiendaDelivered = newOrder?.status2 === "ENCOMIENDA ENTREGADA";
-
-          // Si se crea una orden directamente con estado entregado y encomienda entregada
-          if (isDelivered && isEncomiendaDelivered && !newOrder.provider_stock_applied) {
-            const orderSku = getOrderSku(newOrder);
-            const quantity = getOrderQuantity(newOrder);
+          
+          if (isDelivered && !newOrder.provider_stock_applied) {
+            console.log("🎯 [STOCK] Nuevo pedido creado como ENTREGADO, descontando stock...");
             
             let itemsToUpdate: { sku: string; quantity: number }[] = [];
             
-            if (newOrder.items_json && Array.isArray(newOrder.items_json) && newOrder.items_json.length > 0) {
+            if (newOrder.items_json && Array.isArray(newOrder.items_json)) {
               itemsToUpdate = newOrder.items_json.map((item: any) => ({
                 sku: item.sku || item.product_sku,
-                quantity: item.quantity || item.qty || 1
+                quantity: item.qty || item.quantity || 1
               }));
-            } else if (orderSku) {
-              itemsToUpdate = [{ sku: orderSku, quantity: quantity }];
+            } else if (newOrder.sku) {
+              itemsToUpdate = [{
+                sku: newOrder.sku,
+                quantity: newOrder.quantity || 1
+              }];
             }
-
+            
             for (const item of itemsToUpdate) {
               if (!item.sku) continue;
               
-              const product = products.find((p) => p.sku === item.sku);
+              const product = products.find(p => p.sku === item.sku);
               if (product) {
                 const newStock = Math.max(0, (product.stock || 0) - item.quantity);
                 const newRealStock = Math.max(0, (product.real_stock || 0) - item.quantity);
-
-                const { error } = await supabase
+                
+                await supabase
                   .from("products")
                   .update({ stock: newStock, real_stock: newRealStock })
                   .eq("id", product.id);
-
-                if (!error) {
-                  setProducts((prev) =>
-                    prev.map((p) =>
-                      p.id === product.id
-                        ? { ...p, stock: newStock, real_stock: newRealStock }
-                        : p,
-                    ),
-                  );
-                }
+                
+                setProducts(prev =>
+                  prev.map(p =>
+                    p.id === product.id
+                      ? { ...p, stock: newStock, real_stock: newRealStock }
+                      : p
+                  )
+                );
               }
             }
-
-            // Marcar pedido como procesado
+            
             await supabase
               .from("orders")
               .update({ provider_stock_applied: true })
@@ -1144,6 +1125,7 @@ export default function ProductsView({
       .subscribe();
 
     return () => {
+      console.log("🔊 [STOCK] Cerrando listener...");
       supabase.removeChannel(channel);
     };
   }, [role, myEmail, products]);
@@ -2031,7 +2013,7 @@ export default function ProductsView({
             </div>
           </div>
 
-          {/* 🔍 BARRA DE BÚSQUEDA MÁS VISIBLE - MOVIDA DEBAJO DEL TÍTULO */}
+          {/* 🔍 BARRA DE BÚSQUEDA */}
           <div className="bg-gradient-to-r from-white/5 to-white/2 rounded-2xl border border-white/10 p-4 shadow-lg backdrop-blur-sm">
             <div className="flex items-center gap-3">
               <div className="text-2xl">🔍</div>
