@@ -560,12 +560,10 @@ const AssignDeliveryStockModal = ({
   const [localMovements, setLocalMovements] = useState<DeliveryStockMovement[]>([]);
   const [loadingMovements, setLoadingMovements] = useState(false);
 
-  // Cargar movimientos directamente desde Supabase
   const loadMovements = useCallback(async () => {
     if (!product.id) return;
     
     setLoadingMovements(true);
-    console.log("🔄 Cargando movimientos para producto:", product.id);
     
     const { data, error } = await supabase
       .from("delivery_stock_movements")
@@ -576,16 +574,14 @@ const AssignDeliveryStockModal = ({
     setLoadingMovements(false);
     
     if (error) {
-      console.error("❌ Error cargando movimientos:", error);
+      console.error("Error cargando movimientos:", error);
       toast.error("Error al cargar movimientos");
       return;
     }
     
-    console.log(`✅ Movimientos cargados: ${data?.length || 0}`);
     setLocalMovements(data || []);
   }, [product.id]);
 
-  // Cargar movimientos cuando se activa la pestaña de historial
   useEffect(() => {
     if (activeSubTab === "movimientos") {
       loadMovements();
@@ -1318,7 +1314,7 @@ const ProductDetailModal = ({
                               <span className={`font-bold ${ds.quantity <= 3 ? "text-red-400" : "text-white"}`}>
                                 {ds.quantity}
                               </span>
-                            </tr>
+                            </td>
                             <td className="text-right py-3 px-3">
                               {ds.quantity <= 3 ? (
                                 <span className="text-xs px-2 py-1 rounded-full bg-red-500/20 text-red-400">
@@ -1334,7 +1330,7 @@ const ProductDetailModal = ({
                                 </span>
                               )}
                             </td>
-                           </tr>
+                          </tr>
                         ))
                       ) : (
                         <tr>
