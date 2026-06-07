@@ -539,7 +539,6 @@ const AssignDeliveryStockModal = ({
   product,
   deliveryStocks,
   deliveries,
-  movements,
   onClose,
   onSave,
   onRefresh,
@@ -547,7 +546,6 @@ const AssignDeliveryStockModal = ({
   product: Product;
   deliveryStocks: DeliveryStock[];
   deliveries: { email: string; name: string }[];
-  movements: DeliveryStockMovement[];
   onClose: () => void;
   onSave: (assignments: { delivery_email: string; quantity: number }[]) => void;
   onRefresh: () => void;
@@ -559,6 +557,40 @@ const AssignDeliveryStockModal = ({
     }))
   );
   const [activeSubTab, setActiveSubTab] = useState<"asignar" | "movimientos">("asignar");
+  const [localMovements, setLocalMovements] = useState<DeliveryStockMovement[]>([]);
+  const [loadingMovements, setLoadingMovements] = useState(false);
+
+  // Cargar movimientos directamente desde Supabase
+  const loadMovements = useCallback(async () => {
+    if (!product.id) return;
+    
+    setLoadingMovements(true);
+    console.log("🔄 Cargando movimientos para producto:", product.id);
+    
+    const { data, error } = await supabase
+      .from("delivery_stock_movements")
+      .select("*")
+      .eq("product_id", product.id)
+      .order("created_at", { ascending: false });
+    
+    setLoadingMovements(false);
+    
+    if (error) {
+      console.error("❌ Error cargando movimientos:", error);
+      toast.error("Error al cargar movimientos");
+      return;
+    }
+    
+    console.log(`✅ Movimientos cargados: ${data?.length || 0}`);
+    setLocalMovements(data || []);
+  }, [product.id]);
+
+  // Cargar movimientos cuando se activa la pestaña de historial
+  useEffect(() => {
+    if (activeSubTab === "movimientos") {
+      loadMovements();
+    }
+  }, [activeSubTab, loadMovements]);
 
   const updateQuantity = (email: string, quantity: number) => {
     setAssignments(prev =>
@@ -566,6 +598,11 @@ const AssignDeliveryStockModal = ({
         a.delivery_email === email ? { ...a, quantity: Math.max(0, quantity) } : a
       )
     );
+  };
+
+  const handleRefresh = async () => {
+    await onRefresh();
+    await loadMovements();
   };
 
   return createPortal(
@@ -605,7 +642,7 @@ const AssignDeliveryStockModal = ({
                 : "text-white/50 hover:text-white/80"
             }`}
           >
-            📋 Historial
+            📋 Historial ({localMovements.length})
           </button>
         </div>
 
@@ -655,20 +692,25 @@ const AssignDeliveryStockModal = ({
           {activeSubTab === "movimientos" && (
             <div className="space-y-2">
               <button
-                onClick={onRefresh}
-                className="w-full mb-2 py-1 text-xs rounded-lg bg-white/10 text-white/60 hover:bg-white/20 transition-all"
+                onClick={handleRefresh}
+                className="w-full mb-2 py-1 text-xs rounded-lg bg-white/10 text-white/60 hover:bg-white/20 transition-all flex items-center justify-center gap-2"
               >
-                🔄 Refrescar movimientos
+                <span>🔄</span> Refrescar movimientos
               </button>
               
-              {movements.length === 0 ? (
+              {loadingMovements ? (
+                <div className="text-center py-8 text-white/40">
+                  <div className="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-primary"></div>
+                  <p className="mt-2">Cargando movimientos...</p>
+                </div>
+              ) : localMovements.length === 0 ? (
                 <div className="text-center py-8 text-white/40">
                   No hay movimientos registrados aún
                 </div>
               ) : (
-                movements.map((mov) => (
+                localMovements.map((mov) => (
                   <div key={mov.id} className="flex items-center justify-between p-3 bg-white/5 rounded-lg border border-white/10">
-                    <div>
+                    <div className="flex-1">
                       <div className="flex items-center gap-2">
                         <span className={`font-bold text-sm ${
                           mov.quantity_change > 0 ? "text-green-400" : "text-red-400"
@@ -678,9 +720,9 @@ const AssignDeliveryStockModal = ({
                         <span className="text-sm text-white/70">{mov.reason}</span>
                       </div>
                       <div className="text-xs text-white/40 mt-1">{mov.delivery_email}</div>
-                    </div>
-                    <div className="text-xs text-white/40">
-                      {new Date(mov.created_at).toLocaleString()}
+                      <div className="text-xs text-white/30 mt-0.5">
+                        {new Date(mov.created_at).toLocaleString()}
+                      </div>
                     </div>
                   </div>
                 ))
@@ -731,7 +773,6 @@ const ProductDetailModal = ({
   deliveryStockQuantity,
   showDeliveryStock,
   deliveryStocksList,
-  deliveryMovements,
   onRefreshDeliveryStock,
   onOpenAssignStock,
 }: {
@@ -753,7 +794,6 @@ const ProductDetailModal = ({
   deliveryStockQuantity?: number;
   showDeliveryStock?: boolean;
   deliveryStocksList?: { delivery_email: string; quantity: number; delivery_name: string }[];
-  deliveryMovements?: DeliveryStockMovement[];
   onRefreshDeliveryStock?: () => void;
   onOpenAssignStock?: () => void;
 }) => {
@@ -764,7 +804,6 @@ const ProductDetailModal = ({
   const [customMetrics, setCustomMetrics] = useState<ProductMetrics | null>(null);
   const [customMetricsLoading, setCustomMetricsLoading] = useState(false);
   const [localStocksList, setLocalStocksList] = useState(deliveryStocksList);
-  const [localMovements, setLocalMovements] = useState(deliveryMovements);
   
   const images = getImages(product);
   const stockCritical = isDelivery ? (deliveryStockQuantity || 0) <= 3 : (Number(product.stock || 0) <= 3);
@@ -773,18 +812,7 @@ const ProductDetailModal = ({
 
   useEffect(() => {
     setLocalStocksList(deliveryStocksList);
-    setLocalMovements(deliveryMovements);
-  }, [deliveryStocksList, deliveryMovements]);
-
-  const forceRefresh = useCallback(async () => {
-    if (onRefreshDeliveryStock) {
-      onRefreshDeliveryStock();
-    }
-    setTimeout(() => {
-      setLocalStocksList(deliveryStocksList);
-      setLocalMovements(deliveryMovements);
-    }, 500);
-  }, [onRefreshDeliveryStock, deliveryStocksList, deliveryMovements]);
+  }, [deliveryStocksList]);
 
   const loadMetricsByDate = useCallback(async () => {
     if (!metricsFromDate || !metricsToDate) return;
@@ -1262,7 +1290,7 @@ const ProductDetailModal = ({
                     <span>📦</span> Asignar / Modificar stock
                   </button>
                   <button
-                    onClick={forceRefresh}
+                    onClick={onRefreshDeliveryStock}
                     className="px-4 py-2 rounded-lg bg-primary/20 hover:bg-primary/30 text-primary text-sm font-medium transition-all flex items-center gap-2"
                   >
                     <span>🔄</span> Recargar
@@ -1290,7 +1318,7 @@ const ProductDetailModal = ({
                               <span className={`font-bold ${ds.quantity <= 3 ? "text-red-400" : "text-white"}`}>
                                 {ds.quantity}
                               </span>
-                            </td>
+                            </tr>
                             <td className="text-right py-3 px-3">
                               {ds.quantity <= 3 ? (
                                 <span className="text-xs px-2 py-1 rounded-full bg-red-500/20 text-red-400">
@@ -1306,7 +1334,7 @@ const ProductDetailModal = ({
                                 </span>
                               )}
                             </td>
-                          </tr>
+                           </tr>
                         ))
                       ) : (
                         <tr>
@@ -1318,30 +1346,6 @@ const ProductDetailModal = ({
                     </tbody>
                   </table>
                 </div>
-
-                {localMovements && localMovements.length > 0 && (
-                  <div className="mt-4">
-                    <h4 className="text-sm font-semibold text-white mb-3">📋 Últimos movimientos</h4>
-                    <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                      {localMovements.slice(0, 10).map((mov) => (
-                        <div key={mov.id} className="flex items-center justify-between p-3 bg-white/5 rounded-lg text-sm border border-white/10">
-                          <div className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <span className={`font-bold ${mov.quantity_change > 0 ? "text-green-400" : "text-red-400"}`}>
-                                {mov.quantity_change > 0 ? `+${mov.quantity_change}` : mov.quantity_change}
-                              </span>
-                              <span className="text-white/70">{mov.reason}</span>
-                            </div>
-                            <div className="text-xs text-white/40 mt-1">{mov.delivery_email}</div>
-                          </div>
-                          <div className="text-xs text-white/40">
-                            {new Date(mov.created_at).toLocaleString()}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
 
                 <button
                   onClick={onRefreshDeliveryStock}
@@ -1402,7 +1406,6 @@ export default function ProductsView({
     }[]
   >([]);
   const [deliveryStocks, setDeliveryStocks] = useState<DeliveryStock[]>([]);
-  const [deliveryStockMovements, setDeliveryStockMovements] = useState<DeliveryStockMovement[]>([]);
   const [deliveryUsers, setDeliveryUsers] = useState<{ email: string; name: string }[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -1476,17 +1479,6 @@ export default function ProductsView({
     }
   }, []);
 
-  const loadDeliveryStockMovements = useCallback(async () => {
-    const { data, error } = await supabase
-      .from("delivery_stock_movements")
-      .select("*")
-      .order("created_at", { ascending: false });
-
-    if (!error && data) {
-      setDeliveryStockMovements(data as DeliveryStockMovement[]);
-    }
-  }, []);
-
   const saveDeliveryStockAssignments = async (productId: string, assignments: { delivery_email: string; quantity: number }[]) => {
     for (const assignment of assignments) {
       const existing = deliveryStocks.find(ds => ds.delivery_email === assignment.delivery_email && ds.product_id === productId);
@@ -1529,7 +1521,6 @@ export default function ProductsView({
     }
     
     await loadDeliveryStocks();
-    await loadDeliveryStockMovements();
     toast.success("Stock asignado correctamente");
     setShowAssignStockModal(null);
   };
@@ -1603,14 +1594,13 @@ export default function ProductsView({
 
     setLoading(true);
 
-    const [prodRes, profRes, stockRes, movementsRes] = await Promise.all([
+    const [prodRes, profRes, stockRes] = await Promise.all([
       supabase
         .from("products")
         .select("*")
         .order("created_at", { ascending: false }),
       supabase.from("profiles").select("email, name, logo_url, phone"),
       supabase.from("delivery_stock").select("*"),
-      supabase.from("delivery_stock_movements").select("*").order("created_at", { ascending: false })
     ]);
 
     if (prodRes.error) {
@@ -1629,10 +1619,8 @@ export default function ProductsView({
 
     const allProducts = (prodRes.data || []) as Product[];
     const deliveryStocksData = (stockRes.data || []) as DeliveryStock[];
-    const movementsData = (movementsRes.data || []) as DeliveryStockMovement[];
     
     setDeliveryStocks(deliveryStocksData);
-    setDeliveryStockMovements(movementsData);
 
     const visibleProducts = allProducts.filter((p) =>
       canUserSeeProduct(p, role, myEmail, deliveryStocksData)
@@ -1696,7 +1684,6 @@ export default function ProductsView({
                   });
                 
                 await loadDeliveryStocks();
-                await loadDeliveryStockMovements();
               }
             }
           }
@@ -1707,15 +1694,14 @@ export default function ProductsView({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [role, myEmail, products, loadDeliveryStocks, loadDeliveryStockMovements]);
+  }, [role, myEmail, products, loadDeliveryStocks]);
 
   useEffect(() => {
     load();
     loadFavorites();
     loadDeliveryUsers();
     loadDeliveryStocks();
-    loadDeliveryStockMovements();
-  }, [load, loadFavorites, loadDeliveryUsers, loadDeliveryStocks, loadDeliveryStockMovements]);
+  }, [load, loadFavorites, loadDeliveryUsers, loadDeliveryStocks]);
 
   const visibleProductIds = useMemo(
     () => products.map((p) => p.id),
@@ -2048,12 +2034,6 @@ export default function ProductsView({
       }))
       .sort((a, b) => b.quantity - a.quantity);
   }, [deliveryStocks, profileMap]);
-
-  const getDeliveryMovementsForProduct = useCallback((productId: string) => {
-    return deliveryStockMovements
-      .filter(mov => mov.product_id === productId)
-      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [deliveryStockMovements]);
 
   const getProductAdSpend = useCallback(
     (productId: string) =>
@@ -3350,12 +3330,10 @@ export default function ProductsView({
           product={showAssignStockModal}
           deliveryStocks={deliveryStocks.filter(ds => ds.product_id === showAssignStockModal.id)}
           deliveries={deliveryUsers}
-          movements={getDeliveryMovementsForProduct(showAssignStockModal.id)}
           onClose={() => setShowAssignStockModal(null)}
           onSave={(assignments) => saveDeliveryStockAssignments(showAssignStockModal.id, assignments)}
           onRefresh={() => {
             loadDeliveryStocks();
-            loadDeliveryStockMovements();
           }}
         />
       )}
@@ -3381,10 +3359,8 @@ export default function ProductsView({
           deliveryStockQuantity={getDeliveryStockForProduct(selectedProductDetail.id)}
           showDeliveryStock={canSeeDeliveryStock}
           deliveryStocksList={getDeliveryStocksForProduct(selectedProductDetail.id)}
-          deliveryMovements={getDeliveryMovementsForProduct(selectedProductDetail.id)}
           onRefreshDeliveryStock={() => {
             loadDeliveryStocks();
-            loadDeliveryStockMovements();
           }}
           onOpenAssignStock={() => setShowAssignStockModal(selectedProductDetail)}
         />
