@@ -763,11 +763,28 @@ const ProductDetailModal = ({
   const [metricsToDate, setMetricsToDate] = useState(todayPY());
   const [customMetrics, setCustomMetrics] = useState<ProductMetrics | null>(null);
   const [customMetricsLoading, setCustomMetricsLoading] = useState(false);
+  const [localStocksList, setLocalStocksList] = useState(deliveryStocksList);
+  const [localMovements, setLocalMovements] = useState(deliveryMovements);
   
   const images = getImages(product);
   const stockCritical = isDelivery ? (deliveryStockQuantity || 0) <= 3 : (Number(product.stock || 0) <= 3);
   const gainPerUnit = (Number(product.suggested_price_gs || 0) - Number(product.real_cost_gs || 0));
   const netProfit = (customMetrics?.gross_profit_gs || metrics.gross_profit_gs) - productAdSpend;
+
+  useEffect(() => {
+    setLocalStocksList(deliveryStocksList);
+    setLocalMovements(deliveryMovements);
+  }, [deliveryStocksList, deliveryMovements]);
+
+  const forceRefresh = useCallback(async () => {
+    if (onRefreshDeliveryStock) {
+      onRefreshDeliveryStock();
+    }
+    setTimeout(() => {
+      setLocalStocksList(deliveryStocksList);
+      setLocalMovements(deliveryMovements);
+    }, 500);
+  }, [onRefreshDeliveryStock, deliveryStocksList, deliveryMovements]);
 
   const loadMetricsByDate = useCallback(async () => {
     if (!metricsFromDate || !metricsToDate) return;
@@ -1237,12 +1254,18 @@ const ProductDetailModal = ({
 
             {activeTab === "delivery_stock" && showDeliveryStock && (
               <div className="space-y-4">
-                <div className="flex justify-end">
+                <div className="flex justify-between items-center">
                   <button
                     onClick={onOpenAssignStock}
                     className="px-4 py-2 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 text-sm font-medium transition-all flex items-center gap-2 border border-emerald-500/30"
                   >
                     <span>📦</span> Asignar / Modificar stock
+                  </button>
+                  <button
+                    onClick={forceRefresh}
+                    className="px-4 py-2 rounded-lg bg-primary/20 hover:bg-primary/30 text-primary text-sm font-medium transition-all flex items-center gap-2"
+                  >
+                    <span>🔄</span> Recargar
                   </button>
                 </div>
 
@@ -1256,8 +1279,8 @@ const ProductDetailModal = ({
                       </tr>
                     </thead>
                     <tbody>
-                      {deliveryStocksList && deliveryStocksList.length > 0 ? (
-                        deliveryStocksList.map((ds) => (
+                      {localStocksList && localStocksList.length > 0 ? (
+                        localStocksList.map((ds) => (
                           <tr key={ds.delivery_email} className="border-b border-white/5 hover:bg-white/5 transition-all">
                             <td className="py-3 px-3">
                               <div className="font-medium text-white">{ds.delivery_name}</div>
@@ -1296,11 +1319,11 @@ const ProductDetailModal = ({
                   </table>
                 </div>
 
-                {deliveryMovements && deliveryMovements.length > 0 && (
+                {localMovements && localMovements.length > 0 && (
                   <div className="mt-4">
                     <h4 className="text-sm font-semibold text-white mb-3">📋 Últimos movimientos</h4>
                     <div className="space-y-2 max-h-[200px] overflow-y-auto">
-                      {deliveryMovements.slice(0, 10).map((mov) => (
+                      {localMovements.slice(0, 10).map((mov) => (
                         <div key={mov.id} className="flex items-center justify-between p-3 bg-white/5 rounded-lg text-sm border border-white/10">
                           <div className="flex-1">
                             <div className="flex items-center gap-2">
