@@ -8,6 +8,7 @@ import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import AssignOrdersView from "./components/AssignOrdersView.tsx";
 import QRScannerView from "./components/QRScannerView.tsx";
+import ProductsView from "./components/ProductsView.tsx"; // ✅ AGREGADO
 
 const queryClient = new QueryClient();
 
@@ -52,6 +53,7 @@ const App = () => (
             <Route path="/" element={<Index />} />
             <Route path="/asignar-pedidos" element={<AssignOrdersView />} />
             <Route path="/qr" element={<QRScannerView />} />
+            <Route path="/products" element={<ProductsView />} /> {/* ✅ AGREGADO */}
             <Route path="*" element={<NotFound />} />
           </Routes>
         </HashRouter>
