@@ -66,6 +66,7 @@ interface Product {
   title: string;
   sku: string | null;
   provider_price_gs: number | null;
+  suggested_price_gs: number | null;
   real_cost_gs: number | null;
   stock: number | null;
   real_stock: number | null;
@@ -78,6 +79,9 @@ interface Product {
   is_private: boolean | null;
   is_private_stock?: boolean | null;
   created_at?: string | null;
+  warehouse_city: string | null;
+  warranty_info: string | null;
+  additional_resources: string | null;
 }
 
 interface ProductMetrics {
@@ -125,6 +129,7 @@ const emptyProduct: Omit<Product, "id"> = {
   title: "",
   sku: "",
   provider_price_gs: 0,
+  suggested_price_gs: 0,
   real_cost_gs: 0,
   stock: 0,
   real_stock: 0,
@@ -136,6 +141,9 @@ const emptyProduct: Omit<Product, "id"> = {
   private_to_emails: "",
   is_private: false,
   is_private_stock: false,
+  warehouse_city: "",
+  warranty_info: "",
+  additional_resources: "",
 };
 
 const isPrivateProduct = (p: Product) =>
@@ -323,8 +331,8 @@ const ProductImageGallery = ({
 
   if (!images.length) {
     return (
-      <div className="w-full h-full bg-[radial-gradient(circle_at_top,#2f3441_0%,#171923_100%)] flex items-center justify-center">
-        <div className="text-center text-white/70">
+      <div className="w-full h-full bg-gradient-to-br from-gray-800 to-gray-900 flex items-center justify-center">
+        <div className="text-center text-white/50">
           <div className="text-4xl mb-2">📷</div>
           <div className="text-[10px]">Sin imagen</div>
         </div>
@@ -339,13 +347,13 @@ const ProductImageGallery = ({
       onMouseLeave={() => setIsHovered(false)}
     >
       <div
-        className="w-full h-full flex items-center justify-center cursor-pointer bg-[radial-gradient(circle_at_top,#303542_0%,#191c25_100%)]"
+        className="w-full h-full flex items-center justify-center cursor-pointer bg-gradient-to-br from-gray-800 to-gray-900"
         onClick={() => onViewFullscreen(images[currentIndex])}
       >
         <img
           src={images[currentIndex]}
           alt={title}
-          className="w-full h-full object-contain object-center scale-[1.005] transition-transform duration-300 group-hover:scale-[1.035] select-none"
+          className="w-full h-full object-contain object-center transition-transform duration-300 group-hover:scale-105 select-none"
           loading="lazy"
         />
       </div>
@@ -377,27 +385,6 @@ const ProductImageGallery = ({
             ▶
           </button>
         </>
-      )}
-
-      {images.length > 1 && isHovered && (
-        <div className="absolute bottom-16 left-1/2 -translate-x-1/2 flex gap-1.5 bg-black/50 backdrop-blur-sm px-2 py-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-all duration-200">
-          {images.map((img, idx) => (
-            <div
-              key={idx}
-              onClick={(e) => {
-                e.stopPropagation();
-                onIndexChange(idx);
-              }}
-              className={`w-8 h-8 rounded-md overflow-hidden cursor-pointer transition-all ${
-                idx === currentIndex
-                  ? "ring-2 ring-white scale-110"
-                  : "opacity-60 hover:opacity-100"
-              }`}
-            >
-              <img src={img} alt="" className="w-full h-full object-cover" />
-            </div>
-          ))}
-        </div>
       )}
     </div>
   );
@@ -521,7 +508,7 @@ const ImageFullscreenModal = ({
   );
 };
 
-// Modal de detalles del producto - ESTILO CATÁLOGO PROFESIONAL CON TABS
+// Modal de detalles del producto - con todos los campos del proveedor
 const ProductDetailModal = ({
   product,
   metrics,
@@ -532,7 +519,6 @@ const ProductDetailModal = ({
   canEdit,
   canSeeRealStock,
   canSeeRealCost,
-  canLoadOrder,
   onLoadProduct,
   getImages,
   nf,
@@ -548,7 +534,6 @@ const ProductDetailModal = ({
   canEdit: boolean;
   canSeeRealStock: boolean;
   canSeeRealCost: boolean;
-  canLoadOrder: boolean;
   onLoadProduct?: (sku: string) => void;
   getImages: (p: Product) => string[];
   nf: (n: number) => string;
@@ -559,17 +544,11 @@ const ProductDetailModal = ({
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const images = getImages(product);
   const stockCritical = Number(product.stock || 0) <= 3;
-  const deliveryRate = metrics.sold_count > 0
-    ? Math.round((metrics.delivered_count / metrics.sold_count) * 100)
-    : 0;
-  const netProfit = metrics.gross_profit_gs - productAdSpend;
-  const gainPerUnit = (Number(product.provider_price_gs || 0) - Number(product.real_cost_gs || 0));
 
   // Función para enviar por WhatsApp al cliente
   const sendToClient = () => {
-    const message = encodeURIComponent(`Hola! Te comparto el producto: ${product.title}\nSKU: ${product.sku}\nPrecio: ${nf(Number(product.provider_price_gs || 0))} Gs\n\n¿Te interesa?`);
-    // Esto abriría WhatsApp, pero necesitas el número del cliente. Por ahora es un placeholder
-    toast.success("Función: Enviar al cliente");
+    const message = encodeURIComponent(`Hola! Te comparto el producto: ${product.title}\nSKU: ${product.sku}\nPrecio proveedor: ${nf(Number(product.provider_price_gs || 0))} Gs\nPrecio sugerido: ${nf(Number(product.suggested_price_gs || 0))} Gs\n\n¿Te interesa?`);
+    toast.success("Función: Enviar al cliente - Se abriría WhatsApp");
   };
 
   // Solicitar muestra al proveedor
@@ -600,7 +579,7 @@ const ProductDetailModal = ({
         <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 p-5 z-10">
           <div className="flex justify-between items-start">
             <div>
-              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{product.title}</h1>
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-white uppercase">{product.title}</h1>
               <div className="flex items-center gap-3 mt-1">
                 <span className="text-sm text-gray-500 dark:text-gray-400 font-mono">SKU: {product.sku || "—"}</span>
                 <div className="flex gap-2">
@@ -622,17 +601,13 @@ const ProductDetailModal = ({
         </div>
 
         <div className="p-6 space-y-6">
-          {/* Imagen del producto - estilo catálogo */}
+          {/* Imagen del producto */}
           <div className="bg-gray-100 dark:bg-gray-800 rounded-xl p-6 flex items-center justify-center min-h-[280px]">
             {images.length > 0 ? (
               <img
                 src={images[currentImageIndex]}
                 alt={product.title}
                 className="max-h-[200px] object-contain cursor-pointer"
-                onClick={() => {
-                  // Abrir imagen en fullscreen
-                  const modal = document.createElement("div");
-                }}
               />
             ) : (
               <div className="text-center text-gray-400">
@@ -661,28 +636,13 @@ const ProductDetailModal = ({
             </div>
           )}
 
-          {/* Precios: Proveedor y Sugerido */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4">
-              <div className="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Precio del proveedor</div>
-              <div className="text-2xl font-bold text-gray-900 dark:text-white">
-                {nf(Number(product.provider_price_gs || 0))} Gs
-              </div>
-            </div>
-            <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4">
-              <div className="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Precio sugerido</div>
-              <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                {nf(Math.round(Number(product.provider_price_gs || 0) * 1.3))} Gs
-              </div>
-              <div className="text-xs text-gray-400 mt-1">*Precio de referencia</div>
-            </div>
-          </div>
-
           {/* Disponibilidad y Stock */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4">
               <div className="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Producto disponible en:</div>
-              <div className="font-medium text-gray-900 dark:text-white">Caaguazú / Asunción</div>
+              <div className="font-medium text-gray-900 dark:text-white">
+                {product.warehouse_city || "Caaguazú / Asunción"}
+              </div>
             </div>
             <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4">
               <div className="flex justify-between items-center">
@@ -704,7 +664,24 @@ const ProductDetailModal = ({
             </div>
           </div>
 
-          {/* Botones de acción: Enviar a cliente, Solicitar muestra, Ver informe */}
+          {/* Precios: Proveedor y Sugerido */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4">
+              <div className="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Precio del proveedor</div>
+              <div className="text-2xl font-bold text-gray-900 dark:text-white">
+                {nf(Number(product.provider_price_gs || 0))} Gs
+              </div>
+            </div>
+            <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4">
+              <div className="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Precio sugerido</div>
+              <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                {nf(Number(product.suggested_price_gs || 0))} Gs
+              </div>
+              <div className="text-xs text-gray-400 mt-1">*Precio sugerido para vender</div>
+            </div>
+          </div>
+
+          {/* Botones de acción */}
           <div className="flex flex-wrap gap-3">
             <button
               onClick={sendToClient}
@@ -731,8 +708,10 @@ const ProductDetailModal = ({
             <div className="text-xs text-gray-500 dark:text-gray-400 uppercase mb-2">Vendido por:</div>
             <div className="flex items-center justify-between">
               <div>
-                <div className="font-bold text-gray-900 dark:text-white">{providerName || product.provider_email || "Proveedor"}</div>
-                <div className="text-sm text-gray-500 dark:text-gray-400">Bodegas: CAAGUAZÚ, ASUNCIÓN</div>
+                <div className="font-bold text-gray-900 dark:text-white uppercase">{providerName || product.provider_email || "PROVEEDOR"}</div>
+                <div className="text-sm text-gray-500 dark:text-gray-400">
+                  Bodegas: {product.warehouse_city || "CAAGUAZÚ, ASUNCIÓN"}
+                </div>
               </div>
               {providerPhone && (
                 <a
@@ -786,12 +765,10 @@ const ProductDetailModal = ({
           {/* CONTENIDO DE TABS */}
           <div className="min-h-[200px]">
             {activeTab === "detalles" && (
-              <div className="space-y-4">
-                <div className="prose prose-sm dark:prose-invert max-w-none">
-                  <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">
-                    {product.description || "✨ ¡Liberate del trabajo pesado con este producto! / Diseñado para brindar la mejor experiencia y resultados excepcionales. / Ideal para uso diario, eficiente y duradero. / Ahorra tiempo y disfruta de resultados profesionales."}
-                  </p>
-                </div>
+              <div className="prose prose-sm dark:prose-invert max-w-none">
+                <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap leading-relaxed">
+                  {product.description || "✨ Descripción no cargada por el proveedor."}
+                </p>
                 
                 {/* Información comercial solo para admin/provider */}
                 {canSeeRealCost && (
@@ -803,8 +780,10 @@ const ProductDetailModal = ({
                         <span className="font-medium">{nf(Number(product.real_cost_gs || 0))} Gs</span>
                       </div>
                       <div className="flex justify-between">
-                        <span className="text-gray-500">Ganancia por unidad:</span>
-                        <span className="font-medium text-green-600">{nf(gainPerUnit)} Gs</span>
+                        <span className="text-gray-500">Ganancia por unidad (según sugerido):</span>
+                        <span className="font-medium text-green-600">
+                          {nf(Number(product.suggested_price_gs || 0) - Number(product.real_cost_gs || 0))} Gs
+                        </span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-500">Vendidos (total):</span>
@@ -822,41 +801,20 @@ const ProductDetailModal = ({
 
             {activeTab === "garantias" && (
               <div className="prose prose-sm dark:prose-invert max-w-none">
-                <p className="text-gray-700 dark:text-gray-300">
-                  • Garantía de 12 meses contra defectos de fábrica.<br />
-                  • Soporte técnico incluido durante el primer año.<br />
-                  • Repuestos originales disponibles.<br />
-                  • Garantía de satisfacción: 30 días para cambios.<br />
-                  • Asistencia post-venta vía WhatsApp y email.
+                <p className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                  {product.warranty_info || "El proveedor no ha cargado condiciones de garantía aún."}
                 </p>
               </div>
             )}
 
             {activeTab === "recursos" && (
-              <div className="space-y-3">
-                <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
-                  <span className="text-2xl">📄</span>
-                  <div>
-                    <div className="font-medium text-gray-900 dark:text-white">Ficha técnica del producto</div>
-                    <div className="text-xs text-gray-500">PDF - 2.4 MB</div>
-                  </div>
-                  <button className="ml-auto text-blue-600 text-sm">Descargar</button>
-                </div>
-                <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
-                  <span className="text-2xl">📦</span>
-                  <div>
-                    <div className="font-medium text-gray-900 dark:text-white">Manual de usuario</div>
-                    <div className="text-xs text-gray-500">PDF - 1.8 MB</div>
-                  </div>
-                  <button className="ml-auto text-blue-600 text-sm">Descargar</button>
-                </div>
-                <div className="flex items-center gap-3 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-lg">
-                  <span className="text-2xl">🎥</span>
-                  <div>
-                    <div className="font-medium text-gray-900 dark:text-white">Video demostrativo</div>
-                    <div className="text-xs text-gray-500">YouTube - 5:32 min</div>
-                  </div>
-                  <button className="ml-auto text-blue-600 text-sm">Ver</button>
+              <div className="prose prose-sm dark:prose-invert max-w-none">
+                <div className="text-gray-700 dark:text-gray-300 whitespace-pre-wrap">
+                  {product.additional_resources ? (
+                    <div dangerouslySetInnerHTML={{ __html: product.additional_resources.replace(/\n/g, "<br/>") }} />
+                  ) : (
+                    "El proveedor no ha cargado recursos adicionales aún."
+                  )}
                 </div>
               </div>
             )}
@@ -883,19 +841,6 @@ const ProductDetailModal = ({
                 🗑️ Eliminar producto
               </button>
             </div>
-          )}
-
-          {/* Botón de pedido rápido */}
-          {canLoadOrder && product.sku && (
-            <button
-              onClick={() => {
-                onLoadProduct?.(product.sku!);
-                onClose();
-              }}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-2"
-            >
-              <span>➕</span> Hacer pedido ahora
-            </button>
           )}
         </div>
       </div>
@@ -2386,11 +2331,10 @@ export default function ProductsView({
 
           {grouped.map((group, groupIndex) => {
             const colorIndex = groupIndex % softColors.length;
-            const headerGradient = softColors[colorIndex];
 
             return (
               <div key={group.email || group.name} className="mb-8 last:mb-0">
-                {/* Header del proveedor - estilo más limpio */}
+                {/* Header del proveedor */}
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-2xl bg-white/[0.04] border border-white/10 mb-4 backdrop-blur-sm">
                   <div className="flex items-center gap-4">
                     {group.logo ? (
@@ -2456,7 +2400,7 @@ export default function ProductsView({
                   </div>
                 </div>
 
-                {/* Grid de productos - más limpio y profesional */}
+                {/* Grid de productos */}
                 <div
                   className={
                     viewMode === "grid"
@@ -2468,13 +2412,8 @@ export default function ProductsView({
                     const images = getImages(p);
                     const mainImg = images[imgIndex[p.id] || 0] || "";
                     const isFav = userFavorites.has(p.id);
-                    const gainUnit =
-                      Number(p.provider_price_gs || 0) -
-                      Number(p.real_cost_gs || 0);
-                    const isExpanded = expandedId === p.id;
                     const m = metricsByProduct[p.id] || emptyMetrics;
                     const productAdSpend = getProductAdSpend(p.id);
-                    const netProfit = m.gross_profit_gs - productAdSpend;
                     const deliveryRate =
                       m.sold_count > 0
                         ? Math.round((m.delivered_count / m.sold_count) * 100)
@@ -2574,7 +2513,7 @@ export default function ProductsView({
                       );
                     }
 
-                    // Vista Grid - más limpia y profesional
+                    // Vista Grid
                     return (
                       <div
                         key={p.id}
@@ -2629,7 +2568,7 @@ export default function ProductsView({
                           </button>
                         </div>
 
-                        {/* Información del producto */}
+                        {/* Información del producto - SIN DESCRIPCIÓN */}
                         <div className="p-3 space-y-2">
                           <div className="flex justify-between items-start">
                             <div className="text-[10px] text-white/40 font-mono">
@@ -2654,7 +2593,7 @@ export default function ProductsView({
                           <div className="flex justify-between items-center pt-1">
                             <div>
                               <div className="text-[10px] text-white/40">
-                                Precio
+                                Precio proveedor
                               </div>
                               <div className="font-bold text-white text-sm font-mono">
                                 {nf(Number(p.provider_price_gs || 0))} Gs
@@ -2674,17 +2613,19 @@ export default function ProductsView({
                             </div>
                           </div>
 
+                          {p.suggested_price_gs && p.suggested_price_gs > 0 && (
+                            <div className="text-right">
+                              <div className="text-[10px] text-white/40">Precio sugerido</div>
+                              <div className="text-xs text-blue-400 font-mono">
+                                {nf(p.suggested_price_gs)} Gs
+                              </div>
+                            </div>
+                          )}
+
                           {canSeeRealStock && (
                             <div className="flex justify-between text-xs">
                               <span className="text-white/40">Stock real:</span>
                               <span className="text-white font-mono">{p.real_stock || 0}</span>
-                            </div>
-                          )}
-
-                          {/* Descripción corta */}
-                          {p.description && (
-                            <div className="text-xs text-white/50 line-clamp-2 mt-1">
-                              {p.description}
                             </div>
                           )}
 
@@ -2756,7 +2697,6 @@ export default function ProductsView({
           canEdit={canEdit}
           canSeeRealStock={canSeeRealStock}
           canSeeRealCost={canSeeRealCost}
-          canLoadOrder={canLoadOrder}
           onLoadProduct={onLoadProduct}
           getImages={getImages}
           nf={nf}
@@ -2806,7 +2746,7 @@ export default function ProductsView({
                 </div>
 
                 <div>
-                  <label className="app-label">Precio venta (Gs)</label>
+                  <label className="app-label">Precio proveedor (Gs)</label>
                   <input
                     type="number"
                     className="app-input"
@@ -2817,6 +2757,22 @@ export default function ProductsView({
                         provider_price_gs: Number(e.target.value),
                       })
                     }
+                  />
+                </div>
+
+                <div>
+                  <label className="app-label">Precio sugerido (Gs)</label>
+                  <input
+                    type="number"
+                    className="app-input"
+                    value={editProduct.suggested_price_gs || 0}
+                    onChange={(e) =>
+                      setEditProduct({
+                        ...editProduct,
+                        suggested_price_gs: Number(e.target.value),
+                      })
+                    }
+                    placeholder="Ej: 550000"
                   />
                 </div>
 
@@ -2866,6 +2822,21 @@ export default function ProductsView({
                     />
                   </div>
                 )}
+
+                <div>
+                  <label className="app-label">Ciudad de la bodega</label>
+                  <input
+                    className="app-input"
+                    value={editProduct.warehouse_city || ""}
+                    onChange={(e) =>
+                      setEditProduct({
+                        ...editProduct,
+                        warehouse_city: e.target.value,
+                      })
+                    }
+                    placeholder="Ej: Caaguazú, Asunción"
+                  />
+                </div>
 
                 <ImageUploadField
                   label="Imagen 1"
@@ -2923,7 +2894,7 @@ export default function ProductsView({
                 </div>
 
                 <div className="col-span-1 sm:col-span-2">
-                  <label className="app-label">Descripción</label>
+                  <label className="app-label">Descripción / Detalles</label>
                   <textarea
                     className="app-input min-h-[80px]"
                     value={editProduct.description || ""}
@@ -2933,6 +2904,37 @@ export default function ProductsView({
                         description: e.target.value,
                       })
                     }
+                    placeholder="Descripción del producto..."
+                  />
+                </div>
+
+                <div className="col-span-1 sm:col-span-2">
+                  <label className="app-label">Garantías / Condiciones</label>
+                  <textarea
+                    className="app-input min-h-[80px]"
+                    value={editProduct.warranty_info || ""}
+                    onChange={(e) =>
+                      setEditProduct({
+                        ...editProduct,
+                        warranty_info: e.target.value,
+                      })
+                    }
+                    placeholder="Ej: 12 meses de garantía, soporte incluido, etc."
+                  />
+                </div>
+
+                <div className="col-span-1 sm:col-span-2">
+                  <label className="app-label">Recursos adicionales</label>
+                  <textarea
+                    className="app-input min-h-[80px]"
+                    value={editProduct.additional_resources || ""}
+                    onChange={(e) =>
+                      setEditProduct({
+                        ...editProduct,
+                        additional_resources: e.target.value,
+                      })
+                    }
+                    placeholder="Links a videos, manuales, fichas técnicas, etc."
                   />
                 </div>
               </div>
