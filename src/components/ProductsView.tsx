@@ -521,6 +521,247 @@ const ImageFullscreenModal = ({
   );
 };
 
+// Modal de detalles del producto
+const ProductDetailModal = ({
+  product,
+  metrics,
+  productAdSpend,
+  onClose,
+  onEdit,
+  onDelete,
+  canEdit,
+  canSeeRealStock,
+  canSeeRealCost,
+  canLoadOrder,
+  onLoadProduct,
+  getImages,
+  nf,
+}: {
+  product: Product;
+  metrics: ProductMetrics;
+  productAdSpend: number;
+  onClose: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+  canEdit: boolean;
+  canSeeRealStock: boolean;
+  canSeeRealCost: boolean;
+  canLoadOrder: boolean;
+  onLoadProduct?: (sku: string) => void;
+  getImages: (p: Product) => string[];
+  nf: (n: number) => string;
+}) => {
+  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const images = getImages(product);
+  const stockCritical = Number(product.stock || 0) <= 3;
+  const deliveryRate = metrics.sold_count > 0
+    ? Math.round((metrics.delivered_count / metrics.sold_count) * 100)
+    : 0;
+  const netProfit = metrics.gross_profit_gs - productAdSpend;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 bg-black/80 z-[10000] flex items-center justify-center p-4 overflow-auto"
+      onClick={onClose}
+    >
+      <div
+        className="relative bg-gradient-to-br from-[#0f1320] to-[#080b12] rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto border border-white/20 shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header con botón cerrar */}
+        <div className="sticky top-0 bg-[#0f1320]/95 backdrop-blur-md border-b border-white/10 p-4 flex justify-between items-center z-10">
+          <div>
+            <div className="text-[10px] uppercase text-primary/80 font-black">Detalle del producto</div>
+            <h2 className="text-xl font-black text-white">{product.title}</h2>
+            <div className="text-xs text-white/50 font-mono">SKU: {product.sku || "—"}</div>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-all"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div className="p-6 space-y-6">
+          {/* Galería de imágenes */}
+          {images.length > 0 && (
+            <div className="space-y-3">
+              <div className="aspect-video bg-[#1a1f2e] rounded-xl overflow-hidden border border-white/10">
+                <img
+                  src={images[currentImageIndex]}
+                  alt={product.title}
+                  className="w-full h-full object-contain"
+                />
+              </div>
+              {images.length > 1 && (
+                <div className="flex gap-2 overflow-x-auto pb-2">
+                  {images.map((img, idx) => (
+                    <div
+                      key={idx}
+                      onClick={() => setCurrentImageIndex(idx)}
+                      className={`w-16 h-16 rounded-lg overflow-hidden cursor-pointer border-2 transition-all ${
+                        idx === currentImageIndex
+                          ? "border-primary"
+                          : "border-white/20 hover:border-white/50"
+                      }`}
+                    >
+                      <img src={img} alt="" className="w-full h-full object-cover" />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Información general */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Precios */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-bold text-white/80 border-l-3 border-primary pl-2">💰 Precios</h3>
+              <div className="bg-white/5 rounded-xl p-3 space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-white/60">Precio venta:</span>
+                  <span className="font-bold text-white">{nf(Number(product.provider_price_gs || 0))} Gs</span>
+                </div>
+                {canSeeRealCost && (
+                  <div className="flex justify-between">
+                    <span className="text-white/60">Costo real:</span>
+                    <span className="font-bold text-white">{nf(Number(product.real_cost_gs || 0))} Gs</span>
+                  </div>
+                )}
+                {canSeeRealCost && (
+                  <div className="flex justify-between pt-2 border-t border-white/10">
+                    <span className="text-white/60">Ganancia por unidad:</span>
+                    <span className="font-bold text-emerald-400">
+                      {nf((Number(product.provider_price_gs || 0) - Number(product.real_cost_gs || 0)))} Gs
+                    </span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Stock */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-bold text-white/80 border-l-3 border-primary pl-2">📦 Stock</h3>
+              <div className="bg-white/5 rounded-xl p-3 space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-white/60">Stock disponible:</span>
+                  <span className={`font-bold ${stockCritical ? "text-red-400" : "text-white"}`}>
+                    {product.stock || 0} unidades
+                  </span>
+                </div>
+                {canSeeRealStock && (
+                  <div className="flex justify-between">
+                    <span className="text-white/60">Stock real:</span>
+                    <span className="font-bold text-white">{product.real_stock || 0} unidades</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Descripción */}
+          {product.description && (
+            <div className="space-y-2">
+              <h3 className="text-sm font-bold text-white/80 border-l-3 border-primary pl-2">📝 Descripción</h3>
+              <div className="bg-white/5 rounded-xl p-4">
+                <p className="text-white/80 text-sm whitespace-pre-wrap">{product.description}</p>
+              </div>
+            </div>
+          )}
+
+          {/* Métricas de ventas */}
+          <div className="space-y-3">
+            <h3 className="text-sm font-bold text-white/80 border-l-3 border-primary pl-2">📊 Métricas de ventas</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <div className="bg-white/5 rounded-xl p-3 text-center">
+                <div className="text-2xl font-black text-white">{metrics.sold_count}</div>
+                <div className="text-[10px] text-white/50">Vendidos</div>
+              </div>
+              <div className="bg-white/5 rounded-xl p-3 text-center">
+                <div className="text-2xl font-black text-white">{metrics.delivered_count}</div>
+                <div className="text-[10px] text-white/50">Entregados</div>
+              </div>
+              <div className="bg-white/5 rounded-xl p-3 text-center">
+                <div className="text-2xl font-black text-white">{deliveryRate}%</div>
+                <div className="text-[10px] text-white/50">Tasa entrega</div>
+              </div>
+              <div className="bg-white/5 rounded-xl p-3 text-center">
+                <div className="text-2xl font-black text-white">{metrics.cancelled_count}</div>
+                <div className="text-[10px] text-white/50">Cancelados</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Finanzas */}
+          {canSeeMoney && (
+            <div className="space-y-3">
+              <h3 className="text-sm font-bold text-white/80 border-l-3 border-primary pl-2">💰 Finanzas</h3>
+              <div className="bg-white/5 rounded-xl p-4 space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-white/60">Facturación real:</span>
+                  <span className="font-bold text-white">{nf(metrics.real_revenue_gs)} Gs</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-white/60">Gasto publicitario:</span>
+                  <span className="font-bold text-white">{nf(productAdSpend)} Gs</span>
+                </div>
+                <div className="flex justify-between pt-2 border-t border-white/10">
+                  <span className="text-white/80">Ganancia neta:</span>
+                  <span className={`font-bold text-lg ${netProfit >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+                    {nf(netProfit)} Gs
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Botones de acción */}
+          <div className="flex flex-wrap gap-3 pt-4 border-t border-white/10">
+            {canLoadOrder && product.sku && (
+              <button
+                className="flex-1 bg-primary py-2.5 rounded-xl font-bold text-primary-foreground hover:opacity-90 transition-all"
+                onClick={() => {
+                  onLoadProduct?.(product.sku!);
+                  onClose();
+                }}
+              >
+                ➕ Hacer pedido
+              </button>
+            )}
+            {canEdit && (
+              <>
+                <button
+                  className="flex-1 bg-white/10 border border-white/20 py-2.5 rounded-xl font-bold text-white hover:bg-white/20 transition-all"
+                  onClick={() => {
+                    onEdit();
+                    onClose();
+                  }}
+                >
+                  ✏️ Editar producto
+                </button>
+                <button
+                  className="flex-1 bg-red-500/20 border border-red-500/30 py-2.5 rounded-xl font-bold text-red-400 hover:bg-red-500/30 transition-all"
+                  onClick={() => {
+                    if (confirm(`¿Eliminar "${product.title}"?`)) {
+                      onDelete();
+                      onClose();
+                    }
+                  }}
+                >
+                  🗑️ Eliminar
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+};
+
 export default function ProductsView({
   onLoadProduct,
 }: {
@@ -566,6 +807,7 @@ export default function ProductsView({
     (Product & { isNew?: boolean }) | null
   >(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [selectedProductDetail, setSelectedProductDetail] = useState<Product | null>(null);
   const [imgIndex, setImgIndex] = useState<Record<string, number>>({});
   const [viewingImage, setViewingImage] = useState<{
     url: string;
@@ -957,8 +1199,6 @@ export default function ProductsView({
   useEffect(() => {
     if (!role || !myEmail) return;
 
-    console.log("🔊 [STOCK] Iniciando listener de stock para pedidos ENTREGADOS...");
-
     const channel = supabase
       .channel("orders-stock-updates")
       .on(
@@ -975,11 +1215,7 @@ export default function ProductsView({
           const wasDelivered = isDeliveredStatus(oldOrder?.status);
           const isNowDelivered = isDeliveredStatus(newOrder?.status);
 
-          console.log(`📊 [STOCK] Cambio de estado: ${oldOrder?.status} → ${newOrder?.status}`);
-
           if (!wasDelivered && isNowDelivered) {
-            console.log("🎯 [STOCK] Pedido marcado como ENTREGADO, descontando stock...");
-            
             let itemsToUpdate: { sku: string; quantity: number }[] = [];
             
             if (newOrder.items_json && Array.isArray(newOrder.items_json) && newOrder.items_json.length > 0) {
@@ -995,11 +1231,6 @@ export default function ProductsView({
               }];
             }
             
-            if (itemsToUpdate.length === 0) {
-              console.log("⚠️ [STOCK] No se encontraron items para descontar stock");
-              return;
-            }
-            
             let successCount = 0;
             
             for (const item of itemsToUpdate) {
@@ -1010,8 +1241,6 @@ export default function ProductsView({
               if (product) {
                 const newStock = Math.max(0, (product.stock || 0) - item.quantity);
                 const newRealStock = Math.max(0, (product.real_stock || 0) - item.quantity);
-                
-                console.log(`📦 [STOCK] ${product.title}: stock ${product.stock} → ${newStock} ( -${item.quantity})`);
                 
                 const { error } = await supabase
                   .from("products")
@@ -1031,11 +1260,7 @@ export default function ProductsView({
                         : p
                     )
                   );
-                } else {
-                  console.error(`❌ [STOCK] Error actualizando ${product.title}:`, error);
                 }
-              } else {
-                console.warn(`⚠️ [STOCK] Producto no encontrado: ${item.sku}`);
               }
             }
             
@@ -1050,70 +1275,9 @@ export default function ProductsView({
           }
         },
       )
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "orders",
-        },
-        async (payload) => {
-          const newOrder = payload.new;
-          const isDelivered = isDeliveredStatus(newOrder?.status);
-          
-          if (isDelivered && !newOrder.provider_stock_applied) {
-            console.log("🎯 [STOCK] Nuevo pedido creado como ENTREGADO, descontando stock...");
-            
-            let itemsToUpdate: { sku: string; quantity: number }[] = [];
-            
-            if (newOrder.items_json && Array.isArray(newOrder.items_json)) {
-              itemsToUpdate = newOrder.items_json.map((item: any) => ({
-                sku: item.sku || item.product_sku,
-                quantity: item.qty || item.quantity || 1
-              }));
-            } else if (newOrder.sku) {
-              itemsToUpdate = [{
-                sku: newOrder.sku,
-                quantity: newOrder.quantity || 1
-              }];
-            }
-            
-            for (const item of itemsToUpdate) {
-              if (!item.sku) continue;
-              
-              const product = products.find(p => p.sku === item.sku);
-              if (product) {
-                const newStock = Math.max(0, (product.stock || 0) - item.quantity);
-                const newRealStock = Math.max(0, (product.real_stock || 0) - item.quantity);
-                
-                await supabase
-                  .from("products")
-                  .update({ stock: newStock, real_stock: newRealStock })
-                  .eq("id", product.id);
-                
-                setProducts(prev =>
-                  prev.map(p =>
-                    p.id === product.id
-                      ? { ...p, stock: newStock, real_stock: newRealStock }
-                      : p
-                  )
-                );
-              }
-            }
-            
-            await supabase
-              .from("orders")
-              .update({ provider_stock_applied: true })
-              .eq("id", newOrder.id);
-            
-            toast.success(`📦 Stock actualizado por nuevo pedido entregado`);
-          }
-        },
-      )
       .subscribe();
 
     return () => {
-      console.log("🔊 [STOCK] Cerrando listener...");
       supabase.removeChannel(channel);
     };
   }, [role, myEmail, products]);
@@ -2223,12 +2387,26 @@ export default function ProductsView({
                             >
                               {isFav ? "★" : "☆"}
                             </button>
+                            <button
+                              className="px-2 py-1 rounded-lg bg-primary/20 text-primary text-sm font-bold"
+                              onClick={() => setSelectedProductDetail(p)}
+                            >
+                              👁️ Ver
+                            </button>
                             {canEdit && (
                               <button
                                 className="px-2 py-1 rounded-lg bg-white/5 text-sm"
                                 onClick={() => openEdit(p)}
                               >
                                 ✏️
+                              </button>
+                            )}
+                            {canEdit && (
+                              <button
+                                className="px-2 py-1 rounded-lg bg-red-500/20 text-red-400 text-sm"
+                                onClick={() => deleteProduct(p.id)}
+                              >
+                                🗑️
                               </button>
                             )}
                             {canLoadOrder && p.sku && (
@@ -2344,6 +2522,13 @@ export default function ProductsView({
                             </div>
                           </div>
 
+                          {canSeeRealStock && (
+                            <div className="flex justify-between text-xs">
+                              <span className="text-white/40">Stock real:</span>
+                              <span className="text-white font-mono">{p.real_stock || 0}</span>
+                            </div>
+                          )}
+
                           {/* Descripción corta */}
                           {p.description && (
                             <div className="text-xs text-white/50 line-clamp-2 mt-1">
@@ -2355,11 +2540,9 @@ export default function ProductsView({
                           <div className="flex gap-2 pt-2">
                             <button
                               className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/80 hover:bg-white/10 transition-all"
-                              onClick={() =>
-                                setExpandedId(isExpanded ? null : p.id)
-                              }
+                              onClick={() => setSelectedProductDetail(p)}
                             >
-                              {isExpanded ? "📉 Ocultar" : "📊 Historial"}
+                              👁️ Ver detalles
                             </button>
                             {canLoadOrder && p.sku && (
                               <button
@@ -2371,57 +2554,21 @@ export default function ProductsView({
                             )}
                           </div>
 
-                          {/* Historial expandido */}
-                          {isExpanded && (
-                            <div className="mt-2 pt-2 border-t border-white/10 space-y-1.5 text-xs">
-                              <div className="flex justify-between">
-                                <span className="text-white/50">Vendidos:</span>
-                                <span className="font-bold text-white">
-                                  {m.sold_count}
-                                </span>
-                              </div>
-                              <div className="flex justify-between">
-                                <span className="text-white/50">
-                                  Entregados:
-                                </span>
-                                <span className="font-bold text-white">
-                                  {m.delivered_count}
-                                </span>
-                              </div>
-                              {canSeeMoney && (
-                                <>
-                                  <div className="flex justify-between">
-                                    <span className="text-white/50">
-                                      Facturación:
-                                    </span>
-                                    <span className="font-bold text-white">
-                                      {nf(m.real_revenue_gs)} Gs
-                                    </span>
-                                  </div>
-                                  <div className="flex justify-between">
-                                    <span className="text-white/50">
-                                      Publicidad:
-                                    </span>
-                                    <span className="font-bold text-white">
-                                      {nf(productAdSpend)} Gs
-                                    </span>
-                                  </div>
-                                  <div className="flex justify-between pt-1 border-t border-white/10">
-                                    <span className="text-white/70">
-                                      Ganancia neta:
-                                    </span>
-                                    <span
-                                      className={`font-bold ${
-                                        netProfit >= 0
-                                          ? "text-emerald-400"
-                                          : "text-red-400"
-                                      }`}
-                                    >
-                                      {nf(netProfit)} Gs
-                                    </span>
-                                  </div>
-                                </>
-                              )}
+                          {/* Botones de edición/eliminación solo para admin/provider */}
+                          {canEdit && (
+                            <div className="flex gap-2 pt-1">
+                              <button
+                                className="flex-1 text-xs py-1 rounded-lg bg-white/10 text-white/80 hover:bg-white/20 transition-all"
+                                onClick={() => openEdit(p)}
+                              >
+                                ✏️ Editar
+                              </button>
+                              <button
+                                className="flex-1 text-xs py-1 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-all"
+                                onClick={() => deleteProduct(p.id)}
+                              >
+                                🗑️ Eliminar
+                              </button>
                             </div>
                           )}
                         </div>
@@ -2444,6 +2591,25 @@ export default function ProductsView({
           )}
         </div>
       </section>
+
+      {/* Modal de detalles del producto */}
+      {selectedProductDetail && (
+        <ProductDetailModal
+          product={selectedProductDetail}
+          metrics={metricsByProduct[selectedProductDetail.id] || emptyMetrics}
+          productAdSpend={getProductAdSpend(selectedProductDetail.id)}
+          onClose={() => setSelectedProductDetail(null)}
+          onEdit={() => openEdit(selectedProductDetail)}
+          onDelete={() => deleteProduct(selectedProductDetail.id)}
+          canEdit={canEdit}
+          canSeeRealStock={canSeeRealStock}
+          canSeeRealCost={canSeeRealCost}
+          canLoadOrder={canLoadOrder}
+          onLoadProduct={onLoadProduct}
+          getImages={getImages}
+          nf={nf}
+        />
+      )}
 
       {/* Modal de edición */}
       {editProduct &&
