@@ -241,7 +241,7 @@ const getOrderProductId = (order: any) =>
   String(getOrderValue(order, ["product_id","producto_id","productId","product"]) || "").trim();
 
 const getOrderStatus = (order: any) =>
-  String(getOrderValue(order, ["status","order_status","estado","estado_pedido","delivery_status","shipping_status"]) || "").trim();
+  String(getOrderValue(order, ["estado_1","status","order_status","estado","estado_pedido","delivery_status","shipping_status"]) || "").trim();
 
 const getOrderProviderEmail = (order: any) =>
   normalizeEmail(getOrderValue(order, ["provider_email","proveedor_email","supplier_email","email_proveedor"]));
@@ -250,7 +250,7 @@ const getOrderSellerEmail = (order: any) =>
   normalizeEmail(getOrderValue(order, ["seller_email","vendedor_email","email_vendedor","created_by_email","user_email"]));
 
 const getOrderQuantity = (order: any) =>
-  Number(getOrderValue(order, ["quantity","qty","cantidad","units","unidades"]) || 1);
+  Number(getOrderValue(order, ["pack_qty","quantity","qty","cantidad","units","unidades"]) || 1);
 
 const getOrderAmount = (order: any, fallbackPrice: number) =>
   Number(getOrderValue(order, ["total_gs","total_amount_gs","amount_gs","total","monto_total","precio_total","price_gs","precio"]) || fallbackPrice || 0);
@@ -1131,45 +1131,98 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
     setLoading(false);
   }, [role, myEmail]);
 
-  // Realtime listener para stock de delivery
+  // Realtime listener para stock de delivery - CORREGIDO para usar estado_1 y pack_qty
   useEffect(() => {
     if (!role || !myEmail) return;
+    
     const channel = supabase
       .channel("delivery-stock-updates")
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "orders" }, async (payload) => {
         const oldOrder = payload.old;
         const newOrder = payload.new;
-        const wasDelivered = isDeliveredStatus(oldOrder?.status);
-        const isNowDelivered = isDeliveredStatus(newOrder?.status);
-        if (!wasDelivered && isNowDelivered && newOrder.delivery_email) {
-          const orderSku = getOrderSku(newOrder);
+        
+        // Usar estado_1 en lugar de status
+        const wasDelivered = isDeliveredStatus(oldOrder?.estado_1);
+        const isNowDelivered = isDeliveredStatus(newOrder?.estado_1);
+        
+        console.log('🔔 Cambio detectado:', { 
+          oldEstado: oldOrder?.estado_1, 
+          newEstado: newOrder?.estado_1,
+          wasDelivered, 
+          isNowDelivered,
+          delivery_email: newOrder?.delivery_email,
+          sku: newOrder?.sku
+        });
+        
+        if (!wasDelivered && isNowDelivered && newOrder.delivery_email && newOrder.sku) {
+          console.log('✅ Pedido entregado detectado!');
+          
+          const orderSku = newOrder.sku;
           const product = products.find((p) => p.sku === orderSku);
+          
           if (product) {
+            // Usar pack_qty en lugar de quantity
+            const quantity = newOrder.pack_qty || 1;
+            
+            console.log(`📦 Producto: ${product.title}, Cantidad: ${quantity}`);
+            
+            // 1. Obtener stock actual del delivery
             const { data: currentStock } = await supabase
               .from("delivery_stock")
               .select("quantity")
               .eq("delivery_email", newOrder.delivery_email)
               .eq("product_id", product.id)
               .single();
+            
             if (currentStock) {
-              const quantity = newOrder.quantity || 1;
               const newQuantity = Math.max(0, currentStock.quantity - quantity);
-              await supabase.from("delivery_stock").update({ quantity: newQuantity }).eq("delivery_email", newOrder.delivery_email).eq("product_id", product.id);
+              
+              // 2. Actualizar stock del delivery
+              await supabase
+                .from("delivery_stock")
+                .update({ quantity: newQuantity, updated_at: new Date().toISOString() })
+                .eq("delivery_email", newOrder.delivery_email)
+                .eq("product_id", product.id);
+              
+              // 3. Actualizar stock del producto
+              await supabase
+                .from("products")
+                .update({
+                  stock: Math.max(0, (product.stock || 0) - quantity),
+                  real_stock: Math.max(0, (product.real_stock || 0) - quantity),
+                  updated_at: new Date().toISOString()
+                })
+                .eq("id", product.id);
+              
+              // 4. Registrar movimiento
               await supabase.from("delivery_stock_movements").insert({
                 delivery_email: newOrder.delivery_email,
                 product_id: product.id,
                 quantity_change: -quantity,
-                reason: "📦 Pedido entregado / Encomienda entregada",
+                reason: "📦 " + newOrder.estado_1,
                 order_id: newOrder.id,
+                created_at: new Date().toISOString()
               });
+              
+              console.log(`✅ Stock actualizado: ${currentStock.quantity} -> ${newQuantity}`);
+              
+              // 5. Recargar datos
               await loadDeliveryStocks();
+              await load();
+              
+              toast.success(`Stock actualizado: -${quantity} unidad(es) de ${product.title}`);
+            } else {
+              console.log('⚠️ No hay stock asignado para este delivery/producto');
             }
+          } else {
+            console.log('❌ Producto no encontrado para SKU:', orderSku);
           }
         }
       })
       .subscribe();
+    
     return () => { supabase.removeChannel(channel); };
-  }, [role, myEmail, products, loadDeliveryStocks]);
+  }, [role, myEmail, products, loadDeliveryStocks, load]);
 
   useEffect(() => {
     load();
@@ -1273,7 +1326,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
     let errorCount = 0;
     for (const product of products) {
       try {
-        const { data, error } = await supabase.from("orders").select("items_json, sku, quantity").eq("status", "ENTREGADO");
+        const { data, error } = await supabase.from("orders").select("items_json, sku, pack_qty").eq("estado_1", "ENTREGADO");
         if (error) { errorCount++; continue; }
         let deliveredQty = 0;
         for (const order of data || []) {
@@ -1282,7 +1335,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
               if (item.sku === product.sku) deliveredQty += (item.qty || item.quantity || 1);
             }
           } else if (order.sku === product.sku) {
-            deliveredQty += (order.quantity || 1);
+            deliveredQty += (order.pack_qty || 1);
           }
         }
         const syncedStock = Math.max(0, deliveredQty);
