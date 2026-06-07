@@ -84,6 +84,14 @@ interface Product {
   additional_resources: string | null;
 }
 
+interface DeliveryStock {
+  id: string;
+  delivery_email: string;
+  product_id: string;
+  quantity: number;
+  product?: Product;
+}
+
 interface ProductMetrics {
   product_id: string;
   sku: string;
@@ -149,7 +157,7 @@ const emptyProduct: Omit<Product, "id"> = {
 const isPrivateProduct = (p: Product) =>
   Boolean(p.is_private_stock ?? p.is_private);
 
-const canUserSeeProduct = (p: Product, role: string, myEmail: string) => {
+const canUserSeeProduct = (p: Product, role: string, myEmail: string, deliveryStocks: DeliveryStock[] = []) => {
   const userEmail = normalizeEmail(myEmail);
   const providerEmail = normalizeEmail(p.provider_email);
   const privateEmails = parsePrivateEmails(p.private_to_emails);
@@ -163,7 +171,14 @@ const canUserSeeProduct = (p: Product, role: string, myEmail: string) => {
     return providerEmail === userEmail;
   }
 
-  if (["seller", "despachante", "delivery"].includes(role)) {
+  if (role === "delivery") {
+    const hasStock = deliveryStocks.some(
+      ds => ds.delivery_email === userEmail && ds.product_id === p.id && ds.quantity > 0
+    );
+    return hasStock;
+  }
+
+  if (["seller", "despachante"].includes(role)) {
     if (!isPrivate) return true;
     return privateEmails.includes(userEmail);
   }
@@ -313,7 +328,7 @@ const getOrderAmount = (order: any, fallbackPrice: number) =>
       0,
   );
 
-// Componente de galería de imágenes profesional
+// Componente de galería de imágenes
 const ProductImageGallery = ({
   images,
   title,
@@ -508,7 +523,108 @@ const ImageFullscreenModal = ({
   );
 };
 
-// Modal de detalles del producto - con todos los campos del proveedor
+// Modal de asignación de stock a delivery
+const AssignDeliveryStockModal = ({
+  product,
+  deliveryStocks,
+  deliveries,
+  onClose,
+  onSave,
+}: {
+  product: Product;
+  deliveryStocks: DeliveryStock[];
+  deliveries: { email: string; name: string }[];
+  onClose: () => void;
+  onSave: (assignments: { delivery_email: string; quantity: number }[]) => void;
+}) => {
+  const [assignments, setAssignments] = useState<{ delivery_email: string; quantity: number }[]>(() =>
+    deliveries.map(d => ({
+      delivery_email: d.email,
+      quantity: deliveryStocks.find(ds => ds.delivery_email === d.email)?.quantity || 0
+    }))
+  );
+
+  const updateQuantity = (email: string, quantity: number) => {
+    setAssignments(prev =>
+      prev.map(a =>
+        a.delivery_email === email ? { ...a, quantity: Math.max(0, quantity) } : a
+      )
+    );
+  };
+
+  return createPortal(
+    <div
+      className="fixed inset-0 bg-black/60 z-[10000] flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="relative bg-white dark:bg-gray-900 rounded-2xl max-w-lg w-full shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="p-5 border-b border-gray-200 dark:border-gray-800">
+          <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+            Asignar stock a deliveries
+          </h3>
+          <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+            Producto: {product.title} (SKU: {product.sku})
+          </p>
+        </div>
+
+        <div className="p-5 space-y-4 max-h-[400px] overflow-y-auto">
+          {deliveries.map((delivery) => {
+            const assignment = assignments.find(a => a.delivery_email === delivery.email);
+            return (
+              <div key={delivery.email} className="flex items-center justify-between gap-4 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-xl">
+                <div className="flex-1">
+                  <div className="font-medium text-gray-900 dark:text-white">{delivery.name}</div>
+                  <div className="text-xs text-gray-500">{delivery.email}</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => updateQuantity(delivery.email, (assignment?.quantity || 0) - 1)}
+                    className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-all"
+                  >
+                    -
+                  </button>
+                  <input
+                    type="number"
+                    className="w-20 text-center py-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white font-mono"
+                    value={assignment?.quantity || 0}
+                    onChange={(e) => updateQuantity(delivery.email, parseInt(e.target.value) || 0)}
+                  />
+                  <button
+                    onClick={() => updateQuantity(delivery.email, (assignment?.quantity || 0) + 1)}
+                    className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-all"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="p-5 border-t border-gray-200 dark:border-gray-800 flex gap-3">
+          <button
+            onClick={onClose}
+            className="flex-1 py-2 rounded-xl bg-gray-200 dark:bg-gray-800 text-gray-800 dark:text-white font-medium hover:bg-gray-300 dark:hover:bg-gray-700 transition-all"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={() => onSave(assignments)}
+            className="flex-1 py-2 rounded-xl bg-primary text-primary-foreground font-bold hover:opacity-90 transition-all"
+          >
+            Guardar asignación
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body
+  );
+};
+
+// Modal de detalles del producto - SIN botón "Enviar a cliente"
 const ProductDetailModal = ({
   product,
   metrics,
@@ -524,6 +640,10 @@ const ProductDetailModal = ({
   nf,
   providerName,
   providerPhone,
+  isDelivery,
+  deliveryStockQuantity,
+  currentMonthMetrics,
+  currentMonthLoading,
 }: {
   product: Product;
   metrics: ProductMetrics;
@@ -539,17 +659,17 @@ const ProductDetailModal = ({
   nf: (n: number) => string;
   providerName?: string;
   providerPhone?: string;
+  isDelivery?: boolean;
+  deliveryStockQuantity?: number;
+  currentMonthMetrics?: ProductMetrics;
+  currentMonthLoading?: boolean;
 }) => {
-  const [activeTab, setActiveTab] = useState<"detalles" | "garantias" | "recursos">("detalles");
+  const [activeTab, setActiveTab] = useState<"detalles" | "garantias" | "recursos" | "metricas">("detalles");
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const images = getImages(product);
   const stockCritical = Number(product.stock || 0) <= 3;
-
-  // Función para enviar por WhatsApp al cliente
-  const sendToClient = () => {
-    const message = encodeURIComponent(`Hola! Te comparto el producto: ${product.title}\nSKU: ${product.sku}\nPrecio proveedor: ${nf(Number(product.provider_price_gs || 0))} Gs\nPrecio sugerido: ${nf(Number(product.suggested_price_gs || 0))} Gs\n\n¿Te interesa?`);
-    toast.success("Función: Enviar al cliente - Se abriría WhatsApp");
-  };
+  const netProfit = (currentMonthMetrics?.gross_profit_gs || 0) - productAdSpend;
+  const gainPerUnit = (Number(product.suggested_price_gs || 0) - Number(product.real_cost_gs || 0));
 
   // Solicitar muestra al proveedor
   const requestSample = () => {
@@ -563,8 +683,10 @@ const ProductDetailModal = ({
 
   // Ver informe de ventas
   const viewReport = () => {
-    toast.info(`Informe de ventas para ${product.title}: ${metrics.sold_count} vendidos, ${metrics.delivered_count} entregados`);
+    toast.info(`Informe de ventas para ${product.title}: ${currentMonthMetrics?.sold_count || 0} vendidos este mes, ${currentMonthMetrics?.delivered_count || 0} entregados`);
   };
+
+  const displayMetrics = currentMonthMetrics || metrics;
 
   return createPortal(
     <div
@@ -575,7 +697,7 @@ const ProductDetailModal = ({
         className="relative bg-white dark:bg-gray-900 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header con título, SKU y categorías */}
+        {/* Header */}
         <div className="sticky top-0 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800 p-5 z-10">
           <div className="flex justify-between items-start">
             <div>
@@ -617,7 +739,7 @@ const ProductDetailModal = ({
             )}
           </div>
           
-          {/* Miniaturas de imágenes */}
+          {/* Miniaturas */}
           {images.length > 1 && (
             <div className="flex justify-center gap-2">
               {images.map((img, idx) => (
@@ -626,7 +748,7 @@ const ProductDetailModal = ({
                   onClick={() => setCurrentImageIndex(idx)}
                   className={`w-16 h-16 rounded-lg overflow-hidden cursor-pointer border-2 transition-all ${
                     idx === currentImageIndex
-                      ? "border-blue-500"
+                      ? "border-primary"
                       : "border-gray-200 dark:border-gray-700 hover:border-gray-300"
                   }`}
                 >
@@ -649,10 +771,10 @@ const ProductDetailModal = ({
                 <div>
                   <div className="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Stock disponible</div>
                   <div className={`font-bold text-xl ${stockCritical ? "text-red-500" : "text-gray-900 dark:text-white"}`}>
-                    {product.stock || 0} unidades
+                    {isDelivery ? (deliveryStockQuantity || 0) : (product.stock || 0)} unidades
                   </div>
                 </div>
-                {canSeeRealStock && (
+                {canSeeRealStock && !isDelivery && (
                   <div className="text-right">
                     <div className="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Stock real / Privado</div>
                     <div className="font-bold text-xl text-gray-900 dark:text-white">
@@ -664,7 +786,7 @@ const ProductDetailModal = ({
             </div>
           </div>
 
-          {/* Precios: Proveedor y Sugerido */}
+          {/* Precios */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4">
               <div className="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Precio del proveedor</div>
@@ -674,21 +796,15 @@ const ProductDetailModal = ({
             </div>
             <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4">
               <div className="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Precio sugerido</div>
-              <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+              <div className="text-2xl font-bold text-primary">
                 {nf(Number(product.suggested_price_gs || 0))} Gs
               </div>
               <div className="text-xs text-gray-400 mt-1">*Precio sugerido para vender</div>
             </div>
           </div>
 
-          {/* Botones de acción */}
+          {/* Botones de acción - SIN "Enviar a cliente" */}
           <div className="flex flex-wrap gap-3">
-            <button
-              onClick={sendToClient}
-              className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-2"
-            >
-              <span>📱</span> Enviar a cliente
-            </button>
             <button
               onClick={requestSample}
               className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl transition-all flex items-center justify-center gap-2"
@@ -703,7 +819,7 @@ const ProductDetailModal = ({
             </button>
           </div>
 
-          {/* Vendido por / Proveedor */}
+          {/* Vendido por */}
           <div className="border-t border-gray-200 dark:border-gray-800 pt-4">
             <div className="text-xs text-gray-500 dark:text-gray-400 uppercase mb-2">Vendido por:</div>
             <div className="flex items-center justify-between">
@@ -726,14 +842,14 @@ const ProductDetailModal = ({
             </div>
           </div>
 
-          {/* TABS: Detalles | Garantías | Recursos adicionales */}
+          {/* TABS: Detalles | Garantías | Recursos adicionales | Métricas */}
           <div className="border-b border-gray-200 dark:border-gray-800">
-            <div className="flex gap-6">
+            <div className="flex gap-6 overflow-x-auto">
               <button
                 onClick={() => setActiveTab("detalles")}
-                className={`pb-3 text-sm font-medium transition-all ${
+                className={`pb-3 text-sm font-medium transition-all whitespace-nowrap ${
                   activeTab === "detalles"
-                    ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400"
+                    ? "text-primary border-b-2 border-primary"
                     : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
                 }`}
               >
@@ -741,9 +857,9 @@ const ProductDetailModal = ({
               </button>
               <button
                 onClick={() => setActiveTab("garantias")}
-                className={`pb-3 text-sm font-medium transition-all ${
+                className={`pb-3 text-sm font-medium transition-all whitespace-nowrap ${
                   activeTab === "garantias"
-                    ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400"
+                    ? "text-primary border-b-2 border-primary"
                     : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
                 }`}
               >
@@ -751,13 +867,23 @@ const ProductDetailModal = ({
               </button>
               <button
                 onClick={() => setActiveTab("recursos")}
-                className={`pb-3 text-sm font-medium transition-all ${
+                className={`pb-3 text-sm font-medium transition-all whitespace-nowrap ${
                   activeTab === "recursos"
-                    ? "text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400"
+                    ? "text-primary border-b-2 border-primary"
                     : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
                 }`}
               >
                 Recursos adicionales
+              </button>
+              <button
+                onClick={() => setActiveTab("metricas")}
+                className={`pb-3 text-sm font-medium transition-all whitespace-nowrap ${
+                  activeTab === "metricas"
+                    ? "text-primary border-b-2 border-primary"
+                    : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                }`}
+              >
+                📊 Métricas del mes
               </button>
             </div>
           </div>
@@ -770,7 +896,6 @@ const ProductDetailModal = ({
                   {product.description || "✨ Descripción no cargada por el proveedor."}
                 </p>
                 
-                {/* Información comercial solo para admin/provider */}
                 {canSeeRealCost && (
                   <div className="mt-4 pt-4 border-t border-gray-100 dark:border-gray-800">
                     <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">Información comercial</h4>
@@ -781,17 +906,7 @@ const ProductDetailModal = ({
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-500">Ganancia por unidad (según sugerido):</span>
-                        <span className="font-medium text-green-600">
-                          {nf(Number(product.suggested_price_gs || 0) - Number(product.real_cost_gs || 0))} Gs
-                        </span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-500">Vendidos (total):</span>
-                        <span className="font-medium">{metrics.sold_count}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-500">Entregados:</span>
-                        <span className="font-medium">{metrics.delivered_count}</span>
+                        <span className="font-medium text-green-600">{nf(gainPerUnit)} Gs</span>
                       </div>
                     </div>
                   </div>
@@ -816,6 +931,71 @@ const ProductDetailModal = ({
                     "El proveedor no ha cargado recursos adicionales aún."
                   )}
                 </div>
+              </div>
+            )}
+
+            {activeTab === "metricas" && (
+              <div className="space-y-4">
+                {currentMonthLoading ? (
+                  <div className="text-center py-8">
+                    <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                    <p className="text-sm text-gray-500 mt-2">Cargando métricas del mes...</p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-3 text-center">
+                        <div className="text-2xl font-black text-gray-900 dark:text-white">{displayMetrics.sold_count}</div>
+                        <div className="text-[10px] text-gray-500">Vendidos</div>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-3 text-center">
+                        <div className="text-2xl font-black text-green-600">{displayMetrics.delivered_count}</div>
+                        <div className="text-[10px] text-gray-500">Entregados</div>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-3 text-center">
+                        <div className="text-2xl font-black text-red-500">{displayMetrics.cancelled_count}</div>
+                        <div className="text-[10px] text-gray-500">Cancelados</div>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-3 text-center">
+                        <div className="text-2xl font-black text-orange-500">{displayMetrics.returned_count}</div>
+                        <div className="text-[10px] text-gray-500">Devueltos</div>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-3 text-center">
+                        <div className="text-2xl font-black text-yellow-500">{displayMetrics.no_answer_count}</div>
+                        <div className="text-[10px] text-gray-500">Sin respuesta</div>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-3 text-center">
+                        <div className="text-2xl font-black text-blue-500">{displayMetrics.billed_count}</div>
+                        <div className="text-[10px] text-gray-500">Facturados</div>
+                      </div>
+                    </div>
+
+                    <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4 space-y-2">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">Facturación real:</span>
+                        <span className="font-bold text-gray-900 dark:text-white">{nf(displayMetrics.real_revenue_gs)} Gs</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">Ganancia bruta:</span>
+                        <span className="font-bold text-green-600">{nf(displayMetrics.gross_profit_gs)} Gs</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-gray-500">Gasto publicitario:</span>
+                        <span className="font-bold text-orange-500">{nf(productAdSpend)} Gs</span>
+                      </div>
+                      <div className="flex justify-between text-sm pt-2 border-t border-gray-200 dark:border-gray-700">
+                        <span className="text-gray-700 dark:text-gray-300 font-medium">Ganancia neta:</span>
+                        <span className={`font-bold text-lg ${netProfit >= 0 ? "text-emerald-600" : "text-red-500"}`}>
+                          {nf(netProfit)} Gs
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="text-xs text-gray-400 text-center">
+                      📅 Métricas del {firstDayOfMonth()} al {todayPY()}
+                    </div>
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -868,6 +1048,8 @@ export default function ProductsView({
       phone: string | null;
     }[]
   >([]);
+  const [deliveryStocks, setDeliveryStocks] = useState<DeliveryStock[]>([]);
+  const [deliveryUsers, setDeliveryUsers] = useState<{ email: string; name: string }[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [metricsLoading, setMetricsLoading] = useState(false);
@@ -904,16 +1086,79 @@ export default function ProductsView({
   const [metricsByProduct, setMetricsByProduct] = useState<
     Record<string, ProductMetrics>
   >({});
+  const [currentMonthMetrics, setCurrentMonthMetrics] = useState<
+    Record<string, ProductMetrics>
+  >({});
+  const [currentMonthLoading, setCurrentMonthLoading] = useState(false);
   const [adSpends, setAdSpends] = useState<AdSpend[]>([]);
   const [syncingStock, setSyncingStock] = useState(false);
+  const [showAssignStockModal, setShowAssignStockModal] = useState<Product | null>(null);
 
   const canSeeRealStock = ["admin", "provider", "despachante"].includes(role);
   const canEdit = ["admin", "provider", "despachante"].includes(role);
   const canSeeRealCost = ["admin", "provider"].includes(role);
   const canLoadOrder = ["seller", "despachante", "delivery"].includes(role);
-  const canSeeMoney = ["admin", "provider", "seller", "despachante"].includes(
-    role,
-  );
+  const canSeeMoney = ["admin", "provider", "seller", "despachante"].includes(role);
+  const isDelivery = role === "delivery";
+  const canAssignStock = ["admin", "provider"].includes(role);
+
+  // Cargar deliveries para asignación de stock
+  const loadDeliveryUsers = useCallback(async () => {
+    if (!canAssignStock) return;
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("email, name")
+      .eq("role", "delivery");
+
+    if (!error && data) {
+      setDeliveryUsers(data.map(d => ({ email: d.email, name: d.name || d.email })));
+    }
+  }, [canAssignStock]);
+
+  // Cargar stock de deliveries
+  const loadDeliveryStocks = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("delivery_stock")
+      .select("*");
+
+    if (!error && data) {
+      setDeliveryStocks(data as DeliveryStock[]);
+    }
+  }, []);
+
+  // Guardar asignación de stock
+  const saveDeliveryStockAssignments = async (productId: string, assignments: { delivery_email: string; quantity: number }[]) => {
+    for (const assignment of assignments) {
+      const existing = deliveryStocks.find(ds => ds.delivery_email === assignment.delivery_email && ds.product_id === productId);
+      
+      if (existing) {
+        if (assignment.quantity > 0) {
+          await supabase
+            .from("delivery_stock")
+            .update({ quantity: assignment.quantity })
+            .eq("id", existing.id);
+        } else {
+          await supabase
+            .from("delivery_stock")
+            .delete()
+            .eq("id", existing.id);
+        }
+      } else if (assignment.quantity > 0) {
+        await supabase
+          .from("delivery_stock")
+          .insert({
+            delivery_email: assignment.delivery_email,
+            product_id: productId,
+            quantity: assignment.quantity
+          });
+      }
+    }
+    
+    await loadDeliveryStocks();
+    toast.success("Stock asignado correctamente");
+    setShowAssignStockModal(null);
+  };
 
   const loadFavorites = useCallback(async () => {
     if (!myEmail) return;
@@ -984,12 +1229,13 @@ export default function ProductsView({
 
     setLoading(true);
 
-    const [prodRes, profRes] = await Promise.all([
+    const [prodRes, profRes, stockRes] = await Promise.all([
       supabase
         .from("products")
         .select("*")
         .order("created_at", { ascending: false }),
       supabase.from("profiles").select("email, name, logo_url, phone"),
+      supabase.from("delivery_stock").select("*")
     ]);
 
     if (prodRes.error) {
@@ -1007,14 +1253,69 @@ export default function ProductsView({
     }
 
     const allProducts = (prodRes.data || []) as Product[];
+    const deliveryStocksData = (stockRes.data || []) as DeliveryStock[];
+    setDeliveryStocks(deliveryStocksData);
+
     const visibleProducts = allProducts.filter((p) =>
-      canUserSeeProduct(p, role, myEmail),
+      canUserSeeProduct(p, role, myEmail, deliveryStocksData)
     );
 
     setProducts(visibleProducts);
     setProfiles(profRes.data || []);
     setLoading(false);
   }, [role, myEmail]);
+
+  // Cargar métricas del mes actual para un producto específico
+  const loadCurrentMonthMetricsForProduct = useCallback(async (productId: string) => {
+    const monthStart = firstDayOfMonth();
+    const monthEnd = todayPY();
+
+    const { data, error } = await supabase
+      .from("orders")
+      .select("*")
+      .gte("created_at", `${monthStart}T00:00:00`)
+      .lte("created_at", `${monthEnd}T23:59:59`);
+
+    if (error) return emptyMetrics;
+
+    const product = products.find(p => p.id === productId);
+    if (!product) return emptyMetrics;
+
+    let metrics = { ...emptyMetrics, product_id: productId, sku: product.sku || "" };
+
+    for (const order of data || []) {
+      const orderSku = getOrderSku(order);
+      if (orderSku !== product.sku) continue;
+
+      const qty = getOrderQuantity(order);
+      const unitFallbackPrice = Number(product.provider_price_gs || 0) * qty;
+      const saleAmount = getOrderAmount(order, unitFallbackPrice);
+      const realCost = Number(product.real_cost_gs || 0) * qty;
+      const status = getOrderStatus(order);
+      const delivered = isDeliveredStatus(status);
+      const cancelled = isCancelledStatus(status);
+      const returned = isReturnedStatus(status);
+      const noAnswer = isNoAnswerStatus(status);
+      const billed = isBilledStatus(status);
+
+      metrics.sold_count += qty;
+      if (delivered) metrics.delivered_count += qty;
+      if (cancelled) metrics.cancelled_count += qty;
+      if (returned) metrics.returned_count += qty;
+      if (noAnswer) metrics.no_answer_count += qty;
+      if (billed) metrics.billed_count += qty;
+
+      metrics.gross_revenue_gs += saleAmount;
+
+      if (delivered) {
+        metrics.real_revenue_gs += saleAmount;
+        metrics.product_cost_gs += realCost;
+        metrics.gross_profit_gs += saleAmount - realCost;
+      }
+    }
+
+    return metrics;
+  }, [products]);
 
   const visibleProductIds = useMemo(
     () => products.map((p) => p.id),
@@ -1121,7 +1422,7 @@ export default function ProductsView({
 
         const productProviderEmail = normalizeEmail(product.provider_email);
 
-        if (!canUserSeeProduct(product, role, myEmail)) return;
+        if (!canUserSeeProduct(product, role, myEmail, deliveryStocks)) return;
 
         if (
           role === "provider" &&
@@ -1205,6 +1506,7 @@ export default function ProductsView({
     products,
     selectedProvider,
     selectedProductId,
+    deliveryStocks,
   ]);
 
   const syncStockFromOrders = useCallback(async () => {
@@ -1283,11 +1585,12 @@ export default function ProductsView({
     setSyncingStock(false);
   }, [products]);
 
+  // Listener para stock de delivery cuando se entrega un pedido
   useEffect(() => {
     if (!role || !myEmail) return;
 
     const channel = supabase
-      .channel("orders-stock-updates")
+      .channel("delivery-stock-updates")
       .on(
         "postgres_changes",
         {
@@ -1302,62 +1605,29 @@ export default function ProductsView({
           const wasDelivered = isDeliveredStatus(oldOrder?.status);
           const isNowDelivered = isDeliveredStatus(newOrder?.status);
 
-          if (!wasDelivered && isNowDelivered) {
-            let itemsToUpdate: { sku: string; quantity: number }[] = [];
+          if (!wasDelivered && isNowDelivered && newOrder.delivery_email) {
+            // Descontar stock del delivery
+            const orderSku = getOrderSku(newOrder);
+            const product = products.find(p => p.sku === orderSku);
             
-            if (newOrder.items_json && Array.isArray(newOrder.items_json) && newOrder.items_json.length > 0) {
-              itemsToUpdate = newOrder.items_json.map((item: any) => ({
-                sku: item.sku || item.product_sku,
-                quantity: item.qty || item.quantity || 1
-              }));
-            } 
-            else if (newOrder.sku) {
-              itemsToUpdate = [{
-                sku: newOrder.sku,
-                quantity: newOrder.quantity || 1
-              }];
-            }
-            
-            let successCount = 0;
-            
-            for (const item of itemsToUpdate) {
-              if (!item.sku) continue;
-              
-              let product = products.find(p => p.sku === item.sku);
-              
-              if (product) {
-                const newStock = Math.max(0, (product.stock || 0) - item.quantity);
-                const newRealStock = Math.max(0, (product.real_stock || 0) - item.quantity);
+            if (product) {
+              const { data: currentStock } = await supabase
+                .from("delivery_stock")
+                .select("quantity")
+                .eq("delivery_email", newOrder.delivery_email)
+                .eq("product_id", product.id)
+                .single();
+
+              if (currentStock) {
+                const newQuantity = Math.max(0, currentStock.quantity - (newOrder.quantity || 1));
+                await supabase
+                  .from("delivery_stock")
+                  .update({ quantity: newQuantity })
+                  .eq("delivery_email", newOrder.delivery_email)
+                  .eq("product_id", product.id);
                 
-                const { error } = await supabase
-                  .from("products")
-                  .update({
-                    stock: newStock,
-                    real_stock: newRealStock,
-                    updated_at: new Date().toISOString()
-                  })
-                  .eq("id", product.id);
-                
-                if (!error) {
-                  successCount++;
-                  setProducts(prev =>
-                    prev.map(p =>
-                      p.id === product.id
-                        ? { ...p, stock: newStock, real_stock: newRealStock }
-                        : p
-                    )
-                  );
-                }
+                await loadDeliveryStocks();
               }
-            }
-            
-            if (successCount > 0) {
-              await supabase
-                .from("orders")
-                .update({ provider_stock_applied: true })
-                .eq("id", newOrder.id);
-              
-              toast.success(`✅ Stock actualizado: -${successCount} producto(s) entregados`);
             }
           }
         },
@@ -1367,12 +1637,14 @@ export default function ProductsView({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [role, myEmail, products]);
+  }, [role, myEmail, products, loadDeliveryStocks]);
 
   useEffect(() => {
     load();
     loadFavorites();
-  }, [load, loadFavorites]);
+    loadDeliveryUsers();
+    loadDeliveryStocks();
+  }, [load, loadFavorites, loadDeliveryUsers, loadDeliveryStocks]);
 
   useEffect(() => {
     loadMetrics();
@@ -1422,6 +1694,10 @@ export default function ProductsView({
       logo: profile?.logo || "",
     };
   }, [profileMap]);
+
+  const getDeliveryStockForProduct = useCallback((productId: string) => {
+    return deliveryStocks.find(ds => ds.delivery_email === myEmail && ds.product_id === productId)?.quantity || 0;
+  }, [deliveryStocks, myEmail]);
 
   const getProductAdSpend = useCallback(
     (productId: string) =>
@@ -1509,8 +1785,14 @@ export default function ProductsView({
         const netB = mb.gross_profit_gs - getProductAdSpend(b.id);
         return netB - netA;
       }
-      if (sortMode === "stock_bajo")
+      if (sortMode === "stock_bajo") {
+        if (isDelivery) {
+          const stockA = getDeliveryStockForProduct(a.id);
+          const stockB = getDeliveryStockForProduct(b.id);
+          return stockA - stockB;
+        }
         return Number(a.stock || 0) - Number(b.stock || 0);
+      }
 
       return String(b.created_at || "").localeCompare(
         String(a.created_at || ""),
@@ -1530,6 +1812,8 @@ export default function ProductsView({
     sortMode,
     metricsByProduct,
     getProductAdSpend,
+    isDelivery,
+    getDeliveryStockForProduct,
   ]);
 
   const totals = useMemo(() => {
@@ -2230,7 +2514,7 @@ export default function ProductsView({
       )}
 
       {/* ============================================================ */}
-      {/* 📦 PRODUCTOS DISPONIBLES - SECCIÓN MEJORADA */}
+      {/* 📦 PRODUCTOS DISPONIBLES */}
       {/* ============================================================ */}
       <section className="relative overflow-hidden rounded-[30px] border border-white/10 bg-gradient-to-br from-[#0a0d14] via-[#0f1320] to-[#05070b] p-5 sm:p-6 shadow-2xl space-y-6">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(59,130,246,0.12),transparent_70%)]" />
@@ -2264,7 +2548,7 @@ export default function ProductsView({
             </div>
           </div>
 
-          {/* 🔍 Barra de búsqueda mejorada */}
+          {/* 🔍 Barra de búsqueda */}
           <div className="bg-gradient-to-r from-white/[0.03] to-white/[0.01] rounded-2xl border border-white/10 p-4 shadow-lg backdrop-blur-sm mb-6">
             <div className="flex items-center gap-3">
               <div className="text-xl text-white/50">🔍</div>
@@ -2387,7 +2671,7 @@ export default function ProductsView({
                         </div>
                       </>
                     )}
-                    {group.phone && canLoadOrder && (
+                    {group.phone && canLoadOrder && !isDelivery && (
                       <a
                         href={`https://wa.me/${group.phone.replace(/[^0-9]/g, "")}`}
                         target="_blank"
@@ -2418,9 +2702,12 @@ export default function ProductsView({
                       m.sold_count > 0
                         ? Math.round((m.delivered_count / m.sold_count) * 100)
                         : 0;
-                    const stockCritical = Number(p.stock || 0) <= 3;
+                    const stockCritical = isDelivery 
+                      ? (getDeliveryStockForProduct(p.id) <= 3)
+                      : (Number(p.stock || 0) <= 3);
                     const topProduct =
                       m.delivered_count >= 10 && deliveryRate >= 70;
+                    const deliveryStockQty = getDeliveryStockForProduct(p.id);
 
                     if (viewMode === "compact") {
                       return (
@@ -2462,9 +2749,9 @@ export default function ProductsView({
                                   stockCritical ? "text-red-400" : "text-white/60"
                                 }`}
                               >
-                                Stock: {p.stock || 0}
+                                Stock: {isDelivery ? deliveryStockQty : (p.stock || 0)}
                               </span>
-                              {canSeeRealStock && (
+                              {canSeeRealStock && !isDelivery && (
                                 <span className="text-xs text-white/60">
                                   Real: {p.real_stock || 0}
                                 </span>
@@ -2498,6 +2785,14 @@ export default function ProductsView({
                                 onClick={() => deleteProduct(p.id)}
                               >
                                 🗑️
+                              </button>
+                            )}
+                            {canAssignStock && (
+                              <button
+                                className="px-2 py-1 rounded-lg bg-emerald-500/20 text-emerald-400 text-sm"
+                                onClick={() => setShowAssignStockModal(p)}
+                              >
+                                📦 Stock
                               </button>
                             )}
                             {canLoadOrder && p.sku && (
@@ -2568,7 +2863,7 @@ export default function ProductsView({
                           </button>
                         </div>
 
-                        {/* Información del producto - SIN DESCRIPCIÓN */}
+                        {/* Información del producto */}
                         <div className="p-3 space-y-2">
                           <div className="flex justify-between items-start">
                             <div className="text-[10px] text-white/40 font-mono">
@@ -2593,7 +2888,7 @@ export default function ProductsView({
                           <div className="flex justify-between items-center pt-1">
                             <div>
                               <div className="text-[10px] text-white/40">
-                                Precio proveedor
+                                Precio
                               </div>
                               <div className="font-bold text-white text-sm font-mono">
                                 {nf(Number(p.provider_price_gs || 0))} Gs
@@ -2608,12 +2903,12 @@ export default function ProductsView({
                                   stockCritical ? "text-red-400" : "text-white"
                                 }`}
                               >
-                                {p.stock || 0}
+                                {isDelivery ? deliveryStockQty : (p.stock || 0)}
                               </div>
                             </div>
                           </div>
 
-                          {p.suggested_price_gs && p.suggested_price_gs > 0 && (
+                          {p.suggested_price_gs && p.suggested_price_gs > 0 && !isDelivery && (
                             <div className="text-right">
                               <div className="text-[10px] text-white/40">Precio sugerido</div>
                               <div className="text-xs text-blue-400 font-mono">
@@ -2622,7 +2917,7 @@ export default function ProductsView({
                             </div>
                           )}
 
-                          {canSeeRealStock && (
+                          {canSeeRealStock && !isDelivery && (
                             <div className="flex justify-between text-xs">
                               <span className="text-white/40">Stock real:</span>
                               <span className="text-white font-mono">{p.real_stock || 0}</span>
@@ -2662,6 +2957,14 @@ export default function ProductsView({
                               >
                                 🗑️ Eliminar
                               </button>
+                              {canAssignStock && (
+                                <button
+                                  className="flex-1 text-xs py-1 rounded-lg bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 transition-all"
+                                  onClick={() => setShowAssignStockModal(p)}
+                                >
+                                  📦 Stock
+                                </button>
+                              )}
                             </div>
                           )}
                         </div>
@@ -2685,6 +2988,17 @@ export default function ProductsView({
         </div>
       </section>
 
+      {/* Modal de asignación de stock a delivery */}
+      {showAssignStockModal && (
+        <AssignDeliveryStockModal
+          product={showAssignStockModal}
+          deliveryStocks={deliveryStocks.filter(ds => ds.product_id === showAssignStockModal.id)}
+          deliveries={deliveryUsers}
+          onClose={() => setShowAssignStockModal(null)}
+          onSave={(assignments) => saveDeliveryStockAssignments(showAssignStockModal.id, assignments)}
+        />
+      )}
+
       {/* Modal de detalles del producto */}
       {selectedProductDetail && (
         <ProductDetailModal
@@ -2702,6 +3016,8 @@ export default function ProductsView({
           nf={nf}
           providerName={getProviderInfo(selectedProductDetail.provider_email).name}
           providerPhone={getProviderInfo(selectedProductDetail.provider_email).phone}
+          isDelivery={isDelivery}
+          deliveryStockQuantity={getDeliveryStockForProduct(selectedProductDetail.id)}
         />
       )}
 
