@@ -551,10 +551,8 @@ export default function ProductsView({
   const [selectedProvider, setSelectedProvider] = useState<string>("todos");
   const [selectedProductId, setSelectedProductId] = useState<string>("todos");
 
-  // Estado para ocultar/mostrar sección superior
   const [showTopSection, setShowTopSection] = useState(false);
 
-  // Ad spend states
   const [adSpendFromDate, setAdSpendFromDate] = useState(todayPY());
   const [adSpendToDate, setAdSpendToDate] = useState(todayPY());
   const [adAmount, setAdAmount] = useState<number>(0);
@@ -580,7 +578,6 @@ export default function ProductsView({
   const [adSpends, setAdSpends] = useState<AdSpend[]>([]);
   const [syncingStock, setSyncingStock] = useState(false);
 
-  // Permisos para ver stock real
   const canSeeRealStock = ["admin", "provider", "despachante"].includes(role);
   const canEdit = ["admin", "provider", "despachante"].includes(role);
   const canSeeRealCost = ["admin", "provider"].includes(role);
@@ -881,7 +878,6 @@ export default function ProductsView({
     selectedProductId,
   ]);
 
-  // Función para sincronizar stock desde órdenes entregadas
   const syncStockFromOrders = useCallback(async () => {
     if (!products.length) return;
 
@@ -958,7 +954,6 @@ export default function ProductsView({
     setSyncingStock(false);
   }, [products]);
 
-  // Listener para actualizar stock automáticamente cuando un pedido cambia a ENTREGADO
   useEffect(() => {
     if (!role || !myEmail) return;
 
@@ -982,21 +977,17 @@ export default function ProductsView({
 
           console.log(`📊 [STOCK] Cambio de estado: ${oldOrder?.status} → ${newOrder?.status}`);
 
-          // Solo cuando cambia de NO entregado a ENTREGADO
           if (!wasDelivered && isNowDelivered) {
             console.log("🎯 [STOCK] Pedido marcado como ENTREGADO, descontando stock...");
             
-            // Extraer items del pedido
             let itemsToUpdate: { sku: string; quantity: number }[] = [];
             
-            // Si tiene items_json con múltiples productos
             if (newOrder.items_json && Array.isArray(newOrder.items_json) && newOrder.items_json.length > 0) {
               itemsToUpdate = newOrder.items_json.map((item: any) => ({
                 sku: item.sku || item.product_sku,
                 quantity: item.qty || item.quantity || 1
               }));
             } 
-            // Fallback a SKU directo
             else if (newOrder.sku) {
               itemsToUpdate = [{
                 sku: newOrder.sku,
@@ -1014,7 +1005,6 @@ export default function ProductsView({
             for (const item of itemsToUpdate) {
               if (!item.sku) continue;
               
-              // Buscar el producto
               let product = products.find(p => p.sku === item.sku);
               
               if (product) {
@@ -1034,7 +1024,6 @@ export default function ProductsView({
                 
                 if (!error) {
                   successCount++;
-                  // Actualizar estado local
                   setProducts(prev =>
                     prev.map(p =>
                       p.id === product.id
@@ -1051,7 +1040,6 @@ export default function ProductsView({
             }
             
             if (successCount > 0) {
-              // Marcar pedido como procesado para evitar doble descuento
               await supabase
                 .from("orders")
                 .update({ provider_stock_applied: true })
@@ -1551,7 +1539,6 @@ export default function ProductsView({
     }
   };
 
-  // Colores suaves para proveedores
   const softColors = [
     "from-blue-500/5 to-blue-600/5 border-blue-200/30",
     "from-emerald-500/5 to-emerald-600/5 border-emerald-200/30",
@@ -1981,52 +1968,55 @@ export default function ProductsView({
         </>
       )}
 
-      {/* Catálogo separado */}
-      <section className="relative overflow-hidden rounded-[30px] border border-white/10 bg-[radial-gradient(circle_at_top_left,rgba(80,95,130,0.20),transparent_30%),linear-gradient(135deg,#07080c_0%,#10131b_48%,#030407_100%)] p-4 sm:p-5 shadow-[0_18px_70px_rgba(0,0,0,0.55)] backdrop-blur-xl space-y-5">
-        <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.055),transparent_28%)]" />
-        <div className="pointer-events-none absolute -top-28 -right-28 h-72 w-72 rounded-full bg-blue-500/10 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-28 -left-28 h-72 w-72 rounded-full bg-violet-500/10 blur-3xl" />
-        <div className="relative space-y-5">
-          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-3 border-b border-white/10 pb-4">
+      {/* ============================================================ */}
+      {/* 📦 PRODUCTOS DISPONIBLES - SECCIÓN MEJORADA */}
+      {/* ============================================================ */}
+      <section className="relative overflow-hidden rounded-[30px] border border-white/10 bg-gradient-to-br from-[#0a0d14] via-[#0f1320] to-[#05070b] p-5 sm:p-6 shadow-2xl space-y-6">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,rgba(59,130,246,0.12),transparent_70%)]" />
+        <div className="pointer-events-none absolute -top-40 -right-40 h-96 w-96 rounded-full bg-indigo-500/10 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-40 -left-40 h-96 w-96 rounded-full bg-purple-500/10 blur-3xl" />
+
+        <div className="relative">
+          {/* Header del catálogo */}
+          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 border-b border-white/10 pb-5 mb-2">
             <div>
-              <div className="text-[10px] uppercase tracking-[0.24em] text-white/70 font-black">
+              <div className="text-[10px] uppercase tracking-[0.24em] text-primary/80 font-black">
                 Catálogo
               </div>
-              <h3 className="text-xl sm:text-2xl font-black tracking-tight mt-1 text-white drop-shadow-sm">
+              <h3 className="text-2xl sm:text-3xl font-black tracking-tight mt-1 text-white">
                 📦 Productos disponibles
               </h3>
-              <p className="text-xs sm:text-sm text-white/65 mt-1">
-                Listado separado de gastos, organizado por proveedor, stock y
-                métricas.
+              <p className="text-xs sm:text-sm text-white/60 mt-1">
+                Listado separado de gastos, organizado por proveedor, stock y métricas
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <span className="rounded-full border border-white/10 bg-[#171923]/80 px-3 py-1.5 text-xs font-black text-white shadow-sm">
+              <span className="rounded-full border border-white/15 bg-white/5 backdrop-blur-sm px-3 py-1.5 text-xs font-black text-white shadow-sm">
                 {filtered.length} productos
               </span>
-              <span className="rounded-full border border-white/10 bg-[#171923]/80 px-3 py-1.5 text-xs font-black text-white shadow-sm">
+              <span className="rounded-full border border-white/15 bg-white/5 backdrop-blur-sm px-3 py-1.5 text-xs font-black text-white shadow-sm">
                 📦 {totals.sold} vendidos
               </span>
-              <span className="rounded-full border border-white/10 bg-[#171923]/80 px-3 py-1.5 text-xs font-black text-white shadow-sm">
+              <span className="rounded-full border border-white/15 bg-white/5 backdrop-blur-sm px-3 py-1.5 text-xs font-black text-white shadow-sm">
                 🚚 {totals.delivered} entregados
               </span>
             </div>
           </div>
 
-          {/* 🔍 BARRA DE BÚSQUEDA */}
-          <div className="bg-gradient-to-r from-white/5 to-white/2 rounded-2xl border border-white/10 p-4 shadow-lg backdrop-blur-sm">
+          {/* 🔍 Barra de búsqueda mejorada */}
+          <div className="bg-gradient-to-r from-white/[0.03] to-white/[0.01] rounded-2xl border border-white/10 p-4 shadow-lg backdrop-blur-sm mb-6">
             <div className="flex items-center gap-3">
-              <div className="text-2xl">🔍</div>
+              <div className="text-xl text-white/50">🔍</div>
               <input
-                className="w-full bg-white/10 border-0 rounded-xl px-4 py-3 text-white placeholder:text-white/50 text-base font-medium focus:ring-2 focus:ring-primary/50 focus:outline-none transition-all"
-                placeholder="Buscar producto por nombre, SKU o proveedor..."
+                className="flex-1 bg-transparent border-0 px-0 py-2 text-white placeholder:text-white/40 text-base font-medium focus:ring-0 focus:outline-none"
+                placeholder="Buscar por nombre, SKU o proveedor..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 autoComplete="off"
               />
               {search && (
                 <button
-                  className="text-white/70 hover:text-white text-xl px-3 py-2 transition-all"
+                  className="text-white/50 hover:text-white text-lg px-2 transition-all"
                   onClick={() => setSearch("")}
                 >
                   ✕
@@ -2034,172 +2024,127 @@ export default function ProductsView({
               )}
             </div>
             {search && (
-              <div className="mt-2 text-xs text-white/50 px-2">
+              <div className="mt-2 text-xs text-white/40 px-1">
                 Mostrando {filtered.length} de {products.length} productos
               </div>
             )}
           </div>
 
           {/* Tabs y acciones */}
-          <div className="flex flex-wrap gap-3 items-center justify-between">
+          <div className="flex flex-wrap gap-3 items-center justify-between mb-6">
             <div className="flex flex-wrap gap-2">
               {(["general", "favoritos", "privados"] as Tab[]).map((t) => (
                 <button
                   key={t}
-                  className={`rounded-xl px-3.5 py-2 text-sm font-black transition-all ${tab === t ? "bg-primary text-primary-foreground shadow-lg shadow-primary/20" : "bg-[#11131b]/90 text-white/90 border border-white/10 hover:bg-white/10 hover:text-white"}`}
+                  className={`rounded-xl px-4 py-2 text-sm font-bold transition-all ${
+                    tab === t
+                      ? "bg-primary text-primary-foreground shadow-lg shadow-primary/25"
+                      : "bg-white/5 text-white/80 border border-white/10 hover:bg-white/10 hover:text-white"
+                  }`}
                   onClick={() => setTab(t)}
                 >
-                  {t === "general" && "📦 Todos los productos"}
-                  {t === "favoritos" && "⭐ Mis favoritos"}
-                  {t === "privados" && "🔒 Productos privados"}
+                  {t === "general" && "📦 Todos"}
+                  {t === "favoritos" && "⭐ Favoritos"}
+                  {t === "privados" && "🔒 Privados"}
                 </button>
               ))}
             </div>
 
-            <div className="flex gap-2 items-center">
-              {canEdit && (
-                <button
-                  className="rounded-xl bg-primary px-3.5 py-2 text-sm font-black text-primary-foreground shadow-lg shadow-primary/20 transition-all hover:scale-[1.01]"
-                  onClick={openAdd}
-                >
-                  + Agregar producto
-                </button>
-              )}
-            </div>
+            {canEdit && (
+              <button
+                className="rounded-xl bg-primary px-4 py-2 text-sm font-bold text-primary-foreground shadow-lg shadow-primary/25 transition-all hover:scale-[1.02]"
+                onClick={openAdd}
+              >
+                + Agregar producto
+              </button>
+            )}
           </div>
 
-          {/* Lista de productos */}
+          {/* LISTA DE PRODUCTOS */}
           {loading && (
-            <div className="text-center py-12">
+            <div className="text-center py-16">
               <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-              <p className="text-muted-foreground text-sm mt-3">
-                Cargando productos...
-              </p>
+              <p className="text-white/50 text-sm mt-3">Cargando productos...</p>
             </div>
           )}
 
           {grouped.map((group, groupIndex) => {
             const colorIndex = groupIndex % softColors.length;
-            const headerColor = softColors[colorIndex];
+            const headerGradient = softColors[colorIndex];
 
             return (
-              <div key={group.email || group.name} className="space-y-4">
-                {/* Header del proveedor */}
-                <div
-                  className={`flex flex-col lg:flex-row lg:items-center gap-3 p-3.5 rounded-[24px] border border-white/10 bg-white/[0.06] backdrop-blur-xl transition-all hover:bg-white/[0.085] hover:shadow-[0_10px_34px_rgba(0,0,0,0.24)]`}
-                >
-                  <div className="flex items-center gap-4 flex-1 min-w-0">
-                    {group.logo && group.logo.trim() !== "" ? (
-                      <div className="w-12 h-12 rounded-full bg-white/10 backdrop-blur-sm p-0.5 border border-white/15 shadow-md flex-shrink-0">
+              <div key={group.email || group.name} className="mb-8 last:mb-0">
+                {/* Header del proveedor - estilo más limpio */}
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 p-4 rounded-2xl bg-white/[0.04] border border-white/10 mb-4 backdrop-blur-sm">
+                  <div className="flex items-center gap-4">
+                    {group.logo ? (
+                      <div className="w-12 h-12 rounded-full bg-white/10 p-0.5 border border-white/15">
                         <img
                           src={group.logo}
                           alt={group.name}
                           className="w-full h-full rounded-full object-cover"
                           onError={(e) => {
                             e.currentTarget.style.display = "none";
-                            const parent = e.currentTarget.parentElement;
-                            if (parent) {
-                              const initialsDiv = document.createElement("div");
-                              initialsDiv.className =
-                                "w-12 h-12 rounded-full bg-gradient-to-br from-primary/35 to-primary/20 flex items-center justify-center font-bold text-sm text-white";
-                              initialsDiv.textContent = getInitials(group.name);
-                              parent.appendChild(initialsDiv);
-                            }
                           }}
                         />
                       </div>
                     ) : (
-                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary/35 to-primary/20 flex items-center justify-center font-bold text-sm text-white shadow-md flex-shrink-0">
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-br from-primary/30 to-primary/10 flex items-center justify-center font-bold text-white">
                         {getInitials(group.name)}
                       </div>
                     )}
-
-                    <div className="flex-1 min-w-0">
-                      <div className="text-[10px] uppercase tracking-wider text-white/45 font-black flex items-center gap-2">
-                        <span>Proveedor</span>
-                        <span className="w-1.5 h-1.5 rounded-full bg-current opacity-50"></span>
-                      </div>
-                      <div className="font-black text-base truncate text-white">
-                        {group.name}
-                      </div>
-                      <div className="text-[11px] text-white/55 truncate flex items-center gap-2 mt-0.5">
-                        <span>📧 {group.email}</span>
-                        {group.phone && <span>📱 {group.phone}</span>}
-                      </div>
+                    <div>
+                      <div className="text-[10px] uppercase text-white/40 font-bold">Proveedor</div>
+                      <div className="font-bold text-white">{group.name}</div>
+                      <div className="text-xs text-white/40">{group.email}</div>
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2 flex-1">
-                    <div className="text-center bg-[#171923]/35 border border-white/10 rounded-xl px-2 py-1.5">
-                      <div className="font-black text-sm text-white">
-                        {group.items.length}
-                      </div>
-                      <div className="text-[10px] text-white/55">Productos</div>
+                  <div className="flex flex-wrap gap-3">
+                    <div className="text-center px-3 py-1 rounded-xl bg-white/5 border border-white/10">
+                      <div className="font-bold text-white">{group.items.length}</div>
+                      <div className="text-[10px] text-white/40">Productos</div>
                     </div>
-                    <div className="text-center bg-[#171923]/35 border border-white/10 rounded-xl px-2 py-1.5">
-                      <div className="font-black text-sm text-white">
-                        {group.totals.sold}
-                      </div>
-                      <div className="text-[10px] text-white/55">Vendidos</div>
+                    <div className="text-center px-3 py-1 rounded-xl bg-white/5 border border-white/10">
+                      <div className="font-bold text-white">{group.totals.sold}</div>
+                      <div className="text-[10px] text-white/40">Vendidos</div>
                     </div>
-                    <div className="text-center bg-[#171923]/35 border border-white/10 rounded-xl px-2 py-1.5">
-                      <div className="font-black text-sm text-white">
-                        {group.totals.delivered}
-                      </div>
-                      <div className="text-[10px] text-white/55">
-                        Entregados
-                      </div>
-                    </div>
-                    <div className="text-center bg-[#171923]/35 border border-white/10 rounded-xl px-2 py-1.5">
-                      <div className="font-black text-sm text-white">
-                        {group.totals.deliveryRate}%
-                      </div>
-                      <div className="text-[10px] text-white/55">Entrega</div>
+                    <div className="text-center px-3 py-1 rounded-xl bg-white/5 border border-white/10">
+                      <div className="font-bold text-white">{group.totals.delivered}</div>
+                      <div className="text-[10px] text-white/40">Entregados</div>
                     </div>
                     {canSeeMoney && (
                       <>
-                        <div className="text-center bg-[#171923]/35 border border-white/10 rounded-xl px-2 py-1.5">
-                          <div className="font-black text-sm text-white">
-                            {nf(group.totals.realRevenue)}
-                          </div>
-                          <div className="text-[10px] text-white/55">
-                            Facturación
-                          </div>
+                        <div className="text-center px-3 py-1 rounded-xl bg-white/5 border border-white/10">
+                          <div className="font-bold text-white">{nf(group.totals.realRevenue)}</div>
+                          <div className="text-[10px] text-white/40">Facturación</div>
                         </div>
-                        <div className="text-center bg-[#171923]/35 border border-white/10 rounded-xl px-2 py-1.5">
-                          <div
-                            className={`font-black text-sm ${group.totals.netProfit >= 0 ? "text-emerald-400" : "text-red-400"}`}
-                          >
+                        <div className="text-center px-3 py-1 rounded-xl bg-white/5 border border-white/10">
+                          <div className={`font-bold ${group.totals.netProfit >= 0 ? "text-emerald-400" : "text-red-400"}`}>
                             {nf(group.totals.netProfit)}
                           </div>
-                          <div className="text-[10px] text-white/55">
-                            Ganancia neta
-                          </div>
+                          <div className="text-[10px] text-white/40">Ganancia neta</div>
                         </div>
                       </>
                     )}
+                    {group.phone && canLoadOrder && (
+                      <a
+                        href={`https://wa.me/${group.phone.replace(/[^0-9]/g, "")}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1 rounded-xl border border-white/15 px-3 py-1 text-sm font-medium text-[#25D366] hover:bg-white/5 transition-all"
+                      >
+                        💬 WhatsApp
+                      </a>
+                    )}
                   </div>
-
-                  {group.phone && canLoadOrder && (
-                    <a
-                      href={`https://wa.me/${group.phone.replace(/[^0-9]/g, "")}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="flex items-center justify-center gap-2 nav-btn !px-4 !py-2.5 text-sm font-bold text-[#25D366] hover:!bg-[#25D366]/10 transition-all"
-                    >
-                      <span>💬</span> WhatsApp
-                    </a>
-                  )}
                 </div>
 
-                <div
-                  className={`h-px bg-gradient-to-r ${headerColor.split(" ")[0]} from-${headerColor.split(" ")[0].split("/")[0]}/30 to-transparent ml-4`}
-                ></div>
-
+                {/* Grid de productos - más limpio y profesional */}
                 <div
                   className={
                     viewMode === "grid"
-                      ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-4"
+                      ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5"
                       : "space-y-3"
                   }
                 >
@@ -2214,16 +2159,11 @@ export default function ProductsView({
                     const m = metricsByProduct[p.id] || emptyMetrics;
                     const productAdSpend = getProductAdSpend(p.id);
                     const netProfit = m.gross_profit_gs - productAdSpend;
-                    const cancelRate =
-                      m.sold_count > 0
-                        ? Math.round((m.cancelled_count / m.sold_count) * 100)
-                        : 0;
                     const deliveryRate =
                       m.sold_count > 0
                         ? Math.round((m.delivered_count / m.sold_count) * 100)
                         : 0;
                     const stockCritical = Number(p.stock || 0) <= 3;
-                    const realStockCritical = Number(p.real_stock || 0) <= 3;
                     const topProduct =
                       m.delivered_count >= 10 && deliveryRate >= 70;
 
@@ -2231,10 +2171,10 @@ export default function ProductsView({
                       return (
                         <div
                           key={p.id}
-                          className="group rounded-[20px] border border-white/10 bg-[#0b0e14]/90 backdrop-blur-xl p-2.5 flex flex-col md:flex-row gap-3 md:items-center text-white transition-all duration-300 hover:bg-[#111722]/95 hover:border-white/20 hover:shadow-[0_6px_24px_rgba(0,0,0,0.34)]"
+                          className="group rounded-xl border border-white/10 bg-white/[0.03] p-3 flex flex-col sm:flex-row gap-3 sm:items-center hover:bg-white/[0.06] transition-all"
                         >
                           <div
-                            className="w-16 h-16 rounded-2xl bg-[radial-gradient(circle_at_top,#303542_0%,#191c25_100%)] border border-white/10 overflow-hidden flex items-center justify-center shrink-0 cursor-pointer relative group/img p-1"
+                            className="w-16 h-16 rounded-xl bg-[#1a1f2e] border border-white/10 overflow-hidden flex items-center justify-center cursor-pointer"
                             onClick={() =>
                               mainImg &&
                               setViewingImage({
@@ -2245,135 +2185,47 @@ export default function ProductsView({
                             }
                           >
                             {mainImg ? (
-                              <>
-                                <img
-                                  src={mainImg}
-                                  alt={p.title}
-                                  className="w-full h-full object-contain object-center transition-transform group-hover/img:scale-110"
-                                />
-                                {images.length > 1 && (
-                                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                    <span className="text-white text-[10px] font-bold bg-black/60 px-1.5 py-0.5 rounded-full">
-                                      +{images.length}
-                                    </span>
-                                  </div>
-                                )}
-                              </>
+                              <img
+                                src={mainImg}
+                                alt={p.title}
+                                className="w-full h-full object-contain"
+                              />
                             ) : (
-                              <span className="text-[10px] text-muted-foreground text-center px-1">
-                                Sin img
-                              </span>
+                              <span className="text-xs text-white/30">📷</span>
                             )}
                           </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="text-[10px] uppercase text-muted-foreground font-bold">
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[10px] text-white/40 font-mono">
                               SKU: {p.sku || "—"}
                             </div>
-                            <div className="font-extrabold text-sm truncate">
+                            <div className="font-bold text-white text-sm truncate">
                               {p.title}
                             </div>
                             <div className="flex gap-2 mt-1">
-                              <span className="text-[10px] bg-background/50 px-1.5 py-0.5 rounded">
-                                Stock:{" "}
-                                <b
-                                  className={
-                                    stockCritical ? "text-red-500" : ""
-                                  }
-                                >
-                                  {p.stock || 0}
-                                </b>
+                              <span
+                                className={`text-xs ${
+                                  stockCritical ? "text-red-400" : "text-white/60"
+                                }`}
+                              >
+                                Stock: {p.stock || 0}
                               </span>
                               {canSeeRealStock && (
-                                <span className="text-[10px] bg-background/50 px-1.5 py-0.5 rounded">
-                                  Real:{" "}
-                                  <b
-                                    className={
-                                      realStockCritical ? "text-red-500" : ""
-                                    }
-                                  >
-                                    {p.real_stock || 0}
-                                  </b>
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex flex-wrap gap-1 mt-1">
-                              {stockCritical && (
-                                <span className="chip text-[10px] bg-red-500/15">
-                                  ⚠️ Stock bajo
-                                </span>
-                              )}
-                              {topProduct && (
-                                <span className="chip text-[10px] bg-emerald-500/15">
-                                  🔥 Top ventas
-                                </span>
-                              )}
-                              {isPrivateProduct(p) && (
-                                <span className="chip text-[10px]">
-                                  🔒 Privado
+                                <span className="text-xs text-white/60">
+                                  Real: {p.real_stock || 0}
                                 </span>
                               )}
                             </div>
                           </div>
-
-                          <div className="grid grid-cols-3 md:grid-cols-6 gap-2 text-center">
-                            <div>
-                              <div className="font-black text-sm text-white">
-                                {m.sold_count}
-                              </div>
-                              <div className="text-[10px] text-muted-foreground">
-                                Vend.
-                              </div>
-                            </div>
-                            <div>
-                              <div className="font-black text-sm text-white">
-                                {m.delivered_count}
-                              </div>
-                              <div className="text-[10px] text-muted-foreground">
-                                Ent.
-                              </div>
-                            </div>
-                            <div>
-                              <div className="font-black text-sm">
-                                {deliveryRate}%
-                              </div>
-                              <div className="text-[10px] text-muted-foreground">
-                                Efic.
-                              </div>
-                            </div>
-                            {canSeeMoney && (
-                              <>
-                                <div>
-                                  <div className="font-black text-sm">
-                                    {nf(productAdSpend)}
-                                  </div>
-                                  <div className="text-[10px] text-muted-foreground">
-                                    Ads
-                                  </div>
-                                </div>
-                                <div>
-                                  <div
-                                    className={`font-black text-sm ${netProfit >= 0 ? "text-emerald-500" : "text-red-500"}`}
-                                  >
-                                    {nf(netProfit)}
-                                  </div>
-                                  <div className="text-[10px] text-muted-foreground">
-                                    Neto
-                                  </div>
-                                </div>
-                              </>
-                            )}
-                          </div>
-
-                          <div className="flex gap-1 justify-end">
+                          <div className="flex gap-2">
                             <button
-                              className="nav-btn !px-2 !py-1 text-sm"
+                              className="px-2 py-1 rounded-lg bg-white/5 text-sm"
                               onClick={() => toggleFavorite(p.id)}
                             >
                               {isFav ? "★" : "☆"}
                             </button>
                             {canEdit && (
                               <button
-                                className="nav-btn !px-2 !py-1 text-sm"
+                                className="px-2 py-1 rounded-lg bg-white/5 text-sm"
                                 onClick={() => openEdit(p)}
                               >
                                 ✏️
@@ -2381,10 +2233,10 @@ export default function ProductsView({
                             )}
                             {canLoadOrder && p.sku && (
                               <button
-                                className="nav-btn active !px-2 !py-1 text-sm"
+                                className="px-2 py-1 rounded-lg bg-primary/80 text-xs font-bold text-white"
                                 onClick={() => onLoadProduct?.(p.sku!)}
                               >
-                                ➕
+                                Pedido
                               </button>
                             )}
                           </div>
@@ -2392,20 +2244,22 @@ export default function ProductsView({
                       );
                     }
 
+                    // Vista Grid - más limpia y profesional
                     return (
                       <div
                         key={p.id}
-                        className="group relative flex flex-col overflow-hidden rounded-[22px] border border-white/10 bg-gradient-to-b from-[#171b24]/95 via-[#10141c]/95 to-[#080a0f]/98 backdrop-blur-xl shadow-[0_8px_28px_rgba(0,0,0,0.38)] transition-all duration-300 hover:-translate-y-0.5 hover:border-white/20 hover:from-[#1d2330]/95 hover:to-[#0a0d13]/98 hover:shadow-[0_14px_42px_rgba(0,0,0,0.48)]"
+                        className="group relative rounded-2xl border border-white/10 bg-gradient-to-b from-[#11161f] to-[#0a0d14] overflow-hidden transition-all duration-200 hover:border-white/20 hover:shadow-xl"
                       >
+                        {/* Imagen */}
                         <div
-                          className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${headerColor.split(" ")[0]} ${headerColor.split(" ")[1]} z-10`}
-                        />
-
-                        <div
-                          className="relative m-2 mb-0 aspect-[1/0.78] overflow-hidden rounded-[18px] border border-white/10 bg-[radial-gradient(circle_at_top,#343a48_0%,#171b24_100%)] cursor-pointer shadow-inner"
+                          className="relative aspect-square overflow-hidden cursor-pointer bg-[#1a1f2e]"
                           onClick={() =>
                             mainImg &&
-                            setViewingImage({ url: mainImg, title: p.title, index: 0 })
+                            setViewingImage({
+                              url: mainImg,
+                              title: p.title,
+                              index: 0,
+                            })
                           }
                         >
                           <ProductImageGallery
@@ -2420,26 +2274,22 @@ export default function ProductsView({
                             }
                           />
 
-                          <div className="absolute top-2 left-2 flex flex-col gap-1 z-10">
+                          {/* Badges flotantes */}
+                          <div className="absolute top-2 left-2 flex flex-col gap-1">
                             {stockCritical && (
-                              <span className="rounded-full border border-red-400/40 bg-red-500/20 px-2 py-0.5 text-[10px] font-black text-red-100 backdrop-blur-md">
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-500/80 text-white backdrop-blur-sm">
                                 ⚠️ Stock bajo
                               </span>
                             )}
                             {topProduct && (
-                              <span className="rounded-full border border-emerald-400/40 bg-emerald-500/20 px-2 py-0.5 text-[10px] font-black text-emerald-100 backdrop-blur-md">
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/80 text-white backdrop-blur-sm">
                                 🔥 Top ventas
-                              </span>
-                            )}
-                            {isPrivateProduct(p) && (
-                              <span className="rounded-full border border-white/15 bg-white/10 px-2 py-0.5 text-[10px] font-black text-white/85 backdrop-blur-md">
-                                🔒 Privado
                               </span>
                             )}
                           </div>
 
                           <button
-                            className="absolute top-2 right-2 z-20 w-8 h-8 rounded-full bg-[#12151d]/80 backdrop-blur-md flex items-center justify-center text-lg text-white border border-white/15 hover:scale-110 hover:bg-[#1b2030] transition-all"
+                            className="absolute top-2 right-2 w-7 h-7 rounded-full bg-black/50 backdrop-blur-sm flex items-center justify-center text-white text-sm hover:bg-black/70 transition-all"
                             onClick={(e) => {
                               e.stopPropagation();
                               toggleFavorite(p.id);
@@ -2449,194 +2299,131 @@ export default function ProductsView({
                           </button>
                         </div>
 
-                        <div className="p-3 flex flex-col gap-2.5 flex-grow text-white">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="min-w-0 text-[9px] uppercase tracking-wider text-white/55 font-black truncate">
+                        {/* Información del producto */}
+                        <div className="p-3 space-y-2">
+                          <div className="flex justify-between items-start">
+                            <div className="text-[10px] text-white/40 font-mono">
                               SKU: {p.sku || "—"}
                             </div>
-                            <span className="shrink-0 rounded-full border border-emerald-400/20 bg-emerald-500/12 px-2 py-0.5 text-[9px] font-black text-emerald-200">
+                            <div
+                              className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                deliveryRate >= 70
+                                  ? "bg-emerald-500/20 text-emerald-300"
+                                  : "bg-yellow-500/20 text-yellow-300"
+                              }`}
+                            >
                               ✅ {deliveryRate}% entrega
-                            </span>
+                            </div>
                           </div>
 
-                          <div className="font-black text-[15px] leading-tight line-clamp-2 text-white drop-shadow-sm">
+                          <div className="font-bold text-white text-sm line-clamp-2">
                             {p.title}
                           </div>
 
-                          {/* Stock y precio siempre visibles */}
-                          <div className="grid grid-cols-2 gap-2">
-                            <div className="rounded-xl bg-white/[0.07] border border-white/10 p-2">
-                              <div className="text-[9px] uppercase tracking-wider text-white/45 font-bold">
+                          {/* Precio y stock */}
+                          <div className="flex justify-between items-center pt-1">
+                            <div>
+                              <div className="text-[10px] text-white/40">
+                                Precio
+                              </div>
+                              <div className="font-bold text-white text-sm font-mono">
+                                {nf(Number(p.provider_price_gs || 0))} Gs
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <div className="text-[10px] text-white/40">
                                 Stock
                               </div>
                               <div
-                                className={`font-black text-lg leading-none mt-1 ${stockCritical ? "text-red-300" : "text-white"}`}
+                                className={`font-bold text-sm ${
+                                  stockCritical ? "text-red-400" : "text-white"
+                                }`}
                               >
                                 {p.stock || 0}
                               </div>
                             </div>
-                            {canSeeRealStock ? (
-                              <div className="rounded-xl bg-white/[0.07] border border-white/10 p-2">
-                                <div className="text-[9px] uppercase tracking-wider text-white/45 font-bold">
-                                  Stock real
-                                </div>
-                                <div
-                                  className={`font-black text-lg leading-none mt-1 ${realStockCritical ? "text-red-300" : "text-white"}`}
-                                >
-                                  {p.real_stock || 0}
-                                </div>
-                              </div>
-                            ) : (
-                              <div className="rounded-xl bg-white/[0.07] border border-white/10 p-2">
-                                <div className="text-[9px] uppercase tracking-wider text-white/45 font-bold">
-                                  Precio
-                                </div>
-                                <div className="font-black text-sm leading-none mt-1 text-white font-mono">
-                                  {nf(Number(p.provider_price_gs || 0))} Gs
-                                </div>
-                              </div>
+                          </div>
+
+                          {/* Descripción corta */}
+                          {p.description && (
+                            <div className="text-xs text-white/50 line-clamp-2 mt-1">
+                              {p.description}
+                            </div>
+                          )}
+
+                          {/* Botones de acción */}
+                          <div className="flex gap-2 pt-2">
+                            <button
+                              className="flex-1 text-xs font-medium py-1.5 rounded-lg bg-white/5 border border-white/10 text-white/80 hover:bg-white/10 transition-all"
+                              onClick={() =>
+                                setExpandedId(isExpanded ? null : p.id)
+                              }
+                            >
+                              {isExpanded ? "📉 Ocultar" : "📊 Historial"}
+                            </button>
+                            {canLoadOrder && p.sku && (
+                              <button
+                                className="flex-1 text-xs font-bold py-1.5 rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-all"
+                                onClick={() => onLoadProduct?.(p.sku!)}
+                              >
+                                Pedido
+                              </button>
                             )}
                           </div>
 
-                          {canSeeRealStock && (
-                            <div className="rounded-xl bg-white/[0.07] border border-white/10 p-2">
-                              <div className="text-[9px] uppercase tracking-wider text-white/45 font-bold">
-                                Precio
-                              </div>
-                              <div className="font-black text-sm text-white font-mono">
-                                {nf(Number(p.provider_price_gs || 0))} Gs
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Características visibles con scroll interno */}
-                          <div className="relative rounded-xl border border-white/10 bg-[#070a10]/70 p-2.5 shadow-inner">
-                            <div className="flex items-center justify-between gap-2 mb-1.5">
-                              <div className="text-[9px] uppercase tracking-wider text-white/50 font-black">
-                                Características
-                              </div>
-                              <span className="text-[9px] text-white/35 font-bold">scroll</span>
-                            </div>
-                            <div
-                              className="max-h-[78px] min-h-[42px] overflow-y-auto pr-2 text-[11px] leading-relaxed text-white/78 whitespace-pre-line [scrollbar-width:thin] [scrollbar-color:rgba(255,255,255,0.28)_transparent] [&::-webkit-scrollbar]:w-1.5 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-white/20 hover:[&::-webkit-scrollbar-thumb]:bg-white/32"
-                            >
-                              {p.description ? p.description : "Sin características cargadas."}
-                            </div>
-                            <div className="pointer-events-none absolute bottom-0 left-0 right-0 h-5 rounded-b-xl bg-gradient-to-t from-[#070a10] to-transparent" />
-                          </div>
-
-                          {/* Historial plegable */}
+                          {/* Historial expandido */}
                           {isExpanded && (
-                            <div className="rounded-xl border border-white/10 bg-white/[0.055] p-2.5 space-y-2 animate-in fade-in duration-200">
-                              <div className="grid grid-cols-3 gap-2">
-                                <div className="rounded-lg bg-[#0f131b]/45 border border-white/10 p-1.5 text-center">
-                                  <div className="font-black text-sm text-white">{m.sold_count}</div>
-                                  <div className="text-[9px] text-white/55">Vendidos</div>
-                                </div>
-                                <div className="rounded-lg bg-[#0f131b]/45 border border-white/10 p-1.5 text-center">
-                                  <div className="font-black text-sm text-white">{m.delivered_count}</div>
-                                  <div className="text-[9px] text-white/55">Entregados</div>
-                                </div>
-                                <div className="rounded-lg bg-[#0f131b]/45 border border-white/10 p-1.5 text-center">
-                                  <div className="font-black text-sm text-white">{m.cancelled_count}</div>
-                                  <div className="text-[9px] text-white/55">Cancelados</div>
-                                </div>
+                            <div className="mt-2 pt-2 border-t border-white/10 space-y-1.5 text-xs">
+                              <div className="flex justify-between">
+                                <span className="text-white/50">Vendidos:</span>
+                                <span className="font-bold text-white">
+                                  {m.sold_count}
+                                </span>
                               </div>
-
+                              <div className="flex justify-between">
+                                <span className="text-white/50">
+                                  Entregados:
+                                </span>
+                                <span className="font-bold text-white">
+                                  {m.delivered_count}
+                                </span>
+                              </div>
                               {canSeeMoney && (
-                                <div className="rounded-lg border border-white/10 bg-[#0f131b]/45 p-2 space-y-1">
-                                  <div className="flex justify-between text-xs">
-                                    <span className="text-white/58">Facturación real</span>
-                                    <b className="font-mono text-white">{nf(m.real_revenue_gs)} Gs</b>
+                                <>
+                                  <div className="flex justify-between">
+                                    <span className="text-white/50">
+                                      Facturación:
+                                    </span>
+                                    <span className="font-bold text-white">
+                                      {nf(m.real_revenue_gs)} Gs
+                                    </span>
                                   </div>
-                                  <div className="flex justify-between text-xs">
-                                    <span className="text-white/58">Gasto publicitario</span>
-                                    <b className="font-mono text-white">{nf(productAdSpend)} Gs</b>
+                                  <div className="flex justify-between">
+                                    <span className="text-white/50">
+                                      Publicidad:
+                                    </span>
+                                    <span className="font-bold text-white">
+                                      {nf(productAdSpend)} Gs
+                                    </span>
                                   </div>
-                                  <div className="flex justify-between text-sm pt-1 border-t border-white/10">
-                                    <span className="font-bold text-white">Ganancia neta</span>
-                                    <b className={`font-mono ${netProfit >= 0 ? "text-emerald-300" : "text-red-300"}`}>
+                                  <div className="flex justify-between pt-1 border-t border-white/10">
+                                    <span className="text-white/70">
+                                      Ganancia neta:
+                                    </span>
+                                    <span
+                                      className={`font-bold ${
+                                        netProfit >= 0
+                                          ? "text-emerald-400"
+                                          : "text-red-400"
+                                      }`}
+                                    >
                                       {nf(netProfit)} Gs
-                                    </b>
+                                    </span>
                                   </div>
-                                </div>
+                                </>
                               )}
-
-                              <div className="grid grid-cols-2 gap-1 text-[10px] text-white/62">
-                                <div>Cancelación: <b>{cancelRate}%</b></div>
-                                <div>Facturación bruta: <b>{nf(m.gross_revenue_gs)} Gs</b></div>
-                                {canSeeRealCost && <div>Ganancia/unidad: <b>{nf(gainUnit)} Gs</b></div>}
-                                <div>Estado: <b>{stockCritical ? "Stock bajo" : "Disponible"}</b></div>
-                              </div>
                             </div>
                           )}
-                        </div>
-
-                        <div className="flex flex-col gap-2 px-3 py-2.5 border-t border-white/10 bg-[#11151f]/80 text-white">
-                          <button
-                            className="w-full rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs font-black text-white/90 transition-all hover:bg-white/[0.11] hover:border-white/20"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setExpandedId(isExpanded ? null : p.id);
-                            }}
-                          >
-                            {isExpanded ? "📉 Ocultar historial" : "📊 Ver historial del producto"}
-                          </button>
-
-                          <div className="flex justify-between items-center gap-2">
-                            <div className="min-w-0">
-                              <span className="font-black text-sm font-mono text-white">
-                                {nf(Number(p.provider_price_gs || 0))} Gs
-                              </span>
-                              {canSeeRealCost && (
-                                <div className="text-[10px] text-white/52 truncate">
-                                  Ganancia: {nf(gainUnit)} Gs/unidad
-                                </div>
-                              )}
-                            </div>
-
-                            <div className="flex gap-1.5 shrink-0">
-                              {mainImg && (
-                                <button
-                                  className="rounded-lg border border-white/10 bg-white/[0.07] px-2 py-1.5 text-xs font-bold text-white/85 transition-all hover:bg-white/[0.12]"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setViewingImage({
-                                      url: mainImg,
-                                      title: p.title,
-                                      index: 0,
-                                    });
-                                  }}
-                                >
-                                  👁️ Ver
-                                </button>
-                              )}
-
-                              {canEdit && (
-                                <button
-                                  className="rounded-lg border border-white/10 bg-white/[0.07] px-2 py-1.5 text-xs font-bold text-white/85 transition-all hover:bg-white/[0.12]"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    openEdit(p);
-                                  }}
-                                >
-                                  ✏️ Editar
-                                </button>
-                              )}
-
-                              {canLoadOrder && p.sku && (
-                                <button
-                                  className="rounded-lg bg-primary px-2 py-1.5 text-xs font-black text-primary-foreground transition-all hover:scale-[1.01]"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    onLoadProduct?.(p.sku!);
-                                  }}
-                                >
-                                  ➕ Pedido
-                                </button>
-                              )}
-                            </div>
-                          </div>
                         </div>
                       </div>
                     );
@@ -2648,9 +2435,9 @@ export default function ProductsView({
 
           {filtered.length === 0 && !loading && (
             <div className="text-center py-16">
-              <div className="text-6xl mb-4">📦</div>
-              <p className="text-white/75">No se encontraron productos</p>
-              <p className="text-sm text-white/50 mt-1">
+              <div className="text-5xl mb-3">📦</div>
+              <p className="text-white/60">No se encontraron productos</p>
+              <p className="text-sm text-white/40 mt-1">
                 Probá con otros filtros o agregá un nuevo producto
               </p>
             </div>
@@ -2863,7 +2650,8 @@ export default function ProductsView({
       {viewingImage && (
         <ImageFullscreenModal
           images={getImages(
-            products.find((p) => p.title === viewingImage.title) || products[0],
+            products.find((p) => p.title === viewingImage.title) ||
+              products[0],
           )}
           initialIndex={viewingImage.index || 0}
           title={viewingImage.title}
