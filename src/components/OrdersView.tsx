@@ -75,19 +75,61 @@ function isProviderAllowed(order: any, userEmail: string): boolean {
 }
 
 // ============================================
-// FUNCIÓN PARA DESCONTAR STOCK
+// FUNCIÓN PARA DESCONTAR STOCK (MEJORADA)
 // ============================================
 const decreaseDeliveryStock = async (order: any, loadDeliveryStocksCallback?: () => Promise<void>, loadOrdersCallback?: () => Promise<void>) => {
   console.log('🔄 INICIANDO DESCUENTO DE STOCK');
   console.log('Pedido ID:', order.id);
-  console.log('SKU:', order.sku);
+  console.log('SKU del pedido:', order.sku);
   console.log('Cantidad (pack_qty):', order.pack_qty);
   console.log('Delivery email:', order.delivery_email);
   console.log('Estado:', order.status || order.status2);
+  console.log('Pedido completo:', order);
   
-  if (!order.sku) {
-    console.log('❌ No hay SKU');
-    toast.error('No se puede descontar stock: falta SKU');
+  // 🔥 INTENTAR OBTENER SKU DE MÚLTIPLES FUENTES 🔥
+  let productSku = order.sku;
+  
+  // Si no hay SKU directo, buscar en items_json
+  if (!productSku && order.items_json) {
+    try {
+      const items = typeof order.items_json === 'string' ? JSON.parse(order.items_json) : order.items_json;
+      if (items && items.length > 0 && items[0].sku) {
+        productSku = items[0].sku;
+        console.log('✅ SKU obtenido de items_json:', productSku);
+      } else if (items && items.length > 0 && items[0].product_sku) {
+        productSku = items[0].product_sku;
+        console.log('✅ SKU obtenido de items_json.product_sku:', productSku);
+      }
+    } catch (e) {
+      console.error('Error parseando items_json:', e);
+    }
+  }
+  
+  // Si no hay SKU, buscar en product_sku directo
+  if (!productSku && order.product_sku) {
+    productSku = order.product_sku;
+    console.log('✅ SKU obtenido de product_sku:', productSku);
+  }
+  
+  // Si no hay SKU, intentar buscar por título del producto
+  if (!productSku && order.product_title) {
+    console.log('⚠️ No hay SKU, intentando buscar producto por título:', order.product_title);
+    const { data: productByTitle } = await supabase
+      .from('products')
+      .select('sku')
+      .ilike('title', `%${order.product_title}%`)
+      .limit(1)
+      .single();
+    
+    if (productByTitle?.sku) {
+      productSku = productByTitle.sku;
+      console.log('✅ SKU encontrado por título:', productSku);
+    }
+  }
+  
+  if (!productSku) {
+    console.log('❌ No se pudo encontrar SKU en el pedido');
+    toast.error('No se puede descontar stock: el pedido no tiene SKU asociado. Contacta al administrador.');
     return false;
   }
   
@@ -102,12 +144,12 @@ const decreaseDeliveryStock = async (order: any, loadDeliveryStocksCallback?: ()
     const { data: product, error: productError } = await supabase
       .from('products')
       .select('id, stock, real_stock, title')
-      .eq('sku', order.sku)
+      .eq('sku', productSku)
       .single();
     
     if (productError || !product) {
-      console.error('❌ Producto no encontrado:', productError);
-      toast.error(`Producto no encontrado: ${order.sku}`);
+      console.error('❌ Producto no encontrado con SKU:', productSku, productError);
+      toast.error(`Producto no encontrado con SKU: ${productSku}`);
       return false;
     }
     
@@ -167,6 +209,7 @@ const decreaseDeliveryStock = async (order: any, loadDeliveryStocksCallback?: ()
       }
     } else {
       console.log('⚠️ No hay stock asignado para este delivery, no se descuenta');
+      toast.warning(`⚠️ El delivery ${order.delivery_email} no tiene stock asignado para este producto. No se descuenta stock.`);
     }
     
     // 5. Registrar movimiento
