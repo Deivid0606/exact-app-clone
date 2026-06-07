@@ -89,7 +89,6 @@ interface DeliveryStock {
   delivery_email: string;
   product_id: string;
   quantity: number;
-  product?: Product;
 }
 
 interface DeliveryStockMovement {
@@ -655,6 +654,13 @@ const AssignDeliveryStockModal = ({
 
           {activeSubTab === "movimientos" && (
             <div className="space-y-2">
+              <button
+                onClick={onRefresh}
+                className="w-full mb-2 py-1 text-xs rounded-lg bg-white/10 text-white/60 hover:bg-white/20 transition-all"
+              >
+                🔄 Refrescar movimientos
+              </button>
+              
               {movements.length === 0 ? (
                 <div className="text-center py-8 text-white/40">
                   No hay movimientos registrados aún
@@ -674,7 +680,7 @@ const AssignDeliveryStockModal = ({
                       <div className="text-xs text-white/40 mt-1">{mov.delivery_email}</div>
                     </div>
                     <div className="text-xs text-white/40">
-                      {new Date(mov.created_at).toLocaleDateString()}
+                      {new Date(mov.created_at).toLocaleString()}
                     </div>
                   </div>
                 ))
@@ -1306,7 +1312,7 @@ const ProductDetailModal = ({
                             <div className="text-xs text-white/40 mt-1">{mov.delivery_email}</div>
                           </div>
                           <div className="text-xs text-white/40">
-                            {new Date(mov.created_at).toLocaleDateString()}
+                            {new Date(mov.created_at).toLocaleString()}
                           </div>
                         </div>
                       ))}
@@ -1493,7 +1499,7 @@ export default function ProductsView({
             delivery_email: assignment.delivery_email,
             product_id: productId,
             quantity_change: quantityChange,
-            reason: quantityChange > 0 ? "Asignación de stock por admin/proveedor" : "Reducción de stock por admin/proveedor",
+            reason: quantityChange > 0 ? "➕ Asignación de stock por admin/proveedor" : "➖ Reducción de stock por admin/proveedor",
             order_id: null
           });
       }
@@ -1662,7 +1668,7 @@ export default function ProductsView({
                     delivery_email: newOrder.delivery_email,
                     product_id: product.id,
                     quantity_change: -quantity,
-                    reason: "Pedido entregado / Encomienda entregada",
+                    reason: "📦 Pedido entregado / Encomienda entregada",
                     order_id: newOrder.id
                   });
                 
@@ -3215,7 +3221,7 @@ export default function ProductsView({
                           <div className="flex justify-between items-center pt-1">
                             <div>
                               <div className="text-[10px] text-white/40">
-                                Precio
+                                Precio proveedor
                               </div>
                               <div className="font-bold text-white text-sm font-mono">
                                 {nf(Number(p.provider_price_gs || 0))} Gs
