@@ -75,7 +75,7 @@ function isProviderAllowed(order: any, userEmail: string): boolean {
 }
 
 // ============================================
-// FUNCIÓN PARA DESCONTAR STOCK (NUEVA)
+// FUNCIÓN PARA DESCONTAR STOCK
 // ============================================
 const decreaseDeliveryStock = async (order: any, loadDeliveryStocksCallback?: () => Promise<void>, loadOrdersCallback?: () => Promise<void>) => {
   console.log('🔄 INICIANDO DESCUENTO DE STOCK');
@@ -971,6 +971,9 @@ export default function OrdersView() {
     return true;
   };
 
+  // ============================================
+  // FUNCIÓN CORREGIDA - AHORA DESCUENTA STOCK PARA DELIVERY
+  // ============================================
   const processStatusChangeWithData = async (message: string, attachment: File | null) => {
     console.log('processStatusChangeWithData iniciado:', { message, hasAttachment: !!attachment });
     setUploadingFile(true);
@@ -989,12 +992,45 @@ export default function OrdersView() {
     }
     
     console.log('Ejecutando cambio de estado con:', { message, attachmentUrl });
+    
+    // Guardar el pedido antes de actualizarlo
+    const currentOrder = orders.find(o => o.id === statusChangeModal.orderId);
+    
+    // Ejecutar el cambio de estado principal
     await executeStatusChange(
       statusChangeModal.orderId,
       statusChangeModal.newStatus,
       message,
       attachmentUrl
     );
+    
+    // 🔥🔥🔥 NUEVA LÓGICA: Descontar stock si el delivery marcó como ENTREGADO 🔥🔥🔥
+    if (statusChangeModal.newStatus === 'ENTREGADO' || statusChangeModal.newStatus === 'ENCOMIENDA ENTREGADA') {
+      console.log('🎯 Pedido marcado como entregado por delivery! Descontando stock...');
+      
+      // Esperar un momento a que se actualice el estado local
+      setTimeout(async () => {
+        // Buscar el pedido actualizado en el estado 'orders'
+        const updatedOrder = orders.find(o => o.id === statusChangeModal.orderId);
+        if (updatedOrder) {
+          console.log('✅ Pedido encontrado en estado actualizado, descontando stock...');
+          await decreaseDeliveryStock(
+            { ...updatedOrder, status: statusChangeModal.newStatus },
+            async () => {},
+            loadOrders
+          );
+        } else if (currentOrder) {
+          console.log('⚠️ Usando pedido original para descuento de stock');
+          await decreaseDeliveryStock(
+            { ...currentOrder, status: statusChangeModal.newStatus },
+            async () => {},
+            loadOrders
+          );
+        } else {
+          console.error('❌ No se encontró el pedido para descontar stock');
+        }
+      }, 100); // Pequeño delay para asegurar que el estado 'orders' se haya actualizado
+    }
     
     setUploadingFile(false);
     setStatusChangeModal({ isOpen: false, orderId: '', newStatus: '', oldStatus: '' });
