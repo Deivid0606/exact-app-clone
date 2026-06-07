@@ -894,10 +894,10 @@ export default function ProductsView({
 
     for (const product of products) {
       try {
-        // Obtener todas las órdenes ENTREGADAS de este producto
+        // Obtener todas las órdenes ENTREGADAS de este producto con status2 = ENCOMIENDA ENTREGADA
         const { data, error } = await supabase
           .from("orders")
-          .select("quantity, status")
+          .select("quantity, status, status2")
           .eq("product_id", product.id);
 
         if (error) {
@@ -905,12 +905,12 @@ export default function ProductsView({
           continue;
         }
 
-        // Sumar cantidades de órdenes entregadas
+        // Sumar cantidades de órdenes entregadas Y con encomienda entregada
         const deliveredQty = (data || [])
-          .filter((order) => isDeliveredStatus(order.status))
+          .filter((order) => isDeliveredStatus(order.status) && order.status2 === "ENCOMIENDA ENTREGADA")
           .reduce((sum, order) => sum + getOrderQuantity(order), 0);
 
-        // Calcular stocks basados en stock original - entregados
+        // Calcular stocks basados en entregados
         const syncedStock = Math.max(0, deliveredQty);
 
         // Actualizar en Supabase solo si es necesario
@@ -953,7 +953,8 @@ export default function ProductsView({
     setSyncingStock(false);
   }, [products]);
 
-  // Listener para actualizar stock y real_stock automáticamente cuando un pedido cambia a ENTREGADO
+  // Listener para actualizar stock y real_stock automáticamente
+  // cuando un pedido cambia a ENTREGADO y ENCOMIENDA ENTREGADA
   useEffect(() => {
     if (!role || !myEmail) return;
 
@@ -970,58 +971,108 @@ export default function ProductsView({
           const oldOrder = payload.old;
           const newOrder = payload.new;
 
+          // Verificar estado ENTREGADO
           const wasDelivered = isDeliveredStatus(oldOrder?.status);
           const isNowDelivered = isDeliveredStatus(newOrder?.status);
+          
+          // Verificar ENCOMIENDA ENTREGADA
+          const wasEncomiendaDelivered = oldOrder?.status2 === "ENCOMIENDA ENTREGADA";
+          const isNowEncomiendaDelivered = newOrder?.status2 === "ENCOMIENDA ENTREGADA";
 
-          // Solo cuando cambia de NO entregado a ENTREGADO
-          if (!wasDelivered && isNowDelivered) {
+          // Condición CORRECTA: Ambas condiciones deben cumplirse
+          const shouldUpdateStock = 
+            !wasDelivered && isNowDelivered && 
+            !wasEncomiendaDelivered && isNowEncomiendaDelivered;
+          
+          // Opción 2: Ya estaba entregado pero recién ahora se marca la encomienda
+          const shouldUpdateStockV2 = 
+            isNowDelivered && isNowEncomiendaDelivered && 
+            (newOrder.provider_stock_applied === false || newOrder.provider_stock_applied === null);
+
+          if (shouldUpdateStock || shouldUpdateStockV2) {
+            // Extraer la información del pedido
             const orderSku = getOrderSku(newOrder);
             const orderProductId = getOrderProductId(newOrder);
             const quantity = getOrderQuantity(newOrder);
-
-            // Buscar el producto por ID o SKU
-            let product = products.find((p) => p.id === orderProductId);
-            if (!product && orderSku) {
-              product = products.find((p) => p.sku === orderSku);
+            
+            // Soporte para items_json (si tiene múltiples productos)
+            let itemsToUpdate: { sku: string; quantity: number; productId?: string }[] = [];
+            
+            if (newOrder.items_json && Array.isArray(newOrder.items_json) && newOrder.items_json.length > 0) {
+              itemsToUpdate = newOrder.items_json.map((item: any) => ({
+                sku: item.sku || item.product_sku,
+                quantity: item.quantity || item.qty || 1,
+                productId: item.product_id
+              }));
+            } else if (orderSku) {
+              itemsToUpdate = [{
+                sku: orderSku,
+                quantity: quantity,
+                productId: orderProductId
+              }];
             }
 
-            if (product) {
-              // Calcular nuevos stocks (nunca negativos)
-              const newStock = Math.max(0, (product.stock || 0) - quantity);
-              const newRealStock = Math.max(
-                0,
-                (product.real_stock || 0) - quantity,
-              );
+            let successCount = 0;
+            let errorCount = 0;
 
-              // Actualizar en Supabase
-              const { error } = await supabase
-                .from("products")
-                .update({
-                  stock: newStock,
-                  real_stock: newRealStock,
-                })
-                .eq("id", product.id);
+            // Procesar cada producto del pedido
+            for (const item of itemsToUpdate) {
+              if (!item.sku && !item.productId) continue;
 
-              if (!error) {
-                // Actualizar estado local
-                setProducts((prev) =>
-                  prev.map((p) =>
-                    p.id === product.id
-                      ? { ...p, stock: newStock, real_stock: newRealStock }
-                      : p,
-                  ),
-                );
+              // Buscar el producto por SKU o ID
+              let product = products.find((p) => p.sku === item.sku);
+              if (!product && item.productId) {
+                product = products.find((p) => p.id === item.productId);
+              }
 
-                // Notificar al usuario
+              if (product) {
+                // Calcular nuevos stocks (nunca negativos)
+                const newStock = Math.max(0, (product.stock || 0) - item.quantity);
+                const newRealStock = Math.max(0, (product.real_stock || 0) - item.quantity);
+
+                // Actualizar en Supabase
+                const { error } = await supabase
+                  .from("products")
+                  .update({
+                    stock: newStock,
+                    real_stock: newRealStock,
+                    updated_at: new Date().toISOString()
+                  })
+                  .eq("id", product.id);
+
+                if (!error) {
+                  successCount++;
+                  // Actualizar estado local
+                  setProducts((prev) =>
+                    prev.map((p) =>
+                      p.id === product!.id
+                        ? { ...p, stock: newStock, real_stock: newRealStock }
+                        : p,
+                    ),
+                  );
+                } else {
+                  errorCount++;
+                  console.error(`Error actualizando stock para ${product.title}:`, error);
+                }
+              } else {
+                console.warn(`Producto no encontrado: SKU=${item.sku}, ID=${item.productId}`);
+                errorCount++;
+              }
+            }
+
+            // Marcar el pedido como ya procesado (evita doble descuento)
+            if (successCount > 0) {
+              const { error: markError } = await supabase
+                .from("orders")
+                .update({ provider_stock_applied: true })
+                .eq("id", newOrder.id);
+
+              if (!markError) {
                 toast.success(
                   `✅ Stock actualizado por entrega\n` +
-                    `📦 ${product.title}\n` +
-                    `➖ ${quantity} unidad(es) entregadas\n` +
-                    `📊 Stock: ${newStock} | Real: ${newRealStock}`,
+                  `📦 Se descontaron ${successCount} producto(s)\n` +
+                  `${errorCount > 0 ? `⚠️ ${errorCount} errores` : ''}`
                 );
-              } else {
-                console.error("Error actualizando stock:", error);
-                toast.error("Error al actualizar el stock");
               }
             }
           }
@@ -1037,38 +1088,56 @@ export default function ProductsView({
         async (payload) => {
           const newOrder = payload.new;
           const isDelivered = isDeliveredStatus(newOrder?.status);
+          const isEncomiendaDelivered = newOrder?.status2 === "ENCOMIENDA ENTREGADA";
 
-          // Si se crea una orden directamente con estado entregado
-          if (isDelivered) {
+          // Si se crea una orden directamente con estado entregado y encomienda entregada
+          if (isDelivered && isEncomiendaDelivered && !newOrder.provider_stock_applied) {
             const orderSku = getOrderSku(newOrder);
             const quantity = getOrderQuantity(newOrder);
-            const product = products.find((p) => p.sku === orderSku);
+            
+            let itemsToUpdate: { sku: string; quantity: number }[] = [];
+            
+            if (newOrder.items_json && Array.isArray(newOrder.items_json) && newOrder.items_json.length > 0) {
+              itemsToUpdate = newOrder.items_json.map((item: any) => ({
+                sku: item.sku || item.product_sku,
+                quantity: item.quantity || item.qty || 1
+              }));
+            } else if (orderSku) {
+              itemsToUpdate = [{ sku: orderSku, quantity: quantity }];
+            }
 
-            if (product) {
-              const newStock = Math.max(0, (product.stock || 0) - quantity);
-              const newRealStock = Math.max(
-                0,
-                (product.real_stock || 0) - quantity,
-              );
+            for (const item of itemsToUpdate) {
+              if (!item.sku) continue;
+              
+              const product = products.find((p) => p.sku === item.sku);
+              if (product) {
+                const newStock = Math.max(0, (product.stock || 0) - item.quantity);
+                const newRealStock = Math.max(0, (product.real_stock || 0) - item.quantity);
 
-              const { error } = await supabase
-                .from("products")
-                .update({ stock: newStock, real_stock: newRealStock })
-                .eq("id", product.id);
+                const { error } = await supabase
+                  .from("products")
+                  .update({ stock: newStock, real_stock: newRealStock })
+                  .eq("id", product.id);
 
-              if (!error) {
-                setProducts((prev) =>
-                  prev.map((p) =>
-                    p.id === product.id
-                      ? { ...p, stock: newStock, real_stock: newRealStock }
-                      : p,
-                  ),
-                );
-                toast.success(
-                  `📦 Stock actualizado: -${quantity} de ${product.title}`,
-                );
+                if (!error) {
+                  setProducts((prev) =>
+                    prev.map((p) =>
+                      p.id === product.id
+                        ? { ...p, stock: newStock, real_stock: newRealStock }
+                        : p,
+                    ),
+                  );
+                }
               }
             }
+
+            // Marcar pedido como procesado
+            await supabase
+              .from("orders")
+              .update({ provider_stock_applied: true })
+              .eq("id", newOrder.id);
+            
+            toast.success(`📦 Stock actualizado por nuevo pedido entregado`);
           }
         },
       )
@@ -1710,16 +1779,6 @@ export default function ProductsView({
                 </select>
               </div>
             </div>
-
-            <div>
-              <label className="app-label text-xs">Buscar producto</label>
-              <input
-                className="app-input"
-                placeholder="Nombre, SKU o proveedor..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
           </div>
 
           {/* Gasto Publicitario */}
@@ -1970,6 +2029,33 @@ export default function ProductsView({
                 🚚 {totals.delivered} entregados
               </span>
             </div>
+          </div>
+
+          {/* 🔍 BARRA DE BÚSQUEDA MÁS VISIBLE - MOVIDA DEBAJO DEL TÍTULO */}
+          <div className="bg-gradient-to-r from-white/5 to-white/2 rounded-2xl border border-white/10 p-4 shadow-lg backdrop-blur-sm">
+            <div className="flex items-center gap-3">
+              <div className="text-2xl">🔍</div>
+              <input
+                className="w-full bg-white/10 border-0 rounded-xl px-4 py-3 text-white placeholder:text-white/50 text-base font-medium focus:ring-2 focus:ring-primary/50 focus:outline-none transition-all"
+                placeholder="Buscar producto por nombre, SKU o proveedor..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                autoComplete="off"
+              />
+              {search && (
+                <button
+                  className="text-white/70 hover:text-white text-xl px-3 py-2 transition-all"
+                  onClick={() => setSearch("")}
+                >
+                  ✕
+                </button>
+              )}
+            </div>
+            {search && (
+              <div className="mt-2 text-xs text-white/50 px-2">
+                Mostrando {filtered.length} de {products.length} productos
+              </div>
+            )}
           </div>
 
           {/* Tabs y acciones */}
