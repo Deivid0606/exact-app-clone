@@ -74,7 +74,135 @@ function isProviderAllowed(order: any, userEmail: string): boolean {
   return norm(orderProviderEmail) === norm(userEmail);
 }
 
-// Función para descontar stock de un producto
+// ============================================
+// FUNCIÓN PARA DESCONTAR STOCK (NUEVA)
+// ============================================
+const decreaseDeliveryStock = async (order: any, loadDeliveryStocksCallback?: () => Promise<void>, loadOrdersCallback?: () => Promise<void>) => {
+  console.log('🔄 INICIANDO DESCUENTO DE STOCK');
+  console.log('Pedido ID:', order.id);
+  console.log('SKU:', order.sku);
+  console.log('Cantidad (pack_qty):', order.pack_qty);
+  console.log('Delivery email:', order.delivery_email);
+  console.log('Estado:', order.status || order.status2);
+  
+  if (!order.sku) {
+    console.log('❌ No hay SKU');
+    toast.error('No se puede descontar stock: falta SKU');
+    return false;
+  }
+  
+  if (!order.delivery_email) {
+    console.log('❌ No hay delivery_email');
+    toast.error('No se puede descontar stock: falta delivery_email');
+    return false;
+  }
+  
+  try {
+    // 1. Buscar el producto por SKU
+    const { data: product, error: productError } = await supabase
+      .from('products')
+      .select('id, stock, real_stock, title')
+      .eq('sku', order.sku)
+      .single();
+    
+    if (productError || !product) {
+      console.error('❌ Producto no encontrado:', productError);
+      toast.error(`Producto no encontrado: ${order.sku}`);
+      return false;
+    }
+    
+    console.log('✅ Producto encontrado:', product.title, 'ID:', product.id);
+    
+    const quantity = order.pack_qty || 1;
+    console.log('📦 Cantidad a descontar:', quantity);
+    
+    // 2. Buscar stock del delivery
+    const { data: deliveryStock, error: deliveryError } = await supabase
+      .from('delivery_stock')
+      .select('id, quantity')
+      .eq('delivery_email', order.delivery_email)
+      .eq('product_id', product.id)
+      .single();
+    
+    if (deliveryError && deliveryError.code !== 'PGRST116') {
+      console.error('❌ Error buscando stock delivery:', deliveryError);
+    }
+    
+    console.log('📊 Stock delivery actual:', deliveryStock?.quantity || 0);
+    
+    // 3. Actualizar stock del producto
+    const newProductStock = Math.max(0, (product.stock || 0) - quantity);
+    const newProductRealStock = Math.max(0, (product.real_stock || 0) - quantity);
+    
+    const { error: updateProductError } = await supabase
+      .from('products')
+      .update({
+        stock: newProductStock,
+        real_stock: newProductRealStock,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', product.id);
+    
+    if (updateProductError) {
+      console.error('❌ Error actualizando producto:', updateProductError);
+    } else {
+      console.log('✅ Stock producto actualizado:', product.stock, '->', newProductStock);
+    }
+    
+    // 4. Actualizar stock del delivery
+    if (deliveryStock) {
+      const newDeliveryStock = Math.max(0, deliveryStock.quantity - quantity);
+      const { error: updateDeliveryError } = await supabase
+        .from('delivery_stock')
+        .update({ 
+          quantity: newDeliveryStock,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', deliveryStock.id);
+      
+      if (updateDeliveryError) {
+        console.error('❌ Error actualizando delivery stock:', updateDeliveryError);
+      } else {
+        console.log('✅ Stock delivery actualizado:', deliveryStock.quantity, '->', newDeliveryStock);
+      }
+    } else {
+      console.log('⚠️ No hay stock asignado para este delivery, no se descuenta');
+    }
+    
+    // 5. Registrar movimiento
+    const { error: movementError } = await supabase
+      .from('delivery_stock_movements')
+      .insert({
+        delivery_email: order.delivery_email,
+        product_id: product.id,
+        quantity_change: -quantity,
+        reason: '📦 ' + (order.status || order.status2 || 'ENTREGADO'),
+        order_id: order.id,
+        created_at: new Date().toISOString()
+      });
+    
+    if (movementError) {
+      console.error('❌ Error registrando movimiento:', movementError);
+    } else {
+      console.log('✅ Movimiento registrado');
+    }
+    
+    toast.success(`✅ Stock descontado: ${quantity} unidad(es) de ${product.title}`);
+    
+    // 6. Recargar datos si hay callbacks
+    if (loadDeliveryStocksCallback) await loadDeliveryStocksCallback();
+    if (loadOrdersCallback) await loadOrdersCallback();
+    
+    return true;
+    
+  } catch (error) {
+    console.error('❌ Error en decreaseDeliveryStock:', error);
+    toast.error('Error al descontar stock');
+    return false;
+  }
+};
+
+// Función para descontar stock de un producto (original - mantener para compatibilidad)
 const updateProductStock = async (order: any) => {
   console.log('🔄 Actualizando stock para pedido:', order.id);
   
@@ -90,7 +218,7 @@ const updateProductStock = async (order: any) => {
     } else if (order.sku) {
       itemsToUpdate = [{
         sku: order.sku,
-        quantity: order.quantity || 1
+        quantity: order.pack_qty || order.quantity || 1
       }];
     }
     
@@ -139,6 +267,23 @@ const updateProductStock = async (order: any) => {
         console.error(`❌ Error actualizando stock de ${product.title}:`, updateError);
       } else {
         console.log(`✅ Stock actualizado para ${product.title}`);
+        
+        // También actualizar delivery_stock
+        const { data: deliveryStock } = await supabase
+          .from('delivery_stock')
+          .select('id, quantity')
+          .eq('delivery_email', order.delivery_email)
+          .eq('product_id', product.id)
+          .single();
+        
+        if (deliveryStock) {
+          const newDeliveryStock = Math.max(0, deliveryStock.quantity - item.quantity);
+          await supabase
+            .from('delivery_stock')
+            .update({ quantity: newDeliveryStock })
+            .eq('id', deliveryStock.id);
+          console.log(`✅ Stock delivery actualizado: ${deliveryStock.quantity} -> ${newDeliveryStock}`);
+        }
       }
     }
   } catch (error) {
@@ -813,15 +958,14 @@ export default function OrdersView() {
     setOrders(prev => prev.map(o => o.id === orderId ? { ...o, ...updates } : o));
     postNews(`Pedido ${orderNum} cambió a ${newStatus} por ${myEmail}`, orderNum);
     
-    // 🔥 VERIFICAR SI DEBE DESCONTAR STOCK (cuando se cambia status a ENTREGADO)
-    const currentOrder = orders.find(o => o.id === orderId);
-    const hasEncomienda = currentOrder?.status2 === 'ENCOMIENDA ENTREGADA';
-    
-    if (newStatus === 'ENTREGADO' && hasEncomienda) {
-      console.log('🎯 Condiciones cumplidas! Descontando stock por cambio de status a ENTREGADO...');
+    // 🔥 🔥 🔥 DESCONTAR STOCK CUANDO SE MARCA ENTREGADO 🔥 🔥 🔥
+    if (newStatus === 'ENTREGADO' || newStatus === 'ENCOMIENDA ENTREGADA') {
+      console.log('🎯 Pedido marcado como entregado! Descontando stock...');
       const updatedOrder = { ...order, ...updates, status: newStatus };
-      await updateProductStock(updatedOrder);
-      await saveToHistory(orderId, oldStatus, newStatus, 'Stock descontado por entrega', null);
+      await decreaseDeliveryStock(updatedOrder, async () => {
+        // Recargar delivery_stock después de descontar
+        // No necesitamos hacer nada aquí porque ya se recarga en la función
+      }, loadOrders);
     }
     
     return true;
@@ -871,7 +1015,6 @@ export default function OrdersView() {
       updated_at: new Date().toISOString(),
     };
 
-    // Guardar en historial
     await saveToHistory(orderId, oldStatus2 || '--', val || '--', `Estado 2 cambiado a ${val || 'ninguno'}`, null);
 
     const { error } = await supabase
@@ -895,15 +1038,11 @@ export default function OrdersView() {
       postNews(`Pedido ${orderNum} quedó sin guía generada por ${myEmail}`, orderNum);
     }
     
-    // 🔥 VERIFICAR SI DEBE DESCONTAR STOCK (cuando se cambia status2 a ENCOMIENDA ENTREGADA)
-    const currentOrder = orders.find(o => o.id === orderId);
-    const hasDelivered = currentOrder?.status === 'ENTREGADO';
-    
-    if (val === 'ENCOMIENDA ENTREGADA' && hasDelivered) {
-      console.log('🎯 Condiciones cumplidas! Descontando stock por cambio de status2 a ENCOMIENDA ENTREGADA...');
+    // 🔥 DESCONTAR STOCK SI status2 ES ENCOMIENDA ENTREGADA
+    if (val === 'ENCOMIENDA ENTREGADA') {
+      console.log('🎯 Status2 cambiado a ENCOMIENDA ENTREGADA! Descontando stock...');
       const updatedOrder = { ...order, ...updates, status2: val };
-      await updateProductStock(updatedOrder);
-      await saveToHistory(orderId, oldStatus2 || '--', val, 'Stock descontado por encomienda entregada', null);
+      await decreaseDeliveryStock(updatedOrder, async () => {}, loadOrders);
     }
   };
 
