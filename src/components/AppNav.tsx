@@ -20,7 +20,7 @@ const navItems: NavItem[] = [
   { id: 'chat', label: 'Chat' },
   { id: 'withGuides', label: 'Pedidos con guías', roles: ['ADMIN', 'DESPACHANTE', 'PROVEEDOR'] },
   { id: 'rankingDelivery', label: '🏆 Ranking Delivery', roles: ['ADMIN', 'DESPACHANTE', 'PROVEEDOR', 'DELIVERY'] },
-  { id: 'products', label: 'Productos', roles: ['ADMIN', 'PROVEEDOR', 'DELIVERY'] }, // ✅ MODIFICADO: Ahora DELIVERY puede ver productos
+  { id: 'products', label: 'Productos', roles: ['ADMIN', 'PROVEEDOR', 'DELIVERY', 'VENDEDOR'] }, // ✅ AGREGADO VENDEDOR
   { id: 'earnings', label: 'Ganancias', roles: ['ADMIN', 'PROVEEDOR'] },
   { id: 'order', label: 'Cargar pedido', roles: ['VENDEDOR'] },
   { id: 'orders', label: 'Pedidos' },
