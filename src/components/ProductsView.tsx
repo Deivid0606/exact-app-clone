@@ -92,6 +92,16 @@ interface DeliveryStock {
   product?: Product;
 }
 
+interface DeliveryStockMovement {
+  id: string;
+  delivery_email: string;
+  product_id: string;
+  quantity_change: number;
+  reason: string;
+  order_id: string | null;
+  created_at: string;
+}
+
 interface ProductMetrics {
   product_id: string;
   sku: string;
@@ -197,6 +207,8 @@ const isDeliveredStatus = (s: string | null | undefined) => {
     "delivery_ok",
     "completado",
     "completada",
+    "encomienda entregada",
+    "encomienda_entregada",
   ].includes(v);
 };
 
@@ -528,14 +540,18 @@ const AssignDeliveryStockModal = ({
   product,
   deliveryStocks,
   deliveries,
+  movements,
   onClose,
   onSave,
+  onRefresh,
 }: {
   product: Product;
   deliveryStocks: DeliveryStock[];
   deliveries: { email: string; name: string }[];
+  movements: DeliveryStockMovement[];
   onClose: () => void;
   onSave: (assignments: { delivery_email: string; quantity: number }[]) => void;
+  onRefresh: () => void;
 }) => {
   const [assignments, setAssignments] = useState<{ delivery_email: string; quantity: number }[]>(() =>
     deliveries.map(d => ({
@@ -543,6 +559,7 @@ const AssignDeliveryStockModal = ({
       quantity: deliveryStocks.find(ds => ds.delivery_email === d.email)?.quantity || 0
     }))
   );
+  const [activeSubTab, setActiveSubTab] = useState<"asignar" | "movimientos">("asignar");
 
   const updateQuantity = (email: string, quantity: number) => {
     setAssignments(prev =>
@@ -558,50 +575,111 @@ const AssignDeliveryStockModal = ({
       onClick={onClose}
     >
       <div
-        className="relative bg-white dark:bg-gray-900 rounded-2xl max-w-lg w-full shadow-2xl"
+        className="relative bg-white dark:bg-gray-900 rounded-2xl max-w-2xl w-full shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="p-5 border-b border-gray-200 dark:border-gray-800">
           <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-            Asignar stock a deliveries
+            Gestión de stock para deliveries
           </h3>
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
             Producto: {product.title} (SKU: {product.sku})
           </p>
         </div>
 
-        <div className="p-5 space-y-4 max-h-[400px] overflow-y-auto">
-          {deliveries.map((delivery) => {
-            const assignment = assignments.find(a => a.delivery_email === delivery.email);
-            return (
-              <div key={delivery.email} className="flex items-center justify-between gap-4 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-xl">
-                <div className="flex-1">
-                  <div className="font-medium text-gray-900 dark:text-white">{delivery.name}</div>
-                  <div className="text-xs text-gray-500">{delivery.email}</div>
+        {/* Sub tabs */}
+        <div className="flex border-b border-gray-200 dark:border-gray-800 px-5">
+          <button
+            onClick={() => setActiveSubTab("asignar")}
+            className={`py-2 px-4 text-sm font-medium transition-all ${
+              activeSubTab === "asignar"
+                ? "text-primary border-b-2 border-primary"
+                : "text-gray-500 dark:text-gray-400 hover:text-gray-700"
+            }`}
+          >
+            📦 Asignar stock
+          </button>
+          <button
+            onClick={() => setActiveSubTab("movimientos")}
+            className={`py-2 px-4 text-sm font-medium transition-all ${
+              activeSubTab === "movimientos"
+                ? "text-primary border-b-2 border-primary"
+                : "text-gray-500 dark:text-gray-400 hover:text-gray-700"
+            }`}
+          >
+            📋 Historial de movimientos
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4 max-h-[500px] overflow-y-auto">
+          {activeSubTab === "asignar" && (
+            <>
+              {deliveries.map((delivery) => {
+                const assignment = assignments.find(a => a.delivery_email === delivery.email);
+                return (
+                  <div key={delivery.email} className="flex items-center justify-between gap-4 p-3 bg-gray-50 dark:bg-gray-800/50 rounded-xl">
+                    <div className="flex-1">
+                      <div className="font-medium text-gray-900 dark:text-white">{delivery.name}</div>
+                      <div className="text-xs text-gray-500">{delivery.email}</div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => updateQuantity(delivery.email, (assignment?.quantity || 0) - 1)}
+                        className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-all"
+                      >
+                        -
+                      </button>
+                      <input
+                        type="number"
+                        className="w-20 text-center py-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white font-mono"
+                        value={assignment?.quantity || 0}
+                        onChange={(e) => updateQuantity(delivery.email, parseInt(e.target.value) || 0)}
+                      />
+                      <button
+                        onClick={() => updateQuantity(delivery.email, (assignment?.quantity || 0) + 1)}
+                        className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-all"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+
+          {activeSubTab === "movimientos" && (
+            <div className="space-y-2">
+              {movements.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  No hay movimientos registrados aún
                 </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => updateQuantity(delivery.email, (assignment?.quantity || 0) - 1)}
-                    className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-all"
-                  >
-                    -
-                  </button>
-                  <input
-                    type="number"
-                    className="w-20 text-center py-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-white font-mono"
-                    value={assignment?.quantity || 0}
-                    onChange={(e) => updateQuantity(delivery.email, parseInt(e.target.value) || 0)}
-                  />
-                  <button
-                    onClick={() => updateQuantity(delivery.email, (assignment?.quantity || 0) + 1)}
-                    className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 hover:bg-gray-300 dark:hover:bg-gray-600 transition-all"
-                  >
-                    +
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+              ) : (
+                movements.map((mov) => (
+                  <div key={mov.id} className="flex items-center justify-between p-3 border-b border-gray-100 dark:border-gray-800">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className={`font-bold text-sm ${
+                          mov.quantity_change > 0 ? "text-green-600" : "text-red-600"
+                        }`}>
+                          {mov.quantity_change > 0 ? `+${mov.quantity_change}` : mov.quantity_change}
+                        </span>
+                        <span className="text-sm text-gray-700 dark:text-gray-300">
+                          {mov.reason}
+                        </span>
+                      </div>
+                      <div className="text-xs text-gray-400">
+                        {mov.delivery_email}
+                      </div>
+                    </div>
+                    <div className="text-xs text-gray-400">
+                      {new Date(mov.created_at).toLocaleDateString()}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
         </div>
 
         <div className="p-5 border-t border-gray-200 dark:border-gray-800 flex gap-3">
@@ -609,14 +687,16 @@ const AssignDeliveryStockModal = ({
             onClick={onClose}
             className="flex-1 py-2 rounded-xl bg-gray-200 dark:bg-gray-800 text-gray-800 dark:text-white font-medium hover:bg-gray-300 dark:hover:bg-gray-700 transition-all"
           >
-            Cancelar
+            Cerrar
           </button>
-          <button
-            onClick={() => onSave(assignments)}
-            className="flex-1 py-2 rounded-xl bg-primary text-primary-foreground font-bold hover:opacity-90 transition-all"
-          >
-            Guardar asignación
-          </button>
+          {activeSubTab === "asignar" && (
+            <button
+              onClick={() => onSave(assignments)}
+              className="flex-1 py-2 rounded-xl bg-primary text-primary-foreground font-bold hover:opacity-90 transition-all"
+            >
+              Guardar asignación
+            </button>
+          )}
         </div>
       </div>
     </div>,
@@ -624,7 +704,7 @@ const AssignDeliveryStockModal = ({
   );
 };
 
-// Modal de detalles del producto - SIN botón "Enviar a cliente"
+// Modal de detalles del producto
 const ProductDetailModal = ({
   product,
   metrics,
@@ -642,8 +722,10 @@ const ProductDetailModal = ({
   providerPhone,
   isDelivery,
   deliveryStockQuantity,
-  currentMonthMetrics,
-  currentMonthLoading,
+  showDeliveryStock,
+  deliveryStocksList,
+  deliveryMovements,
+  onRefreshDeliveryStock,
 }: {
   product: Product;
   metrics: ProductMetrics;
@@ -661,15 +743,113 @@ const ProductDetailModal = ({
   providerPhone?: string;
   isDelivery?: boolean;
   deliveryStockQuantity?: number;
-  currentMonthMetrics?: ProductMetrics;
-  currentMonthLoading?: boolean;
+  showDeliveryStock?: boolean;
+  deliveryStocksList?: { delivery_email: string; quantity: number; delivery_name: string }[];
+  deliveryMovements?: DeliveryStockMovement[];
+  onRefreshDeliveryStock?: () => void;
 }) => {
-  const [activeTab, setActiveTab] = useState<"detalles" | "garantias" | "recursos" | "metricas">("detalles");
+  const [activeTab, setActiveTab] = useState<"detalles" | "garantias" | "recursos" | "metricas" | "delivery_stock">("detalles");
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [metricsFromDate, setMetricsFromDate] = useState(firstDayOfMonth());
+  const [metricsToDate, setMetricsToDate] = useState(todayPY());
+  const [customMetrics, setCustomMetrics] = useState<ProductMetrics | null>(null);
+  const [customMetricsLoading, setCustomMetricsLoading] = useState(false);
+  
   const images = getImages(product);
-  const stockCritical = Number(product.stock || 0) <= 3;
-  const netProfit = (currentMonthMetrics?.gross_profit_gs || 0) - productAdSpend;
+  const stockCritical = isDelivery ? (deliveryStockQuantity || 0) <= 3 : (Number(product.stock || 0) <= 3);
   const gainPerUnit = (Number(product.suggested_price_gs || 0) - Number(product.real_cost_gs || 0));
+  const netProfit = (customMetrics?.gross_profit_gs || metrics.gross_profit_gs) - productAdSpend;
+
+  // Función para cargar métricas por fecha
+  const loadMetricsByDate = useCallback(async () => {
+    if (!metricsFromDate || !metricsToDate) return;
+    
+    setCustomMetricsLoading(true);
+    
+    try {
+      const { data, error } = await supabase
+        .from("orders")
+        .select("*")
+        .gte("created_at", `${metricsFromDate}T00:00:00`)
+        .lte("created_at", `${metricsToDate}T23:59:59`);
+
+      if (error) throw error;
+
+      let m = {
+        ...emptyMetrics,
+        product_id: product.id,
+        sku: product.sku || "",
+      };
+
+      for (const order of data || []) {
+        const orderSku = getOrderSku(order);
+        if (orderSku !== product.sku) continue;
+
+        const qty = getOrderQuantity(order);
+        const unitFallbackPrice = Number(product.provider_price_gs || 0) * qty;
+        const saleAmount = getOrderAmount(order, unitFallbackPrice);
+        const realCost = Number(product.real_cost_gs || 0) * qty;
+        const status = getOrderStatus(order);
+        const delivered = isDeliveredStatus(status);
+        const cancelled = isCancelledStatus(status);
+        const returned = isReturnedStatus(status);
+        const noAnswer = isNoAnswerStatus(status);
+        const billed = isBilledStatus(status);
+
+        m.sold_count += qty;
+        if (delivered) m.delivered_count += qty;
+        if (cancelled) m.cancelled_count += qty;
+        if (returned) m.returned_count += qty;
+        if (noAnswer) m.no_answer_count += qty;
+        if (billed) m.billed_count += qty;
+
+        m.gross_revenue_gs += saleAmount;
+
+        if (delivered) {
+          m.real_revenue_gs += saleAmount;
+          m.product_cost_gs += realCost;
+          m.gross_profit_gs += saleAmount - realCost;
+        }
+      }
+
+      setCustomMetrics(m);
+    } catch (error) {
+      console.error("Error cargando métricas por fecha:", error);
+      toast.error("No se pudieron cargar las métricas");
+    } finally {
+      setCustomMetricsLoading(false);
+    }
+  }, [product, metricsFromDate, metricsToDate]);
+
+  // Cargar métricas al cambiar fechas
+  useEffect(() => {
+    if (activeTab === "metricas") {
+      loadMetricsByDate();
+    }
+  }, [activeTab, metricsFromDate, metricsToDate, loadMetricsByDate]);
+
+  const displayMetrics = customMetrics || metrics;
+
+  // Función para establecer fecha a hoy
+  const setToday = () => {
+    setMetricsFromDate(todayPY());
+    setMetricsToDate(todayPY());
+  };
+
+  // Función para establecer fecha a este mes
+  const setThisMonth = () => {
+    setMetricsFromDate(firstDayOfMonth());
+    setMetricsToDate(todayPY());
+  };
+
+  // Función para establecer fecha al mes pasado
+  const setLastMonth = () => {
+    const now = new Date();
+    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+    setMetricsFromDate(`${lastMonth.getFullYear()}-${String(lastMonth.getMonth() + 1).padStart(2, "0")}-01`);
+    setMetricsToDate(`${lastMonthEnd.getFullYear()}-${String(lastMonthEnd.getMonth() + 1).padStart(2, "0")}-${lastMonthEnd.getDate()}`);
+  };
 
   // Solicitar muestra al proveedor
   const requestSample = () => {
@@ -683,10 +863,8 @@ const ProductDetailModal = ({
 
   // Ver informe de ventas
   const viewReport = () => {
-    toast.info(`Informe de ventas para ${product.title}: ${currentMonthMetrics?.sold_count || 0} vendidos este mes, ${currentMonthMetrics?.delivered_count || 0} entregados`);
+    toast.info(`Informe de ventas para ${product.title}: ${displayMetrics.sold_count} vendidos, ${displayMetrics.delivered_count} entregados`);
   };
-
-  const displayMetrics = currentMonthMetrics || metrics;
 
   return createPortal(
     <div
@@ -694,7 +872,7 @@ const ProductDetailModal = ({
       onClick={onClose}
     >
       <div
-        className="relative bg-white dark:bg-gray-900 rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
+        className="relative bg-white dark:bg-gray-900 rounded-2xl max-w-5xl w-full max-h-[90vh] overflow-y-auto shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -730,6 +908,9 @@ const ProductDetailModal = ({
                 src={images[currentImageIndex]}
                 alt={product.title}
                 className="max-h-[200px] object-contain cursor-pointer"
+                onClick={() => {
+                  // Abrir imagen en fullscreen
+                }}
               />
             ) : (
               <div className="text-center text-gray-400">
@@ -803,7 +984,7 @@ const ProductDetailModal = ({
             </div>
           </div>
 
-          {/* Botones de acción - SIN "Enviar a cliente" */}
+          {/* Botones de acción */}
           <div className="flex flex-wrap gap-3">
             <button
               onClick={requestSample}
@@ -842,7 +1023,7 @@ const ProductDetailModal = ({
             </div>
           </div>
 
-          {/* TABS: Detalles | Garantías | Recursos adicionales | Métricas */}
+          {/* TABS */}
           <div className="border-b border-gray-200 dark:border-gray-800">
             <div className="flex gap-6 overflow-x-auto">
               <button
@@ -883,8 +1064,20 @@ const ProductDetailModal = ({
                     : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
                 }`}
               >
-                📊 Métricas del mes
+                📊 Métricas
               </button>
+              {showDeliveryStock && (
+                <button
+                  onClick={() => setActiveTab("delivery_stock")}
+                  className={`pb-3 text-sm font-medium transition-all whitespace-nowrap ${
+                    activeTab === "delivery_stock"
+                      ? "text-primary border-b-2 border-primary"
+                      : "text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+                  }`}
+                >
+                  🚚 Stock en deliveries
+                </button>
+              )}
             </div>
           </div>
 
@@ -936,10 +1129,55 @@ const ProductDetailModal = ({
 
             {activeTab === "metricas" && (
               <div className="space-y-4">
-                {currentMonthLoading ? (
+                {/* Selector de fechas */}
+                <div className="bg-gray-50 dark:bg-gray-800/50 rounded-xl p-4">
+                  <div className="text-xs text-gray-500 dark:text-gray-400 uppercase mb-2">Filtrar por fecha</div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-3">
+                    <button
+                      onClick={setToday}
+                      className="text-xs py-1.5 px-3 rounded-lg bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition-all"
+                    >
+                      Hoy
+                    </button>
+                    <button
+                      onClick={setThisMonth}
+                      className="text-xs py-1.5 px-3 rounded-lg bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition-all"
+                    >
+                      Este mes
+                    </button>
+                    <button
+                      onClick={setLastMonth}
+                      className="text-xs py-1.5 px-3 rounded-lg bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 transition-all"
+                    >
+                      Mes pasado
+                    </button>
+                  </div>
+                  <div className="flex gap-3">
+                    <div className="flex-1">
+                      <label className="text-xs text-gray-500">Desde</label>
+                      <input
+                        type="date"
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm"
+                        value={metricsFromDate}
+                        onChange={(e) => setMetricsFromDate(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex-1">
+                      <label className="text-xs text-gray-500">Hasta</label>
+                      <input
+                        type="date"
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm"
+                        value={metricsToDate}
+                        onChange={(e) => setMetricsToDate(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {customMetricsLoading ? (
                   <div className="text-center py-8">
                     <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-                    <p className="text-sm text-gray-500 mt-2">Cargando métricas del mes...</p>
+                    <p className="text-sm text-gray-500 mt-2">Cargando métricas...</p>
                   </div>
                 ) : (
                   <>
@@ -992,15 +1230,91 @@ const ProductDetailModal = ({
                     </div>
 
                     <div className="text-xs text-gray-400 text-center">
-                      📅 Métricas del {firstDayOfMonth()} al {todayPY()}
+                      📅 Período: {metricsFromDate} al {metricsToDate}
                     </div>
                   </>
                 )}
               </div>
             )}
+
+            {activeTab === "delivery_stock" && showDeliveryStock && (
+              <div className="space-y-4">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gray-50 dark:bg-gray-800/50">
+                      <tr>
+                        <th className="text-left py-2 px-3">Delivery</th>
+                        <th className="text-center py-2 px-3">Stock actual</th>
+                        <th className="text-right py-2 px-3">Estado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {deliveryStocksList?.map((ds) => (
+                        <tr key={ds.delivery_email} className="border-b border-gray-100 dark:border-gray-800">
+                          <td className="py-2 px-3">
+                            <div className="font-medium">{ds.delivery_name}</div>
+                            <div className="text-xs text-gray-400">{ds.delivery_email}</div>
+                          </td>
+                          <td className="text-center py-2 px-3">
+                            <span className={`font-bold ${ds.quantity <= 3 ? "text-red-500" : "text-gray-900 dark:text-white"}`}>
+                              {ds.quantity}
+                            </span>
+                          </td>
+                          <td className="text-right py-2 px-3">
+                            {ds.quantity <= 3 ? (
+                              <span className="text-xs px-2 py-1 rounded-full bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400">
+                                Stock bajo
+                              </span>
+                            ) : ds.quantity > 0 ? (
+                              <span className="text-xs px-2 py-1 rounded-full bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400">
+                                Con stock
+                              </span>
+                            ) : (
+                              <span className="text-xs px-2 py-1 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-500">
+                                Sin stock
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Movimientos recientes */}
+                {deliveryMovements && deliveryMovements.length > 0 && (
+                  <div className="mt-4">
+                    <h4 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">📋 Últimos movimientos</h4>
+                    <div className="space-y-2 max-h-[200px] overflow-y-auto">
+                      {deliveryMovements.slice(0, 10).map((mov) => (
+                        <div key={mov.id} className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800/50 rounded-lg text-sm">
+                          <div>
+                            <span className={`font-bold ${mov.quantity_change > 0 ? "text-green-600" : "text-red-600"}`}>
+                              {mov.quantity_change > 0 ? `+${mov.quantity_change}` : mov.quantity_change}
+                            </span>
+                            <span className="text-gray-600 dark:text-gray-400 ml-2">{mov.reason}</span>
+                            <div className="text-xs text-gray-400">{mov.delivery_email}</div>
+                          </div>
+                          <div className="text-xs text-gray-400">
+                            {new Date(mov.created_at).toLocaleDateString()}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  onClick={onRefreshDeliveryStock}
+                  className="w-full py-2 rounded-lg bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 text-sm font-medium hover:bg-gray-200 dark:hover:bg-gray-700 transition-all"
+                >
+                  🔄 Actualizar
+                </button>
+              </div>
+            )}
           </div>
 
-          {/* Botones de edición y eliminación (solo admin/provider) */}
+          {/* Botones de edición y eliminación */}
           {canEdit && (
             <div className="flex gap-3 pt-4 border-t border-gray-200 dark:border-gray-800">
               <button
@@ -1049,6 +1363,7 @@ export default function ProductsView({
     }[]
   >([]);
   const [deliveryStocks, setDeliveryStocks] = useState<DeliveryStock[]>([]);
+  const [deliveryStockMovements, setDeliveryStockMovements] = useState<DeliveryStockMovement[]>([]);
   const [deliveryUsers, setDeliveryUsers] = useState<{ email: string; name: string }[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -1086,10 +1401,6 @@ export default function ProductsView({
   const [metricsByProduct, setMetricsByProduct] = useState<
     Record<string, ProductMetrics>
   >({});
-  const [currentMonthMetrics, setCurrentMonthMetrics] = useState<
-    Record<string, ProductMetrics>
-  >({});
-  const [currentMonthLoading, setCurrentMonthLoading] = useState(false);
   const [adSpends, setAdSpends] = useState<AdSpend[]>([]);
   const [syncingStock, setSyncingStock] = useState(false);
   const [showAssignStockModal, setShowAssignStockModal] = useState<Product | null>(null);
@@ -1101,6 +1412,7 @@ export default function ProductsView({
   const canSeeMoney = ["admin", "provider", "seller", "despachante"].includes(role);
   const isDelivery = role === "delivery";
   const canAssignStock = ["admin", "provider"].includes(role);
+  const canSeeDeliveryStock = ["admin", "provider"].includes(role);
 
   // Cargar deliveries para asignación de stock
   const loadDeliveryUsers = useCallback(async () => {
@@ -1127,10 +1439,24 @@ export default function ProductsView({
     }
   }, []);
 
+  // Cargar movimientos de stock de deliveries
+  const loadDeliveryStockMovements = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("delivery_stock_movements")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (!error && data) {
+      setDeliveryStockMovements(data as DeliveryStockMovement[]);
+    }
+  }, []);
+
   // Guardar asignación de stock
   const saveDeliveryStockAssignments = async (productId: string, assignments: { delivery_email: string; quantity: number }[]) => {
     for (const assignment of assignments) {
       const existing = deliveryStocks.find(ds => ds.delivery_email === assignment.delivery_email && ds.product_id === productId);
+      const oldQuantity = existing?.quantity || 0;
+      const quantityChange = assignment.quantity - oldQuantity;
       
       if (existing) {
         if (assignment.quantity > 0) {
@@ -1153,9 +1479,23 @@ export default function ProductsView({
             quantity: assignment.quantity
           });
       }
+      
+      // Registrar movimiento
+      if (quantityChange !== 0) {
+        await supabase
+          .from("delivery_stock_movements")
+          .insert({
+            delivery_email: assignment.delivery_email,
+            product_id: productId,
+            quantity_change: quantityChange,
+            reason: quantityChange > 0 ? "Asignación de stock por admin/proveedor" : "Reducción de stock por admin/proveedor",
+            order_id: null
+          });
+      }
     }
     
     await loadDeliveryStocks();
+    await loadDeliveryStockMovements();
     toast.success("Stock asignado correctamente");
     setShowAssignStockModal(null);
   };
@@ -1229,13 +1569,14 @@ export default function ProductsView({
 
     setLoading(true);
 
-    const [prodRes, profRes, stockRes] = await Promise.all([
+    const [prodRes, profRes, stockRes, movementsRes] = await Promise.all([
       supabase
         .from("products")
         .select("*")
         .order("created_at", { ascending: false }),
       supabase.from("profiles").select("email, name, logo_url, phone"),
-      supabase.from("delivery_stock").select("*")
+      supabase.from("delivery_stock").select("*"),
+      supabase.from("delivery_stock_movements").select("*").order("created_at", { ascending: false })
     ]);
 
     if (prodRes.error) {
@@ -1254,7 +1595,10 @@ export default function ProductsView({
 
     const allProducts = (prodRes.data || []) as Product[];
     const deliveryStocksData = (stockRes.data || []) as DeliveryStock[];
+    const movementsData = (movementsRes.data || []) as DeliveryStockMovement[];
+    
     setDeliveryStocks(deliveryStocksData);
+    setDeliveryStockMovements(movementsData);
 
     const visibleProducts = allProducts.filter((p) =>
       canUserSeeProduct(p, role, myEmail, deliveryStocksData)
@@ -1265,57 +1609,81 @@ export default function ProductsView({
     setLoading(false);
   }, [role, myEmail]);
 
-  // Cargar métricas del mes actual para un producto específico
-  const loadCurrentMonthMetricsForProduct = useCallback(async (productId: string) => {
-    const monthStart = firstDayOfMonth();
-    const monthEnd = todayPY();
+  // Listener para stock de delivery cuando se entrega un pedido
+  useEffect(() => {
+    if (!role || !myEmail) return;
 
-    const { data, error } = await supabase
-      .from("orders")
-      .select("*")
-      .gte("created_at", `${monthStart}T00:00:00`)
-      .lte("created_at", `${monthEnd}T23:59:59`);
+    const channel = supabase
+      .channel("delivery-stock-updates")
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "orders",
+        },
+        async (payload) => {
+          const oldOrder = payload.old;
+          const newOrder = payload.new;
 
-    if (error) return emptyMetrics;
+          const wasDelivered = isDeliveredStatus(oldOrder?.status);
+          const isNowDelivered = isDeliveredStatus(newOrder?.status);
 
-    const product = products.find(p => p.id === productId);
-    if (!product) return emptyMetrics;
+          // Solo cuando cambia de NO entregado a ENTREGADO o ENCOMIENDA ENTREGADA
+          if (!wasDelivered && isNowDelivered && newOrder.delivery_email) {
+            const orderSku = getOrderSku(newOrder);
+            const product = products.find(p => p.sku === orderSku);
+            
+            if (product) {
+              const { data: currentStock } = await supabase
+                .from("delivery_stock")
+                .select("quantity")
+                .eq("delivery_email", newOrder.delivery_email)
+                .eq("product_id", product.id)
+                .single();
 
-    let metrics = { ...emptyMetrics, product_id: productId, sku: product.sku || "" };
+              if (currentStock) {
+                const quantity = newOrder.quantity || 1;
+                const newQuantity = Math.max(0, currentStock.quantity - quantity);
+                
+                await supabase
+                  .from("delivery_stock")
+                  .update({ quantity: newQuantity })
+                  .eq("delivery_email", newOrder.delivery_email)
+                  .eq("product_id", product.id);
+                
+                // Registrar movimiento
+                await supabase
+                  .from("delivery_stock_movements")
+                  .insert({
+                    delivery_email: newOrder.delivery_email,
+                    product_id: product.id,
+                    quantity_change: -quantity,
+                    reason: "Pedido entregado / Encomienda entregada",
+                    order_id: newOrder.id
+                  });
+                
+                await loadDeliveryStocks();
+                await loadDeliveryStockMovements();
+              }
+            }
+          }
+        },
+      )
+      .subscribe();
 
-    for (const order of data || []) {
-      const orderSku = getOrderSku(order);
-      if (orderSku !== product.sku) continue;
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [role, myEmail, products, loadDeliveryStocks, loadDeliveryStockMovements]);
 
-      const qty = getOrderQuantity(order);
-      const unitFallbackPrice = Number(product.provider_price_gs || 0) * qty;
-      const saleAmount = getOrderAmount(order, unitFallbackPrice);
-      const realCost = Number(product.real_cost_gs || 0) * qty;
-      const status = getOrderStatus(order);
-      const delivered = isDeliveredStatus(status);
-      const cancelled = isCancelledStatus(status);
-      const returned = isReturnedStatus(status);
-      const noAnswer = isNoAnswerStatus(status);
-      const billed = isBilledStatus(status);
-
-      metrics.sold_count += qty;
-      if (delivered) metrics.delivered_count += qty;
-      if (cancelled) metrics.cancelled_count += qty;
-      if (returned) metrics.returned_count += qty;
-      if (noAnswer) metrics.no_answer_count += qty;
-      if (billed) metrics.billed_count += qty;
-
-      metrics.gross_revenue_gs += saleAmount;
-
-      if (delivered) {
-        metrics.real_revenue_gs += saleAmount;
-        metrics.product_cost_gs += realCost;
-        metrics.gross_profit_gs += saleAmount - realCost;
-      }
-    }
-
-    return metrics;
-  }, [products]);
+  useEffect(() => {
+    load();
+    loadFavorites();
+    loadDeliveryUsers();
+    loadDeliveryStocks();
+    loadDeliveryStockMovements();
+  }, [load, loadFavorites, loadDeliveryUsers, loadDeliveryStocks, loadDeliveryStockMovements]);
 
   const visibleProductIds = useMemo(
     () => products.map((p) => p.id),
@@ -1585,67 +1953,6 @@ export default function ProductsView({
     setSyncingStock(false);
   }, [products]);
 
-  // Listener para stock de delivery cuando se entrega un pedido
-  useEffect(() => {
-    if (!role || !myEmail) return;
-
-    const channel = supabase
-      .channel("delivery-stock-updates")
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "orders",
-        },
-        async (payload) => {
-          const oldOrder = payload.old;
-          const newOrder = payload.new;
-
-          const wasDelivered = isDeliveredStatus(oldOrder?.status);
-          const isNowDelivered = isDeliveredStatus(newOrder?.status);
-
-          if (!wasDelivered && isNowDelivered && newOrder.delivery_email) {
-            // Descontar stock del delivery
-            const orderSku = getOrderSku(newOrder);
-            const product = products.find(p => p.sku === orderSku);
-            
-            if (product) {
-              const { data: currentStock } = await supabase
-                .from("delivery_stock")
-                .select("quantity")
-                .eq("delivery_email", newOrder.delivery_email)
-                .eq("product_id", product.id)
-                .single();
-
-              if (currentStock) {
-                const newQuantity = Math.max(0, currentStock.quantity - (newOrder.quantity || 1));
-                await supabase
-                  .from("delivery_stock")
-                  .update({ quantity: newQuantity })
-                  .eq("delivery_email", newOrder.delivery_email)
-                  .eq("product_id", product.id);
-                
-                await loadDeliveryStocks();
-              }
-            }
-          }
-        },
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [role, myEmail, products, loadDeliveryStocks]);
-
-  useEffect(() => {
-    load();
-    loadFavorites();
-    loadDeliveryUsers();
-    loadDeliveryStocks();
-  }, [load, loadFavorites, loadDeliveryUsers, loadDeliveryStocks]);
-
   useEffect(() => {
     loadMetrics();
     loadAdSpends();
@@ -1698,6 +2005,23 @@ export default function ProductsView({
   const getDeliveryStockForProduct = useCallback((productId: string) => {
     return deliveryStocks.find(ds => ds.delivery_email === myEmail && ds.product_id === productId)?.quantity || 0;
   }, [deliveryStocks, myEmail]);
+
+  const getDeliveryStocksForProduct = useCallback((productId: string) => {
+    return deliveryStocks
+      .filter(ds => ds.product_id === productId)
+      .map(ds => ({
+        delivery_email: ds.delivery_email,
+        quantity: ds.quantity,
+        delivery_name: profileMap[normalizeEmail(ds.delivery_email)]?.name || ds.delivery_email
+      }))
+      .sort((a, b) => b.quantity - a.quantity);
+  }, [deliveryStocks, profileMap]);
+
+  const getDeliveryMovementsForProduct = useCallback((productId: string) => {
+    return deliveryStockMovements
+      .filter(mov => mov.product_id === productId)
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+  }, [deliveryStockMovements]);
 
   const getProductAdSpend = useCallback(
     (productId: string) =>
@@ -2994,8 +3318,13 @@ export default function ProductsView({
           product={showAssignStockModal}
           deliveryStocks={deliveryStocks.filter(ds => ds.product_id === showAssignStockModal.id)}
           deliveries={deliveryUsers}
+          movements={getDeliveryMovementsForProduct(showAssignStockModal.id)}
           onClose={() => setShowAssignStockModal(null)}
           onSave={(assignments) => saveDeliveryStockAssignments(showAssignStockModal.id, assignments)}
+          onRefresh={() => {
+            loadDeliveryStocks();
+            loadDeliveryStockMovements();
+          }}
         />
       )}
 
@@ -3018,6 +3347,13 @@ export default function ProductsView({
           providerPhone={getProviderInfo(selectedProductDetail.provider_email).phone}
           isDelivery={isDelivery}
           deliveryStockQuantity={getDeliveryStockForProduct(selectedProductDetail.id)}
+          showDeliveryStock={canSeeDeliveryStock}
+          deliveryStocksList={getDeliveryStocksForProduct(selectedProductDetail.id)}
+          deliveryMovements={getDeliveryMovementsForProduct(selectedProductDetail.id)}
+          onRefreshDeliveryStock={() => {
+            loadDeliveryStocks();
+            loadDeliveryStockMovements();
+          }}
         />
       )}
 
