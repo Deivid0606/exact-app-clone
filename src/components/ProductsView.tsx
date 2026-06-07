@@ -35,11 +35,13 @@ const normalizeEmail = (s: string | null | undefined) =>
 
 const normalizeRole = (s: string | null | undefined) => {
   const r = (s || "").trim().toLowerCase();
+
   if (["admin", "administrador"].includes(r)) return "admin";
   if (["provider", "proveedor"].includes(r)) return "provider";
   if (["seller", "vendedor"].includes(r)) return "seller";
   if (["despachante", "dispatcher"].includes(r)) return "despachante";
   if (["delivery", "repartidor"].includes(r)) return "delivery";
+
   return r;
 };
 
@@ -404,7 +406,6 @@ const AssignDeliveryStockModal = ({
     setLocalMovements(data || []);
   }, [product.id]);
 
-  // FIX: cargar movimientos al montar también (no solo al cambiar pestaña)
   useEffect(() => {
     loadMovements();
   }, [loadMovements]);
@@ -906,7 +907,6 @@ const ProductDetailModal = ({
                   </button>
                 </div>
 
-                {/* FIX: usar deliveryStocksList directamente del prop (sin estado local) */}
                 {deliveryStocksList && deliveryStocksList.length > 0 ? (
                   <div className="overflow-x-auto">
                     <table className="w-full text-sm">
@@ -1011,6 +1011,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
   const [adSpends, setAdSpends] = useState<AdSpend[]>([]);
   const [syncingStock, setSyncingStock] = useState(false);
   const [showAssignStockModal, setShowAssignStockModal] = useState<Product | null>(null);
+  const [deliveryStocksForEdit, setDeliveryStocksForEdit] = useState<{ delivery_email: string; quantity: number }[]>([]);
 
   const canSeeRealStock = ["admin", "provider", "despachante"].includes(role);
   const canEdit = ["admin", "provider", "despachante"].includes(role);
@@ -1029,7 +1030,6 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
     }
   }, [canAssignStock]);
 
-  // FIX: loadDeliveryStocks ahora es async y retorna Promise<void>
   const loadDeliveryStocks = useCallback(async (): Promise<void> => {
     const { data, error } = await supabase.from("delivery_stock").select("*");
     if (!error && data) {
@@ -1440,24 +1440,62 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
   const getInitials = (name: string) => name.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() || "").join("") || "PR";
 
   const openAdd = () => setEditProduct({ id: "", ...emptyProduct, isNew: true, provider_email: role === "provider" ? myEmail : "" } as any);
-  const openEdit = (p: Product) => setEditProduct({ ...p });
+  
+  const openEdit = (p: Product) => {
+    setEditProduct({ ...p });
+    // Cargar stocks actuales para este producto
+    const currentStocks = deliveryStocks
+      .filter(ds => ds.product_id === p.id)
+      .map(ds => ({ delivery_email: ds.delivery_email, quantity: ds.quantity }));
+    setDeliveryStocksForEdit(currentStocks);
+  };
 
   const saveProduct = async () => {
     if (!editProduct) return;
     const { isNew, id, ...data } = editProduct as any;
     if (!data.title || !data.sku) { toast.error("Título y SKU son obligatorios"); return; }
     if (role === "provider") data.provider_email = myEmail;
+    
+    let savedProductId = id;
+    
     if (isNew) {
-      const { error } = await supabase.from("products").insert(data);
+      const { data: inserted, error } = await supabase.from("products").insert(data).select().single();
       if (error) { toast.error(error.message); return; }
       toast.success("Producto creado");
+      savedProductId = inserted.id;
     } else {
       const { error } = await supabase.from("products").update(data).eq("id", id);
       if (error) { toast.error(error.message); return; }
       toast.success("Producto actualizado");
     }
+
+    // Guardar stocks de delivery
+    if (savedProductId && canAssignStock) {
+      // Eliminar stocks existentes
+      await supabase.from("delivery_stock").delete().eq("product_id", savedProductId);
+      // Insertar nuevos stocks
+      for (const stock of deliveryStocksForEdit) {
+        if (stock.quantity > 0) {
+          await supabase.from("delivery_stock").insert({
+            delivery_email: stock.delivery_email,
+            product_id: savedProductId,
+            quantity: stock.quantity
+          });
+          // Registrar movimiento
+          await supabase.from("delivery_stock_movements").insert({
+            delivery_email: stock.delivery_email,
+            product_id: savedProductId,
+            quantity_change: stock.quantity,
+            reason: "➕ Asignación de stock por admin/proveedor",
+            order_id: null,
+          });
+        }
+      }
+    }
+
     setEditProduct(null);
     load();
+    loadDeliveryStocks();
   };
 
   const deleteProduct = async (productId: string) => {
@@ -1503,6 +1541,19 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
       toast.error(error?.message || "No se pudo eliminar");
     }
   };
+
+  const softColors = [
+    "from-blue-500/5 to-blue-600/5 border-blue-200/30",
+    "from-emerald-500/5 to-emerald-600/5 border-emerald-200/30",
+    "from-purple-500/5 to-purple-600/5 border-purple-200/30",
+    "from-amber-500/5 to-amber-600/5 border-amber-200/30",
+    "from-rose-500/5 to-rose-600/5 border-rose-200/30",
+    "from-cyan-500/5 to-cyan-600/5 border-cyan-200/30",
+    "from-indigo-500/5 to-indigo-600/5 border-indigo-200/30",
+    "from-teal-500/5 to-teal-600/5 border-teal-200/30",
+    "from-orange-500/5 to-orange-600/5 border-orange-200/30",
+    "from-pink-500/5 to-pink-600/5 border-pink-200/30",
+  ];
 
   return (
     <div className="app-card space-y-8">
@@ -1781,7 +1832,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                   </div>
                 </div>
                 <div className="flex flex-wrap gap-3">
-                  {[{ label: "Productos", val: group.items.length, color: "text-white" }, { label: "Vendidos", val: group.totals.sold, color: "text-white" }, { label: "Entregados", val: group.totals.delivered, color: "text-white" }].map(({ label, val }) => (
+                  {[{ label: "Productos", val: group.items.length }, { label: "Vendidos", val: group.totals.sold }, { label: "Entregados", val: group.totals.delivered }].map(({ label, val }) => (
                     <div key={label} className="text-center px-3 py-1 rounded-xl bg-white/5 border border-white/10">
                       <div className="font-bold text-white">{val}</div>
                       <div className="text-[10px] text-white/40">{label}</div>
@@ -2029,6 +2080,119 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
                 <label className="app-label">Recursos adicionales</label>
                 <textarea className="app-input min-h-[80px]" value={editProduct.additional_resources || ""} onChange={(e) => setEditProduct({ ...editProduct, additional_resources: e.target.value })} placeholder="Links a videos, manuales, fichas técnicas, etc." />
               </div>
+
+              {/* SECCIÓN DE STOCK POR DELIVERY DENTRO DEL MODAL DE EDICIÓN */}
+              {canAssignStock && (
+                <div className="col-span-1 sm:col-span-2 border-t border-border/50 pt-4 mt-2">
+                  <label className="app-label text-base font-bold flex items-center gap-2">
+                    <span>📦</span> Stock por delivery
+                  </label>
+                  <p className="text-xs text-muted-foreground mb-3">
+                    Asignar stock específico a cada delivery
+                  </p>
+                  
+                  <div className="space-y-2 max-h-[300px] overflow-y-auto border border-border/50 rounded-lg p-3 bg-secondary/20">
+                    {deliveryUsers.length === 0 ? (
+                      <div className="text-center py-4 text-muted-foreground text-sm">
+                        No hay deliveries registrados en el sistema
+                      </div>
+                    ) : (
+                      deliveryUsers.map((delivery) => {
+                        const currentStock = deliveryStocksForEdit.find(
+                          ds => ds.delivery_email === delivery.email
+                        )?.quantity || 0;
+                        
+                        return (
+                          <div key={delivery.email} className="flex items-center justify-between gap-3 p-2 rounded-lg bg-background/50 border border-border/50">
+                            <div className="flex-1 min-w-0">
+                              <div className="font-medium text-sm">{delivery.name}</div>
+                              <div className="text-xs text-muted-foreground truncate">{delivery.email}</div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const newStock = Math.max(0, currentStock - 1);
+                                  setDeliveryStocksForEdit(prev => {
+                                    const existing = prev.find(ds => ds.delivery_email === delivery.email);
+                                    if (existing) {
+                                      if (newStock === 0) {
+                                        return prev.filter(ds => ds.delivery_email !== delivery.email);
+                                      }
+                                      return prev.map(ds => 
+                                        ds.delivery_email === delivery.email 
+                                          ? { ...ds, quantity: newStock }
+                                          : ds
+                                      );
+                                    } else if (newStock > 0) {
+                                      return [...prev, { delivery_email: delivery.email, quantity: newStock }];
+                                    }
+                                    return prev;
+                                  });
+                                }}
+                                className="w-7 h-7 rounded-full bg-destructive/20 text-destructive hover:bg-destructive/30 transition-all"
+                              >
+                                -
+                              </button>
+                              <input
+                                type="number"
+                                className="w-16 text-center py-1.5 rounded-lg bg-background border border-border text-sm font-mono"
+                                value={currentStock}
+                                onChange={(e) => {
+                                  const newStock = Math.max(0, parseInt(e.target.value) || 0);
+                                  setDeliveryStocksForEdit(prev => {
+                                    const existing = prev.find(ds => ds.delivery_email === delivery.email);
+                                    if (existing) {
+                                      if (newStock === 0) {
+                                        return prev.filter(ds => ds.delivery_email !== delivery.email);
+                                      }
+                                      return prev.map(ds => 
+                                        ds.delivery_email === delivery.email 
+                                          ? { ...ds, quantity: newStock }
+                                          : ds
+                                      );
+                                    } else if (newStock > 0) {
+                                      return [...prev, { delivery_email: delivery.email, quantity: newStock }];
+                                    }
+                                    return prev;
+                                  });
+                                }}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const newStock = currentStock + 1;
+                                  setDeliveryStocksForEdit(prev => {
+                                    const existing = prev.find(ds => ds.delivery_email === delivery.email);
+                                    if (existing) {
+                                      return prev.map(ds => 
+                                        ds.delivery_email === delivery.email 
+                                          ? { ...ds, quantity: newStock }
+                                          : ds
+                                      );
+                                    } else {
+                                      return [...prev, { delivery_email: delivery.email, quantity: newStock }];
+                                    }
+                                  });
+                                }}
+                                className="w-7 h-7 rounded-full bg-primary/20 text-primary hover:bg-primary/30 transition-all"
+                              >
+                                +
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                  
+                  {deliveryStocksForEdit.length > 0 && (
+                    <div className="text-xs text-muted-foreground mt-2">
+                      Total stock asignado: {deliveryStocksForEdit.reduce((sum, ds) => sum + ds.quantity, 0)} unidades
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
             <div className="flex gap-2 justify-between">
               <div>
