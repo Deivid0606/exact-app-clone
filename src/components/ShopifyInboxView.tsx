@@ -330,45 +330,119 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         });
         setRowStatuses(statusMap);
         setRowOrderNumbers(orderNumberMap);
+        console.log("📊 Estados cargados desde BD:", statusMap);
+      } else if (error) {
+        console.error("Error cargando estados:", error);
       }
     } catch (err) { console.error(err); }
     finally { setLoadingStatuses(false); }
   }, [myEmail, sheetUrl]);
 
   const setRowStatus = useCallback(async (key: string, status: OrderStatus, orderNumber?: string) => {
-    if (!myEmail || !sheetUrl) return;
-    const rowIndex = parseInt(key);
+    if (!myEmail || !sheetUrl) {
+      toast.error("Falta email o URL del sheet");
+      return;
+    }
     
+    const rowIndex = parseInt(key);
+    console.log(`📝 Actualizando estado: Fila ${rowIndex + 1} -> "${status}"`);
+    
+    // Guardar el estado anterior por si hay error
+    const previousStatus = rowStatuses[key];
+    
+    // Actualizar UI inmediatamente (optimista)
     setRowStatuses(prev => ({ ...prev, [key]: status }));
     if (orderNumber) {
       setRowOrderNumbers(prev => ({ ...prev, [key]: orderNumber }));
     }
     
-    if (status !== "CARGAR") {
-      await supabase.from("sheet_row_statuses").upsert({
-        user_email: myEmail, sheet_url: sheetUrl, row_index: rowIndex,
-        status: status, order_number: orderNumber || null, updated_at: new Date().toISOString()
-      }, { onConflict: 'user_email,sheet_url,row_index' });
-    } else {
-      await supabase
-        .from("sheet_row_statuses")
-        .delete()
-        .eq("user_email", myEmail)
-        .eq("sheet_url", sheetUrl)
-        .eq("row_index", rowIndex);
-      
-      setRowStatuses(prev => {
-        const newState = { ...prev };
-        delete newState[key];
-        return newState;
-      });
-      setRowOrderNumbers(prev => {
-        const newState = { ...prev };
-        delete newState[key];
-        return newState;
-      });
+    try {
+      if (status !== "CARGAR") {
+        // Guardar o actualizar en BD
+        const { error } = await supabase
+          .from("sheet_row_statuses")
+          .upsert({
+            user_email: myEmail,
+            sheet_url: sheetUrl,
+            row_index: rowIndex,
+            status: status,
+            order_number: orderNumber || null,
+            updated_at: new Date().toISOString()
+          }, {
+            onConflict: 'user_email,sheet_url,row_index'
+          });
+        
+        if (error) throw error;
+        
+        console.log(`✅ Estado guardado: ${status}`);
+        const statusMessages = {
+          "CANCELADO": "❌ Cancelado",
+          "A DROPEAR": "⚠️ A Dropear",
+          "CARGADO": "✅ Cargado Auto",
+          "CARGADO_MANUAL": "✍️ Cargado Manual",
+          "CARGAR": "⏳ Pendiente"
+        };
+        toast.success(`✅ Estado: ${statusMessages[status] || status}`);
+        
+      } else {
+        // Eliminar de BD (volver a pendiente)
+        const { error } = await supabase
+          .from("sheet_row_statuses")
+          .delete()
+          .eq("user_email", myEmail)
+          .eq("sheet_url", sheetUrl)
+          .eq("row_index", rowIndex);
+        
+        if (error) throw error;
+        
+        // Limpiar del estado local
+        setRowStatuses(prev => {
+          const newState = { ...prev };
+          delete newState[key];
+          return newState;
+        });
+        setRowOrderNumbers(prev => {
+          const newState = { ...prev };
+          delete newState[key];
+          return newState;
+        });
+        
+        console.log(`✅ Estado eliminado (Pendiente)`);
+        toast.success(`✅ Estado: ⏳ Pendiente`);
+      }
+    } catch (error: any) {
+      console.error("❌ Error al guardar estado:", error);
+      // Revertir cambio local
+      setRowStatuses(prev => ({ ...prev, [key]: previousStatus }));
+      toast.error(`Error: ${error.message}`);
     }
-  }, [myEmail, sheetUrl]);
+  }, [myEmail, sheetUrl, rowStatuses]);
+
+  // Suscribirse a cambios en tiempo real
+  useEffect(() => {
+    if (!myEmail || !sheetUrl) return;
+    
+    const channel = supabase
+      .channel('sheet_row_statuses_changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'sheet_row_statuses',
+          filter: `user_email=eq.${myEmail}`,
+        },
+        (payload) => {
+          console.log('🔄 Cambio detectado en tiempo real:', payload);
+          loadStatusesFromDatabase();
+        }
+      )
+      .subscribe();
+    
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [myEmail, sheetUrl, loadStatusesFromDatabase]);
 
   useEffect(() => {
     localStorage.setItem(AUTO_LOAD_KEY, autoLoad.toString());
@@ -466,7 +540,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       customer_name: order[colKeys.name] || "", 
       phone: extractPhoneNumber(order[colKeys.phone] || ""),
       city: city,
-      departamento: departamento || "", // AGREGADO: departamento automático
+      departamento: departamento || "",
       street: order[colKeys.street] || "", 
       district: "", 
       email: "", 
@@ -973,6 +1047,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         <button className={`px-2 py-0.5 text-[11px] rounded transition ${autoLoad ? "bg-green-600" : "bg-slate-700"}`} onClick={toggleAutoLoad}>
           {autoLoad ? "🤖 Auto ON" : "🤖 Auto OFF"}
         </button>
+        <button 
+          className="px-2 py-0.5 text-[11px] bg-red-600 hover:bg-red-700 rounded transition" 
+          onClick={() => loadStatusesFromDatabase()}
+        >
+          🔄 Recargar estados
+        </button>
         {lastSync && <span className="text-[9px] text-slate-500 self-center">🔄 {lastSync.toLocaleTimeString("es-PY")}</span>}
       </div>
 
@@ -1107,7 +1187,11 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                     <select
                       className="bg-slate-800 border border-slate-700 rounded px-1 py-0.5 text-[10px] focus:outline-none focus:border-blue-500"
                       value={status}
-                      onChange={(e) => setRowStatus(String(idx), e.target.value as OrderStatus, orderNumber || undefined)}
+                      onChange={(e) => {
+                        const newStatus = e.target.value as OrderStatus;
+                        console.log(`🔄 Cambiando estado de fila ${idx + 1} de ${status} a ${newStatus}`);
+                        setRowStatus(String(idx), newStatus, orderNumber || undefined);
+                      }}
                     >
                       <option value="CARGAR">⏳ Pendiente</option>
                       <option value="A DROPEAR">⚠️ Dropear</option>
