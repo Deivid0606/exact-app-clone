@@ -155,6 +155,7 @@ const getCityDepartment = (cityName: string): string | null => {
   if (normalized.includes("interior") || normalized.includes("pagoanticipado")) return "Varios";
   if (normalized.includes("augusto") || (normalized.includes("saldivar") && normalized.length < 20)) return "Central";
   if (normalized.includes("villaelsa") || normalized.includes("villaelisa")) return "Central";
+  if (normalized.includes("ciudaddeleste") || normalized.includes("cdedeleste")) return "Alto Paraná";
   
   return CITY_DEPARTMENT_MAP[normalized] || null;
 };
@@ -389,6 +390,18 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     if (sheetUrl && !initialLoadDone) { readSheet(); setInitialLoadDone(true); }
   }, [sheetUrl]);
 
+  // Debug: Mostrar ciudades encontradas y sus departamentos
+  useEffect(() => {
+    if (sheetOrders.length > 0 && colKeys.city) {
+      const uniqueCities = [...new Set(sheetOrders.map(o => o[colKeys.city]).filter(c => c))];
+      console.log("🏙️ CIUDADES ENCONTRADAS EN EL SHEET:");
+      uniqueCities.forEach(city => {
+        const depto = getCityDepartment(city);
+        console.log(`  - "${city}" → Depto: ${depto || "❌ NO ENCONTRADO"}`);
+      });
+    }
+  }, [sheetOrders, colKeys.city]);
+
   const readSheet = useCallback(async () => {
     if (!sheetUrl) { toast.error("Configurá tu URL de Google Sheet"); return; }
     setLoading(true);
@@ -433,7 +446,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const departamento = getCityDepartment(city);
     if (!departamento) {
       toast.warning(`⚠️ No se pudo determinar el departamento para "${city}"`);
-      // Puedes decidir si continuar o no - aquí continuamos con string vacío
     }
     
     const salePrice = getAmountFromRow(order, colKeys.amount);
@@ -808,7 +820,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                 </div>
                 <div className="col-span-2 md:col-span-1">
                   <div className="text-slate-400 text-[9px] uppercase tracking-wider">Departamento</div>
-                  <div className="text-white mt-0.5">{departamento || "—"}</div>
+                  <div className="text-white mt-0.5 font-medium">{departamento || "—"}</div>
                 </div>
                 <div className="col-span-2">
                   <div className="text-slate-400 text-[9px] uppercase tracking-wider">Calle / Dirección</div>
@@ -1034,7 +1046,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">Fecha</th>
               <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">Cliente</th>
               <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">Teléfono</th>
-              <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">Ciudad / Delivery</th>
+              <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">Ciudad</th>
+              <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">Departamento</th>
+              <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">Delivery</th>
               <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">Producto</th>
               <th className="px-1.5 py-1.5 text-center text-[10px] font-medium text-slate-400">Cant</th>
               <th className="px-1.5 py-1.5 text-right text-[10px] font-medium text-slate-400">Venta</th>
@@ -1067,16 +1081,28 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                   <td className="px-1.5 py-1 text-[10px]">{order[colKeys.phone]?.substring(0, 15) || "—"}</td>
                   <td className="px-1.5 py-1 text-[10px]">
                     <div className={covered ? "text-green-400" : "text-red-400"}>
-                      {city?.substring(0, 20) || "—"}
-                      {deliveryPrice && <span className="text-[9px] text-slate-400 ml-0.5">({nf(deliveryPrice)} Gs)</span>}
-                      {departamento && <span className="text-[8px] text-slate-500 ml-1">[{departamento}]</span>}
+                      {city?.substring(0, 25) || "—"}
                     </div>
+                  </td>
+                  <td className="px-1.5 py-1 text-[10px]">
+                    <div className={departamento ? "text-blue-400 font-medium" : "text-slate-500"}>
+                      {departamento || "—"}
+                    </div>
+                  </td>
+                  <td className="px-1.5 py-1 text-[10px]">
+                    {deliveryPrice ? (
+                      <span className="text-orange-400 font-medium">{nf(deliveryPrice)} Gs</span>
+                    ) : (
+                      <span className="text-slate-500">—</span>
+                    )}
                   </td>
                   <td className="px-1.5 py-1 text-[10px] max-w-[150px] truncate" title={order[colKeys.product] || ""}>
                     {order[colKeys.product]?.substring(0, 25) || "—"}
                   </td>
                   <td className="px-1.5 py-1 text-[10px] text-center">{parseQuantity(order[colKeys.qty])}</td>
-                  <td className="px-1.5 py-1 text-[10px] text-right text-green-400">{salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}</td>
+                  <td className="px-1.5 py-1 text-[10px] text-right text-green-400">
+                    {salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}
+                  </td>
                   <td className="px-1.5 py-1 text-center">
                     <select
                       className="bg-slate-800 border border-slate-700 rounded px-1 py-0.5 text-[10px] focus:outline-none focus:border-blue-500"
@@ -1122,7 +1148,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             })}
             {filteredOrders.length === 0 && (
               <tr>
-                <td colSpan={11} className="text-center py-4 text-slate-500 text-[10px]">No hay pedidos para mostrar</td>
+                <td colSpan={13} className="text-center py-4 text-slate-500 text-[10px]">
+                  No hay pedidos para mostrar
+                </td>
               </tr>
             )}
           </tbody>
