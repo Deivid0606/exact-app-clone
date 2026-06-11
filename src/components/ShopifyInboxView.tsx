@@ -53,6 +53,82 @@ const CITY_COVERAGE_MAP: Record<string, number> = {
   "ypacarai": 55000, "ypane": 45000
 };
 
+// MAPA DE CIUDADES A DEPARTAMENTOS
+const CITY_DEPARTMENT_MAP: Record<string, string> = {
+  "altos": "Cordillera",
+  "aregua": "Central",
+  "asuncion": "Central",
+  "atyra": "Cordillera",
+  "benjaminaceval": "Presidente Hayes",
+  "caacupe": "Cordillera",
+  "caaguazu": "Caaguazú",
+  "capiata": "Central",
+  "carapegua": "Paraguarí",
+  "ciudaddeleste": "Alto Paraná",
+  "coloniyguazu": "Alto Paraná",
+  "coronelbogado": "Itapúa",
+  "coroneloviedo": "Caaguazú",
+  "emboscada": "Cordillera",
+  "encarnacion": "Itapúa",
+  "escobar": "Paraguarí",
+  "eusebioayala": "Cordillera",
+  "felixperezcardozo": "Caaguazú",
+  "fernandodelamora": "Central",
+  "generalbernardinocaballero": "Paraguarí",
+  "guarambare": "Central",
+  "hernandarias": "Alto Paraná",
+  "interiorpagoanticipado": "Varios",
+  "ita": "Central",
+  "itacurubidelacordillera": "Cordillera",
+  "itaugua": "Central",
+  "jaugustosaldivar": "Central",
+  "jaugustosaldívar": "Central",
+  "jagugustosaldivar": "Central",
+  "juanleonmalloriquin": "Alto Paraná",
+  "karaguatay": "Cordillera",
+  "lambare": "Central",
+  "limpio": "Central",
+  "lomagrande": "Cordillera",
+  "luque": "Central",
+  "marianoroquealonso": "Central",
+  "mauriciojosetroche": "Caaguazú",
+  "mbocayaty": "Guairá",
+  "mingaguazu": "Alto Paraná",
+  "nataliciotalavera": "Caaguazú",
+  "ñemby": "Central",
+  "nemby": "Central",
+  "nuevaitalia": "Cordillera",
+  "paraguari": "Paraguarí",
+  "pedrojuancaballero": "Amambay",
+  "pirayu": "Paraguarí",
+  "piribebuy": "Cordillera",
+  "presidentefranco": "Alto Paraná",
+  "puertopresidentefranco": "Alto Paraná",
+  "remansito": "Presidente Hayes",
+  "repatriacion": "Caaguazú",
+  "sanalberto": "Alto Paraná",
+  "santonio": "Central",
+  "sanantonio": "Central",
+  "sanbernardino": "Cordillera",
+  "sanestanislao": "San Pedro",
+  "sanjosedelosarroyos": "Caaguazú",
+  "sanlorenzo": "Central",
+  "santahelena": "Cordillera",
+  "santarita": "Alto Paraná",
+  "sapucai": "Paraguarí",
+  "tobati": "Cordillera",
+  "villaelsa": "Central",
+  "villaelisa": "Central",
+  "villahayes": "Presidente Hayes",
+  "villarrica": "Guairá",
+  "villeta": "Central",
+  "yaguaron": "Paraguarí",
+  "yataitydelnorte": "Caaguazú",
+  "yguazu": "Alto Paraná",
+  "ypacarai": "Cordillera",
+  "ypane": "Central"
+};
+
 const hasCoverage = (cityName: string): boolean => {
   if (!cityName) return false;
   const normalized = normalizeText(cityName);
@@ -68,6 +144,19 @@ const getCityDeliveryPrice = (cityName: string): number | null => {
   if (normalized.includes("interior") || normalized.includes("pagoanticipado")) return 35000;
   if (normalized.includes("augusto") || (normalized.includes("saldivar") && normalized.length < 20)) return 45000;
   return CITY_COVERAGE_MAP[normalized] || null;
+};
+
+// Función para obtener el departamento según la ciudad
+const getCityDepartment = (cityName: string): string | null => {
+  if (!cityName) return null;
+  const normalized = normalizeText(cityName);
+  
+  // Casos especiales
+  if (normalized.includes("interior") || normalized.includes("pagoanticipado")) return "Varios";
+  if (normalized.includes("augusto") || (normalized.includes("saldivar") && normalized.length < 20)) return "Central";
+  if (normalized.includes("villaelsa") || normalized.includes("villaelisa")) return "Central";
+  
+  return CITY_DEPARTMENT_MAP[normalized] || null;
 };
 
 function parseQuantity(value: any): number {
@@ -340,6 +429,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       return false; 
     }
     
+    // OBTENER DEPARTAMENTO
+    const departamento = getCityDepartment(city);
+    if (!departamento) {
+      toast.warning(`⚠️ No se pudo determinar el departamento para "${city}"`);
+      // Puedes decidir si continuar o no - aquí continuamos con string vacío
+    }
+    
     const salePrice = getAmountFromRow(order, colKeys.amount);
     if (salePrice === 0) { 
       toast.warning(`⚠️ No se detectó monto en fila ${idx + 1}`); 
@@ -357,7 +453,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       created_by: myEmail,
       customer_name: order[colKeys.name] || "", 
       phone: extractPhoneNumber(order[colKeys.phone] || ""),
-      city: city, 
+      city: city,
+      departamento: departamento || "", // AGREGADO: departamento automático
       street: order[colKeys.street] || "", 
       district: "", 
       email: "", 
@@ -384,7 +481,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
     
     await setRowStatus(String(idx), newStatus, orderId);
-    toast.success(`✅ Pedido ${orderId} cargado | Delivery: ${nf(deliveryPrice)} Gs`);
+    toast.success(`✅ Pedido ${orderId} cargado | Delivery: ${nf(deliveryPrice)} Gs | Depto: ${departamento || "?"}`);
     return true;
   }, [colKeys, matchProduct, myEmail, setRowStatus]);
 
@@ -607,6 +704,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const city = order[colKeys.city] || "";
     const covered = hasCoverage(city);
     const deliveryPrice = getCityDeliveryPrice(city);
+    const departamento = getCityDepartment(city);
     const salePrice = getDisplayAmount(order);
     const productName = order[colKeys.product] || "";
     const matched = matchProduct(productName);
@@ -709,6 +807,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                   </div>
                 </div>
                 <div className="col-span-2 md:col-span-1">
+                  <div className="text-slate-400 text-[9px] uppercase tracking-wider">Departamento</div>
+                  <div className="text-white mt-0.5">{departamento || "—"}</div>
+                </div>
+                <div className="col-span-2">
                   <div className="text-slate-400 text-[9px] uppercase tracking-wider">Calle / Dirección</div>
                   <div className="text-white mt-0.5">{order[colKeys.street] || "—"}</div>
                 </div>
@@ -950,6 +1052,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               const orderDate = getOrderDate(order);
               const canLoad = status === "CARGAR" && covered && salePrice > 0;
               const orderNumber = getRowOrderNumber(idx);
+              const departamento = getCityDepartment(city);
 
               return (
                 <tr key={idx} className={getRowClassName(status, covered)}>
@@ -966,6 +1069,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                     <div className={covered ? "text-green-400" : "text-red-400"}>
                       {city?.substring(0, 20) || "—"}
                       {deliveryPrice && <span className="text-[9px] text-slate-400 ml-0.5">({nf(deliveryPrice)} Gs)</span>}
+                      {departamento && <span className="text-[8px] text-slate-500 ml-1">[{departamento}]</span>}
                     </div>
                   </td>
                   <td className="px-1.5 py-1 text-[10px] max-w-[150px] truncate" title={order[colKeys.product] || ""}>
