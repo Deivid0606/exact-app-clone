@@ -1245,4 +1245,4 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       {renderGuideModal()}
     </div>
   );
-}    cuando le doy a estado  auto no guarda  y tambien en acciones le doy cargar y carga , pero no hace desaparecer de la fila y dejar en cargados
+}
