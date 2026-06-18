@@ -324,8 +324,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         const statusMap: Record<string, OrderStatus> = {};
         const orderNumberMap: Record<string, string> = {};
         data.forEach(item => { 
-          // 🔥 CORRECCIÓN: Convertir de 1-based (BD) a 0-based (array)
-          const idx = String(item.row_index - 1);
+          // ✅ MANTENER 0-based (igual que el array)
+          const idx = String(item.row_index);
           statusMap[idx] = item.status as OrderStatus;
           if (item.order_number) {
             orderNumberMap[idx] = item.order_number;
@@ -346,12 +346,11 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       throw new Error("Falta email o URL del sheet");
     }
     
-    // 🔥 CORRECCIÓN: +1 para convertir de 0-based (array) a 1-based (sheet)
-    const rowIndex = parseInt(key) + 1;
-    console.log(`📝 Persistiendo estado en BD: Fila ${rowIndex} (sheet) -> "${status}"`);
+    // ✅ MANTENER 0-based (igual que el array)
+    const rowIndex = parseInt(key);
+    console.log(`📝 Persistiendo estado en BD: Fila ${rowIndex} (0-based) -> "${status}"`);
     
     if (status !== "CARGAR") {
-      // Guardar o actualizar en BD
       const { data, error } = await supabase
         .from("sheet_row_statuses")
         .upsert({
@@ -374,7 +373,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       console.log(`✅ Estado persistido: ${status}`, data);
       
     } else {
-      // Eliminar de BD (volver a pendiente)
       const { data, error } = await supabase
         .from("sheet_row_statuses")
         .delete()
