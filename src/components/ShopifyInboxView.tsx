@@ -309,9 +309,16 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return rowOrderNumbers[String(idx)] || null;
   }, [rowOrderNumbers]);
 
+  // FUNCIÓN MEJORADA PARA CARGAR ESTADOS - CON LOGS DETALLADOS
   const loadStatusesFromDatabase = useCallback(async () => {
-    if (!myEmail || !sheetUrl) return;
+    if (!myEmail || !sheetUrl) {
+      console.log("⏭️ Saltando carga de estados: falta email o sheetUrl");
+      return;
+    }
+    
     setLoadingStatuses(true);
+    console.log("📊 Cargando estados desde BD...");
+    
     try {
       const { data, error } = await supabase
         .from("sheet_row_statuses")
@@ -322,20 +329,28 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       if (!error && data) {
         const statusMap: Record<string, OrderStatus> = {};
         const orderNumberMap: Record<string, string> = {};
+        
         data.forEach(item => { 
           statusMap[String(item.row_index)] = item.status as OrderStatus;
           if (item.order_number) {
             orderNumberMap[String(item.row_index)] = item.order_number;
           }
         });
+        
+        console.log("📊 Estados cargados desde BD:", statusMap);
+        console.log("📊 Números de orden cargados:", orderNumberMap);
+        
         setRowStatuses(statusMap);
         setRowOrderNumbers(orderNumberMap);
-        console.log("📊 Estados cargados desde BD:", statusMap);
       } else if (error) {
-        console.error("Error cargando estados:", error);
+        console.error("❌ Error cargando estados:", error);
       }
-    } catch (err) { console.error(err); }
-    finally { setLoadingStatuses(false); }
+    } catch (err) { 
+      console.error("❌ Error en loadStatusesFromDatabase:", err); 
+    }
+    finally { 
+      setLoadingStatuses(false); 
+    }
   }, [myEmail, sheetUrl]);
 
   const setRowStatus = useCallback(async (key: string, status: OrderStatus, orderNumber?: string) => {
@@ -346,17 +361,26 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     
     const rowIndex = parseInt(key);
     console.log(`📝 Actualizando estado: Fila ${rowIndex + 1} -> "${status}"`);
+    console.log(`📝 OrderNumber: ${orderNumber || "ninguno"}`);
     
     // Guardar el estado anterior por si hay error
     const previousStatus = rowStatuses[key];
     const previousOrderNumber = rowOrderNumbers[key];
     
-    // Actualizar UI inmediatamente (optimista)
-    setRowStatuses(prev => ({ ...prev, [key]: status }));
+    // ACTUALIZACIÓN OPTIMISTA - UI inmediata
+    setRowStatuses(prev => {
+      const newState = { ...prev };
+      if (status === "CARGAR") {
+        delete newState[key];
+      } else {
+        newState[key] = status;
+      }
+      return newState;
+    });
+    
     if (orderNumber) {
       setRowOrderNumbers(prev => ({ ...prev, [key]: orderNumber }));
     } else if (status === "CARGAR") {
-      // Si se vuelve a pendiente, eliminar el número de orden
       setRowOrderNumbers(prev => {
         const newState = { ...prev };
         delete newState[key];
@@ -380,9 +404,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             onConflict: 'user_email,sheet_url,row_index'
           });
         
-        if (error) throw error;
+        if (error) {
+          console.error("❌ Error en upsert:", error);
+          throw error;
+        }
         
-        console.log(`✅ Estado guardado: ${status}`);
+        console.log(`✅ Estado guardado en BD: ${status} para fila ${rowIndex + 1}`);
+        
         const statusMessages = {
           "CANCELADO": "❌ Cancelado",
           "A DROPEAR": "⚠️ A Dropear",
@@ -401,27 +429,31 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           .eq("sheet_url", sheetUrl)
           .eq("row_index", rowIndex);
         
-        if (error) throw error;
+        if (error) {
+          console.error("❌ Error en delete:", error);
+          throw error;
+        }
         
-        // Limpiar del estado local
-        setRowStatuses(prev => {
-          const newState = { ...prev };
-          delete newState[key];
-          return newState;
-        });
-        setRowOrderNumbers(prev => {
-          const newState = { ...prev };
-          delete newState[key];
-          return newState;
-        });
-        
-        console.log(`✅ Estado eliminado (Pendiente)`);
+        console.log(`✅ Estado eliminado de BD para fila ${rowIndex + 1}`);
         toast.success(`✅ Estado: ⏳ Pendiente`);
       }
+      
+      // 🔥 FORZAR RECARGA COMPLETA DE ESTADOS DESDE BD
+      console.log("🔄 Forzando recarga de estados desde BD...");
+      await loadStatusesFromDatabase();
+      
     } catch (error: any) {
       console.error("❌ Error al guardar estado:", error);
       // Revertir cambio local
-      setRowStatuses(prev => ({ ...prev, [key]: previousStatus || "CARGAR" }));
+      setRowStatuses(prev => {
+        const newState = { ...prev };
+        if (previousStatus && previousStatus !== "CARGAR") {
+          newState[key] = previousStatus;
+        } else {
+          delete newState[key];
+        }
+        return newState;
+      });
       if (previousOrderNumber) {
         setRowOrderNumbers(prev => ({ ...prev, [key]: previousOrderNumber }));
       } else {
@@ -433,11 +465,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       }
       toast.error(`Error: ${error.message}`);
     }
-  }, [myEmail, sheetUrl, rowStatuses, rowOrderNumbers]);
+  }, [myEmail, sheetUrl, rowStatuses, rowOrderNumbers, loadStatusesFromDatabase]);
 
-  // Suscribirse a cambios en tiempo real
+  // Suscribirse a cambios en tiempo real - MEJORADO
   useEffect(() => {
     if (!myEmail || !sheetUrl) return;
+    
+    console.log("🔔 Suscribiendo a cambios en tiempo real...");
     
     const channel = supabase
       .channel('sheet_row_statuses_changes')
@@ -451,12 +485,16 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         },
         (payload) => {
           console.log('🔄 Cambio detectado en tiempo real:', payload);
+          // Recargar estados cuando hay cambios
           loadStatusesFromDatabase();
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        console.log("📡 Estado de suscripción:", status);
+      });
     
     return () => {
+      console.log("🔌 Desuscribiendo canal...");
       supabase.removeChannel(channel);
     };
   }, [myEmail, sheetUrl, loadStatusesFromDatabase]);
@@ -474,11 +512,17 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   }, []);
 
   useEffect(() => {
-    if (myEmail && sheetUrl) loadStatusesFromDatabase();
+    if (myEmail && sheetUrl) {
+      console.log("🔄 Cargando estados iniciales...");
+      loadStatusesFromDatabase();
+    }
   }, [myEmail, sheetUrl, loadStatusesFromDatabase]);
 
   useEffect(() => {
-    if (sheetUrl && !initialLoadDone) { readSheet(); setInitialLoadDone(true); }
+    if (sheetUrl && !initialLoadDone) { 
+      readSheet(); 
+      setInitialLoadDone(true); 
+    }
   }, [sheetUrl]);
 
   // Debug: Mostrar ciudades encontradas y sus departamentos
@@ -576,6 +620,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       provider_emails_list: matched.provider_email || "",
     };
     
+    console.log("📦 Guardando pedido:", payload);
+    
     const { error } = await supabase.from("orders").insert(payload);
     if (error) { 
       toast.error("Error al guardar: " + error.message); 
@@ -583,15 +629,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       return false; 
     }
     
-    // Actualizar estado y forzar recarga de estados desde la BD
-    await setRowStatus(String(idx), newStatus, orderId);
+    console.log(`✅ Pedido ${orderId} guardado exitosamente`);
     
-    // 🔥 FUERZA LA RECARGA DE ESTADOS DESDE LA BD
-    await loadStatusesFromDatabase();
+    // Actualizar estado y FORZAR RECARGA
+    await setRowStatus(String(idx), newStatus, orderId);
     
     toast.success(`✅ Pedido ${orderId} cargado | Delivery: ${nf(deliveryPrice)} Gs | Depto: ${departamento || "?"}`);
     return true;
-  }, [colKeys, matchProduct, myEmail, setRowStatus, loadStatusesFromDatabase]);
+  }, [colKeys, matchProduct, myEmail, setRowStatus]);
 
   const handleDirectSave = (order: SheetOrder, idx: number) => loadOrder(order, idx, "auto");
   
@@ -1086,7 +1131,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         </button>
         <button 
           className="px-2 py-0.5 text-[11px] bg-red-600 hover:bg-red-700 rounded transition" 
-          onClick={() => loadStatusesFromDatabase()}
+          onClick={() => {
+            console.log("🔄 Recargando estados manualmente...");
+            loadStatusesFromDatabase();
+          }}
         >
           🔄 Recargar estados
         </button>
