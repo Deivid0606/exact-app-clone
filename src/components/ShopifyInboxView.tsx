@@ -349,11 +349,19 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     
     // Guardar el estado anterior por si hay error
     const previousStatus = rowStatuses[key];
+    const previousOrderNumber = rowOrderNumbers[key];
     
     // Actualizar UI inmediatamente (optimista)
     setRowStatuses(prev => ({ ...prev, [key]: status }));
     if (orderNumber) {
       setRowOrderNumbers(prev => ({ ...prev, [key]: orderNumber }));
+    } else if (status === "CARGAR") {
+      // Si se vuelve a pendiente, eliminar el número de orden
+      setRowOrderNumbers(prev => {
+        const newState = { ...prev };
+        delete newState[key];
+        return newState;
+      });
     }
     
     try {
@@ -413,10 +421,19 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     } catch (error: any) {
       console.error("❌ Error al guardar estado:", error);
       // Revertir cambio local
-      setRowStatuses(prev => ({ ...prev, [key]: previousStatus }));
+      setRowStatuses(prev => ({ ...prev, [key]: previousStatus || "CARGAR" }));
+      if (previousOrderNumber) {
+        setRowOrderNumbers(prev => ({ ...prev, [key]: previousOrderNumber }));
+      } else {
+        setRowOrderNumbers(prev => {
+          const newState = { ...prev };
+          delete newState[key];
+          return newState;
+        });
+      }
       toast.error(`Error: ${error.message}`);
     }
-  }, [myEmail, sheetUrl, rowStatuses]);
+  }, [myEmail, sheetUrl, rowStatuses, rowOrderNumbers]);
 
   // Suscribirse a cambios en tiempo real
   useEffect(() => {
@@ -566,12 +583,18 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       return false; 
     }
     
+    // Actualizar estado y forzar recarga de estados desde la BD
     await setRowStatus(String(idx), newStatus, orderId);
+    
+    // 🔥 FUERZA LA RECARGA DE ESTADOS DESDE LA BD
+    await loadStatusesFromDatabase();
+    
     toast.success(`✅ Pedido ${orderId} cargado | Delivery: ${nf(deliveryPrice)} Gs | Depto: ${departamento || "?"}`);
     return true;
-  }, [colKeys, matchProduct, myEmail, setRowStatus]);
+  }, [colKeys, matchProduct, myEmail, setRowStatus, loadStatusesFromDatabase]);
 
   const handleDirectSave = (order: SheetOrder, idx: number) => loadOrder(order, idx, "auto");
+  
   const handleOpenForm = (order: SheetOrder, idx: number) => {
     if (onSheetConfirm) onSheetConfirm({
       customer: order[colKeys.name] || "", 
@@ -586,17 +609,31 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
   const handleBulkLoad = async () => {
     let count = 0, errors = 0;
-    for (let i = 0; i < sheetOrders.length; i++) {
-      const status = getRowStatus(i);
-      if (status !== "CARGAR") continue;
-      
-      const city = sheetOrders[i][colKeys.city] || "";
-      if (!hasCoverage(city)) continue;
-      
-      const success = await loadOrder(sheetOrders[i], i, "auto");
+    const ordersToLoad = sheetOrders
+      .map((o, i) => ({ order: o, idx: i }))
+      .filter(({ idx }) => {
+        const status = getRowStatus(idx);
+        if (status !== "CARGAR") return false;
+        const city = sheetOrders[idx][colKeys.city] || "";
+        return hasCoverage(city);
+      });
+    
+    if (ordersToLoad.length === 0) {
+      toast.info("No hay pedidos pendientes con cobertura para cargar");
+      return;
+    }
+    
+    toast.info(`🔄 Cargando ${ordersToLoad.length} pedidos...`);
+    
+    for (let i = 0; i < ordersToLoad.length; i++) {
+      const { order, idx } = ordersToLoad[i];
+      const success = await loadOrder(order, idx, "auto");
       if (success) count++; else errors++;
       if (count % 3 === 0) await new Promise(r => setTimeout(r, 100));
     }
+    
+    // 🔥 FORZAR RECARGA FINAL
+    await loadStatusesFromDatabase();
     toast.success(`✅ ${count} cargados | ❌ ${errors} errores`);
   };
 
