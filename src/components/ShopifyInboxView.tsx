@@ -302,7 +302,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   }, [sheetHeaders]);
 
   const getRowStatus = useCallback((idx: number): OrderStatus => {
-    return rowStatuses[String(idx)] || "CARGAR";
+    const key = String(idx);
+    const status = rowStatuses[key];
+    if (status) {
+      return status;
+    }
+    return "CARGAR";
   }, [rowStatuses]);
 
   const getRowOrderNumber = useCallback((idx: number): string | null => {
@@ -321,16 +326,22 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         .eq("sheet_url", sheetUrl);
       
       if (!error && data) {
+        console.log(`📊 Total de registros cargados: ${data.length}`);
+        console.log("📊 Buscando row_index 1079:", data.find(item => item.row_index === 1079));
+        
         const statusMap: Record<string, OrderStatus> = {};
         const orderNumberMap: Record<string, string> = {};
         data.forEach(item => { 
-          // ✅ MANTENER 0-based (igual que el array)
           const idx = String(item.row_index);
           statusMap[idx] = item.status as OrderStatus;
           if (item.order_number) {
             orderNumberMap[idx] = item.order_number;
           }
         });
+        
+        console.log("📊 Estado para fila 1079:", statusMap["1079"]);
+        console.log("📊 Claves en statusMap (primeras 10):", Object.keys(statusMap).slice(0, 10));
+        
         setRowStatuses(statusMap);
         setRowOrderNumbers(orderNumberMap);
         console.log("📊 Estados cargados desde BD:", statusMap);
@@ -346,7 +357,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       throw new Error("Falta email o URL del sheet");
     }
     
-    // ✅ MANTENER 0-based (igual que el array)
     const rowIndex = parseInt(key);
     console.log(`📝 Persistiendo estado en BD: Fila ${rowIndex} (0-based) -> "${status}"`);
     
