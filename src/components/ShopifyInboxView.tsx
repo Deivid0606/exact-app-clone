@@ -340,67 +340,45 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
   const setRowStatus = useCallback(async (key: string, status: OrderStatus, orderNumber?: string) => {
     if (!myEmail || !sheetUrl) {
-      toast.error("Falta email o URL del sheet");
-      return;
+      throw new Error("Falta email o URL del sheet");
     }
     
     const rowIndex = parseInt(key);
     console.log(`📝 Persistiendo estado: Fila ${rowIndex + 1} -> "${status}"`);
     
-    try {
-      if (status !== "CARGAR") {
-        // Guardar o actualizar en BD
-        const { error } = await supabase
-          .from("sheet_row_statuses")
-          .upsert({
-            user_email: myEmail,
-            sheet_url: sheetUrl,
-            row_index: rowIndex,
-            status: status,
-            order_number: orderNumber || null,
-            updated_at: new Date().toISOString()
-          }, {
-            onConflict: 'user_email,sheet_url,row_index'
-          });
-        
-        if (error) throw error;
-        
-        console.log(`✅ Estado persistido: ${status}`);
-        const statusMessages = {
-          "CANCELADO": "❌ Cancelado",
-          "A DROPEAR": "⚠️ A Dropear",
-          "CARGADO": "✅ Cargado Auto",
-          "CARGADO_MANUAL": "✍️ Cargado Manual",
-          "CARGAR": "⏳ Pendiente"
-        };
-        toast.success(`✅ Estado: ${statusMessages[status] || status}`);
-        
-      } else {
-        // Eliminar de BD (volver a pendiente)
-        const { error } = await supabase
-          .from("sheet_row_statuses")
-          .delete()
-          .eq("user_email", myEmail)
-          .eq("sheet_url", sheetUrl)
-          .eq("row_index", rowIndex);
-        
-        if (error) throw error;
-        
-        console.log(`✅ Estado eliminado (Pendiente)`);
-        toast.success(`✅ Estado: ⏳ Pendiente`);
-      }
-    } catch (error: any) {
-      console.error("❌ Error al persistir estado:", error);
-      // Revertir el cambio local si falla la BD
-      setRowStatuses(prev => {
-        const newState = { ...prev };
-        // Restaurar el estado anterior (cargar desde la BD nuevamente)
-        loadStatusesFromDatabase();
-        return newState;
-      });
-      toast.error(`Error: ${error.message}`);
+    if (status !== "CARGAR") {
+      // Guardar o actualizar en BD
+      const { error } = await supabase
+        .from("sheet_row_statuses")
+        .upsert({
+          user_email: myEmail,
+          sheet_url: sheetUrl,
+          row_index: rowIndex,
+          status: status,
+          order_number: orderNumber || null,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'user_email,sheet_url,row_index'
+        });
+      
+      if (error) throw error;
+      
+      console.log(`✅ Estado persistido: ${status}`);
+      
+    } else {
+      // Eliminar de BD (volver a pendiente)
+      const { error } = await supabase
+        .from("sheet_row_statuses")
+        .delete()
+        .eq("user_email", myEmail)
+        .eq("sheet_url", sheetUrl)
+        .eq("row_index", rowIndex);
+      
+      if (error) throw error;
+      
+      console.log(`✅ Estado eliminado (Pendiente)`);
     }
-  }, [myEmail, sheetUrl, loadStatusesFromDatabase]);
+  }, [myEmail, sheetUrl]);
 
   // Suscribirse a cambios en tiempo real
   useEffect(() => {
@@ -556,9 +534,25 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     setRowOrderNumbers(prev => ({ ...prev, [key]: orderId }));
     
     // Persistir en BD
-    await setRowStatus(key, newStatus, orderId);
-    toast.success(`✅ Pedido ${orderId} cargado | Delivery: ${nf(deliveryPrice)} Gs | Depto: ${departamento || "?"}`);
-    return true;
+    try {
+      await setRowStatus(key, newStatus, orderId);
+      toast.success(`✅ Pedido ${orderId} cargado | Delivery: ${nf(deliveryPrice)} Gs | Depto: ${departamento || "?"}`);
+      return true;
+    } catch (error: any) {
+      // Si falla la persistencia, revertir el estado local
+      setRowStatuses(prev => {
+        const newState = { ...prev };
+        delete newState[key];
+        return newState;
+      });
+      setRowOrderNumbers(prev => {
+        const newState = { ...prev };
+        delete newState[key];
+        return newState;
+      });
+      toast.error(`Error al persistir estado: ${error.message}`);
+      return false;
+    }
   }, [colKeys, matchProduct, myEmail, setRowStatus]);
 
   const handleDirectSave = (order: SheetOrder, idx: number) => loadOrder(order, idx, "auto");
@@ -1178,24 +1172,85 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                     <select
                       className="bg-slate-800 border border-slate-700 rounded px-1 py-0.5 text-[10px] focus:outline-none focus:border-blue-500"
                       value={status}
-                      onChange={(e) => {
+                      onChange={async (e) => {
                         const newStatus = e.target.value as OrderStatus;
-                        console.log(`🔄 Cambiando estado de fila ${idx + 1} de ${status} a ${newStatus}`);
+                        const key = String(idx);
+                        const previousStatus = status;
+                        const previousOrderNumber = orderNumber;
                         
-                        // UPDATE LOCAL INMEDIATO - Esto hace que filteredOrders se re-evalúe y la fila desaparezca del filtro actual
-                        setRowStatuses(prev => ({ ...prev, [key]: newStatus }));
+                        console.log(`🔄 Cambiando estado de fila ${idx + 1} de ${previousStatus} a ${newStatus}`);
                         
-                        if (newStatus === "CARGAR") {
-                          // Si vuelve a pendiente, eliminar el número de orden
-                          setRowOrderNumbers(prev => { 
-                            const s = { ...prev }; 
-                            delete s[key]; 
-                            return s; 
-                          });
+                        // Guardar el estado anterior para posible reversión
+                        const oldStatuses = { ...rowStatuses };
+                        const oldOrderNumbers = { ...rowOrderNumbers };
+                        
+                        try {
+                          // 1. Intentar guardar en BD primero
+                          if (!myEmail || !sheetUrl) {
+                            throw new Error("Falta email o URL del sheet");
+                          }
+                          
+                          const rowIndex = parseInt(key);
+                          
+                          if (newStatus !== "CARGAR") {
+                            // Guardar o actualizar en BD
+                            const { error } = await supabase
+                              .from("sheet_row_statuses")
+                              .upsert({
+                                user_email: myEmail,
+                                sheet_url: sheetUrl,
+                                row_index: rowIndex,
+                                status: newStatus,
+                                order_number: orderNumber || null,
+                                updated_at: new Date().toISOString()
+                              }, {
+                                onConflict: 'user_email,sheet_url,row_index'
+                              });
+                            
+                            if (error) throw error;
+                            
+                          } else {
+                            // Eliminar de BD (volver a pendiente)
+                            const { error } = await supabase
+                              .from("sheet_row_statuses")
+                              .delete()
+                              .eq("user_email", myEmail)
+                              .eq("sheet_url", sheetUrl)
+                              .eq("row_index", rowIndex);
+                            
+                            if (error) throw error;
+                          }
+                          
+                          // 2. Si la BD funcionó, actualizar UI
+                          setRowStatuses(prev => ({ ...prev, [key]: newStatus }));
+                          
+                          if (newStatus === "CARGAR") {
+                            setRowOrderNumbers(prev => { 
+                              const s = { ...prev }; 
+                              delete s[key]; 
+                              return s; 
+                            });
+                          }
+                          
+                          // 3. Mostrar toast de éxito
+                          const statusMessages = {
+                            "CANCELADO": "❌ Cancelado",
+                            "A DROPEAR": "⚠️ A Dropear",
+                            "CARGADO": "✅ Cargado Auto",
+                            "CARGADO_MANUAL": "✍️ Cargado Manual",
+                            "CARGAR": "⏳ Pendiente"
+                          };
+                          toast.success(`✅ Estado: ${statusMessages[newStatus] || newStatus}`);
+                          
+                        } catch (error: any) {
+                          console.error("❌ Error al guardar estado:", error);
+                          
+                          // Revertir UI al estado anterior
+                          setRowStatuses(oldStatuses);
+                          setRowOrderNumbers(oldOrderNumbers);
+                          
+                          toast.error(`Error al guardar: ${error.message || "Intenta de nuevo"}`);
                         }
-                        
-                        // Persistir en BD (sin actualizar local nuevamente)
-                        setRowStatus(key, newStatus, orderNumber || undefined);
                       }}
                     >
                       <option value="CARGAR">⏳ Pendiente</option>
