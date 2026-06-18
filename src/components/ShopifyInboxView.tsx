@@ -324,9 +324,11 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         const statusMap: Record<string, OrderStatus> = {};
         const orderNumberMap: Record<string, string> = {};
         data.forEach(item => { 
-          statusMap[String(item.row_index)] = item.status as OrderStatus;
+          // 🔥 CORRECCIÓN: Convertir de 1-based (BD) a 0-based (array)
+          const idx = String(item.row_index - 1);
+          statusMap[idx] = item.status as OrderStatus;
           if (item.order_number) {
-            orderNumberMap[String(item.row_index)] = item.order_number;
+            orderNumberMap[idx] = item.order_number;
           }
         });
         setRowStatuses(statusMap);
@@ -344,8 +346,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       throw new Error("Falta email o URL del sheet");
     }
     
-    const rowIndex = parseInt(key);
-    console.log(`📝 Persistiendo estado en BD: Fila ${rowIndex + 1} -> "${status}"`);
+    // 🔥 CORRECCIÓN: +1 para convertir de 0-based (array) a 1-based (sheet)
+    const rowIndex = parseInt(key) + 1;
+    console.log(`📝 Persistiendo estado en BD: Fila ${rowIndex} (sheet) -> "${status}"`);
     
     if (status !== "CARGAR") {
       // Guardar o actualizar en BD
@@ -1216,9 +1219,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                             "CARGAR": "⏳ Pendiente"
                           };
                           toast.success(`✅ Estado: ${statusMessages[newStatus] || newStatus}`);
-                          
-                          // 4. NO recargar desde BD para evitar sobrescribir el estado local
-                          // Los cambios ya se guardaron correctamente
                           
                         } catch (error: any) {
                           console.error("❌ Error al guardar estado:", error);
