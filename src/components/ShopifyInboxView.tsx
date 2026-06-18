@@ -1217,8 +1217,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                           };
                           toast.success(`✅ Estado: ${statusMessages[newStatus] || newStatus}`);
                           
-                          // 4. Recargar estados desde BD para asegurar consistencia
-                          await loadStatusesFromDatabase();
+                          // 4. NO recargar desde BD para evitar sobrescribir el estado local
+                          // Los cambios ya se guardaron correctamente
                           
                         } catch (error: any) {
                           console.error("❌ Error al guardar estado:", error);
