@@ -323,7 +323,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         .from("sheet_row_statuses")
         .select("row_index, status, order_number")
         .eq("user_email", myEmail)
-        .eq("sheet_url", sheetUrl);
+        .eq("sheet_url", sheetUrl)
+        .limit(10000); // 🔥 Aumentar límite para traer todos los registros
       
       if (!error && data) {
         console.log(`📊 Total de registros cargados: ${data.length}`);
@@ -345,7 +346,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         setRowStatuses(statusMap);
         setRowOrderNumbers(orderNumberMap);
         
-        // Verificar después de setear
         console.log("📊 rowStatuses actualizado, tiene 1074?", rowStatuses["1074"]);
         console.log("📊 Total de estados en rowStatuses:", Object.keys(rowStatuses).length);
         
