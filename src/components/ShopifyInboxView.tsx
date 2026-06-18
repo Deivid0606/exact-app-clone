@@ -327,7 +327,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       
       if (!error && data) {
         console.log(`📊 Total de registros cargados: ${data.length}`);
-        console.log("📊 Buscando row_index 1079:", data.find(item => item.row_index === 1079));
         
         const statusMap: Record<string, OrderStatus> = {};
         const orderNumberMap: Record<string, string> = {};
@@ -339,12 +338,17 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           }
         });
         
-        console.log("📊 Estado para fila 1079:", statusMap["1079"]);
-        console.log("📊 Claves en statusMap (primeras 10):", Object.keys(statusMap).slice(0, 10));
+        console.log("📊 Buscando row_index 1074:", data.find(item => item.row_index === 1074));
+        console.log("📊 Estado para fila 1074:", statusMap["1074"]);
+        console.log("📊 statusMap tiene 1074?", statusMap.hasOwnProperty("1074"));
         
         setRowStatuses(statusMap);
         setRowOrderNumbers(orderNumberMap);
-        console.log("📊 Estados cargados desde BD:", statusMap);
+        
+        // Verificar después de setear
+        console.log("📊 rowStatuses actualizado, tiene 1074?", rowStatuses["1074"]);
+        console.log("📊 Total de estados en rowStatuses:", Object.keys(rowStatuses).length);
+        
       } else if (error) {
         console.error("Error cargando estados:", error);
       }
@@ -710,7 +714,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     };
   }, [sheetOrders, colKeys, getRowStatus]);
 
-  // FILTRO CORREGIDO - Ahora con key para forzar re-render
+  // FILTRO CORREGIDO
   const filteredOrders = useMemo(() => {
     return sheetOrders
       .map((o, i) => ({ order: o, idx: i }))
@@ -1196,16 +1200,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                         const newStatus = e.target.value as OrderStatus;
                         const key = String(idx);
                         const previousStatus = status;
-                        const previousOrderNumber = orderNumber;
                         
                         console.log(`🔄 Cambiando estado de fila ${idx + 1} de ${previousStatus} a ${newStatus}`);
                         
-                        // Guardar el estado anterior para posible reversión
                         const oldStatuses = { ...rowStatuses };
                         const oldOrderNumbers = { ...rowOrderNumbers };
                         
                         try {
-                          // 1. PRIMERO: Actualizar UI optimistamente (para feedback inmediato)
+                          // Actualizar UI optimistamente
                           setRowStatuses(prev => ({ ...prev, [key]: newStatus }));
                           if (newStatus === "CARGAR") {
                             setRowOrderNumbers(prev => { 
@@ -1215,10 +1217,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                             });
                           }
                           
-                          // 2. LUEGO: Persistir en BD
+                          // Persistir en BD
                           await saveStatusToDatabase(key, newStatus, orderNumber || undefined);
                           
-                          // 3. Mostrar toast de éxito
                           const statusMessages = {
                             "CANCELADO": "❌ Cancelado",
                             "A DROPEAR": "⚠️ A Dropear",
@@ -1228,13 +1229,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                           };
                           toast.success(`✅ Estado: ${statusMessages[newStatus] || newStatus}`);
                           
+                          // Recargar estados desde BD para asegurar consistencia
+                          await loadStatusesFromDatabase();
+                          
                         } catch (error: any) {
                           console.error("❌ Error al guardar estado:", error);
-                          
-                          // Revertir UI al estado anterior
                           setRowStatuses(oldStatuses);
                           setRowOrderNumbers(oldOrderNumbers);
-                          
                           toast.error(`Error al guardar: ${error.message || "Intenta de nuevo"}`);
                         }
                       }}
