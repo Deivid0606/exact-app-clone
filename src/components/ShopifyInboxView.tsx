@@ -345,16 +345,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
     
     const rowIndex = parseInt(key);
-    console.log(`📝 Actualizando estado: Fila ${rowIndex + 1} -> "${status}"`);
-    
-    // Guardar el estado anterior por si hay error
-    const previousStatus = rowStatuses[key];
-    
-    // Actualizar UI inmediatamente (optimista)
-    setRowStatuses(prev => ({ ...prev, [key]: status }));
-    if (orderNumber) {
-      setRowOrderNumbers(prev => ({ ...prev, [key]: orderNumber }));
-    }
+    console.log(`📝 Persistiendo estado: Fila ${rowIndex + 1} -> "${status}"`);
     
     try {
       if (status !== "CARGAR") {
@@ -374,7 +365,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         
         if (error) throw error;
         
-        console.log(`✅ Estado guardado: ${status}`);
+        console.log(`✅ Estado persistido: ${status}`);
         const statusMessages = {
           "CANCELADO": "❌ Cancelado",
           "A DROPEAR": "⚠️ A Dropear",
@@ -395,28 +386,21 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         
         if (error) throw error;
         
-        // Limpiar del estado local
-        setRowStatuses(prev => {
-          const newState = { ...prev };
-          delete newState[key];
-          return newState;
-        });
-        setRowOrderNumbers(prev => {
-          const newState = { ...prev };
-          delete newState[key];
-          return newState;
-        });
-        
         console.log(`✅ Estado eliminado (Pendiente)`);
         toast.success(`✅ Estado: ⏳ Pendiente`);
       }
     } catch (error: any) {
-      console.error("❌ Error al guardar estado:", error);
-      // Revertir cambio local
-      setRowStatuses(prev => ({ ...prev, [key]: previousStatus }));
+      console.error("❌ Error al persistir estado:", error);
+      // Revertir el cambio local si falla la BD
+      setRowStatuses(prev => {
+        const newState = { ...prev };
+        // Restaurar el estado anterior (cargar desde la BD nuevamente)
+        loadStatusesFromDatabase();
+        return newState;
+      });
       toast.error(`Error: ${error.message}`);
     }
-  }, [myEmail, sheetUrl, rowStatuses]);
+  }, [myEmail, sheetUrl, loadStatusesFromDatabase]);
 
   // Suscribirse a cambios en tiempo real
   useEffect(() => {
@@ -566,7 +550,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       return false; 
     }
     
-    await setRowStatus(String(idx), newStatus, orderId);
+    // Actualizar estado local INMEDIATAMENTE (optimista)
+    const key = String(idx);
+    setRowStatuses(prev => ({ ...prev, [key]: newStatus }));
+    setRowOrderNumbers(prev => ({ ...prev, [key]: orderId }));
+    
+    // Persistir en BD
+    await setRowStatus(key, newStatus, orderId);
     toast.success(`✅ Pedido ${orderId} cargado | Delivery: ${nf(deliveryPrice)} Gs | Depto: ${departamento || "?"}`);
     return true;
   }, [colKeys, matchProduct, myEmail, setRowStatus]);
@@ -706,7 +696,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     };
   }, [sheetOrders, colKeys, getRowStatus]);
 
-  // FILTRO CORREGIDO
+  // FILTRO CORREGIDO - Ahora con key para forzar re-render
   const filteredOrders = useMemo(() => {
     return sheetOrders
       .map((o, i) => ({ order: o, idx: i }))
@@ -769,7 +759,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         
         return true;
       });
-  }, [sheetOrders, activeFilter, search, productSearch, cityFilter, searchType, coverageFilter, colKeys, getRowStatus]);
+  }, [sheetOrders, activeFilter, search, productSearch, cityFilter, searchType, coverageFilter, colKeys, getRowStatus, rowStatuses]);
 
   const changeFilter = (filter: FilterType) => setActiveFilter(filter);
   
@@ -1147,9 +1137,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               const canLoad = status === "CARGAR" && covered && salePrice > 0;
               const orderNumber = getRowOrderNumber(idx);
               const departamento = getCityDepartment(city);
+              const key = String(idx);
 
               return (
-                <tr key={idx} className={getRowClassName(status, covered)}>
+                <tr key={key} className={getRowClassName(status, covered)}>
                   <td className="px-1.5 py-1 text-[10px] text-slate-400">{idx + 1}</td>
                   <td className="px-1.5 py-1 text-[10px] font-mono">
                     {orderNumber ? <span className="text-green-400">{orderNumber}</span> : <span className="text-slate-600">—</span>}
@@ -1190,7 +1181,21 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                       onChange={(e) => {
                         const newStatus = e.target.value as OrderStatus;
                         console.log(`🔄 Cambiando estado de fila ${idx + 1} de ${status} a ${newStatus}`);
-                        setRowStatus(String(idx), newStatus, orderNumber || undefined);
+                        
+                        // UPDATE LOCAL INMEDIATO - Esto hace que filteredOrders se re-evalúe y la fila desaparezca del filtro actual
+                        setRowStatuses(prev => ({ ...prev, [key]: newStatus }));
+                        
+                        if (newStatus === "CARGAR") {
+                          // Si vuelve a pendiente, eliminar el número de orden
+                          setRowOrderNumbers(prev => { 
+                            const s = { ...prev }; 
+                            delete s[key]; 
+                            return s; 
+                          });
+                        }
+                        
+                        // Persistir en BD (sin actualizar local nuevamente)
+                        setRowStatus(key, newStatus, orderNumber || undefined);
                       }}
                     >
                       <option value="CARGAR">⏳ Pendiente</option>
