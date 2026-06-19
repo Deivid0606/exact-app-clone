@@ -325,7 +325,6 @@ export default function DashboardView() {
     try { localStorage.setItem('provider_ad_spend', String(val)); } catch {}
   };
 
-  const isTodayRange = dateFrom === todayPY() && dateTo === todayPY();
 
   return (
     <div className="min-h-full w-full overflow-auto bg-[#020617] p-3 text-slate-100 md:p-5">
@@ -336,9 +335,7 @@ export default function DashboardView() {
             <div className="flex items-center gap-4">
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-400 text-2xl shadow-lg shadow-blue-500/20">📊</div>
               <div>
-                <div className="text-[11px] font-black uppercase tracking-[0.26em] text-cyan-300">Panel ejecutivo</div>
-                <h2 className="text-2xl font-black leading-tight text-white md:text-3xl">Dashboard PRO</h2>
-                <p className="text-sm font-semibold text-slate-400">Ventas, guías generadas, entregas reales y utilidad por rango.</p>
+                <h2 className="text-2xl font-black leading-tight text-white md:text-3xl">Dashboard</h2>
               </div>
             </div>
 
@@ -358,10 +355,6 @@ export default function DashboardView() {
                 Hoy
               </button>
             </div>
-          </div>
-
-          <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-3 text-sm font-bold text-cyan-100">
-            Rango activo: <span className="text-white">{dateFrom}</span> hasta <span className="text-white">{dateTo}</span>{isTodayRange ? ' · Día actual' : ''}. Guías se cuentan por <span className="text-white">assigned_at</span> y entregados por <span className="text-white">delivered_at</span>, sin importar cuándo se vendieron.
           </div>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
