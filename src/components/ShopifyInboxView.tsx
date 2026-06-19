@@ -949,7 +949,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     });
 
     return (
-      <div className="grid gap-4 md:grid-cols-[190px_1fr] md:items-center">
+      <div className="grid gap-3 md:grid-cols-[190px_1fr] md:items-center">
         <div className="relative mx-auto h-44 w-44">
           <svg viewBox="0 0 100 100" className="h-full w-full drop-shadow-[0_0_24px_rgba(59,130,246,0.22)]">
             <circle cx={center} cy={center} r={radius} fill="none" stroke="rgba(30,41,59,.9)" strokeWidth="13" />
@@ -1029,7 +1029,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/78 p-4 backdrop-blur-md" onClick={() => setShowGuideModal(false)}>
         <div className="max-h-[92vh] w-full max-w-4xl overflow-hidden rounded-3xl border border-slate-700/70 bg-slate-950 shadow-2xl shadow-black/60" onClick={(e) => e.stopPropagation()}>
           <div className="sticky top-0 z-10 border-b border-slate-800 bg-slate-950/95 px-6 py-5 backdrop-blur-xl">
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.24em] text-cyan-300">Guía de envío</p>
                 <h2 className="mt-1 flex flex-wrap items-center gap-3 text-2xl font-black text-white">
@@ -1043,7 +1043,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           </div>
 
           <div className="max-h-[calc(92vh-108px)] overflow-y-auto p-6">
-            <div className="grid gap-4 md:grid-cols-4">
+            <div className="grid gap-3 md:grid-cols-4">
               <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 md:col-span-2">
                 <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">Estado actual</p>
                 <div className="mt-3"><StatusBadge status={status} /></div>
@@ -1057,10 +1057,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               </div>
             </div>
 
-            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+            <div className="mt-4 grid gap-3 lg:grid-cols-2">
               <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
                 <h3 className="mb-4 text-sm font-black uppercase tracking-[0.18em] text-white">👤 Datos del cliente</h3>
-                <div className="grid gap-4 text-sm">
+                <div className="grid gap-3 text-sm">
                   <div><p className="text-xs font-bold text-slate-500">Nombre</p><p className="mt-1 font-bold text-white">{order[colKeys.name] || "—"}</p></div>
                   <div><p className="text-xs font-bold text-slate-500">Teléfono</p><p className="mt-1 font-bold text-white">{order[colKeys.phone] || "—"}</p></div>
                   <div className="grid grid-cols-2 gap-3">
@@ -1131,7 +1131,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   if (loadingStatuses) {
     return (
       <div className="flex h-64 items-center justify-center bg-slate-950">
-        <div className="flex flex-col items-center gap-4 rounded-3xl border border-slate-800 bg-slate-900/70 px-10 py-8 shadow-2xl">
+        <div className="flex flex-col items-center gap-3 rounded-3xl border border-slate-800 bg-slate-900/70 px-10 py-8 shadow-2xl">
           <div className="h-12 w-12 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
           <span className="text-sm font-bold text-slate-300">Cargando pedidos...</span>
         </div>
@@ -1177,13 +1177,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   ].filter(d => d.value > 0);
 
   return (
-    <div className="relative h-full overflow-auto bg-slate-950 p-4 text-slate-100 md:p-6">
+    <div className="relative h-full w-full overflow-auto bg-slate-950 p-2 text-slate-100 md:p-3">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.18),transparent_30%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.12),transparent_32%)]" />
-      <div className="relative mx-auto flex max-w-[1800px] flex-col gap-4">
+      <div className="relative flex w-full min-w-0 flex-col gap-3">
         {/* HEADER */}
-        <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-5 shadow-2xl shadow-black/30 backdrop-blur-xl">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <div className="flex items-center gap-4">
+        <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-4 shadow-2xl shadow-black/30 backdrop-blur-xl">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex items-center gap-3">
               <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-cyan-400 text-2xl shadow-lg shadow-blue-950/40">📦</div>
               <div>
                 <p className="text-xs font-black uppercase tracking-[0.24em] text-cyan-300">Panel operativo</p>
@@ -1211,7 +1211,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         </div>
 
         {/* KPIS */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
           <MetricCard title="Ventas" value={`${nf(dashboardStats.totalVenta)} Gs`} subtitle="Total de pedidos cargados" icon="💰" tone="emerald" />
           <MetricCard title="Pedidos" value={dashboardStats.totalPedidos} subtitle={`${filteredOrders.length} visibles`} icon="📊" tone="violet" />
           <MetricCard title="Pendientes" value={pendingTotal} subtitle={`✅ ${dashboardStats.pendientesConCobertura} · ❌ ${dashboardStats.pendientesSinCobertura}`} icon="⏳" tone="blue" />
@@ -1221,8 +1221,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         </div>
 
         {/* GRAFICOS */}
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
-          <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-5 shadow-xl shadow-black/20 backdrop-blur-xl xl:col-span-1">
+        <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
+          <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-4 shadow-xl shadow-black/20 backdrop-blur-xl xl:col-span-1">
             <div className="mb-5 flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-black text-white">Distribución de estados</h2>
@@ -1233,7 +1233,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             <DonutChart data={pieData} />
           </div>
 
-          <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-5 shadow-xl shadow-black/20 backdrop-blur-xl xl:col-span-1">
+          <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-4 shadow-xl shadow-black/20 backdrop-blur-xl xl:col-span-1">
             <h2 className="text-lg font-black text-white">Cobertura</h2>
             <p className="mb-5 text-sm font-medium text-slate-400">Pendientes con y sin cobertura.</p>
             <div className="space-y-5">
@@ -1248,7 +1248,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             </div>
           </div>
 
-          <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-5 shadow-xl shadow-black/20 backdrop-blur-xl xl:col-span-1">
+          <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-4 shadow-xl shadow-black/20 backdrop-blur-xl xl:col-span-1">
             <h2 className="text-lg font-black text-white">Top ciudades</h2>
             <p className="mb-5 text-sm font-medium text-slate-400">Mayor volumen de pedidos.</p>
             <div className="space-y-3">
@@ -1265,7 +1265,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
         {/* FILTROS */}
         <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-4 shadow-xl shadow-black/20 backdrop-blur-xl">
-          <div className="flex flex-col gap-4 2xl:flex-row 2xl:items-center 2xl:justify-between">
+          <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
             <div className="flex flex-wrap gap-2">
               <button onClick={() => changeFilter("TODOS")} className={`rounded-2xl px-4 py-2 text-sm font-black transition ${activeFilter === "TODOS" ? "bg-white text-slate-950" : "bg-slate-800/80 text-slate-300 ring-1 ring-slate-700 hover:text-white"}`}>📋 Todos <span className="opacity-70">({counts.total})</span></button>
               <button onClick={() => changeFilter("CARGAR")} className={`rounded-2xl px-4 py-2 text-sm font-black transition ${activeFilter === "CARGAR" ? "bg-blue-500/20 text-blue-200 ring-1 ring-blue-400/25" : "bg-slate-800/80 text-slate-300 ring-1 ring-slate-700 hover:text-white"}`}>⏳ Pendientes <span className="opacity-70">({counts.cargarConCobertura})</span></button>
@@ -1337,7 +1337,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         )}
 
         {/* TABLA Y RANKING */}
-        <div className="grid gap-4 2xl:grid-cols-[1fr_340px]">
+        <div className="grid gap-3 2xl:grid-cols-[1fr_340px]">
           <div className="overflow-hidden rounded-3xl border border-slate-800/80 bg-slate-900/80 shadow-2xl shadow-black/20 backdrop-blur-xl">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-5 py-4">
               <div>
@@ -1455,7 +1455,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           </div>
 
           <aside className="space-y-4">
-            <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-5 shadow-xl shadow-black/20 backdrop-blur-xl">
+            <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-4 shadow-xl shadow-black/20 backdrop-blur-xl">
               <h2 className="text-lg font-black text-white">Top productos</h2>
               <p className="mb-5 text-sm font-medium text-slate-400">Más repetidos en el sheet.</p>
               <div className="space-y-3">
@@ -1469,7 +1469,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               </div>
             </div>
 
-            <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-5 shadow-xl shadow-black/20 backdrop-blur-xl">
+            <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-4 shadow-xl shadow-black/20 backdrop-blur-xl">
               <h2 className="text-lg font-black text-white">Resumen rápido</h2>
               <div className="mt-4 space-y-3 text-sm">
                 <div className="flex justify-between rounded-2xl bg-slate-950/60 p-3"><span className="font-bold text-slate-400">Visible</span><span className="font-black text-white">{filteredOrders.length}</span></div>
