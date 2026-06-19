@@ -300,6 +300,7 @@ export default function ClosuresView() {
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [fees, setFees] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
   
   const [filterDelivery, setFilterDelivery] = useState('');
   const [filterSupplier, setFilterSupplier] = useState('');
@@ -476,6 +477,7 @@ export default function ClosuresView() {
     loadDeliveries();
     supabase.from('delivery_fees').select('*').then(({ data }) => setFees(data || []));
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
+    supabase.from('products').select('*').then(({ data }) => setProducts(data || []));
   }, []);
 
   const loadClosures = async () => {
@@ -584,7 +586,11 @@ export default function ClosuresView() {
       rendidos: rendidos.length,
       noRendidos: noRendidos.length,
       montoRendido: rendidos.reduce((s, o) => s + Number(o.total_gs || 0), 0),
-      montoPendiente: noRendidos.reduce((s, o) => s + Number(o.total_gs || 0), 0),
+      // Neto real pendiente a rendir: total cobrado menos tarifa del delivery.
+      montoPendiente: noRendidos.reduce((s, o) => {
+        const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
+        return s + (Number(o.total_gs || 0) - fee);
+      }, 0),
     };
   }, [filteredOrders, rendidos, noRendidos]);
 
@@ -595,6 +601,49 @@ export default function ClosuresView() {
       return s + (Number(o.total_gs || 0) - fee);
     }, 0);
   }, [delivered]);
+
+
+  const productCostMap = useMemo(() => {
+    const map: Record<string, number> = {};
+    products.forEach((p: any) => {
+      if (p.sku) {
+        map[String(p.sku).trim()] = Number(p.real_cost_gs || p.provider_price_gs || 0);
+      }
+    });
+    return map;
+  }, [products]);
+
+  const financialBreakdown = useMemo(() => {
+    return delivered.reduce((acc, o) => {
+      const total = Number(o.total_gs || 0);
+      const deliveryCost = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
+      const sellerCommission = Number(o.commission_gs || 0);
+      let productCost = 0;
+
+      try {
+        const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
+        items.forEach((it: any) => {
+          const sku = String(it.sku || '').trim();
+          const qty = Number(it.qty || 1);
+          const unitCost = Number(it.real_cost_gs || it.provider_price_gs || productCostMap[sku] || 0);
+          productCost += unitCost * qty;
+        });
+      } catch {}
+
+      acc.totalSales += total;
+      acc.productCost += productCost;
+      acc.deliveryCost += deliveryCost;
+      acc.sellerCommission += sellerCommission;
+      acc.realProfit += total - productCost - deliveryCost - sellerCommission;
+      return acc;
+    }, {
+      totalSales: 0,
+      productCost: 0,
+      deliveryCost: 0,
+      sellerCommission: 0,
+      realProfit: 0,
+    });
+  }, [delivered, productCostMap, fees]);
 
   // Función principal para cambiar estado con validación
   const handleStatusChangeWithValidation = async (orderId: string, newStatus: string) => {
@@ -977,8 +1026,48 @@ export default function ClosuresView() {
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">ENCOMIENDAS</div><div className="text-[22px] font-extrabold">{kpis.encomiendas}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.encomiendaRev)}</div></div>
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Ganancia Delivery</div><div className="text-[22px] font-extrabold">{nf(kpis.deliveryFee)}</div></div>
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Neto a Rendir</div><div className="text-[22px] font-extrabold">{nf(netRendir)}</div></div>
-        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Pendientes rendir</div><div className="text-[22px] font-extrabold" style={{ color: '#eab308' }}>{kpis.noRendidos}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.montoPendiente)}</div></div>
+        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Pendientes rendir</div><div className="text-[22px] font-extrabold" style={{ color: '#eab308' }}>{kpis.noRendidos}</div><div className="text-xs text-muted-foreground">Neto a rendir: Gs {nf(kpis.montoPendiente)}</div></div>
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Ya rendidos</div><div className="text-[22px] font-extrabold" style={{ color: '#4ade80' }}>{kpis.rendidos}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.montoRendido)}</div></div>
+      </div>
+
+      <div className="app-card !p-4 mb-4 border-l-4 border-l-[#22c55e] bg-gradient-to-br from-[#22c55e]/10 to-[#3b82f6]/5">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+          <div>
+            <h4 className="font-extrabold">💰 Panel de Ganancia Real</h4>
+            <p className="text-xs text-muted-foreground">Calculado sobre pedidos entregados/encomienda entregada visibles en el cierre.</p>
+          </div>
+          <span className="badge-status badge-entregado">Ganancia = venta - producto - delivery - comisión</span>
+        </div>
+
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="kpi-card border border-blue-500/20 bg-blue-500/10">
+            <div className="text-xs text-muted-foreground mb-1">Total cobrado</div>
+            <div className="text-[20px] font-extrabold">{nf(financialBreakdown.totalSales)}</div>
+            <div className="text-xs text-muted-foreground">Gs</div>
+          </div>
+          <div className="kpi-card border border-purple-500/20 bg-purple-500/10">
+            <div className="text-xs text-muted-foreground mb-1">Costo producto</div>
+            <div className="text-[20px] font-extrabold">{nf(financialBreakdown.productCost)}</div>
+            <div className="text-xs text-muted-foreground">Gs</div>
+          </div>
+          <div className="kpi-card border border-amber-500/20 bg-amber-500/10">
+            <div className="text-xs text-muted-foreground mb-1">Pago delivery</div>
+            <div className="text-[20px] font-extrabold">{nf(financialBreakdown.deliveryCost)}</div>
+            <div className="text-xs text-muted-foreground">Gs</div>
+          </div>
+          <div className="kpi-card border border-cyan-500/20 bg-cyan-500/10">
+            <div className="text-xs text-muted-foreground mb-1">Comisión vendedor</div>
+            <div className="text-[20px] font-extrabold">{nf(financialBreakdown.sellerCommission)}</div>
+            <div className="text-xs text-muted-foreground">Gs</div>
+          </div>
+          <div className="kpi-card border border-green-500/20 bg-green-500/10">
+            <div className="text-xs text-muted-foreground mb-1">Mi ganancia</div>
+            <div className="text-[22px] font-extrabold" style={{ color: financialBreakdown.realProfit >= 0 ? '#4ade80' : '#f87171' }}>
+              {nf(financialBreakdown.realProfit)}
+            </div>
+            <div className="text-xs text-muted-foreground">Gs</div>
+          </div>
+        </div>
       </div>
 
       <div className="mb-4">
