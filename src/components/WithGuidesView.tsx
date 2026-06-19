@@ -26,6 +26,13 @@ const displayClientName = (value: any): string => {
   return String(value || '').replace(/\s+/g, ' ').trim() || 'SIN NOMBRE';
 };
 
+const panelCls = "rounded-3xl border border-slate-700/70 bg-[#0b1020]/95 shadow-[0_24px_80px_rgba(0,0,0,.35)] p-4 md:p-6 text-white";
+const cardCls = "rounded-2xl border border-slate-700/70 bg-[#101827]/90 shadow-xl";
+const kpiBaseCls = "relative overflow-hidden rounded-2xl border p-4 min-h-[96px] shadow-lg";
+const pillInputCls = "bg-[#070b18] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20";
+const proBtnCls = "rounded-xl px-4 py-2 text-sm font-black text-white transition hover:scale-[1.02] active:scale-[.98] shadow-lg";
+
+
 export default function WithGuidesView() {
   const { profile } = useAuth();
   const role = profile?.role || '';
@@ -543,7 +550,7 @@ export default function WithGuidesView() {
           <h3 style="color: #7c5cff; margin: 0 0 10px 0;">GUÍA DE ENVÍO — ${order.order_number || order.id.slice(0, 8)}</h3>
           
           <table style="width: 100%; font-size: 12px; margin-bottom: 12px;">
-            <tbody>
+            <tbody className="divide-y divide-slate-800/80">
               <tr><td style="width: 100px; padding: 2px 0; color: #666;">Cliente:</td><td style="font-weight: bold;">${(order.customer_name || '').replace(/</g, '&lt;')}</td></tr>
               <tr><td style="padding: 2px 0; color: #666;">Teléfono:</td><td style="font-weight: bold;">${order.phone || ''}</td></tr>
               <tr><td style="padding: 2px 0; color: #666;">Email:</td><td style="font-weight: bold;">${(order.email || '').replace(/</g, '&lt;')}</td></tr>
@@ -1075,66 +1082,87 @@ export default function WithGuidesView() {
   };
 
   return (
-    <div className="app-card bg-[#050816] border border-[#1d2a44] rounded-2xl shadow-2xl">
-      <div className="flex justify-between items-center mb-3">
-        <div>
-          <div className="text-[10px] tracking-[0.25em] text-cyan-300 font-black uppercase">Panel operativo</div>
-          <h3 className="text-2xl font-black text-white">Pedidos con guías</h3>
-          <p className="text-xs text-slate-400">Guías, QR, impresión, repetidos y control diario.</p>
+    <div className={panelCls}>
+      <div className="rounded-3xl border border-slate-700/80 bg-[#101827] px-4 md:px-6 py-4 mb-4 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center text-2xl shadow-lg shadow-cyan-500/20">📦</div>
+          <div>
+            <div className="text-[10px] tracking-[0.28em] text-cyan-300 font-black uppercase">Panel operativo</div>
+            <h3 className="text-2xl md:text-3xl font-black text-white leading-tight">Pedidos con guías PRO</h3>
+            <p className="text-xs md:text-sm text-slate-400">Guías, QR, impresión térmica, repetidos, filtros y control diario.</p>
+          </div>
         </div>
-        <button
-          onClick={() => window.open('#/asignar-pedidos', '_blank')}
-          className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2"
-        >
-          📷 <span>Abrir Lector QR</span>
-        </button>
+        <div className="flex flex-wrap items-end gap-2 justify-end">
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] uppercase tracking-widest text-slate-400 font-black">Desde</span>
+            <input type="date" className={pillInputCls} value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+          </div>
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] uppercase tracking-widest text-slate-400 font-black">Hasta</span>
+            <input type="date" className={pillInputCls} value={dateTo} onChange={e => setDateTo(e.target.value)} />
+          </div>
+          <button className={proBtnCls + " bg-gradient-to-r from-blue-600 to-cyan-500"} onClick={load} disabled={loading}>
+            {loading ? 'Cargando...' : 'Aplicar'}
+          </button>
+          <button className={proBtnCls + " bg-slate-800 border border-slate-700"} onClick={() => { const t = todayISO(); setDateFrom(t); setDateTo(t); }}>Hoy</button>
+          <button
+            onClick={() => window.open('#/asignar-pedidos', '_blank')}
+            className={proBtnCls + " bg-gradient-to-r from-violet-600 to-purple-500"}
+          >
+            📷 Abrir Lector QR
+          </button>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 mb-4 text-xs md:text-sm font-bold text-cyan-100">
+        Rango activo: {dateFrom} hasta {dateTo}. Guías generadas se cuentan por updated_at y entregados por delivered_at, sin importar cuándo se vendieron.
       </div>
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-9 gap-3 mb-3">
-        <div className="kpi-card border border-blue-500/20 bg-blue-500/10">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-9 gap-3 mb-4">
+        <div className={kpiBaseCls + " border-blue-500/40 bg-gradient-to-br from-blue-500/20 to-[#101827]"}>
           <div className="text-xs text-blue-200 mb-1">Guías pendientes</div>
           <div className="text-[24px] font-black text-white">{pendingGuides.length}</div>
         </div>
-        <div className="kpi-card border border-emerald-500/20 bg-emerald-500/10">
+        <div className={kpiBaseCls + " border-emerald-500/40 bg-gradient-to-br from-emerald-500/20 to-[#101827]"}>
           <div className="text-xs text-emerald-200 mb-1">Con guía generada</div>
           <div className="text-[24px] font-black text-white">{withGuides.length}</div>
         </div>
-        <div className="kpi-card border border-cyan-500/20 bg-cyan-500/10">
+        <div className={kpiBaseCls + " border-cyan-500/40 bg-gradient-to-br from-cyan-500/20 to-[#101827]"}>
           <div className="text-xs text-cyan-200 mb-1">Guías generadas hoy</div>
           <div className="text-[24px] font-black text-white">{guidesTodayCount}</div>
           <div className="text-[10px] text-cyan-300">Por fecha de actualización</div>
         </div>
-        <div className="kpi-card border border-violet-500/20 bg-violet-500/10">
+        <div className={kpiBaseCls + " border-violet-500/40 bg-gradient-to-br from-violet-500/20 to-[#101827]"}>
           <div className="text-xs text-violet-200 mb-1">Entregados hoy</div>
           <div className="text-[24px] font-black text-white">{deliveredTodayCount}</div>
           <div className="text-[10px] text-violet-300">Por delivered_at</div>
         </div>
-        <div className="kpi-card border border-slate-500/20 bg-slate-500/10">
+        <div className={kpiBaseCls + " border-slate-500/40 bg-gradient-to-br from-slate-500/20 to-[#101827]"}>
           <div className="text-xs text-slate-300 mb-1">Total en rango</div>
           <div className="text-[24px] font-black text-white">{filtered.length}</div>
         </div>
-        <div className="kpi-card border border-amber-500/20 bg-amber-500/10">
+        <div className={kpiBaseCls + " border-amber-500/40 bg-gradient-to-br from-amber-500/20 to-[#101827]"}>
           <div className="text-xs text-amber-200 mb-1">Clientes repetidos</div>
           <div className="text-[24px] font-black text-white">{repeatedClientsCount}</div>
           <div className="text-[10px] text-amber-300">{repeatedGuidesCount} guías involucradas</div>
         </div>
-        <div className="kpi-card">
+        <div className={kpiBaseCls + " border-slate-700/70 bg-[#101827]"}>
           <div className="text-xs text-muted-foreground mb-1">Departamentos</div>
           <div className="text-[22px] font-extrabold">{selectedDepartments.size || 'Todos'}</div>
         </div>
-        <div className="kpi-card">
+        <div className={kpiBaseCls + " border-slate-700/70 bg-[#101827]"}>
           <div className="text-xs text-muted-foreground mb-1">Ciudades</div>
           <div className="text-[22px] font-extrabold">{selectedCities.size || 'Todas'}</div>
         </div>
-        <div className="kpi-card">
+        <div className={kpiBaseCls + " border-slate-700/70 bg-[#101827]"}>
           <div className="text-xs text-muted-foreground mb-1">Seleccionados</div>
           <div className="text-[22px] font-extrabold">{selectedIds.size}</div>
         </div>
       </div>
 
       {repeatedClients.length > 0 && (
-        <div className="mb-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3">
+        <div className="mb-4 rounded-2xl border border-amber-500/40 bg-gradient-to-br from-amber-500/15 to-[#101827] p-4 shadow-xl">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
             <div>
               <div className="text-sm font-black text-amber-200">⚠️ Clientes repetidos detectados</div>
@@ -1168,14 +1196,14 @@ export default function WithGuidesView() {
       )}
 
       {/* Filtros */}
-      <div className="flex flex-wrap gap-2 mb-3">
+      <div className={cardCls + " flex flex-wrap items-end gap-2 mb-3 p-3"}>
         <label className="app-label !mt-0">Desde</label>
-        <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+        <input type="date" className={pillInputCls + " !w-auto"} value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
         <label className="app-label !mt-0">Hasta</label>
-        <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+        <input type="date" className={pillInputCls + " !w-auto"} value={dateTo} onChange={e => setDateTo(e.target.value)} />
         
         <label className="app-label !mt-0">Estado</label>
-        <select className="app-input !w-auto min-w-[150px]" value={status2Filter} onChange={e => setStatus2Filter(e.target.value)}>
+        <select className={pillInputCls + " !w-auto min-w-[150px]"} value={status2Filter} onChange={e => setStatus2Filter(e.target.value)}>
           <option value="PENDIENTES">📋 Pendientes</option>
           <option value="CON_GUIA">✅ Con guía generada</option>
           <option value="TODOS">📦 Todos</option>
@@ -1184,7 +1212,7 @@ export default function WithGuidesView() {
         {role !== 'PROVEEDOR' && (
           <>
             <label className="app-label !mt-0">Proveedor</label>
-            <select className="app-input !w-auto min-w-[200px]" value={providerFilter} onChange={e => setProviderFilter(e.target.value)}>
+            <select className={pillInputCls + " !w-auto min-w-[200px]"} value={providerFilter} onChange={e => setProviderFilter(e.target.value)}>
               <option value="">Todos los proveedores</option>
               {allProviders.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
@@ -1193,8 +1221,8 @@ export default function WithGuidesView() {
       </div>
 
       {/* Filtros segunda línea */}
-      <div className="flex flex-wrap gap-2 mb-3">
-        <input className="app-input flex-1 min-w-[200px]" placeholder="🔎 Buscar por order_number..."
+      <div className={cardCls + " flex flex-wrap gap-2 mb-3 p-3"}>
+        <input className={pillInputCls + " flex-1 min-w-[240px]"} placeholder="🔎 Buscar por order_number..."
           value={search} onChange={e => setSearch(e.target.value)} />
         
         <div className="relative">
@@ -1205,7 +1233,7 @@ export default function WithGuidesView() {
           {showDeptDropdown && (
             <div className="absolute top-full mt-1 left-0 z-50 bg-card border border-border rounded-xl shadow-xl w-80 max-h-96 overflow-hidden flex flex-col">
               <div className="p-2 border-b border-border">
-                <input type="text" className="app-input w-full text-sm" placeholder="🔎 Buscar departamento..."
+                <input type="text" className={pillInputCls + " w-full text-sm"} placeholder="🔎 Buscar departamento..."
                   value={deptSearch} onChange={e => setDeptSearch(e.target.value)} />
               </div>
               <div className="p-2 border-b border-border flex gap-2">
@@ -1235,7 +1263,7 @@ export default function WithGuidesView() {
           {showCityDropdown && (
             <div className="absolute top-full mt-1 left-0 z-50 bg-card border border-border rounded-xl shadow-xl w-80 max-h-96 overflow-hidden flex flex-col">
               <div className="p-2 border-b border-border">
-                <input type="text" className="app-input w-full text-sm" placeholder="🔎 Buscar ciudad..."
+                <input type="text" className={pillInputCls + " w-full text-sm"} placeholder="🔎 Buscar ciudad..."
                   value={citySearch} onChange={e => setCitySearch(e.target.value)} />
               </div>
               <div className="p-2 border-b border-border flex gap-2">
@@ -1264,7 +1292,7 @@ export default function WithGuidesView() {
 
       {/* Acciones masivas */}
       {selectedIds.size > 0 && (
-        <div className="flex flex-wrap gap-2 mb-3 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
+        <div className="flex flex-wrap gap-2 mb-3 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl shadow-xl">
           <div className="text-sm font-bold text-green-400 mr-2 self-center">
             ✅ {selectedIds.size} seleccionado{selectedIds.size > 1 ? 's' : ''}:
           </div>
@@ -1285,7 +1313,7 @@ export default function WithGuidesView() {
         </div>
       )}
 
-      <div className="flex flex-wrap gap-2 mb-3">
+      <div className={cardCls + " flex flex-wrap gap-2 mb-3 p-3"}>
         <button className="nav-btn" onClick={selectAllPending} style={{ background: '#3b82f6', color: 'white' }}>
           ☑️ Seleccionar todos pendientes ({pendingGuides.length})
         </button>
@@ -1304,10 +1332,10 @@ export default function WithGuidesView() {
       </div>
 
       {/* Tabla */}
-      <div className="overflow-auto">
-        <table className="app-table min-w-[1200px]">
-          <thead>
-            <tr>
+      <div className="overflow-auto rounded-2xl border border-slate-700/80 bg-[#101827] shadow-2xl">
+        <table className="w-full min-w-[1320px] text-sm [&_th]:px-4 [&_th]:py-3 [&_td]:px-4 [&_td]:py-3">
+          <thead className="bg-[#070b18] sticky top-0 z-10">
+            <tr className="text-left text-[11px] uppercase tracking-widest text-slate-400 border-b border-slate-700/80">
               <th className="w-[40px] text-center">
                 <input type="checkbox" checked={selectedIds.size === visibleOrders.length && visibleOrders.length > 0}
                   onChange={() => selectedIds.size === visibleOrders.length ? setSelectedIds(new Set()) : setSelectedIds(new Set(visibleOrders.map(o => o.id)))} />
@@ -1325,9 +1353,9 @@ export default function WithGuidesView() {
               <th>Guía</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="divide-y divide-slate-800/80">
             {visibleOrders.map(o => (
-              <tr key={o.id}>
+              <tr key={o.id} className="hover:bg-slate-800/45 transition-colors">
                 <td className="text-center">
                   <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
                  </td>
@@ -1347,7 +1375,7 @@ export default function WithGuidesView() {
                 <td className="text-xs">{o.created_by}</td>
                 <td className="text-xs">{o.provider_emails_list || o.provider_email || '—'}</td>
                 <td className="text-xs">
-                  <select className="app-input w-auto py-1 px-2 text-xs" value={o.status2 || '--'}
+                  <select className="bg-[#070b18] border border-slate-700 rounded-lg px-2 py-1 text-xs text-white outline-none focus:border-blue-400" value={o.status2 || '--'}
                     onChange={e => updateStatus2(o.id, e.target.value)}>
                     {state2Opts.map(s => <option key={s} value={s}>{s}</option>)}
                   </select>
@@ -1376,7 +1404,7 @@ export default function WithGuidesView() {
       {/* MODAL DE GUÍA CON QR */}
       {showGuideModal && currentOrder && (
         <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-4" onClick={() => setShowGuideModal(false)}>
-          <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-auto" onClick={e => e.stopPropagation()}>
+          <div className="bg-[#101827] border border-slate-700 rounded-3xl p-6 w-full max-w-3xl max-h-[90vh] overflow-auto shadow-2xl text-white" onClick={e => e.stopPropagation()}>
             <h4 className="text-lg font-extrabold mb-3">📦 Guía de Envío</h4>
             
             <div className="space-y-2 text-sm">
