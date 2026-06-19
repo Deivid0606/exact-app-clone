@@ -43,8 +43,6 @@ export default function WithGuidesView() {
   const [guideText, setGuideText] = useState('');
   const [guideId, setGuideId] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [dateFrom, setDateFrom] = useState(() => todayISO());
-  const [dateTo, setDateTo] = useState(() => todayISO());
   const [loading, setLoading] = useState(false);
   const [guidesTodayCount, setGuidesTodayCount] = useState(0);
   const [deliveredTodayCount, setDeliveredTodayCount] = useState(0);
@@ -135,15 +133,12 @@ export default function WithGuidesView() {
     let query = supabase
       .from('orders')
       .select('*')
-      .order('created_at', { ascending: false });
+      .order('created_at', { ascending: false })
+      .range(0, 9999);
 
     if (search && search.trim()) {
       const searchTerm = search.trim();
       query = query.ilike('order_number', `%${searchTerm}%`);
-    } else {
-      query = query
-        .gte('created_at', dateFrom + 'T00:00:00')
-        .lte('created_at', dateTo + 'T23:59:59');
     }
 
     if (status2Filter === 'PENDIENTES') {
@@ -195,7 +190,7 @@ export default function WithGuidesView() {
 
   useEffect(() => { 
     load(); 
-  }, [dateFrom, dateTo, status2Filter]);
+  }, [status2Filter]);
 
   useEffect(() => {
     if (search && search.trim()) {
@@ -1087,24 +1082,10 @@ export default function WithGuidesView() {
         <div className="flex items-center gap-4">
           <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center text-2xl shadow-lg shadow-cyan-500/20">📦</div>
           <div>
-            <div className="text-[10px] tracking-[0.28em] text-cyan-300 font-black uppercase">Panel operativo</div>
-            <h3 className="text-2xl md:text-3xl font-black text-white leading-tight">Pedidos con guías PRO</h3>
-            <p className="text-xs md:text-sm text-slate-400">Guías, QR, impresión térmica, repetidos, filtros y control diario.</p>
+            <h3 className="text-2xl md:text-3xl font-black text-white leading-tight">Pedidos con guías</h3>
           </div>
         </div>
         <div className="flex flex-wrap items-end gap-2 justify-end">
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] uppercase tracking-widest text-slate-400 font-black">Desde</span>
-            <input type="date" className={pillInputCls} value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-          </div>
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] uppercase tracking-widest text-slate-400 font-black">Hasta</span>
-            <input type="date" className={pillInputCls} value={dateTo} onChange={e => setDateTo(e.target.value)} />
-          </div>
-          <button className={proBtnCls + " bg-gradient-to-r from-blue-600 to-cyan-500"} onClick={load} disabled={loading}>
-            {loading ? 'Cargando...' : 'Aplicar'}
-          </button>
-          <button className={proBtnCls + " bg-slate-800 border border-slate-700"} onClick={() => { const t = todayISO(); setDateFrom(t); setDateTo(t); }}>Hoy</button>
           <button
             onClick={() => window.open('#/asignar-pedidos', '_blank')}
             className={proBtnCls + " bg-gradient-to-r from-violet-600 to-purple-500"}
@@ -1112,10 +1093,6 @@ export default function WithGuidesView() {
             📷 Abrir Lector QR
           </button>
         </div>
-      </div>
-
-      <div className="rounded-2xl border border-cyan-500/30 bg-cyan-500/10 px-4 py-3 mb-4 text-xs md:text-sm font-bold text-cyan-100">
-        Rango activo: {dateFrom} hasta {dateTo}. Guías generadas se cuentan por updated_at y entregados por delivered_at, sin importar cuándo se vendieron.
       </div>
 
       {/* KPIs */}
@@ -1131,15 +1108,13 @@ export default function WithGuidesView() {
         <div className={kpiBaseCls + " border-cyan-500/40 bg-gradient-to-br from-cyan-500/20 to-[#101827]"}>
           <div className="text-xs text-cyan-200 mb-1">Guías generadas hoy</div>
           <div className="text-[24px] font-black text-white">{guidesTodayCount}</div>
-          <div className="text-[10px] text-cyan-300">Por fecha de actualización</div>
         </div>
         <div className={kpiBaseCls + " border-violet-500/40 bg-gradient-to-br from-violet-500/20 to-[#101827]"}>
           <div className="text-xs text-violet-200 mb-1">Entregados hoy</div>
           <div className="text-[24px] font-black text-white">{deliveredTodayCount}</div>
-          <div className="text-[10px] text-violet-300">Por delivered_at</div>
         </div>
         <div className={kpiBaseCls + " border-slate-500/40 bg-gradient-to-br from-slate-500/20 to-[#101827]"}>
-          <div className="text-xs text-slate-300 mb-1">Total en rango</div>
+          <div className="text-xs text-slate-300 mb-1">Total</div>
           <div className="text-[24px] font-black text-white">{filtered.length}</div>
         </div>
         <div className={kpiBaseCls + " border-amber-500/40 bg-gradient-to-br from-amber-500/20 to-[#101827]"}>
@@ -1166,7 +1141,7 @@ export default function WithGuidesView() {
           <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
             <div>
               <div className="text-sm font-black text-amber-200">⚠️ Clientes repetidos detectados</div>
-              <div className="text-xs text-slate-300">Se comparan nombres exactos normalizados dentro del rango y filtros visibles.</div>
+              <div className="text-xs text-slate-300">Se comparan nombres exactos normalizados dentro de los filtros visibles.</div>
             </div>
             <button
               className="nav-btn"
@@ -1197,11 +1172,6 @@ export default function WithGuidesView() {
 
       {/* Filtros */}
       <div className={cardCls + " flex flex-wrap items-end gap-2 mb-3 p-3"}>
-        <label className="app-label !mt-0">Desde</label>
-        <input type="date" className={pillInputCls + " !w-auto"} value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-        <label className="app-label !mt-0">Hasta</label>
-        <input type="date" className={pillInputCls + " !w-auto"} value={dateTo} onChange={e => setDateTo(e.target.value)} />
-        
         <label className="app-label !mt-0">Estado</label>
         <select className={pillInputCls + " !w-auto min-w-[150px]"} value={status2Filter} onChange={e => setStatus2Filter(e.target.value)}>
           <option value="PENDIENTES">📋 Pendientes</option>
@@ -1394,7 +1364,7 @@ export default function WithGuidesView() {
             ))}
             {visibleOrders.length === 0 && (
               <tr>
-                <td colSpan={12} className="text-center text-muted-foreground py-8">Sin pedidos en el rango seleccionado</td>
+                <td colSpan={12} className="text-center text-muted-foreground py-8">Sin pedidos para mostrar</td>
               </tr>
             )}
           </tbody>
