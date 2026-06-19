@@ -6,9 +6,10 @@ import {
   PieChart, Pie, Cell, Legend
 } from 'recharts';
 
-const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
-const COLORS = ['#7c5cff','#21c08b','#ffa726','#ff5c7c','#42a5f5','#ab47bc','#26c6da','#ef5350','#66bb6a','#ffca28'];
+const nf = (n: number) => new Intl.NumberFormat('es-PY').format(Math.round(Number(n || 0)));
+const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#22c55e', '#f97316', '#a855f7'];
 const CANCEL_STATES = new Set(['CANCELADO','RECHAZADO','RECHAZADO EN EL LUGAR','NO DESEA','CANCELÓ POR WHATSAPP']);
+const DELIVERED_STATES = new Set(['ENTREGADO', 'ENCOMIENDA ENTREGADA']);
 
 interface OrderRow {
   id: string;
@@ -28,7 +29,22 @@ interface OrderRow {
   delivered_at: string | null;
 }
 
-// Helper para verificar si el proveedor tiene acceso al pedido (misma función que en OrdersView)
+type KpiTone = 'blue' | 'emerald' | 'amber' | 'rose' | 'violet' | 'cyan';
+
+const todayPY = () => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+const inDateRange = (value: string | null | undefined, from: string, to: string) => {
+  if (!value) return false;
+  const day = value.slice(0, 10);
+  return day >= from && day <= to;
+};
+
 function isProviderAllowed(order: any, userEmail: string): boolean {
   const providerList = order.provider_emails_list;
   if (!providerList) return false;
@@ -48,16 +64,89 @@ function isProviderAllowed(order: any, userEmail: string): boolean {
   return emails.some(email => email.toLowerCase() === userEmail.toLowerCase());
 }
 
+function mergeOrders(...groups: any[][]): OrderRow[] {
+  const map = new Map<string, OrderRow>();
+  groups.flat().forEach((order: any) => {
+    if (order?.id) map.set(order.id, order as OrderRow);
+  });
+  return Array.from(map.values());
+}
+
+function KpiCard({ title, value, subtitle, icon, tone = 'blue' }: {
+  title: string;
+  value: string | number;
+  subtitle?: string;
+  icon: string;
+  tone?: KpiTone;
+}) {
+  const tones: Record<KpiTone, string> = {
+    blue: 'from-blue-500/20 to-cyan-500/5 border-blue-500/25 text-blue-300 shadow-blue-500/10',
+    emerald: 'from-emerald-500/20 to-teal-500/5 border-emerald-500/25 text-emerald-300 shadow-emerald-500/10',
+    amber: 'from-amber-500/20 to-orange-500/5 border-amber-500/25 text-amber-300 shadow-amber-500/10',
+    rose: 'from-rose-500/20 to-red-500/5 border-rose-500/25 text-rose-300 shadow-rose-500/10',
+    violet: 'from-violet-500/20 to-fuchsia-500/5 border-violet-500/25 text-violet-300 shadow-violet-500/10',
+    cyan: 'from-cyan-500/20 to-blue-500/5 border-cyan-500/25 text-cyan-300 shadow-cyan-500/10',
+  };
+
+  return (
+    <div className={`relative overflow-hidden rounded-2xl border bg-gradient-to-br ${tones[tone]} p-4 shadow-xl transition-all duration-200 hover:-translate-y-0.5 hover:border-white/20`}>
+      <div className="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-white/5 blur-2xl" />
+      <div className="relative flex items-start justify-between gap-3">
+        <div>
+          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">{title}</div>
+          <div className="mt-2 text-2xl font-black leading-tight text-white md:text-3xl">{value}</div>
+          {subtitle && <div className="mt-2 text-[11px] font-bold text-slate-400">{subtitle}</div>}
+        </div>
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-slate-950/50 text-xl shadow-inner">
+          {icon}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MiniList({ title, subtitle, data, accent = 'cyan' }: {
+  title: string;
+  subtitle: string;
+  data: [string, { qty: number; revenue?: number }][];
+  accent?: 'cyan' | 'violet';
+}) {
+  const max = Math.max(...data.map(([, d]) => d.qty), 1);
+  const bar = accent === 'violet' ? 'from-violet-500 to-fuchsia-400' : 'from-blue-500 to-cyan-400';
+  return (
+    <div className="rounded-2xl border border-slate-700/60 bg-slate-900/70 p-5 shadow-2xl shadow-black/20">
+      <h3 className="text-base font-black text-white">{title}</h3>
+      <p className="mb-4 text-xs font-semibold text-slate-400">{subtitle}</p>
+      {data.length === 0 ? (
+        <div className="flex h-36 items-center justify-center rounded-xl border border-dashed border-slate-700 text-sm text-slate-500">Sin datos</div>
+      ) : (
+        <div className="space-y-3">
+          {data.slice(0, 8).map(([name, d], i) => (
+            <div key={i}>
+              <div className="mb-1 flex items-center justify-between gap-3 text-xs">
+                <span className="truncate font-bold text-slate-200">{name}</span>
+                <span className="shrink-0 font-black text-white">{nf(d.qty)}</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-slate-950/80">
+                <div className={`h-full rounded-full bg-gradient-to-r ${bar}`} style={{ width: `${Math.max(6, (d.qty / max) * 100)}%` }} />
+              </div>
+              {typeof d.revenue === 'number' && <div className="mt-1 text-[10px] font-bold text-slate-500">Gs {nf(d.revenue)}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function DashboardView() {
   const { profile } = useAuth();
   const role = profile?.role || '';
   const email = profile?.email || '';
 
-  const [dateFrom, setDateFrom] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() - 7);
-    return d.toISOString().slice(0, 10);
-  });
-  const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  // ✅ Por defecto el dashboard siempre abre desde/hasta el día actual.
+  const [dateFrom, setDateFrom] = useState(() => todayPY());
+  const [dateTo, setDateTo] = useState(() => todayPY());
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [deliveryRates, setDeliveryRates] = useState<Record<string, number>>({});
@@ -68,70 +157,75 @@ export default function DashboardView() {
 
   const loadDashboard = async () => {
     setLoading(true);
-    const [ordersRes, productsRes, ratesRes] = await Promise.all([
-      supabase.from('orders').select('*').gte('created_at', dateFrom + 'T00:00:00').lte('created_at', dateTo + 'T23:59:59'),
+    const from = `${dateFrom}T00:00:00`;
+    const to = `${dateTo}T23:59:59`;
+
+    // Trae pedidos por venta, por guía generada y por entrega para que los KPIs diarios no dependan de created_at.
+    const [createdRes, guidesRes, deliveredRes, productsRes, ratesRes] = await Promise.all([
+      supabase.from('orders').select('*').gte('created_at', from).lte('created_at', to),
+      supabase.from('orders').select('*').gte('assigned_at', from).lte('assigned_at', to),
+      supabase.from('orders').select('*').gte('delivered_at', from).lte('delivered_at', to),
       supabase.from('products').select('*'),
       supabase.from('delivery_fees').select('*'),
     ]);
-    setOrders((ordersRes.data || []) as OrderRow[]);
+
+    setOrders(mergeOrders(createdRes.data || [], guidesRes.data || [], deliveredRes.data || []));
     setProducts(productsRes.data || []);
+
     const rm: Record<string, number> = {};
-    (ratesRes.data || []).forEach((r: any) => { if (r.city) rm[r.city.toLowerCase().trim()] = Number(r.fee_gs || 0); });
+    (ratesRes.data || []).forEach((r: any) => {
+      if (r.city) rm[r.city.toLowerCase().trim()] = Number(r.fee_gs || 0);
+    });
     setDeliveryRates(rm);
     setLoading(false);
   };
 
-  // ✅ AHORA se actualiza cuando cambian las fechas
   useEffect(() => { loadDashboard(); }, [dateFrom, dateTo]);
 
-  // Build cost map by SKU
   const costMap = useMemo(() => {
     const m: Record<string, number> = {};
     products.forEach(p => { if (p.sku) m[p.sku.trim()] = Number(p.real_cost_gs || p.provider_price_gs || 0); });
     return m;
   }, [products]);
 
-  // Provider email map by SKU (solo se usa para cálculos de ganancia, NO para filtrar)
   const skuProviderMap = useMemo(() => {
     const m: Record<string, string> = {};
     products.forEach(p => { if (p.sku && p.provider_email) m[p.sku.trim()] = p.provider_email.toLowerCase().trim(); });
     return m;
   }, [products]);
 
-  // ✅ Filter orders by role - MISMA LÓGICA que OrdersView
-  const filteredOrders = useMemo(() => {
-    return orders.filter(o => {
-      // VENDEDOR: mismo filtro que OrdersView
-      if (role === 'VENDEDOR' && (o.created_by || '').toLowerCase() !== email.toLowerCase()) return false;
-      
-      // DELIVERY: mismo filtro que OrdersView
-      if (role === 'DELIVERY' && (o.assigned_delivery || '').toLowerCase() !== email.toLowerCase()) return false;
-      
-      // PROVEEDOR: usa provider_emails_list (mismo que OrdersView)
-      if (role === 'PROVEEDOR' && !isProviderAllowed(o, email)) return false;
-      
-      // ADMIN y DESPACHANTE ven todos
-      return true;
-    });
-  }, [orders, role, email]);
+  const roleAllowed = (o: OrderRow) => {
+    if (role === 'VENDEDOR' && (o.created_by || '').toLowerCase() !== email.toLowerCase()) return false;
+    if (role === 'DELIVERY' && (o.assigned_delivery || '').toLowerCase() !== email.toLowerCase()) return false;
+    if (role === 'PROVEEDOR' && !isProviderAllowed(o, email)) return false;
+    return true;
+  };
 
-  // KPIs
+  const filteredOrders = useMemo(() => orders.filter(roleAllowed), [orders, role, email]);
+
+  const createdRangeOrders = useMemo(() => filteredOrders.filter(o => inDateRange(o.created_at, dateFrom, dateTo)), [filteredOrders, dateFrom, dateTo]);
+  const guidesRangeOrders = useMemo(() => filteredOrders.filter(o => inDateRange(o.assigned_at, dateFrom, dateTo)), [filteredOrders, dateFrom, dateTo]);
+  const deliveredRangeOrders = useMemo(() => filteredOrders.filter(o => inDateRange(o.delivered_at, dateFrom, dateTo) && DELIVERED_STATES.has((o.status || '').toUpperCase())), [filteredOrders, dateFrom, dateTo]);
+
   const kpis = useMemo(() => {
     let orderCount = 0, sold = 0, delivered = 0, canceled = 0, profit = 0;
     let montoRendir = 0, sumaEntregado = 0;
     let deliveredTodayProfit = 0, deliveredRangeProfit = 0;
-    const today = new Date().toISOString().slice(0, 10);
+    const currentDay = todayPY();
 
-    filteredOrders.forEach(o => {
+    createdRangeOrders.forEach(o => {
       orderCount++;
       const total = Number(o.total_gs || 0);
       const status = (o.status || 'PENDIENTE').toUpperCase();
-
-      if (status === 'ENTREGADO' || status === 'ENCOMIENDA ENTREGADA') delivered++;
       if (CANCEL_STATES.has(status)) canceled++;
       sold += total;
+    });
 
-      // Profit calculation
+    deliveredRangeOrders.forEach(o => {
+      delivered++;
+      const total = Number(o.total_gs || 0);
+      const status = (o.status || 'PENDIENTE').toUpperCase();
+
       if (role === 'PROVEEDOR') {
         try {
           const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
@@ -142,11 +236,8 @@ export default function DashboardView() {
               const salePrice = Number(it.sale_gs || 0);
               const cost = Number(costMap[sku] || 0);
               const itemProfit = (salePrice - cost) * qty;
-              if (status === 'ENTREGADO' || status === 'ENCOMIENDA ENTREGADA') {
-                deliveredRangeProfit += itemProfit;
-                const deliveredDate = o.delivered_at ? o.delivered_at.slice(0, 10) : '';
-                if (deliveredDate === today) deliveredTodayProfit += itemProfit;
-              }
+              deliveredRangeProfit += itemProfit;
+              if ((o.delivered_at || '').slice(0, 10) === currentDay) deliveredTodayProfit += itemProfit;
             }
           });
         } catch {}
@@ -158,7 +249,6 @@ export default function DashboardView() {
           if (!o.delivery_settled) montoRendir += (total - fee);
         }
       } else {
-        // ADMIN/VENDEDOR
         try {
           const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
           let provCost = 0;
@@ -166,41 +256,46 @@ export default function DashboardView() {
             const sku = String(it.sku || '').trim();
             provCost += Number(costMap[sku] || 0) * Number(it.qty || 0);
           });
-          if (status === 'ENTREGADO' || status === 'ENCOMIENDA ENTREGADA') {
-            profit += total - provCost - Number(o.delivery_gs || 0);
-          }
+          profit += total - provCost - Number(o.delivery_gs || 0);
         } catch {}
       }
     });
 
-    return { orders: orderCount, sold, delivered, canceled, profit, montoRendir, sumaEntregado, deliveredTodayProfit, deliveredRangeProfit };
-  }, [filteredOrders, role, email, costMap, deliveryRates, skuProviderMap]);
+    return {
+      orders: orderCount,
+      sold,
+      delivered,
+      canceled,
+      profit,
+      montoRendir,
+      sumaEntregado,
+      deliveredTodayProfit,
+      deliveredRangeProfit,
+      guidesGenerated: guidesRangeOrders.length,
+    };
+  }, [createdRangeOrders, deliveredRangeOrders, guidesRangeOrders, role, email, costMap, deliveryRates, skuProviderMap]);
 
-  // Bar chart data (sales by day)
   const barData = useMemo(() => {
     const byDay: Record<string, number> = {};
-    filteredOrders.forEach(o => {
-      const baseDate = (role === 'DELIVERY' && o.assigned_at) ? o.assigned_at : o.created_at;
-      const day = baseDate.slice(0, 10);
+    createdRangeOrders.forEach(o => {
+      const day = o.created_at.slice(0, 10);
       byDay[day] = (byDay[day] || 0) + Number(o.total_gs || 0);
     });
-    return Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b)).map(([date, value]) => ({ date, value }));
-  }, [filteredOrders, role]);
+    return Object.entries(byDay).sort(([a], [b]) => a.localeCompare(b)).map(([date, value]) => ({ date: date.slice(5), value }));
+  }, [createdRangeOrders]);
 
-  // Pie chart data (by city)
   const pieData = useMemo(() => {
-    const byCity: Record<string, number> = {};
-    filteredOrders.forEach(o => {
-      const city = o.city || 'SIN CIUDAD';
-      byCity[city] = (byCity[city] || 0) + 1;
+    const byStatus: Record<string, number> = {};
+    createdRangeOrders.forEach(o => {
+      const status = (o.status || 'PENDIENTE').toUpperCase();
+      byStatus[status] = (byStatus[status] || 0) + 1;
     });
-    return Object.entries(byCity).sort(([,a], [,b]) => b - a).slice(0, 10).map(([name, value]) => ({ name, value }));
-  }, [filteredOrders]);
+    return Object.entries(byStatus).sort(([,a], [,b]) => b - a).slice(0, 8).map(([name, value]) => ({ name, value }));
+  }, [createdRangeOrders]);
 
-  // Top products
   const topProducts = useMemo(() => {
     const map: Record<string, { qty: number; revenue: number }> = {};
-    filteredOrders.forEach(o => {
+    createdRangeOrders.forEach(o => {
       try {
         const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
         items.forEach((it: any) => {
@@ -212,174 +307,156 @@ export default function DashboardView() {
       } catch {}
     });
     return Object.entries(map).sort(([,a], [,b]) => b.qty - a.qty).slice(0, 10);
-  }, [filteredOrders]);
+  }, [createdRangeOrders]);
 
-  // Map cities
   const mapCities = useMemo(() => {
     const byCity: Record<string, { qty: number; revenue: number }> = {};
-    filteredOrders.forEach(o => {
+    createdRangeOrders.forEach(o => {
       const city = o.city || 'SIN CIUDAD';
       if (!byCity[city]) byCity[city] = { qty: 0, revenue: 0 };
       byCity[city].qty++;
       byCity[city].revenue += Number(o.total_gs || 0);
     });
-    return Object.entries(byCity).sort(([,a], [,b]) => b.revenue - a.revenue);
-  }, [filteredOrders]);
+    return Object.entries(byCity).sort(([,a], [,b]) => b.qty - a.qty).slice(0, 10);
+  }, [createdRangeOrders]);
 
   const handleAdSpend = (val: number) => {
     setAdSpend(val);
     try { localStorage.setItem('provider_ad_spend', String(val)); } catch {}
   };
 
+  const isTodayRange = dateFrom === todayPY() && dateTo === todayPY();
+
   return (
-    <div className="app-card">
-      <h3 className="text-lg font-extrabold mb-3">Dashboard</h3>
-      <div className="flex flex-wrap items-center gap-2 mb-3">
-        <label className="app-label !mt-0">Desde</label>
-        <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-        <label className="app-label !mt-0">Hasta</label>
-        <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
-        <button className="nav-btn active" onClick={loadDashboard} disabled={loading}>
-          {loading ? <span className="flex items-center gap-2"><span className="btn-spinner" /> Cargando...</span> : 'Aplicar'}
-        </button>
-      </div>
+    <div className="min-h-full w-full overflow-auto bg-[#020617] p-3 text-slate-100 md:p-5">
+      <div className="relative w-full overflow-hidden rounded-3xl border border-slate-800/80 bg-slate-950/80 p-4 shadow-2xl shadow-black/30 md:p-6">
+        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,.18),transparent_30%),radial-gradient(circle_at_top_right,rgba(16,185,129,.14),transparent_28%)]" />
+        <div className="relative space-y-5">
+          <div className="flex flex-col justify-between gap-4 rounded-3xl border border-slate-700/70 bg-slate-900/70 p-4 shadow-xl shadow-black/20 xl:flex-row xl:items-center">
+            <div className="flex items-center gap-4">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-400 text-2xl shadow-lg shadow-blue-500/20">📊</div>
+              <div>
+                <div className="text-[11px] font-black uppercase tracking-[0.26em] text-cyan-300">Panel ejecutivo</div>
+                <h2 className="text-2xl font-black leading-tight text-white md:text-3xl">Dashboard PRO</h2>
+                <p className="text-sm font-semibold text-slate-400">Ventas, guías generadas, entregas reales y utilidad por rango.</p>
+              </div>
+            </div>
 
-      {/* KPIs by role */}
-      <div className="grid-kpi">
-        <div className="kpi-card">
-          <div className="text-xs text-muted-foreground mb-1.5">Pedidos</div>
-          <div className="text-[22px] font-extrabold">{nf(kpis.orders)}</div>
-        </div>
-        <div className="kpi-card">
-          <div className="text-xs text-muted-foreground mb-1.5">Total vendido (Gs)</div>
-          <div className="text-[22px] font-extrabold">{nf(kpis.sold)}</div>
-        </div>
-        <div className="kpi-card">
-          <div className="text-xs text-muted-foreground mb-1.5">Entregados</div>
-          <div className="text-[22px] font-extrabold">{nf(kpis.delivered)}</div>
-        </div>
-        <div className="kpi-card">
-          <div className="text-xs text-muted-foreground mb-1.5">Cancelados</div>
-          <div className="text-[22px] font-extrabold">{nf(kpis.canceled)}</div>
-        </div>
-
-        {role === 'DELIVERY' ? (
-          <>
-            <div className="kpi-card">
-              <div className="text-xs text-muted-foreground mb-1.5">Suma entregado (Gs)</div>
-              <div className="text-[22px] font-extrabold">{nf(kpis.sumaEntregado)}</div>
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="flex flex-col gap-1 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                Desde
+                <input type="date" className="h-10 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm font-bold text-white outline-none transition focus:border-cyan-400" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+              </label>
+              <label className="flex flex-col gap-1 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                Hasta
+                <input type="date" className="h-10 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm font-bold text-white outline-none transition focus:border-cyan-400" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+              </label>
+              <button className="h-10 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 px-5 text-sm font-black text-white shadow-lg shadow-blue-500/20 transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60" onClick={loadDashboard} disabled={loading}>
+                {loading ? '⏳ Cargando...' : 'Aplicar'}
+              </button>
+              <button className="h-10 rounded-xl border border-slate-700 bg-slate-800 px-4 text-sm font-black text-slate-200 transition hover:bg-slate-700" onClick={() => { const t = todayPY(); setDateFrom(t); setDateTo(t); }}>
+                Hoy
+              </button>
             </div>
-            <div className="kpi-card">
-              <div className="text-xs text-muted-foreground mb-1.5">Monto a rendir (Gs)</div>
-              <div className="text-[22px] font-extrabold">{nf(kpis.montoRendir)}</div>
-            </div>
-          </>
-        ) : role === 'PROVEEDOR' ? (
-          <>
-            <div className="kpi-card">
-              <div className="text-xs text-muted-foreground mb-1.5">Ganancia hoy (Gs)</div>
-              <div className="text-[22px] font-extrabold">{nf(kpis.deliveredTodayProfit)}</div>
-            </div>
-            <div className="kpi-card">
-              <div className="text-xs text-muted-foreground mb-1.5">Ganancia rango (Gs)</div>
-              <div className="text-[22px] font-extrabold">{nf(kpis.deliveredRangeProfit)}</div>
-            </div>
-            <div className="kpi-card">
-              <div className="text-xs text-muted-foreground mb-1.5">Inversión publicidad (Gs)</div>
-              <input
-                type="number"
-                className="app-input !py-1 !mt-1 text-lg font-bold"
-                value={adSpend}
-                onChange={e => handleAdSpend(Number(e.target.value || 0))}
-              />
-            </div>
-            <div className="kpi-card">
-              <div className="text-xs text-muted-foreground mb-1.5">Liquidez real (Gs)</div>
-              <div className="text-[22px] font-extrabold">{nf(kpis.deliveredRangeProfit - adSpend)}</div>
-            </div>
-          </>
-        ) : (
-          <div className="kpi-card">
-            <div className="text-xs text-muted-foreground mb-1.5">
-              {role === 'VENDEDOR' ? 'Mi comisión (Gs)' : 'Utilidad Total (Gs)'}
-            </div>
-            <div className="text-[22px] font-extrabold">{nf(kpis.profit)}</div>
           </div>
-        )}
-      </div>
 
-      {/* Charts */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-        <div className="kpi-card min-h-[280px]">
-          <div className="text-xs font-bold text-muted-foreground mb-2">Ventas por día (Gs)</div>
-          {barData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={barData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="hsl(240 16% 22%)" />
-                <XAxis dataKey="date" tick={{ fill: 'hsl(228 12% 62%)', fontSize: 10 }} />
-                <YAxis tick={{ fill: 'hsl(228 12% 62%)', fontSize: 10 }} tickFormatter={v => nf(v)} />
-                <Tooltip
-                  contentStyle={{ background: 'hsl(240 18% 10%)', border: '1px solid hsl(240 16% 22%)', borderRadius: 8, color: '#fff' }}
-                  formatter={(v: number) => [nf(v) + ' Gs', 'Ventas']}
+          <div className="rounded-2xl border border-cyan-500/20 bg-cyan-500/10 px-4 py-3 text-sm font-bold text-cyan-100">
+            Rango activo: <span className="text-white">{dateFrom}</span> hasta <span className="text-white">{dateTo}</span>{isTodayRange ? ' · Día actual' : ''}. Guías se cuentan por <span className="text-white">assigned_at</span> y entregados por <span className="text-white">delivered_at</span>, sin importar cuándo se vendieron.
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
+            <KpiCard title="Pedidos" value={nf(kpis.orders)} subtitle="Vendidos en el rango" icon="🧾" tone="blue" />
+            <KpiCard title="Total vendido" value={`${nf(kpis.sold)} Gs`} subtitle="Según fecha de venta" icon="💰" tone="emerald" />
+            <KpiCard title="Guías generadas" value={nf(kpis.guidesGenerated)} subtitle="Según fecha de guía" icon="📦" tone="cyan" />
+            <KpiCard title="Entregados" value={nf(kpis.delivered)} subtitle="Según fecha de entrega" icon="✅" tone="emerald" />
+            <KpiCard title="Cancelados" value={nf(kpis.canceled)} subtitle="Cancelados vendidos en rango" icon="✕" tone="rose" />
+            {role === 'DELIVERY' ? (
+              <KpiCard title="A rendir" value={`${nf(kpis.montoRendir)} Gs`} subtitle="Entregas no liquidadas" icon="🏦" tone="violet" />
+            ) : role === 'PROVEEDOR' ? (
+              <KpiCard title="Ganancia rango" value={`${nf(kpis.deliveredRangeProfit)} Gs`} subtitle="Por entregas" icon="🏦" tone="violet" />
+            ) : (
+              <KpiCard title={role === 'VENDEDOR' ? 'Mi comisión' : 'Utilidad total'} value={`${nf(kpis.profit)} Gs`} subtitle="Por entregas del rango" icon="🏦" tone="violet" />
+            )}
+          </div>
+
+          {role === 'DELIVERY' && (
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <KpiCard title="Suma entregado" value={`${nf(kpis.sumaEntregado)} Gs`} subtitle="Entregado en el rango" icon="🚚" tone="emerald" />
+              <KpiCard title="Monto a rendir" value={`${nf(kpis.montoRendir)} Gs`} subtitle="Total menos delivery" icon="🏦" tone="violet" />
+            </div>
+          )}
+
+          {role === 'PROVEEDOR' && (
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+              <KpiCard title="Ganancia hoy" value={`${nf(kpis.deliveredTodayProfit)} Gs`} subtitle="Entregas del día actual" icon="⚡" tone="emerald" />
+              <div className="rounded-2xl border border-amber-500/25 bg-gradient-to-br from-amber-500/20 to-orange-500/5 p-4 shadow-xl shadow-amber-500/10">
+                <div className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Inversión publicidad</div>
+                <input
+                  type="number"
+                  className="mt-2 h-11 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 text-xl font-black text-white outline-none focus:border-amber-400"
+                  value={adSpend}
+                  onChange={e => handleAdSpend(Number(e.target.value || 0))}
                 />
-                <Bar dataKey="value" fill="hsl(256 100% 68%)" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex items-center justify-center h-[200px] text-muted-foreground text-sm">Sin datos</div>
+              </div>
+              <KpiCard title="Liquidez real" value={`${nf(kpis.deliveredRangeProfit - adSpend)} Gs`} subtitle="Ganancia - publicidad" icon="💎" tone="cyan" />
+            </div>
           )}
-        </div>
 
-        <div className="kpi-card min-h-[280px]">
-          <div className="text-xs font-bold text-muted-foreground mb-2">Pedidos por ciudad</div>
-          {pieData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={240}>
-              <PieChart>
-                <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}>
-                  {pieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                </Pie>
-                <Tooltip contentStyle={{ background: 'hsl(240 18% 10%)', border: '1px solid hsl(240 16% 22%)', borderRadius: 8, color: '#fff' }} />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
-              </PieChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex items-center justify-center h-[200px] text-muted-foreground text-sm">Sin datos</div>
-          )}
-        </div>
-      </div>
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <div className="rounded-2xl border border-slate-700/60 bg-slate-900/70 p-5 shadow-2xl shadow-black/20">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-black text-white">Ventas por día</h3>
+                  <p className="text-xs font-semibold text-slate-400">Total vendido según created_at.</p>
+                </div>
+                <span className="rounded-full bg-blue-500/10 px-3 py-1 text-xs font-black text-blue-300">Gs</span>
+              </div>
+              {barData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={280}>
+                  <BarChart data={barData}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,.18)" />
+                    <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                    <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => nf(v)} />
+                    <Tooltip
+                      contentStyle={{ background: '#020617', border: '1px solid rgba(148,163,184,.25)', borderRadius: 14, color: '#fff' }}
+                      formatter={(v: number) => [nf(v) + ' Gs', 'Ventas']}
+                    />
+                    <Bar dataKey="value" fill="#3b82f6" radius={[10, 10, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-[240px] items-center justify-center rounded-xl border border-dashed border-slate-700 text-sm font-bold text-slate-500">Sin datos</div>
+              )}
+            </div>
 
-      {/* Top products + Map cities */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
-        <div className="kpi-card">
-          <div className="text-xs font-bold text-muted-foreground mb-2">🏆 Top Productos</div>
-          {topProducts.length === 0 ? (
-            <p className="text-muted-foreground text-xs">Sin datos</p>
-          ) : (
-            <ul className="space-y-1">
-              {topProducts.map(([name, d], i) => (
-                <li key={i} className="text-xs flex justify-between gap-2">
-                  <span className="truncate">{name}</span>
-                  <span className="text-muted-foreground whitespace-nowrap">{nf(d.qty)} uds — Gs {nf(d.revenue)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
+            <div className="rounded-2xl border border-slate-700/60 bg-slate-900/70 p-5 shadow-2xl shadow-black/20">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-base font-black text-white">Distribución de estados</h3>
+                  <p className="text-xs font-semibold text-slate-400">Pedidos vendidos en el rango.</p>
+                </div>
+                <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-black text-emerald-300">Live</span>
+              </div>
+              {pieData.length > 0 ? (
+                <ResponsiveContainer width="100%" height={280}>
+                  <PieChart>
+                    <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={58} outerRadius={90} paddingAngle={3} label={({ percent }) => `${(percent * 100).toFixed(0)}%`}>
+                      {pieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                    </Pie>
+                    <Tooltip contentStyle={{ background: '#020617', border: '1px solid rgba(148,163,184,.25)', borderRadius: 14, color: '#fff' }} />
+                    <Legend wrapperStyle={{ fontSize: 11, color: '#cbd5e1' }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <div className="flex h-[240px] items-center justify-center rounded-xl border border-dashed border-slate-700 text-sm font-bold text-slate-500">Sin datos</div>
+              )}
+            </div>
+          </div>
 
-        <div className="kpi-card">
-          <div className="text-xs font-bold text-muted-foreground mb-2">🗺️ Pedidos por ciudad</div>
-          {mapCities.length === 0 ? (
-            <p className="text-muted-foreground text-xs">Sin datos</p>
-          ) : (
-            <ul className="space-y-1">
-              {mapCities.map(([city, d], i) => (
-                <li key={i} className="text-xs flex justify-between gap-2">
-                  <span className="truncate">{city}</span>
-                  <span className="text-muted-foreground whitespace-nowrap">{nf(d.qty)} pedidos — Gs {nf(d.revenue)}</span>
-                </li>
-              ))}
-            </ul>
-          )}
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+            <MiniList title="Top productos" subtitle="Más vendidos por unidades." data={topProducts} accent="violet" />
+            <MiniList title="Top ciudades" subtitle="Mayor volumen de pedidos." data={mapCities} accent="cyan" />
+          </div>
         </div>
       </div>
     </div>
