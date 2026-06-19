@@ -243,8 +243,11 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [initialLoadDone, setInitialLoadDone] = useState(false);
   const [loadingStatuses, setLoadingStatuses] = useState(true);
   const [products, setProducts] = useState<any[]>([]);
+  
+  // 🔥 CAMBIO CRÍTICO: usar __row (número de fila real) como clave, NO idx
   const [rowStatuses, setRowStatuses] = useState<Record<string, OrderStatus>>({});
   const [rowOrderNumbers, setRowOrderNumbers] = useState<Record<string, string>>({});
+  
   const [autoLoad, setAutoLoad] = useState<boolean>(() => localStorage.getItem(AUTO_LOAD_KEY) === "true");
   const [activeFilter, setActiveFilter] = useState<FilterType>(() => {
     const saved = localStorage.getItem(ACTIVE_FILTER_KEY) as FilterType;
@@ -255,7 +258,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [cityFilter, setCityFilter] = useState("");
   const [coverageFilter, setCoverageFilter] = useState<"all" | "covered" | "uncovered">("all");
   const [search, setSearch] = useState("");
-  const [selectedOrder, setSelectedOrder] = useState<{ order: SheetOrder; idx: number } | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<{ order: SheetOrder; rowKey: string } | null>(null);
   const [showGuideModal, setShowGuideModal] = useState(false);
 
   const colKeys = useMemo(() => {
@@ -284,15 +287,27 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     };
   }, [sheetHeaders]);
 
-  // ─── FIX: getRowStatus lee directamente de rowStatuses sin useCallback
-  // para que siempre tenga la referencia más fresca en el memo filteredOrders
-  const getRowStatus = (idx: number): OrderStatus => {
-    return rowStatuses[String(idx)] || "CARGAR";
-  };
+  // ─── FUNCIONES CON __row COMO CLAVE ───
+  
+  // Obtener la clave estable de una fila: usa __row del sheet, fallback a idx
+  const getRowKey = useCallback((order: SheetOrder, idx: number): string => {
+    // Si el order tiene __row (del endpoint corregido), usarlo
+    if (order.__row) {
+      return String(order.__row);
+    }
+    // Fallback: idx (pero esto es inestable, debería venir __row siempre)
+    console.warn(`⚠️ Fila ${idx} sin __row, usando idx como fallback`);
+    return String(idx);
+  }, []);
 
-  const getRowOrderNumber = (idx: number): string | null => {
-    return rowOrderNumbers[String(idx)] || null;
-  };
+  // getRowStatus ahora recibe rowKey (string) en lugar de idx
+  const getRowStatus = useCallback((rowKey: string): OrderStatus => {
+    return rowStatuses[rowKey] || "CARGAR";
+  }, [rowStatuses]);
+
+  const getRowOrderNumber = useCallback((rowKey: string): string | null => {
+    return rowOrderNumbers[rowKey] || null;
+  }, [rowOrderNumbers]);
 
   const loadStatusesFromDatabase = useCallback(async () => {
     if (!myEmail || !sheetUrl) return;
@@ -307,12 +322,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         const statusMap: Record<string, OrderStatus> = {};
         const orderNumberMap: Record<string, string> = {};
         data.forEach(item => {
-          statusMap[String(item.row_index)] = item.status as OrderStatus;
-          if (item.order_number) orderNumberMap[String(item.row_index)] = item.order_number;
+          // row_index ahora es el __row real (string)
+          const rowKey = String(item.row_index);
+          statusMap[rowKey] = item.status as OrderStatus;
+          if (item.order_number) orderNumberMap[rowKey] = item.order_number;
         });
         setRowStatuses(statusMap);
         setRowOrderNumbers(orderNumberMap);
-        console.log("📊 Estados cargados desde BD:", statusMap);
+        console.log("📊 Estados cargados desde BD (usando __row):", statusMap);
       } else if (error) {
         console.error("Error cargando estados:", error);
       }
@@ -320,15 +337,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     finally { setLoadingStatuses(false); }
   }, [myEmail, sheetUrl]);
 
-  // ─── FIX PRINCIPAL: persistRowStatus solo persiste en BD, NO toca el estado local
-  // El estado local (rowStatuses) ahora se actualiza SIEMPRE desde el llamador (onChange o loadOrder)
-  const persistRowStatus = useCallback(async (key: string, status: OrderStatus, orderNumber?: string) => {
+  // persistRowStatus: usa rowKey (que es __row) directamente
+  const persistRowStatus = useCallback(async (rowKey: string, status: OrderStatus, orderNumber?: string) => {
     if (!myEmail || !sheetUrl) {
       toast.error("Falta email o URL del sheet");
       return;
     }
-    const rowIndex = parseInt(key);
-    console.log(`📝 Persistiendo estado: Fila ${rowIndex + 1} -> "${status}"`);
+    console.log(`📝 Persistiendo estado: Fila ${rowKey} -> "${status}"`);
     try {
       if (status !== "CARGAR") {
         const { error } = await supabase
@@ -336,7 +351,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           .upsert({
             user_email: myEmail,
             sheet_url: sheetUrl,
-            row_index: rowIndex,
+            row_index: rowKey, // ahora es string (__row)
             status: status,
             order_number: orderNumber || null,
             updated_at: new Date().toISOString()
@@ -359,7 +374,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           .delete()
           .eq("user_email", myEmail)
           .eq("sheet_url", sheetUrl)
-          .eq("row_index", rowIndex);
+          .eq("row_index", rowKey);
         if (error) throw error;
         console.log(`✅ Estado eliminado (Pendiente)`);
         toast.success(`✅ Estado: ⏳ Pendiente`);
@@ -367,37 +382,36 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     } catch (error: any) {
       console.error("❌ Error al persistir estado:", error);
       toast.error(`Error: ${error.message}`);
-      // Revertir UI recargando desde BD
       await loadStatusesFromDatabase();
     }
   }, [myEmail, sheetUrl, loadStatusesFromDatabase]);
 
-  // ─── setRowStatus: actualiza UI inmediatamente Y persiste en BD
-  const setRowStatus = useCallback(async (key: string, status: OrderStatus, orderNumber?: string) => {
-    // 1. UPDATE LOCAL INMEDIATO — garantiza que filteredOrders se recalcula YA
-    setRowStatuses(prev => ({ ...prev, [key]: status }));
-
-    if (orderNumber) {
-      setRowOrderNumbers(prev => ({ ...prev, [key]: orderNumber }));
-    }
-
+  // setRowStatus: actualiza UI inmediatamente Y persiste en BD
+  const setRowStatus = useCallback(async (rowKey: string, status: OrderStatus, orderNumber?: string) => {
+    // 1. UPDATE LOCAL INMEDIATO
     if (status === "CARGAR") {
       setRowStatuses(prev => {
         const next = { ...prev };
-        delete next[key];
+        delete next[rowKey];
         return next;
       });
       setRowOrderNumbers(prev => {
         const next = { ...prev };
-        delete next[key];
+        delete next[rowKey];
         return next;
       });
+    } else {
+      setRowStatuses(prev => ({ ...prev, [rowKey]: status }));
+      if (orderNumber) {
+        setRowOrderNumbers(prev => ({ ...prev, [rowKey]: orderNumber }));
+      }
     }
 
-    // 2. PERSISTIR EN BD (asíncrono, sin bloquear UI)
-    await persistRowStatus(key, status, orderNumber);
+    // 2. PERSISTIR EN BD
+    await persistRowStatus(rowKey, status, orderNumber);
   }, [persistRowStatus]);
 
+  // ─── REALTIME ───
   useEffect(() => {
     if (!myEmail || !sheetUrl) return;
     const channel = supabase
@@ -414,6 +428,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return () => { supabase.removeChannel(channel); };
   }, [myEmail, sheetUrl, loadStatusesFromDatabase]);
 
+  // ─── EFFECTS ───
   useEffect(() => { localStorage.setItem(AUTO_LOAD_KEY, autoLoad.toString()); }, [autoLoad]);
   useEffect(() => { localStorage.setItem(ACTIVE_FILTER_KEY, activeFilter); }, [activeFilter]);
   useEffect(() => { supabase.from("products").select("*").then(({ data }) => setProducts(data || [])); }, []);
@@ -456,7 +471,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
            null;
   }, [products]);
 
-  const loadOrder = useCallback(async (order: SheetOrder, idx: number, source: "auto" | "manual" = "auto") => {
+  const loadOrder = useCallback(async (order: SheetOrder, rowKey: string, source: "auto" | "manual" = "auto") => {
     const productName = order[colKeys.product] || "";
     const matched = matchProduct(productName);
     if (!matched) { toast.error(`❌ Producto no detectado: "${productName}"`); return false; }
@@ -469,7 +484,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     if (!departamento) toast.warning(`⚠️ No se pudo determinar el departamento para "${city}"`);
 
     const salePrice = getAmountFromRow(order, colKeys.amount);
-    if (salePrice === 0) { toast.warning(`⚠️ No se detectó monto en fila ${idx + 1}`); return false; }
+    if (salePrice === 0) { toast.warning(`⚠️ No se detectó monto en fila ${rowKey}`); return false; }
 
     const orderId = await generateUniqueOrderId();
     const newStatus: OrderStatus = source === "auto" ? "CARGADO" : "CARGADO_MANUAL";
@@ -502,15 +517,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const { error } = await supabase.from("orders").insert(payload);
     if (error) { toast.error("Error al guardar: " + error.message); console.error("Error detallado:", error); return false; }
 
-    // ─── FIX: usar setRowStatus que ya incluye el update local inmediato
-    await setRowStatus(String(idx), newStatus, orderId);
+    await setRowStatus(rowKey, newStatus, orderId);
     toast.success(`✅ Pedido ${orderId} cargado | Delivery: ${nf(deliveryPrice)} Gs | Depto: ${departamento || "?"}`);
     return true;
   }, [colKeys, matchProduct, myEmail, setRowStatus]);
 
-  const handleDirectSave = (order: SheetOrder, idx: number) => loadOrder(order, idx, "auto");
+  const handleDirectSave = (order: SheetOrder, rowKey: string) => loadOrder(order, rowKey, "auto");
 
-  const handleOpenForm = (order: SheetOrder, idx: number) => {
+  const handleOpenForm = (order: SheetOrder, rowKey: string) => {
     if (onSheetConfirm) onSheetConfirm({
       customer: order[colKeys.name] || "",
       phone: extractPhoneNumber(order[colKeys.phone] || ""),
@@ -525,11 +539,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const handleBulkLoad = async () => {
     let count = 0, errors = 0;
     for (let i = 0; i < sheetOrders.length; i++) {
-      const status = getRowStatus(i);
+      const order = sheetOrders[i];
+      const rowKey = getRowKey(order, i);
+      const status = getRowStatus(rowKey);
       if (status !== "CARGAR") continue;
-      const city = sheetOrders[i][colKeys.city] || "";
+      const city = order[colKeys.city] || "";
       if (!hasCoverage(city)) continue;
-      const success = await loadOrder(sheetOrders[i], i, "auto");
+      const success = await loadOrder(order, rowKey, "auto");
       if (success) count++; else errors++;
       if (count % 3 === 0) await new Promise(r => setTimeout(r, 100));
     }
@@ -566,12 +582,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return { principales, extras };
   };
 
+  // ─── ESTADÍSTICAS CON __row ───
   const dashboardStats = useMemo(() => {
     let pendientesConCobertura = 0, pendientesSinCobertura = 0, cargados = 0, dropeados = 0, cancelados = 0;
     sheetOrders.forEach((order, idx) => {
+      const rowKey = getRowKey(order, idx);
       const city = order[colKeys.city] || "";
       const covered = hasCoverage(city);
-      const status = getRowStatus(idx);
+      const status = getRowStatus(rowKey);
       if (status === "CARGAR") {
         if (covered) pendientesConCobertura++; else pendientesSinCobertura++;
       } else if (status === "CARGADO" || status === "CARGADO_MANUAL") {
@@ -583,13 +601,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       }
     });
     return { pendientesConCobertura, pendientesSinCobertura, cargados, dropeados, cancelados, totalPedidos: sheetOrders.length };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sheetOrders, colKeys, rowStatuses]); // rowStatuses como dependencia directa
+  }, [sheetOrders, colKeys, getRowKey, getRowStatus]);
 
   const counts = useMemo(() => {
     let cargarConCobertura = 0, cargarSinCobertura = 0, cargados = 0, aDropear = 0, cancelados = 0;
     sheetOrders.forEach((order, idx) => {
-      const status = getRowStatus(idx);
+      const rowKey = getRowKey(order, idx);
+      const status = getRowStatus(rowKey);
       const city = order[colKeys.city] || "";
       const covered = hasCoverage(city);
       if (status === "CARGAR") {
@@ -603,14 +621,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       }
     });
     return { cargarConCobertura, cargarSinCobertura, cargados, aDropear, cancelados, total: sheetOrders.length };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sheetOrders, colKeys, rowStatuses]); // rowStatuses como dependencia directa
+  }, [sheetOrders, colKeys, getRowKey, getRowStatus]);
 
+  // ─── FILTERED ORDERS CON __row ───
   const filteredOrders = useMemo(() => {
     return sheetOrders
-      .map((o, i) => ({ order: o, idx: i }))
-      .filter(({ order, idx }) => {
-        const status = getRowStatus(idx);
+      .map((order, idx) => ({ order, idx, rowKey: getRowKey(order, idx) }))
+      .filter(({ order, rowKey }) => {
+        const status = getRowStatus(rowKey);
         const city = order[colKeys.city] || "";
         const covered = hasCoverage(city);
 
@@ -646,9 +664,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         }
         return true;
       });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sheetOrders, activeFilter, search, productSearch, cityFilter, searchType, coverageFilter, colKeys, rowStatuses]);
-  // ↑ rowStatuses como dependencia directa — cuando cambia, filteredOrders se recalcula
+  }, [sheetOrders, activeFilter, search, productSearch, cityFilter, searchType, coverageFilter, colKeys, getRowKey, getRowStatus]);
 
   const changeFilter = (filter: FilterType) => setActiveFilter(filter);
 
@@ -662,8 +678,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
   const renderGuideModal = () => {
     if (!showGuideModal || !selectedOrder) return null;
-    const { order, idx } = selectedOrder;
-    const status = getRowStatus(idx);
+    const { order, rowKey } = selectedOrder;
+    const status = getRowStatus(rowKey);
     const city = order[colKeys.city] || "";
     const covered = hasCoverage(city);
     const deliveryPrice = getCityDeliveryPrice(city);
@@ -672,7 +688,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const productName = order[colKeys.product] || "";
     const matched = matchProduct(productName);
     const quantity = parseQuantity(order[colKeys.qty]);
-    const orderNumber = getRowOrderNumber(idx);
+    const orderNumber = getRowOrderNumber(rowKey);
     const { extras } = getAllFields(order);
     const totalConEnvio = salePrice + (deliveryPrice || 0);
     const unitPrice = quantity > 1 ? Math.round(salePrice / quantity) : salePrice;
@@ -688,7 +704,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                   <span className="text-[10px] font-mono text-green-400 bg-green-500/10 px-2 py-0.5 rounded">{orderNumber}</span>
                 )}
               </h2>
-              <p className="text-[10px] text-slate-400 mt-0.5">Pedido #{idx + 1} - {getOrderDate(order)}</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">Fila real #{order.__row || '?'} - {getOrderDate(order)}</p>
             </div>
             <button onClick={() => setShowGuideModal(false)} className="text-slate-400 hover:text-white text-3xl leading-none transition-colors">×</button>
           </div>
@@ -959,20 +975,22 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-800">
-            {filteredOrders.map(({ order, idx }) => {
-              const status = getRowStatus(idx);
+            {filteredOrders.map(({ order, idx, rowKey }) => {
+              const status = getRowStatus(rowKey);
               const city = order[colKeys.city] || "";
               const deliveryPrice = getCityDeliveryPrice(city);
               const covered = deliveryPrice !== null;
               const salePrice = getDisplayAmount(order);
               const orderDate = getOrderDate(order);
               const canLoad = status === "CARGAR" && covered && salePrice > 0;
-              const orderNumber = getRowOrderNumber(idx);
+              const orderNumber = getRowOrderNumber(rowKey);
               const departamento = getCityDepartment(city);
+              // Mostrar el número de fila REAL del sheet
+              const rowDisplay = order.__row || String(idx + 1);
 
               return (
-                <tr key={idx} className={getRowClassName(status, covered)}>
-                  <td className="px-1.5 py-1 text-[10px] text-slate-400">{idx + 1}</td>
+                <tr key={rowKey} className={getRowClassName(status, covered)}>
+                  <td className="px-1.5 py-1 text-[10px] text-slate-400 font-mono">{rowDisplay}</td>
                   <td className="px-1.5 py-1 text-[10px] font-mono">
                     {orderNumber ? <span className="text-green-400">{orderNumber}</span> : <span className="text-slate-600">—</span>}
                   </td>
@@ -1000,32 +1018,32 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                     {salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}
                   </td>
                   <td className="px-1.5 py-1 text-center">
-                    {/* ─── FIX APLICADO AQUÍ ─── */}
+                    {/* ─── SELECT CON FIX COMPLETO ─── */}
                     <select
                       className="bg-slate-800 border border-slate-700 rounded px-1 py-0.5 text-[10px] focus:outline-none focus:border-blue-500"
                       value={status}
                       onChange={(e) => {
                         const newStatus = e.target.value as OrderStatus;
-                        console.log(`🔄 Cambiando estado de fila ${idx + 1} de ${status} a ${newStatus}`);
+                        console.log(`🔄 Cambiando estado de fila ${rowKey} (real #${rowDisplay}) de ${status} a ${newStatus}`);
 
                         // UPDATE LOCAL INMEDIATO — React recalcula filteredOrders en el mismo ciclo
                         if (newStatus === "CARGAR") {
                           setRowStatuses(prev => {
                             const next = { ...prev };
-                            delete next[String(idx)];
+                            delete next[rowKey];
                             return next;
                           });
                           setRowOrderNumbers(prev => {
                             const next = { ...prev };
-                            delete next[String(idx)];
+                            delete next[rowKey];
                             return next;
                           });
                         } else {
-                          setRowStatuses(prev => ({ ...prev, [String(idx)]: newStatus }));
+                          setRowStatuses(prev => ({ ...prev, [rowKey]: newStatus }));
                         }
 
                         // PERSISTIR EN BD (no bloquea UI, maneja error internamente)
-                        persistRowStatus(String(idx), newStatus, orderNumber || undefined);
+                        persistRowStatus(rowKey, newStatus, orderNumber || undefined);
                       }}
                     >
                       <option value="CARGAR">⏳ Pendiente</option>
@@ -1040,20 +1058,20 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                       {canLoad && (
                         <button
                           className="px-1.5 py-0.5 text-[10px] bg-blue-600 hover:bg-blue-700 rounded transition-colors"
-                          onClick={() => handleDirectSave(order, idx)}
+                          onClick={() => handleDirectSave(order, rowKey)}
                         >
                           Cargar
                         </button>
                       )}
                       <button
                         className="px-1.5 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 rounded transition-colors"
-                        onClick={() => { setSelectedOrder({ order, idx }); setShowGuideModal(true); }}
+                        onClick={() => { setSelectedOrder({ order, rowKey }); setShowGuideModal(true); }}
                       >
                         📄 Guía
                       </button>
                       <button
                         className="px-1.5 py-0.5 text-[10px] bg-purple-700 hover:bg-purple-600 rounded transition-colors"
-                        onClick={() => handleOpenForm(order, idx)}
+                        onClick={() => handleOpenForm(order, rowKey)}
                       >
                         Formulario
                       </button>
