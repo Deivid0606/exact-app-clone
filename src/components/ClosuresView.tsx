@@ -302,7 +302,9 @@ export default function ClosuresView() {
   const [clientPrices, setClientPrices] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   
-  const [filterDelivery, setFilterDelivery] = useState('');
+  const [filterDeliveries, setFilterDeliveries] = useState<Set<string>>(new Set());
+  const [deliverySearch, setDeliverySearch] = useState('');
+  const [showDeliveryDropdown, setShowDeliveryDropdown] = useState(false);
   const [filterSupplier, setFilterSupplier] = useState('');
   const [filterType, setFilterType] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -480,6 +482,73 @@ export default function ClosuresView() {
     supabase.from('products').select('*').then(({ data }) => setProducts(data || []));
   }, []);
 
+
+  const selectedDeliveryList = useMemo(() => Array.from(filterDeliveries), [filterDeliveries]);
+
+  const filteredDeliveryOptions = useMemo(() => {
+    if (!deliverySearch.trim()) return deliveries;
+    const q = deliverySearch.toLowerCase().trim();
+    return deliveries.filter((d: any) =>
+      String(d.name || '').toLowerCase().includes(q) ||
+      String(d.email || '').toLowerCase().includes(q)
+    );
+  }, [deliveries, deliverySearch]);
+
+  const toggleDeliveryFilter = (email: string) => {
+    setFilterDeliveries(prev => {
+      const next = new Set(prev);
+      if (next.has(email)) next.delete(email);
+      else next.add(email);
+      return next;
+    });
+  };
+
+  const selectAllDeliveryFilters = () => {
+    if (filterDeliveries.size === deliveries.length) {
+      setFilterDeliveries(new Set());
+    } else {
+      setFilterDeliveries(new Set(deliveries.map((d: any) => d.email)));
+    }
+  };
+
+  const updateOrderCity = async (orderId: string, city: string) => {
+    const { error } = await supabase.from('orders').update({
+      city,
+      updated_at: new Date().toISOString()
+    }).eq('id', orderId);
+
+    if (error) {
+      toast.error(error.message);
+      loadClosures();
+      return;
+    }
+
+    toast.success('Ciudad actualizada');
+    setOrders(prev => prev.map(o => o.id === orderId ? { ...o, city, updated_at: new Date().toISOString() } : o));
+  };
+
+  const updateAssignedDelivery = async (orderId: string, deliveryEmail: string) => {
+    const { error } = await supabase.from('orders').update({
+      assigned_delivery: deliveryEmail || null,
+      assigned_at: deliveryEmail ? new Date().toISOString() : null,
+      updated_at: new Date().toISOString()
+    }).eq('id', orderId);
+
+    if (error) {
+      toast.error(error.message);
+      loadClosures();
+      return;
+    }
+
+    toast.success(deliveryEmail ? 'Delivery reasignado' : 'Delivery removido');
+    setOrders(prev => prev.map(o => o.id === orderId ? {
+      ...o,
+      assigned_delivery: deliveryEmail || null,
+      assigned_at: deliveryEmail ? new Date().toISOString() : null,
+      updated_at: new Date().toISOString()
+    } : o));
+  };
+
   const loadClosures = async () => {
     let dateField = filterDateBy;
     
@@ -496,13 +565,13 @@ export default function ClosuresView() {
 
     if (isSupplier) {
       query = query.eq('provider_email', myEmail);
-      if (filterDelivery) {
-        query = query.eq('assigned_delivery', filterDelivery);
+      if (selectedDeliveryList.length > 0) {
+        query = query.in('assigned_delivery', selectedDeliveryList);
       }
     } else if (isVendedor) {
       query = query.eq('created_by', myEmail);
-      if (filterDelivery) {
-        query = query.eq('assigned_delivery', filterDelivery);
+      if (selectedDeliveryList.length > 0) {
+        query = query.in('assigned_delivery', selectedDeliveryList);
       }
       if (filterSupplier) {
         query = query.eq('provider_email', filterSupplier);
@@ -513,7 +582,7 @@ export default function ClosuresView() {
         query = query.eq('provider_email', filterSupplier);
       }
     } else if (isAdmin) {
-      if (filterDelivery) query = query.eq('assigned_delivery', filterDelivery);
+      if (selectedDeliveryList.length > 0) query = query.in('assigned_delivery', selectedDeliveryList);
       if (filterSupplier) query = query.eq('provider_email', filterSupplier);
     }
 
@@ -528,8 +597,8 @@ export default function ClosuresView() {
     let deliveryToCheck = '';
     if (isDelivery) {
       deliveryToCheck = myEmail;
-    } else if ((isAdmin || isSupplier) && filterDelivery) {
-      deliveryToCheck = filterDelivery;
+    } else if ((isAdmin || isSupplier) && selectedDeliveryList.length === 1) {
+      deliveryToCheck = selectedDeliveryList[0];
     }
     
     if (deliveryToCheck) {
@@ -545,7 +614,7 @@ export default function ClosuresView() {
     }
   };
 
-  useEffect(() => { loadClosures(); }, [filterSupplier, filterDelivery, filterType, dateFrom, dateTo, filterDateBy]);
+  useEffect(() => { loadClosures(); }, [filterSupplier, filterDeliveries, filterType, dateFrom, dateTo, filterDateBy]);
 
   const filteredOrders = useMemo(() => {
     if (!searchTerm.trim()) return orders;
@@ -801,7 +870,11 @@ export default function ClosuresView() {
     if (isDelivery) {
       deliveryEmail = myEmail;
     } else if (isAdmin || isSupplier) {
-      deliveryEmail = filterDelivery;
+      if (selectedDeliveryList.length !== 1) {
+        toast.error('Seleccioná un solo delivery para marcar rendición pagada');
+        return;
+      }
+      deliveryEmail = selectedDeliveryList[0];
     }
     
     if (!deliveryEmail) { toast.error('Seleccioná un delivery primero'); return; }
@@ -856,9 +929,11 @@ export default function ClosuresView() {
   let deliveryName = '';
   if (isDelivery) {
     deliveryName = profile?.name || myEmail;
-  } else if ((isAdmin || isSupplier) && filterDelivery) {
-    const found = deliveries.find(d => d.email === filterDelivery);
-    deliveryName = found?.name || filterDelivery;
+  } else if ((isAdmin || isSupplier) && selectedDeliveryList.length === 1) {
+    const found = deliveries.find((d: any) => d.email === selectedDeliveryList[0]);
+    deliveryName = found?.name || selectedDeliveryList[0];
+  } else if ((isAdmin || isSupplier) && selectedDeliveryList.length > 1) {
+    deliveryName = `${selectedDeliveryList.length} repartidores seleccionados`;
   }
   
   const allRendered = noRendidos.length === 0 && delivered.length > 0;
@@ -900,28 +975,65 @@ export default function ClosuresView() {
         <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
         
         {(isSupplier || isAdmin) && (
-          <div className="flex items-center gap-1">
-            <select className="app-input !w-auto min-w-[280px]" value={filterDelivery} onChange={e => setFilterDelivery(e.target.value)}>
-              <option value="">Todos los repartidores</option>
-              {loadingDeliveries ? (
-                <option value="" disabled>Cargando repartidores...</option>
-              ) : deliveries.length === 0 ? (
-                <option value="" disabled>No hay repartidores disponibles</option>
-              ) : (
-                deliveries.map(d => (
-                  <option key={d.email} value={d.email}>
-                    {d.name || d.email}
-                  </option>
-                ))
-              )}
-            </select>
-            <button 
+          <div className="relative flex items-center gap-1">
+            <button
+              type="button"
+              className="app-input !w-auto min-w-[280px] text-left"
+              onClick={() => setShowDeliveryDropdown(!showDeliveryDropdown)}
+            >
+              {selectedDeliveryList.length === 0
+                ? 'Todos los repartidores'
+                : `${selectedDeliveryList.length} repartidor${selectedDeliveryList.length > 1 ? 'es' : ''} seleccionado${selectedDeliveryList.length > 1 ? 's' : ''}`}
+            </button>
+
+            <button
               className="nav-btn !bg-gray-500 text-xs !py-1 !px-2"
               onClick={() => loadDeliveries()}
               title="Recargar repartidores"
+              type="button"
             >
               🔄
             </button>
+
+            {showDeliveryDropdown && (
+              <div className="absolute top-full left-0 z-50 mt-1 w-[360px] max-h-96 overflow-hidden rounded-xl border border-border bg-card shadow-xl">
+                <div className="p-2 border-b border-border">
+                  <input
+                    className="app-input w-full text-sm"
+                    placeholder="🔎 Buscar delivery por nombre o correo..."
+                    value={deliverySearch}
+                    onChange={e => setDeliverySearch(e.target.value)}
+                  />
+                </div>
+                <div className="flex gap-2 p-2 border-b border-border">
+                  <button className="nav-btn !py-1 text-xs" type="button" onClick={selectAllDeliveryFilters}>
+                    {filterDeliveries.size === deliveries.length ? 'Deseleccionar todos' : 'Seleccionar todos'}
+                  </button>
+                  <button className="nav-btn !py-1 text-xs" type="button" onClick={() => setFilterDeliveries(new Set())}>
+                    Limpiar
+                  </button>
+                </div>
+                <div className="max-h-64 overflow-auto">
+                  {loadingDeliveries ? (
+                    <div className="p-3 text-sm text-muted-foreground">Cargando repartidores...</div>
+                  ) : filteredDeliveryOptions.length === 0 ? (
+                    <div className="p-3 text-sm text-muted-foreground">No hay repartidores disponibles</div>
+                  ) : (
+                    filteredDeliveryOptions.map((d: any) => (
+                      <label key={d.email} className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm hover:bg-secondary">
+                        <input
+                          type="checkbox"
+                          checked={filterDeliveries.has(d.email)}
+                          onChange={() => toggleDeliveryFilter(d.email)}
+                        />
+                        <span className="font-bold">{d.name || d.email}</span>
+                        {d.name && <span className="ml-auto text-xs text-muted-foreground">{d.email}</span>}
+                      </label>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -958,7 +1070,7 @@ export default function ClosuresView() {
         <button className="nav-btn active" onClick={loadClosures}>Aplicar</button>
       </div>
 
-      {(filterDelivery || isDelivery || isSupplier || isVendedor) && (
+      {(selectedDeliveryList.length > 0 || isDelivery || isSupplier || isVendedor) && (
         <div className="grid-kpi mb-4">
           <div className="kpi-card">
             <div className="text-xs text-muted-foreground mb-1">📦 Pedidos</div>
@@ -1026,7 +1138,7 @@ export default function ClosuresView() {
                   value={rendicionNote} onChange={e => setRendicionNote(e.target.value)} />
                 <button
                   onClick={markRendicionPagada}
-                  disabled={(!filterDelivery && !isDelivery) || totalAPagar <= 0}
+                  disabled={((selectedDeliveryList.length !== 1) && !isDelivery) || totalAPagar <= 0}
                   className="nav-btn active"
                 >
                   ✅ MARCAR COMO PAGADO
@@ -1132,7 +1244,7 @@ export default function ClosuresView() {
       </div>
 
       <div className="overflow-auto">
-        <table className="app-table min-w-[1600px]">
+        <table className="app-table min-w-[1800px]">
           <thead>
             <tr>
               <th>Fecha Asignación</th>
@@ -1142,6 +1254,7 @@ export default function ClosuresView() {
               <th>Cliente</th>
               <th>Teléfono</th>
               <th>Proveedor</th>
+              <th>Delivery</th>
               <th className="text-right">Total (Gs)</th>
               <th className="text-right">Tarifa (Gs)</th>
               <th className="text-right">Neto (Gs)</th>
@@ -1205,10 +1318,51 @@ export default function ClosuresView() {
                     {formatDatePY(o.created_at)}
                    </td>
                   <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
-                  <td className="text-xs">{o.city || '—'}</td>
+                  <td className="text-xs">
+                    {canEditFull ? (
+                      <select
+                        className="app-input !w-auto !py-1 !px-2 text-xs min-w-[160px]"
+                        value={o.city || ''}
+                        onChange={e => updateOrderCity(o.id, e.target.value)}
+                      >
+                        <option value="">Seleccionar ciudad</option>
+                        {clientPrices.map((cp: any) => (
+                          <option key={cp.city} value={cp.city}>{cp.city}</option>
+                        ))}
+                        {o.city && !clientPrices.some((cp: any) => cp.city === o.city) && (
+                          <option value={o.city}>{o.city}</option>
+                        )}
+                      </select>
+                    ) : (
+                      <span>{o.city || '—'}</span>
+                    )}
+                  </td>
                   <td className="text-xs">{o.customer_name}</td>
                   <td className="text-xs">{o.customer_phone || '—'}</td>
                   <td className="text-xs">{o.provider_email || '—'}</td>
+                  <td className="text-xs">
+                    {canEditFull ? (
+                      <select
+                        className="app-input !w-auto !py-1 !px-2 text-xs min-w-[220px]"
+                        value={o.assigned_delivery || ''}
+                        onChange={e => updateAssignedDelivery(o.id, e.target.value)}
+                      >
+                        <option value="">Seleccionar delivery</option>
+                        {deliveries.map((d: any) => (
+                          <option key={d.email} value={d.email}>
+                            {d.name || d.email}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <span>
+                        {(() => {
+                          const found = deliveries.find((d: any) => d.email === o.assigned_delivery);
+                          return found?.name || o.assigned_delivery || '—';
+                        })()}
+                      </span>
+                    )}
+                  </td>
                   <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
                   <td className="text-right text-xs">{nf(fee)}</td>
                   <td className="text-right text-xs">{nf(net)}</td>
@@ -1273,7 +1427,7 @@ export default function ClosuresView() {
             })}
             {filteredOrders.length === 0 && (
               <tr>
-                <td colSpan={canManageRendicion ? 15 : 14} className="text-center text-muted-foreground py-8">
+                <td colSpan={canManageRendicion ? 16 : 15} className="text-center text-muted-foreground py-8">
                   {searchTerm ? 'No se encontraron resultados para tu búsqueda' : 'Sin resultados en este período'}
                 </td>
               </tr>
