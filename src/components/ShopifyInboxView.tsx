@@ -248,8 +248,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [rowOrderNumbers, setRowOrderNumbers] = useState<Record<string, string>>({});
   
   const [autoLoad, setAutoLoad] = useState<boolean>(() => localStorage.getItem(AUTO_LOAD_KEY) === "true");
-  
-  // 🔥 Filtro: Pendientes + Con cobertura por defecto
   const [activeFilter, setActiveFilter] = useState<FilterType>(() => {
     const saved = localStorage.getItem(ACTIVE_FILTER_KEY) as FilterType;
     return saved || "CARGAR";
@@ -258,21 +256,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [searchType, setSearchType] = useState<"all" | "product" | "city">("product");
   const [productSearch, setProductSearch] = useState("");
   const [cityFilter, setCityFilter] = useState("");
-  
-  // 🔥 Coverage filter por defecto: "covered" (con cobertura)
-  const [coverageFilter, setCoverageFilter] = useState<"all" | "covered" | "uncovered">(() => {
-    return "covered";
-  });
-  
+  const [coverageFilter, setCoverageFilter] = useState<"all" | "covered" | "uncovered">("covered");
   const [search, setSearch] = useState("");
   const [selectedOrder, setSelectedOrder] = useState<{ order: SheetOrder; rowKey: string } | null>(null);
   const [showGuideModal, setShowGuideModal] = useState(false);
 
-  // ─── FILTRO DE FECHAS ───
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
 
-  // ─── SELECCIÓN MÚLTIPLE ───
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [selectAll, setSelectAll] = useState(false);
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
@@ -408,7 +399,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     await persistRowStatus(rowKey, status, orderNumber);
   }, [persistRowStatus]);
 
-  // ─── REALTIME ───
   useEffect(() => {
     if (!myEmail || !sheetUrl) return;
     const channel = supabase
@@ -424,7 +414,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return () => { supabase.removeChannel(channel); };
   }, [myEmail, sheetUrl, loadStatusesFromDatabase]);
 
-  // ─── EFFECTS ───
   useEffect(() => { localStorage.setItem(AUTO_LOAD_KEY, autoLoad.toString()); }, [autoLoad]);
   useEffect(() => { localStorage.setItem(ACTIVE_FILTER_KEY, activeFilter); }, [activeFilter]);
   useEffect(() => { supabase.from("products").select("*").then(({ data }) => setProducts(data || [])); }, []);
@@ -537,7 +526,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     toast.success(`✅ ${count} cargados | ❌ ${errors} errores`);
   };
 
-  // ─── SELECCIÓN MÚLTIPLE ───
   const toggleRowSelection = (rowKey: string) => {
     setSelectedRows(prev => {
       const newSet = new Set(prev);
@@ -710,25 +698,45 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return { principales, extras };
   };
 
-  // ─── ESTADÍSTICAS ───
+  // ─── ESTADÍSTICAS PARA DASHBOARD ───
   const dashboardStats = useMemo(() => {
     let pendientesConCobertura = 0, pendientesSinCobertura = 0, cargados = 0, dropeados = 0, cancelados = 0;
+    let totalVenta = 0;
+    
     sheetOrders.forEach((order, idx) => {
       const rowKey = getRowKey(order, idx);
       const city = order[colKeys.city] || "";
       const covered = hasCoverage(city);
       const status = getRowStatus(rowKey);
+      const amount = getAmountFromRow(order, colKeys.amount);
+      
       if (status === "CARGAR") {
         if (covered) pendientesConCobertura++; else pendientesSinCobertura++;
       } else if (status === "CARGADO" || status === "CARGADO_MANUAL") {
         cargados++;
+        totalVenta += amount;
       } else if (status === "A DROPEAR") {
         dropeados++;
       } else if (status === "CANCELADO") {
         cancelados++;
       }
     });
-    return { pendientesConCobertura, pendientesSinCobertura, cargados, dropeados, cancelados, totalPedidos: sheetOrders.length };
+    
+    const totalPedidos = sheetOrders.length;
+    const tasaCobertura = totalPedidos > 0 ? Math.round((pendientesConCobertura / totalPedidos) * 100) : 0;
+    const tasaCargados = totalPedidos > 0 ? Math.round((cargados / totalPedidos) * 100) : 0;
+    
+    return { 
+      pendientesConCobertura, 
+      pendientesSinCobertura, 
+      cargados, 
+      dropeados, 
+      cancelados, 
+      totalPedidos,
+      totalVenta,
+      tasaCobertura,
+      tasaCargados
+    };
   }, [sheetOrders, colKeys, getRowKey, getRowStatus]);
 
   const counts = useMemo(() => {
@@ -816,7 +824,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       });
   }, [sheetOrders, activeFilter, search, productSearch, cityFilter, searchType, coverageFilter, dateFrom, dateTo, colKeys, getRowKey, getRowStatus]);
 
-  // ─── SYNC SELECT ALL ───
   useEffect(() => {
     if (filteredOrders.length === 0) {
       setSelectAll(false);
@@ -835,6 +842,74 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     if (status === "CANCELADO") return "bg-rose-500/5 hover:bg-rose-500/10";
     if (!hasCoverageCity && status === "CARGAR") return "bg-orange-500/5 hover:bg-orange-500/10";
     return "hover:bg-white/5";
+  };
+
+  // ─── COMPONENTE DE GRÁFICO DE TORTA SIMPLE ───
+  const PieChart = ({ data }: { data: { label: string; value: number; color: string }[] }) => {
+    const total = data.reduce((sum, d) => sum + d.value, 0);
+    if (total === 0) return <div className="text-center text-slate-500 text-[10px] py-4">Sin datos</div>;
+    
+    let currentAngle = 0;
+    const segments = data.map(d => {
+      const percentage = (d.value / total) * 100;
+      const angle = (percentage / 100) * 360;
+      const start = currentAngle;
+      currentAngle += angle;
+      return { ...d, percentage, start, angle };
+    });
+
+    return (
+      <div className="flex flex-col items-center gap-3">
+        <div className="relative w-32 h-32">
+          <svg viewBox="0 0 100 100" className="transform -rotate-90">
+            {segments.map((seg, i) => {
+              if (seg.value === 0) return null;
+              const r = 40;
+              const cx = 50;
+              const cy = 50;
+              const startRad = (seg.start * Math.PI) / 180;
+              const endRad = ((seg.start + seg.angle) * Math.PI) / 180;
+              const x1 = cx + r * Math.cos(startRad);
+              const y1 = cy + r * Math.sin(startRad);
+              const x2 = cx + r * Math.cos(endRad);
+              const y2 = cy + r * Math.sin(endRad);
+              const largeArc = seg.angle > 180 ? 1 : 0;
+              
+              return (
+                <path
+                  key={i}
+                  d={`M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2} Z`}
+                  fill={seg.color}
+                  className="transition-all duration-300 hover:opacity-80 cursor-pointer"
+                />
+              );
+            })}
+          </svg>
+        </div>
+        <div className="flex flex-wrap gap-2 justify-center">
+          {segments.map((seg, i) => (
+            <div key={i} className="flex items-center gap-1.5">
+              <div className="w-2.5 h-2.5 rounded" style={{ backgroundColor: seg.color }} />
+              <span className="text-[9px] text-slate-300">{seg.label} <span className="text-slate-500">({Math.round(seg.percentage)}%)</span></span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // ─── COMPONENTE DE BARRA DE PROGRESO ───
+  const ProgressBar = ({ value, total, label, color }: { value: number; total: number; label: string; color: string }) => {
+    const percentage = total > 0 ? Math.round((value / total) * 100) : 0;
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-[9px] text-slate-400 w-16 truncate">{label}</span>
+        <div className="flex-1 h-1.5 bg-[#1f1f26] rounded-full overflow-hidden">
+          <div className="h-full rounded-full transition-all duration-500" style={{ width: `${percentage}%`, backgroundColor: color }} />
+        </div>
+        <span className="text-[9px] text-slate-400 w-8 text-right">{percentage}%</span>
+      </div>
+    );
   };
 
   const renderGuideModal = () => {
@@ -856,8 +931,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => setShowGuideModal(false)}>
-        <div className="bg-slate-900 rounded-xl border border-slate-700 max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
-          <div className="sticky top-0 bg-slate-900 border-b border-slate-700 px-6 py-4 flex justify-between items-center z-10">
+        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="sticky top-0 bg-[#1a1a1f] border-b border-[#2a2a30] px-6 py-4 flex justify-between items-center z-10">
             <div>
               <h2 className="text-lg font-bold text-white flex items-center gap-3">
                 📦 GUÍA DE ENVÍO
@@ -867,14 +942,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                   </span>
                 )}
               </h2>
-              <p className="text-[10px] text-slate-400 mt-0.5">Fila #{order.__row || '?'} · {getOrderDate(order)}</p>
+              <p className="text-[10px] text-slate-500 mt-0.5">Fila #{order.__row || '?'} · {getOrderDate(order)}</p>
             </div>
             <button onClick={() => setShowGuideModal(false)} className="text-slate-400 hover:text-white text-2xl transition-colors">×</button>
           </div>
           <div className="p-6 space-y-4">
             <div className="grid grid-cols-2 gap-3">
-              <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
-                <div className="text-[9px] text-slate-400 uppercase tracking-wider">Estado actual</div>
+              <div className="bg-[#0f0f12] rounded-lg p-4 border border-[#2a2a30]">
+                <div className="text-[9px] text-slate-500 uppercase tracking-wider">Estado actual</div>
                 <div className="mt-1">
                   <span className={`inline-block px-3 py-1 rounded-full text-[11px] font-semibold ${
                     status === "CARGADO" || status === "CARGADO_MANUAL" ? "bg-emerald-500/20 text-emerald-400" :
@@ -889,13 +964,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                   </span>
                 </div>
               </div>
-              <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
-                <div className="text-[9px] text-slate-400 uppercase tracking-wider">Cobertura de envío</div>
+              <div className="bg-[#0f0f12] rounded-lg p-4 border border-[#2a2a30]">
+                <div className="text-[9px] text-slate-500 uppercase tracking-wider">Cobertura</div>
                 <div className="mt-1">
                   {covered ? (
                     <>
                       <div className="text-emerald-400 font-semibold text-sm">✅ CON COBERTURA</div>
-                      {deliveryPrice && <div className="text-[10px] text-slate-400 mt-0.5">Costo: {nf(deliveryPrice)} Gs</div>}
+                      {deliveryPrice && <div className="text-[10px] text-slate-500 mt-0.5">Costo: {nf(deliveryPrice)} Gs</div>}
                     </>
                   ) : (
                     <div className="text-rose-400 font-semibold text-sm">❌ SIN COBERTURA</div>
@@ -904,38 +979,38 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               </div>
             </div>
 
-            <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
-              <h3 className="text-xs font-bold text-white mb-3 flex items-center gap-2"><span className="text-base">👤</span> DATOS DEL CLIENTE</h3>
+            <div className="bg-[#0f0f12] rounded-lg p-4 border border-[#2a2a30]">
+              <h3 className="text-xs font-bold text-white mb-3">👤 DATOS DEL CLIENTE</h3>
               <div className="grid grid-cols-2 gap-3 text-[12px]">
                 <div className="col-span-2 md:col-span-1">
-                  <div className="text-slate-400 text-[9px] uppercase tracking-wider">Nombre completo</div>
+                  <div className="text-slate-500 text-[9px] uppercase tracking-wider">Nombre</div>
                   <div className="text-white font-medium mt-0.5">{order[colKeys.name] || "—"}</div>
                 </div>
                 <div className="col-span-2 md:col-span-1">
-                  <div className="text-slate-400 text-[9px] uppercase tracking-wider">Teléfono</div>
+                  <div className="text-slate-500 text-[9px] uppercase tracking-wider">Teléfono</div>
                   <div className="text-white mt-0.5">{order[colKeys.phone] || "—"}</div>
                 </div>
                 <div className="col-span-2 md:col-span-1">
-                  <div className="text-slate-400 text-[9px] uppercase tracking-wider">Ciudad</div>
+                  <div className="text-slate-500 text-[9px] uppercase tracking-wider">Ciudad</div>
                   <div className={`mt-0.5 font-medium ${covered ? "text-emerald-400" : "text-rose-400"}`}>{order[colKeys.city] || "—"}</div>
                 </div>
                 <div className="col-span-2 md:col-span-1">
-                  <div className="text-slate-400 text-[9px] uppercase tracking-wider">Departamento</div>
+                  <div className="text-slate-500 text-[9px] uppercase tracking-wider">Departamento</div>
                   <div className="text-white mt-0.5 font-medium">{departamento || "—"}</div>
                 </div>
                 <div className="col-span-2">
-                  <div className="text-slate-400 text-[9px] uppercase tracking-wider">Dirección</div>
+                  <div className="text-slate-500 text-[9px] uppercase tracking-wider">Dirección</div>
                   <div className="text-white mt-0.5">{order[colKeys.street] || "—"}</div>
                 </div>
               </div>
             </div>
 
-            <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
-              <h3 className="text-xs font-bold text-white mb-3 flex items-center gap-2"><span className="text-base">📦</span> DETALLE DEL PRODUCTO</h3>
+            <div className="bg-[#0f0f12] rounded-lg p-4 border border-[#2a2a30]">
+              <h3 className="text-xs font-bold text-white mb-3">📦 DETALLE DEL PRODUCTO</h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-[12px]">
-                  <thead className="border-b border-slate-700">
-                    <tr className="text-slate-400 text-[9px] uppercase tracking-wider">
+                  <thead className="border-b border-[#2a2a30]">
+                    <tr className="text-slate-500 text-[9px] uppercase tracking-wider">
                       <th className="text-left py-1">Producto</th>
                       <th className="text-center w-16">Cant.</th>
                       <th className="text-right w-28">Precio Unit.</th>
@@ -943,7 +1018,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                     </tr>
                   </thead>
                   <tbody>
-                    <tr className="border-b border-slate-700/50">
+                    <tr className="border-b border-[#2a2a30]/50">
                       <td className="py-2 text-white font-medium">{productName || "—"}</td>
                       <td className="py-2 text-center text-white">{quantity}</td>
                       <td className="py-2 text-right text-white">{nf(unitPrice)} Gs</td>
@@ -953,30 +1028,30 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                 </table>
               </div>
               {matched && (
-                <div className="mt-2 pt-2 border-t border-slate-700/50 text-[10px] text-slate-400">
+                <div className="mt-2 pt-2 border-t border-[#2a2a30]/50 text-[10px] text-slate-500">
                   SKU: {matched.sku || "—"} · Costo: {nf(matched.provider_price_gs || 0)} Gs
                 </div>
               )}
             </div>
 
-            <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
-              <h3 className="text-xs font-bold text-white mb-3 flex items-center gap-2"><span className="text-base">💰</span> RESUMEN</h3>
+            <div className="bg-[#0f0f12] rounded-lg p-4 border border-[#2a2a30]">
+              <h3 className="text-xs font-bold text-white mb-3">💰 RESUMEN</h3>
               <div className="space-y-2">
                 <div className="flex justify-between text-[12px]">
-                  <span className="text-slate-400">Subtotal:</span>
+                  <span className="text-slate-500">Subtotal:</span>
                   <span className="text-white">{nf(salePrice)} Gs</span>
                 </div>
                 <div className="flex justify-between text-[12px]">
-                  <span className="text-slate-400">Envío:</span>
+                  <span className="text-slate-500">Envío:</span>
                   <span className={deliveryPrice ? "text-amber-400" : "text-slate-500"}>{deliveryPrice ? nf(deliveryPrice) : "0"} Gs</span>
                 </div>
                 {matched && (
-                  <div className="flex justify-between text-[12px] pt-1 border-t border-slate-700/50">
-                    <span className="text-slate-400">Comisión:</span>
+                  <div className="flex justify-between text-[12px] pt-1 border-t border-[#2a2a30]/50">
+                    <span className="text-slate-500">Comisión:</span>
                     <span className="text-blue-400 font-semibold">{nf(salePrice - (matched.provider_price_gs || 0) - (deliveryPrice || 0))} Gs</span>
                   </div>
                 )}
-                <div className="flex justify-between text-[14px] pt-2 border-t border-slate-700">
+                <div className="flex justify-between text-[14px] pt-2 border-t border-[#2a2a30]">
                   <span className="font-bold text-white">TOTAL:</span>
                   <span className="font-bold text-emerald-400">{nf(totalConEnvio)} Gs</span>
                 </div>
@@ -984,12 +1059,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             </div>
 
             {Object.keys(extras).length > 0 && (
-              <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
-                <h3 className="text-xs font-bold text-white mb-3 flex items-center gap-2"><span className="text-base">📋</span> INFORMACIÓN ADICIONAL</h3>
+              <div className="bg-[#0f0f12] rounded-lg p-4 border border-[#2a2a30]">
+                <h3 className="text-xs font-bold text-white mb-3">📋 INFORMACIÓN ADICIONAL</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
                   {Object.entries(extras).map(([key, value]) => (
                     <div key={key} className="flex">
-                      <span className="text-slate-400 min-w-[100px]">{key}:</span>
+                      <span className="text-slate-500 min-w-[100px]">{key}:</span>
                       <span className="text-white ml-2 break-all">{value}</span>
                     </div>
                   ))}
@@ -998,7 +1073,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             )}
 
             <div className="text-center pt-2">
-              <div className="text-[9px] text-slate-500">Generado el {new Date().toLocaleString("es-PY")}</div>
+              <div className="text-[9px] text-slate-600">Generado el {new Date().toLocaleString("es-PY")}</div>
             </div>
           </div>
         </div>
@@ -1017,8 +1092,21 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     );
   }
 
+  // ─── DATOS PARA GRÁFICOS ───
+  const pieData = [
+    { label: 'Pendientes', value: dashboardStats.pendientesConCobertura + dashboardStats.pendientesSinCobertura, color: '#3b82f6' },
+    { label: 'Cargados', value: dashboardStats.cargados, color: '#10b981' },
+    { label: 'Dropear', value: dashboardStats.dropeados, color: '#f59e0b' },
+    { label: 'Cancelados', value: dashboardStats.cancelados, color: '#ef4444' },
+  ].filter(d => d.value > 0);
+
+  const coverageData = [
+    { label: 'Con cobertura', value: dashboardStats.pendientesConCobertura, color: '#10b981' },
+    { label: 'Sin cobertura', value: dashboardStats.pendientesSinCobertura, color: '#ef4444' },
+  ].filter(d => d.value > 0);
+
   return (
-    <div className="h-full flex flex-col space-y-2 p-4 bg-[#0f0f12]">
+    <div className="h-full flex flex-col space-y-3 p-4 bg-[#0f0f12] overflow-auto">
       {/* ─── HEADER ─── */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-[#1a1a1f] border border-[#2a2a30] rounded-xl px-4 py-3 flex-shrink-0">
         <div className="flex items-center gap-3">
@@ -1042,31 +1130,89 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         </div>
       </div>
 
-      {/* ─── DASHBOARD ─── */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 flex-shrink-0">
-        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-3 text-center hover:border-blue-500/40 transition-all duration-200">
-          <div className="text-xl font-bold text-blue-400">{dashboardStats.pendientesConCobertura}</div>
-          <div className="text-[9px] text-slate-500 mt-0.5">Con cobertura</div>
+      {/* ─── DASHBOARD KPIS ─── */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 flex-shrink-0">
+        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-4 hover:border-blue-500/40 transition-all duration-200">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-slate-500">Pendientes</span>
+            <span className="text-lg">⏳</span>
+          </div>
+          <div className="text-2xl font-bold text-blue-400 mt-1">{dashboardStats.pendientesConCobertura + dashboardStats.pendientesSinCobertura}</div>
+          <div className="flex gap-2 mt-1">
+            <span className="text-[8px] text-emerald-400">✅ {dashboardStats.pendientesConCobertura}</span>
+            <span className="text-[8px] text-rose-400">❌ {dashboardStats.pendientesSinCobertura}</span>
+          </div>
         </div>
-        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-3 text-center hover:border-orange-500/40 transition-all duration-200">
-          <div className="text-xl font-bold text-orange-400">{dashboardStats.pendientesSinCobertura}</div>
-          <div className="text-[9px] text-slate-500 mt-0.5">Sin cobertura</div>
+
+        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-4 hover:border-emerald-500/40 transition-all duration-200">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-slate-500">Cargados</span>
+            <span className="text-lg">✅</span>
+          </div>
+          <div className="text-2xl font-bold text-emerald-400 mt-1">{dashboardStats.cargados}</div>
+          <div className="text-[8px] text-slate-500 mt-1">Tasa: {dashboardStats.tasaCargados}%</div>
         </div>
-        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-3 text-center hover:border-emerald-500/40 transition-all duration-200">
-          <div className="text-xl font-bold text-emerald-400">{dashboardStats.cargados}</div>
-          <div className="text-[9px] text-slate-500 mt-0.5">Cargados</div>
+
+        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-4 hover:border-amber-500/40 transition-all duration-200">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-slate-500">Dropear</span>
+            <span className="text-lg">⚠️</span>
+          </div>
+          <div className="text-2xl font-bold text-amber-400 mt-1">{dashboardStats.dropeados}</div>
         </div>
-        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-3 text-center hover:border-amber-500/40 transition-all duration-200">
-          <div className="text-xl font-bold text-amber-400">{dashboardStats.dropeados}</div>
-          <div className="text-[9px] text-slate-500 mt-0.5">Dropeados</div>
+
+        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-4 hover:border-rose-500/40 transition-all duration-200">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-slate-500">Cancelados</span>
+            <span className="text-lg">❌</span>
+          </div>
+          <div className="text-2xl font-bold text-rose-400 mt-1">{dashboardStats.cancelados}</div>
         </div>
-        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-3 text-center hover:border-rose-500/40 transition-all duration-200">
-          <div className="text-xl font-bold text-rose-400">{dashboardStats.cancelados}</div>
-          <div className="text-[9px] text-slate-500 mt-0.5">Cancelados</div>
+
+        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-4 hover:border-purple-500/40 transition-all duration-200">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-slate-500">Total</span>
+            <span className="text-lg">📊</span>
+          </div>
+          <div className="text-2xl font-bold text-purple-400 mt-1">{dashboardStats.totalPedidos}</div>
         </div>
-        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-3 text-center hover:border-purple-500/40 transition-all duration-200">
-          <div className="text-xl font-bold text-purple-400">{dashboardStats.totalPedidos}</div>
-          <div className="text-[9px] text-slate-500 mt-0.5">Total</div>
+
+        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-4 hover:border-emerald-500/40 transition-all duration-200">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-slate-500">Ventas</span>
+            <span className="text-lg">💰</span>
+          </div>
+          <div className="text-xl font-bold text-emerald-400 mt-1">{nf(dashboardStats.totalVenta)}</div>
+          <div className="text-[8px] text-slate-500 mt-1">Gs</div>
+        </div>
+      </div>
+
+      {/* ─── GRÁFICOS ─── */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 flex-shrink-0">
+        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-4">
+          <h3 className="text-xs font-bold text-white mb-3">📊 Distribución de estados</h3>
+          <PieChart data={pieData} />
+        </div>
+        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-4">
+          <h3 className="text-xs font-bold text-white mb-3">📈 Cobertura de envíos</h3>
+          <div className="space-y-3">
+            <ProgressBar 
+              value={dashboardStats.pendientesConCobertura} 
+              total={dashboardStats.pendientesConCobertura + dashboardStats.pendientesSinCobertura} 
+              label="Con cobertura" 
+              color="#10b981" 
+            />
+            <ProgressBar 
+              value={dashboardStats.pendientesSinCobertura} 
+              total={dashboardStats.pendientesConCobertura + dashboardStats.pendientesSinCobertura} 
+              label="Sin cobertura" 
+              color="#ef4444" 
+            />
+            <div className="flex justify-between pt-2 border-t border-[#2a2a30]">
+              <span className="text-[10px] text-slate-500">Tasa de cobertura</span>
+              <span className="text-[10px] font-bold text-emerald-400">{dashboardStats.tasaCobertura}%</span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1085,7 +1231,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           🔄 Recargar
         </button>
         <div className="flex-1"></div>
-        <span className="text-[9px] text-slate-600">v2.0</span>
+        <span className="text-[9px] text-slate-600">v2.0 PRO</span>
       </div>
 
       {/* ─── BARRA DE ACCIONES EN LOTE ─── */}
