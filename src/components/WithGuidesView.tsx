@@ -11,6 +11,21 @@ declare global {
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
+const todayISO = () => new Date().toISOString().slice(0, 10);
+
+const normalizeClientName = (value: any): string => {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+const displayClientName = (value: any): string => {
+  return String(value || '').replace(/\s+/g, ' ').trim() || 'SIN NOMBRE';
+};
+
 export default function WithGuidesView() {
   const { profile } = useAuth();
   const role = profile?.role || '';
@@ -21,12 +36,11 @@ export default function WithGuidesView() {
   const [guideText, setGuideText] = useState('');
   const [guideId, setGuideId] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [dateFrom, setDateFrom] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() - 15);
-    return d.toISOString().slice(0, 10);
-  });
-  const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [dateFrom, setDateFrom] = useState(() => todayISO());
+  const [dateTo, setDateTo] = useState(() => todayISO());
   const [loading, setLoading] = useState(false);
+  const [guidesTodayCount, setGuidesTodayCount] = useState(0);
+  const [deliveredTodayCount, setDeliveredTodayCount] = useState(0);
   
   // FILTROS EXISTENTES
   const [status2Filter, setStatus2Filter] = useState<string>('PENDIENTES');
@@ -140,6 +154,35 @@ export default function WithGuidesView() {
     }
 
     setOrders(data || []);
+
+    const today = todayISO();
+    const [guidesTodayRes, deliveredTodayRes] = await Promise.all([
+      supabase
+        .from('orders')
+        .select('*')
+        .eq('status2', 'GUIA GENERADA')
+        .gte('updated_at', today + 'T00:00:00')
+        .lte('updated_at', today + 'T23:59:59'),
+      supabase
+        .from('orders')
+        .select('*')
+        .in('status', ['ENTREGADO', 'ENCOMIENDA ENTREGADA'])
+        .gte('delivered_at', today + 'T00:00:00')
+        .lte('delivered_at', today + 'T23:59:59'),
+    ]);
+
+    const roleFilter = (o: any) => {
+      if (role === 'PROVEEDOR') {
+        const providerList = o.provider_emails_list || '';
+        return providerList.toLowerCase().includes(myEmail.toLowerCase());
+      }
+      if (role === 'DELIVERY') return (o.assigned_delivery || '').toLowerCase() === myEmail.toLowerCase();
+      if (role === 'VENDEDOR') return (o.created_by || '').toLowerCase() === myEmail.toLowerCase();
+      return true;
+    };
+
+    setGuidesTodayCount((guidesTodayRes.data || []).filter(roleFilter).length);
+    setDeliveredTodayCount((deliveredTodayRes.data || []).filter(roleFilter).length);
     setLoading(false);
   };
 
@@ -272,6 +315,24 @@ export default function WithGuidesView() {
   const pendingGuides = filtered.filter(o => !o.status2 || o.status2 === '--');
   const withGuides = filtered.filter(o => o.status2 === 'GUIA GENERADA');
   const visibleOrders = filtered;
+
+  const repeatedClients = useMemo(() => {
+    const map: Record<string, { name: string; count: number; guides: string[]; phones: string[] }> = {};
+    visibleOrders.forEach(o => {
+      const key = normalizeClientName(o.customer_name);
+      if (!key) return;
+      if (!map[key]) map[key] = { name: displayClientName(o.customer_name), count: 0, guides: [], phones: [] };
+      map[key].count += 1;
+      map[key].guides.push(o.order_number || o.id?.slice(0, 8) || 'SIN ID');
+      if (o.phone && !map[key].phones.includes(o.phone)) map[key].phones.push(o.phone);
+    });
+    return Object.values(map)
+      .filter(item => item.count > 1)
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  }, [visibleOrders]);
+
+  const repeatedClientsCount = repeatedClients.length;
+  const repeatedGuidesCount = repeatedClients.reduce((sum, item) => sum + item.count, 0);
 
   const state2Opts = ['--', 'GUIA GENERADA', 'FUERA DE COBERTURA', 'CANCELADO', 'REPETIDO', 'RENDIDO'];
 
@@ -1014,9 +1075,13 @@ export default function WithGuidesView() {
   };
 
   return (
-    <div className="app-card">
+    <div className="app-card bg-[#050816] border border-[#1d2a44] rounded-2xl shadow-2xl">
       <div className="flex justify-between items-center mb-3">
-        <h3 className="text-lg font-extrabold">Pedidos con guías</h3>
+        <div>
+          <div className="text-[10px] tracking-[0.25em] text-cyan-300 font-black uppercase">Panel operativo</div>
+          <h3 className="text-2xl font-black text-white">Pedidos con guías</h3>
+          <p className="text-xs text-slate-400">Guías, QR, impresión, repetidos y control diario.</p>
+        </div>
         <button
           onClick={() => window.open('#/asignar-pedidos', '_blank')}
           className="bg-purple-500 hover:bg-purple-600 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2"
@@ -1026,18 +1091,33 @@ export default function WithGuidesView() {
       </div>
 
       {/* KPIs */}
-      <div className="grid grid-cols-2 md:grid-cols-6 gap-3 mb-3">
-        <div className="kpi-card">
-          <div className="text-xs text-muted-foreground mb-1">Guías pendientes</div>
-          <div className="text-[22px] font-extrabold">{pendingGuides.length}</div>
+      <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-9 gap-3 mb-3">
+        <div className="kpi-card border border-blue-500/20 bg-blue-500/10">
+          <div className="text-xs text-blue-200 mb-1">Guías pendientes</div>
+          <div className="text-[24px] font-black text-white">{pendingGuides.length}</div>
         </div>
-        <div className="kpi-card">
-          <div className="text-xs text-muted-foreground mb-1">Con guía generada</div>
-          <div className="text-[22px] font-extrabold">{withGuides.length}</div>
+        <div className="kpi-card border border-emerald-500/20 bg-emerald-500/10">
+          <div className="text-xs text-emerald-200 mb-1">Con guía generada</div>
+          <div className="text-[24px] font-black text-white">{withGuides.length}</div>
         </div>
-        <div className="kpi-card">
-          <div className="text-xs text-muted-foreground mb-1">Total en rango</div>
-          <div className="text-[22px] font-extrabold">{filtered.length}</div>
+        <div className="kpi-card border border-cyan-500/20 bg-cyan-500/10">
+          <div className="text-xs text-cyan-200 mb-1">Guías generadas hoy</div>
+          <div className="text-[24px] font-black text-white">{guidesTodayCount}</div>
+          <div className="text-[10px] text-cyan-300">Por fecha de actualización</div>
+        </div>
+        <div className="kpi-card border border-violet-500/20 bg-violet-500/10">
+          <div className="text-xs text-violet-200 mb-1">Entregados hoy</div>
+          <div className="text-[24px] font-black text-white">{deliveredTodayCount}</div>
+          <div className="text-[10px] text-violet-300">Por delivered_at</div>
+        </div>
+        <div className="kpi-card border border-slate-500/20 bg-slate-500/10">
+          <div className="text-xs text-slate-300 mb-1">Total en rango</div>
+          <div className="text-[24px] font-black text-white">{filtered.length}</div>
+        </div>
+        <div className="kpi-card border border-amber-500/20 bg-amber-500/10">
+          <div className="text-xs text-amber-200 mb-1">Clientes repetidos</div>
+          <div className="text-[24px] font-black text-white">{repeatedClientsCount}</div>
+          <div className="text-[10px] text-amber-300">{repeatedGuidesCount} guías involucradas</div>
         </div>
         <div className="kpi-card">
           <div className="text-xs text-muted-foreground mb-1">Departamentos</div>
@@ -1052,6 +1132,40 @@ export default function WithGuidesView() {
           <div className="text-[22px] font-extrabold">{selectedIds.size}</div>
         </div>
       </div>
+
+      {repeatedClients.length > 0 && (
+        <div className="mb-3 rounded-2xl border border-amber-500/30 bg-amber-500/10 p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <div>
+              <div className="text-sm font-black text-amber-200">⚠️ Clientes repetidos detectados</div>
+              <div className="text-xs text-slate-300">Se comparan nombres exactos normalizados dentro del rango y filtros visibles.</div>
+            </div>
+            <button
+              className="nav-btn"
+              style={{ background: '#f59e0b', color: 'white' }}
+              onClick={() => {
+                const text = repeatedClients.map(c => `${c.name} — ${c.count} guías: ${c.guides.join(', ')}${c.phones.length ? ' — Tel: ' + c.phones.join(', ') : ''}`).join('\n');
+                navigator.clipboard.writeText(text);
+                toast.success('Listado de repetidos copiado');
+              }}
+            >
+              📋 Copiar repetidos
+            </button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+            {repeatedClients.slice(0, 9).map((client, i) => (
+              <div key={i} className="rounded-xl border border-amber-500/20 bg-black/20 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-black text-white truncate">{client.name}</div>
+                  <span className="text-xs font-black text-amber-200 bg-amber-500/20 px-2 py-1 rounded-full">{client.count}x</span>
+                </div>
+                {client.phones.length > 0 && <div className="text-[11px] text-slate-400 mt-1">Tel: {client.phones.join(', ')}</div>}
+                <div className="text-[11px] text-slate-300 mt-1">Guías: {client.guides.join(', ')}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Filtros */}
       <div className="flex flex-wrap gap-2 mb-3">
@@ -1203,6 +1317,7 @@ export default function WithGuidesView() {
               <th>Departamento</th>
               <th>Ciudad</th>
               <th>Cliente</th>
+              <th>Repetido</th>
               <th>Teléfono</th>
               <th>Vendedor</th>
               <th>Proveedor</th>
@@ -1220,7 +1335,14 @@ export default function WithGuidesView() {
                 <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
                 <td className="text-xs">{o.departamento || '—'}</td>
                 <td className="text-xs">{o.city || '—'}</td>
-                <td className="text-xs">{o.customer_name}</td>
+                <td className="text-xs font-bold">{o.customer_name}</td>
+                <td className="text-xs">
+                  {repeatedClients.some(c => normalizeClientName(c.name) === normalizeClientName(o.customer_name)) ? (
+                    <span className="px-2 py-1 rounded-full bg-amber-500/20 text-amber-300 font-black">Repetido</span>
+                  ) : (
+                    <span className="text-slate-500">—</span>
+                  )}
+                </td>
                 <td className="text-xs">{o.phone}</td>
                 <td className="text-xs">{o.created_by}</td>
                 <td className="text-xs">{o.provider_emails_list || o.provider_email || '—'}</td>
@@ -1244,7 +1366,7 @@ export default function WithGuidesView() {
             ))}
             {visibleOrders.length === 0 && (
               <tr>
-                <td colSpan={11} className="text-center text-muted-foreground py-8">Sin pedidos en el rango seleccionado</td>
+                <td colSpan={12} className="text-center text-muted-foreground py-8">Sin pedidos en el rango seleccionado</td>
               </tr>
             )}
           </tbody>
