@@ -244,15 +244,17 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [loadingStatuses, setLoadingStatuses] = useState(true);
   const [products, setProducts] = useState<any[]>([]);
   
-  // 🔥 CAMBIO CRÍTICO: usar __row (número de fila real) como clave, NO idx
   const [rowStatuses, setRowStatuses] = useState<Record<string, OrderStatus>>({});
   const [rowOrderNumbers, setRowOrderNumbers] = useState<Record<string, string>>({});
   
   const [autoLoad, setAutoLoad] = useState<boolean>(() => localStorage.getItem(AUTO_LOAD_KEY) === "true");
+  
+  // 🔥 Filtro "Pendientes" por defecto al entrar
   const [activeFilter, setActiveFilter] = useState<FilterType>(() => {
     const saved = localStorage.getItem(ACTIVE_FILTER_KEY) as FilterType;
-    return saved || "CARGAR";
+    return saved || "CARGAR"; // <-- Por defecto: Pendientes
   });
+  
   const [searchType, setSearchType] = useState<"all" | "product" | "city">("product");
   const [productSearch, setProductSearch] = useState("");
   const [cityFilter, setCityFilter] = useState("");
@@ -260,6 +262,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [search, setSearch] = useState("");
   const [selectedOrder, setSelectedOrder] = useState<{ order: SheetOrder; rowKey: string } | null>(null);
   const [showGuideModal, setShowGuideModal] = useState(false);
+
+  // ─── NUEVO: Filtro de fechas ───
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
 
   // ─── NUEVO: Estado para selección múltiple ───
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
@@ -292,9 +298,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     };
   }, [sheetHeaders]);
 
-  // ─── FUNCIONES CON __row COMO CLAVE ───
-  
-  // Obtener la clave estable de una fila: usa __row del sheet, fallback a idx
   const getRowKey = useCallback((order: SheetOrder, idx: number): string => {
     if (order.__row) {
       return String(order.__row);
@@ -550,7 +553,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
   // ─── NUEVO: Funciones para selección múltiple ───
 
-  // Toggle selección de una fila
   const toggleRowSelection = (rowKey: string) => {
     setSelectedRows(prev => {
       const newSet = new Set(prev);
@@ -563,7 +565,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     });
   };
 
-  // Seleccionar/Deseleccionar todos
   const toggleSelectAll = () => {
     if (selectAll) {
       setSelectedRows(new Set());
@@ -574,7 +575,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     setSelectAll(!selectAll);
   };
 
-  // Acción en lote: Cambiar estado de múltiples filas
   const bulkChangeStatus = async (newStatus: OrderStatus) => {
     if (selectedRows.size === 0) {
       toast.warning("⚠️ Seleccioná al menos una fila");
@@ -585,15 +585,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     let successCount = 0;
     let errorCount = 0;
 
-    const statusMessages: Record<OrderStatus, string> = {
-      "CANCELADO": "❌ Cancelado",
-      "A DROPEAR": "⚠️ A Dropear",
-      "CARGADO": "✅ Cargado Auto",
-      "CARGADO_MANUAL": "✍️ Cargado Manual",
-      "CARGAR": "⏳ Pendiente"
-    };
-
-    // Procesar en lotes de 10 para no sobrecargar
     const rows = Array.from(selectedRows);
     const batchSize = 10;
     
@@ -601,10 +592,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       const batch = rows.slice(i, i + batchSize);
       const promises = batch.map(async (rowKey) => {
         try {
-          // Obtener el orderNumber actual si existe
           const orderNumber = getRowOrderNumber(rowKey);
           
-          // Actualizar UI localmente
           if (newStatus === "CARGAR") {
             setRowStatuses(prev => {
               const next = { ...prev };
@@ -620,7 +609,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             setRowStatuses(prev => ({ ...prev, [rowKey]: newStatus }));
           }
 
-          // Persistir en BD
           await persistRowStatus(rowKey, newStatus, orderNumber || undefined);
           successCount++;
         } catch (error) {
@@ -630,12 +618,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       });
 
       await Promise.all(promises);
-      
-      // Mostrar progreso
       toast.info(`⏳ Procesando... ${Math.min(i + batchSize, rows.length)}/${rows.length}`);
     }
 
-    // Limpiar selección
     setSelectedRows(new Set());
     setSelectAll(false);
     setBulkActionLoading(false);
@@ -643,7 +628,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     toast.success(`✅ Estados actualizados: ${successCount} exitosos, ${errorCount} errores`);
   };
 
-  // Acción en lote: Cargar múltiples pedidos
   const bulkLoadOrders = async () => {
     if (selectedRows.size === 0) {
       toast.warning("⚠️ Seleccioná al menos una fila");
@@ -656,8 +640,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     let skippedCount = 0;
 
     const rows = Array.from(selectedRows);
-    
-    // Primero, verificar qué filas son cargables
     const loadableRows: { rowKey: string; order: SheetOrder }[] = [];
     
     for (const rowKey of rows) {
@@ -667,7 +649,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         continue;
       }
       
-      // Encontrar el order correspondiente
       const order = sheetOrders.find((o, idx) => getRowKey(o, idx) === rowKey);
       if (!order) {
         errorCount++;
@@ -691,7 +672,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
     toast.info(`⏳ Cargando ${loadableRows.length} pedidos...`);
 
-    // Procesar en lotes de 5 para no sobrecargar
     const batchSize = 5;
     for (let i = 0; i < loadableRows.length; i += batchSize) {
       const batch = loadableRows.slice(i, i + batchSize);
@@ -707,12 +687,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       });
 
       await Promise.all(promises);
-      
-      // Mostrar progreso
       toast.info(`⏳ Progreso: ${Math.min(i + batchSize, loadableRows.length)}/${loadableRows.length}`);
     }
 
-    // Limpiar selección
     setSelectedRows(new Set());
     setSelectAll(false);
     setBulkActionLoading(false);
@@ -791,7 +768,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return { cargarConCobertura, cargarSinCobertura, cargados, aDropear, cancelados, total: sheetOrders.length };
   }, [sheetOrders, colKeys, getRowKey, getRowStatus]);
 
-  // ─── FILTERED ORDERS CON __row ───
+  // ─── FILTERED ORDERS CON __row Y FILTRO DE FECHAS ───
   const filteredOrders = useMemo(() => {
     return sheetOrders
       .map((order, idx) => ({ order, idx, rowKey: getRowKey(order, idx) }))
@@ -800,6 +777,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         const city = order[colKeys.city] || "";
         const covered = hasCoverage(city);
 
+        // ─── FILTRO DE ESTADO ───
         let estadoMatch = true;
         switch (activeFilter) {
           case "CARGAR":    estadoMatch = status === "CARGAR"; break;
@@ -810,6 +788,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         }
         if (!estadoMatch) return false;
 
+        // ─── FILTRO DE COBERTURA ───
         let coberturaMatch = true;
         switch (coverageFilter) {
           case "covered":   coberturaMatch = covered === true; break;
@@ -818,6 +797,32 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         }
         if (!coberturaMatch) return false;
 
+        // ─── NUEVO: FILTRO DE FECHAS ───
+        let dateMatch = true;
+        if (dateFrom || dateTo) {
+          const orderDateStr = order[colKeys.date] || "";
+          if (orderDateStr && orderDateStr !== "—") {
+            try {
+              const orderDate = new Date(orderDateStr);
+              if (!isNaN(orderDate.getTime())) {
+                if (dateFrom) {
+                  const fromDate = new Date(dateFrom);
+                  if (orderDate < fromDate) dateMatch = false;
+                }
+                if (dateTo && dateMatch) {
+                  const toDate = new Date(dateTo);
+                  toDate.setHours(23, 59, 59);
+                  if (orderDate > toDate) dateMatch = false;
+                }
+              }
+            } catch (e) {
+              // Si no se puede parsear la fecha, no filtrar
+            }
+          }
+        }
+        if (!dateMatch) return false;
+
+        // ─── BÚSQUEDA ───
         if (searchType === "product" && productSearch.trim()) {
           const product = order[colKeys.product] || "";
           return product.toLowerCase().includes(productSearch.toLowerCase());
@@ -832,7 +837,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         }
         return true;
       });
-  }, [sheetOrders, activeFilter, search, productSearch, cityFilter, searchType, coverageFilter, colKeys, getRowKey, getRowStatus]);
+  }, [sheetOrders, activeFilter, search, productSearch, cityFilter, searchType, coverageFilter, dateFrom, dateTo, colKeys, getRowKey, getRowStatus]);
 
   // ─── NUEVO: Efecto para mantener selectAll sincronizado ───
   useEffect(() => {
@@ -848,10 +853,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const changeFilter = (filter: FilterType) => setActiveFilter(filter);
 
   const getRowClassName = (status: OrderStatus, hasCoverageCity: boolean) => {
-    if (status === "CARGADO" || status === "CARGADO_MANUAL") return "bg-green-500/5";
-    if (status === "A DROPEAR") return "bg-yellow-500/5";
-    if (status === "CANCELADO") return "bg-red-500/5";
-    if (!hasCoverageCity && status === "CARGAR") return "bg-orange-500/5";
+    if (status === "CARGADO" || status === "CARGADO_MANUAL") return "bg-emerald-500/5 hover:bg-emerald-500/10";
+    if (status === "A DROPEAR") return "bg-amber-500/5 hover:bg-amber-500/10";
+    if (status === "CANCELADO") return "bg-rose-500/5 hover:bg-rose-500/10";
+    if (!hasCoverageCity && status === "CARGAR") return "bg-orange-500/5 hover:bg-orange-500/10";
     return "hover:bg-slate-800/30";
   };
 
@@ -873,29 +878,33 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const unitPrice = quantity > 1 ? Math.round(salePrice / quantity) : salePrice;
 
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => setShowGuideModal(false)}>
-        <div className="bg-slate-900 rounded-xl border border-slate-700 max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
-          <div className="sticky top-0 bg-slate-900 border-b border-slate-700 px-5 py-4 flex justify-between items-center z-10">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={() => setShowGuideModal(false)}>
+        <div className="bg-slate-900 rounded-2xl border border-slate-700/50 shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+          <div className="sticky top-0 bg-slate-900/95 backdrop-blur-sm border-b border-slate-700/50 px-6 py-4 flex justify-between items-center z-10">
             <div>
-              <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                📦 GUÍA DE ENVÍO
+              <h2 className="text-xl font-bold text-white flex items-center gap-3">
+                <span className="text-2xl">📦</span>
+                GUÍA DE ENVÍO
                 {orderNumber && (
-                  <span className="text-[10px] font-mono text-green-400 bg-green-500/10 px-2 py-0.5 rounded">{orderNumber}</span>
+                  <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20">
+                    {orderNumber}
+                  </span>
                 )}
               </h2>
-              <p className="text-[10px] text-slate-400 mt-0.5">Fila real #{order.__row || '?'} - {getOrderDate(order)}</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">Fila real #{order.__row || '?'} · {getOrderDate(order)}</p>
             </div>
-            <button onClick={() => setShowGuideModal(false)} className="text-slate-400 hover:text-white text-3xl leading-none transition-colors">×</button>
+            <button onClick={() => setShowGuideModal(false)} className="text-slate-400 hover:text-white text-2xl leading-none transition-colors w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-800">×</button>
           </div>
-          <div className="p-5 space-y-4">
+          <div className="p-6 space-y-4">
+            {/* Resto del modal igual que antes */}
             <div className="grid grid-cols-2 gap-3">
-              <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
+              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
                 <div className="text-[9px] text-slate-400 uppercase tracking-wider">Estado actual</div>
                 <div className="mt-1">
-                  <span className={`inline-block px-2 py-0.5 rounded text-[11px] font-semibold ${
-                    status === "CARGADO" || status === "CARGADO_MANUAL" ? "bg-green-500/20 text-green-400" :
-                    status === "A DROPEAR" ? "bg-yellow-500/20 text-yellow-400" :
-                    status === "CANCELADO" ? "bg-red-500/20 text-red-400" :
+                  <span className={`inline-block px-3 py-1 rounded-full text-[11px] font-semibold ${
+                    status === "CARGADO" || status === "CARGADO_MANUAL" ? "bg-emerald-500/20 text-emerald-400" :
+                    status === "A DROPEAR" ? "bg-amber-500/20 text-amber-400" :
+                    status === "CANCELADO" ? "bg-rose-500/20 text-rose-400" :
                     "bg-blue-500/20 text-blue-400"
                   }`}>
                     {status === "CARGADO" ? "✅ CARGADO AUTOMÁTICO" :
@@ -905,22 +914,22 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                   </span>
                 </div>
               </div>
-              <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
+              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
                 <div className="text-[9px] text-slate-400 uppercase tracking-wider">Cobertura de envío</div>
                 <div className="mt-1">
                   {covered ? (
                     <>
-                      <div className="text-green-400 font-semibold text-sm">✅ CON COBERTURA</div>
+                      <div className="text-emerald-400 font-semibold text-sm">✅ CON COBERTURA</div>
                       {deliveryPrice && <div className="text-[10px] text-slate-400 mt-0.5">Costo delivery: {nf(deliveryPrice)} Gs</div>}
                     </>
                   ) : (
-                    <div className="text-red-400 font-semibold text-sm">❌ SIN COBERTURA</div>
+                    <div className="text-rose-400 font-semibold text-sm">❌ SIN COBERTURA</div>
                   )}
                 </div>
               </div>
             </div>
 
-            <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
+            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
               <h3 className="text-xs font-bold text-white mb-3 flex items-center gap-2"><span className="text-base">👤</span> DATOS DEL CLIENTE</h3>
               <div className="grid grid-cols-2 gap-3 text-[12px]">
                 <div className="col-span-2 md:col-span-1">
@@ -933,7 +942,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                 </div>
                 <div className="col-span-2 md:col-span-1">
                   <div className="text-slate-400 text-[9px] uppercase tracking-wider">Ciudad / Localidad</div>
-                  <div className={`mt-0.5 font-medium ${covered ? "text-green-400" : "text-red-400"}`}>{order[colKeys.city] || "—"}</div>
+                  <div className={`mt-0.5 font-medium ${covered ? "text-emerald-400" : "text-rose-400"}`}>{order[colKeys.city] || "—"}</div>
                 </div>
                 <div className="col-span-2 md:col-span-1">
                   <div className="text-slate-400 text-[9px] uppercase tracking-wider">Departamento</div>
@@ -946,7 +955,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               </div>
             </div>
 
-            <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
+            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
               <h3 className="text-xs font-bold text-white mb-3 flex items-center gap-2"><span className="text-base">📦</span> DETALLE DEL PRODUCTO</h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-[12px]">
@@ -963,7 +972,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                       <td className="py-2 text-white font-medium truncate max-w-[200px]" title={productName}>{productName || "—"}</td>
                       <td className="py-2 text-center text-white">{quantity}</td>
                       <td className="py-2 text-right text-white">{nf(unitPrice)} Gs</td>
-                      <td className="py-2 text-right text-green-400 font-semibold">{nf(salePrice)} Gs</td>
+                      <td className="py-2 text-right text-emerald-400 font-semibold">{nf(salePrice)} Gs</td>
                     </tr>
                   </tbody>
                 </table>
@@ -976,7 +985,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               )}
             </div>
 
-            <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
+            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
               <h3 className="text-xs font-bold text-white mb-3 flex items-center gap-2"><span className="text-base">💰</span> RESUMEN DE COSTOS</h3>
               <div className="space-y-2">
                 <div className="flex justify-between text-[12px]">
@@ -985,7 +994,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                 </div>
                 <div className="flex justify-between text-[12px]">
                   <span className="text-slate-400">Costo de envío:</span>
-                  <span className={deliveryPrice ? "text-orange-400" : "text-slate-500"}>{deliveryPrice ? nf(deliveryPrice) : "0"} Gs</span>
+                  <span className={deliveryPrice ? "text-amber-400" : "text-slate-500"}>{deliveryPrice ? nf(deliveryPrice) : "0"} Gs</span>
                 </div>
                 {matched && (
                   <div className="flex justify-between text-[12px] pt-1 border-t border-slate-700/50">
@@ -995,13 +1004,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                 )}
                 <div className="flex justify-between text-[14px] pt-2 border-t border-slate-700">
                   <span className="font-bold text-white">TOTAL A PAGAR:</span>
-                  <span className="font-bold text-green-400 text-base">{nf(totalConEnvio)} Gs</span>
+                  <span className="font-bold text-emerald-400 text-base">{nf(totalConEnvio)} Gs</span>
                 </div>
               </div>
             </div>
 
             {Object.keys(extras).length > 0 && (
-              <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
+              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
                 <h3 className="text-xs font-bold text-white mb-3 flex items-center gap-2"><span className="text-base">📋</span> INFORMACIÓN ADICIONAL</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
                   {Object.entries(extras).map(([key, value]) => (
@@ -1025,66 +1034,97 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   };
 
   if (loadingStatuses) {
-    return <div className="flex items-center justify-center h-64"><div className="btn-spinner mr-2" />Cargando...</div>;
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="flex flex-col items-center gap-3">
+          <div className="animate-spin rounded-full h-10 w-10 border-2 border-blue-500 border-t-transparent"></div>
+          <span className="text-sm text-slate-400">Cargando pedidos...</span>
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="h-full flex flex-col space-y-1.5">
-      {/* Dashboard */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-1 flex-shrink-0">
-        <div className="bg-blue-500/10 rounded p-1.5 text-center border border-blue-500/20">
-          <div className="text-sm font-bold text-blue-400">{dashboardStats.pendientesConCobertura}</div>
-          <div className="text-[9px] text-slate-400">Pendientes con cobertura</div>
+    <div className="h-full flex flex-col space-y-3 p-3 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
+      {/* ─── HEADER MODERNO ─── */}
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 px-4 py-3 flex-shrink-0">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-lg shadow-lg shadow-blue-500/20">
+            📦
+          </div>
+          <div>
+            <h1 className="text-sm font-bold text-white">Shopify Inbox</h1>
+            <p className="text-[10px] text-slate-400">Panel de gestión de pedidos</p>
+          </div>
         </div>
-        <div className="bg-orange-500/10 rounded p-1.5 text-center border border-orange-500/20">
-          <div className="text-sm font-bold text-orange-400">{dashboardStats.pendientesSinCobertura}</div>
-          <div className="text-[9px] text-slate-400">Pendientes sin cobertura</div>
-        </div>
-        <div className="bg-green-500/10 rounded p-1.5 text-center border border-green-500/20">
-          <div className="text-sm font-bold text-green-400">{dashboardStats.cargados}</div>
-          <div className="text-[9px] text-slate-400">Cargados (Auto/Manual)</div>
-        </div>
-        <div className="bg-yellow-500/10 rounded p-1.5 text-center border border-yellow-500/20">
-          <div className="text-sm font-bold text-yellow-400">{dashboardStats.dropeados}</div>
-          <div className="text-[9px] text-slate-400">Dropeados</div>
-        </div>
-        <div className="bg-red-500/10 rounded p-1.5 text-center border border-red-500/20">
-          <div className="text-sm font-bold text-red-400">{dashboardStats.cancelados}</div>
-          <div className="text-[9px] text-slate-400">Cancelados</div>
-        </div>
-        <div className="bg-purple-500/10 rounded p-1.5 text-center border border-purple-500/20">
-          <div className="text-sm font-bold text-purple-400">{dashboardStats.totalPedidos}</div>
-          <div className="text-[9px] text-slate-400">Total Pedidos</div>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-slate-500 bg-black/30 px-3 py-1 rounded-full">
+            {sheetOrders.length} pedidos
+          </span>
+          {lastSync && (
+            <span className="text-[9px] text-slate-500 bg-black/30 px-3 py-1 rounded-full">
+              🔄 {lastSync.toLocaleTimeString("es-PY")}
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Controles */}
-      <div className="flex flex-wrap gap-1 flex-shrink-0">
-        <button className="px-2 py-0.5 text-[11px] bg-blue-600 hover:bg-blue-700 rounded transition" onClick={() => readSheet()} disabled={loading}>
-          {loading ? "Leyendo..." : "📊 Leer Sheet"}
+      {/* ─── DASHBOARD MODERNO ─── */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 flex-shrink-0">
+        <div className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 rounded-xl p-3 text-center border border-blue-500/20 hover:border-blue-500/40 transition-all duration-200">
+          <div className="text-xl font-bold text-blue-400">{dashboardStats.pendientesConCobertura}</div>
+          <div className="text-[9px] text-slate-400 mt-0.5">Pendientes con cobertura</div>
+        </div>
+        <div className="bg-gradient-to-br from-orange-500/10 to-orange-600/5 rounded-xl p-3 text-center border border-orange-500/20 hover:border-orange-500/40 transition-all duration-200">
+          <div className="text-xl font-bold text-orange-400">{dashboardStats.pendientesSinCobertura}</div>
+          <div className="text-[9px] text-slate-400 mt-0.5">Pendientes sin cobertura</div>
+        </div>
+        <div className="bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 rounded-xl p-3 text-center border border-emerald-500/20 hover:border-emerald-500/40 transition-all duration-200">
+          <div className="text-xl font-bold text-emerald-400">{dashboardStats.cargados}</div>
+          <div className="text-[9px] text-slate-400 mt-0.5">Cargados</div>
+        </div>
+        <div className="bg-gradient-to-br from-amber-500/10 to-amber-600/5 rounded-xl p-3 text-center border border-amber-500/20 hover:border-amber-500/40 transition-all duration-200">
+          <div className="text-xl font-bold text-amber-400">{dashboardStats.dropeados}</div>
+          <div className="text-[9px] text-slate-400 mt-0.5">Dropeados</div>
+        </div>
+        <div className="bg-gradient-to-br from-rose-500/10 to-rose-600/5 rounded-xl p-3 text-center border border-rose-500/20 hover:border-rose-500/40 transition-all duration-200">
+          <div className="text-xl font-bold text-rose-400">{dashboardStats.cancelados}</div>
+          <div className="text-[9px] text-slate-400 mt-0.5">Cancelados</div>
+        </div>
+        <div className="bg-gradient-to-br from-purple-500/10 to-purple-600/5 rounded-xl p-3 text-center border border-purple-500/20 hover:border-purple-500/40 transition-all duration-200">
+          <div className="text-xl font-bold text-purple-400">{dashboardStats.totalPedidos}</div>
+          <div className="text-[9px] text-slate-400 mt-0.5">Total Pedidos</div>
+        </div>
+      </div>
+
+      {/* ─── CONTROLES ─── */}
+      <div className="flex flex-wrap items-center gap-1.5 flex-shrink-0 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 px-3 py-2">
+        <button className="px-3 py-1 text-[11px] bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 rounded-lg transition-all duration-200 shadow-lg shadow-blue-500/20 font-medium" onClick={() => readSheet()} disabled={loading}>
+          {loading ? "⏳ Leyendo..." : "📊 Leer Sheet"}
         </button>
-        <button className="px-2 py-0.5 text-[11px] bg-emerald-600 hover:bg-emerald-700 rounded transition" onClick={handleBulkLoad}>
+        <button className="px-3 py-1 text-[11px] bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 rounded-lg transition-all duration-200 shadow-lg shadow-emerald-500/20 font-medium" onClick={handleBulkLoad}>
           🚀 Cargar todos
         </button>
-        <button className={`px-2 py-0.5 text-[11px] rounded transition ${autoLoad ? "bg-green-600" : "bg-slate-700"}`} onClick={toggleAutoLoad}>
+        <button className={`px-3 py-1 text-[11px] rounded-lg transition-all duration-200 font-medium ${autoLoad ? "bg-gradient-to-r from-emerald-600 to-emerald-700 shadow-lg shadow-emerald-500/20" : "bg-slate-700 hover:bg-slate-600"}`} onClick={toggleAutoLoad}>
           {autoLoad ? "🤖 Auto ON" : "🤖 Auto OFF"}
         </button>
-        <button className="px-2 py-0.5 text-[11px] bg-red-600 hover:bg-red-700 rounded transition" onClick={() => loadStatusesFromDatabase()}>
+        <button className="px-3 py-1 text-[11px] bg-rose-600/80 hover:bg-rose-600 rounded-lg transition-all duration-200" onClick={() => loadStatusesFromDatabase()}>
           🔄 Recargar estados
         </button>
-        {lastSync && <span className="text-[9px] text-slate-500 self-center">🔄 {lastSync.toLocaleTimeString("es-PY")}</span>}
+        <div className="flex-1"></div>
+        <span className="text-[9px] text-slate-500">v2.0 PRO</span>
       </div>
 
-      {/* ─── NUEVO: Barra de acciones en lote ─── */}
+      {/* ─── BARRA DE ACCIONES EN LOTE ─── */}
       {selectedRows.size > 0 && (
-        <div className="flex flex-wrap items-center gap-1 p-1.5 bg-blue-500/10 rounded border border-blue-500/20 flex-shrink-0">
+        <div className="flex flex-wrap items-center gap-1.5 p-2 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-xl border border-blue-500/20 flex-shrink-0 animate-in slide-in-from-top duration-300">
           <span className="text-[10px] text-blue-400 font-medium mr-1">
             ✅ {selectedRows.size} seleccionado{selectedRows.size > 1 ? 's' : ''}
           </span>
-          <div className="h-4 w-px bg-slate-600 mx-1" />
+          <div className="h-5 w-px bg-slate-600/50 mx-1" />
           
           <select
-            className="bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-[10px] focus:outline-none focus:border-blue-500"
+            className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-0.5 text-[10px] focus:outline-none focus:border-blue-500 transition-colors"
             onChange={(e) => {
               const value = e.target.value;
               if (value) {
@@ -1104,7 +1144,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           </select>
 
           <button
-            className="px-1.5 py-0.5 text-[10px] bg-emerald-600 hover:bg-emerald-700 rounded transition-colors disabled:opacity-50"
+            className="px-2 py-0.5 text-[10px] bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 rounded-lg transition-all duration-200 disabled:opacity-50 font-medium"
             onClick={bulkLoadOrders}
             disabled={bulkActionLoading}
           >
@@ -1112,7 +1152,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           </button>
 
           <button
-            className="px-1.5 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 rounded transition-colors disabled:opacity-50"
+            className="px-2 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 rounded-lg transition-all duration-200 disabled:opacity-50"
             onClick={() => {
               setSelectedRows(new Set());
               setSelectAll(false);
@@ -1123,57 +1163,55 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           </button>
 
           {bulkActionLoading && (
-            <span className="text-[10px] text-yellow-400 animate-pulse ml-1">⏳ Procesando...</span>
+            <span className="text-[10px] text-amber-400 animate-pulse ml-1">⏳ Procesando...</span>
           )}
         </div>
       )}
 
-      {/* Filtros */}
-      <div className="flex flex-wrap gap-0.5 flex-shrink-0">
-        <button onClick={() => changeFilter("TODOS")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "TODOS" ? "bg-slate-700 text-white" : "text-slate-400"}`}>
-          📋 Todos ({counts.total})
+      {/* ─── FILTROS ─── */}
+      <div className="flex flex-wrap items-center gap-1 flex-shrink-0 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 px-3 py-2">
+        <button onClick={() => changeFilter("TODOS")} className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all duration-200 ${activeFilter === "TODOS" ? "bg-white/20 text-white shadow-lg" : "text-slate-400 hover:text-white hover:bg-white/10"}`}>
+          📋 Todos <span className="opacity-60">({counts.total})</span>
         </button>
-        <button onClick={() => changeFilter("CARGAR")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "CARGAR" ? "bg-blue-600 text-white" : "text-slate-400"}`}>
-          ⏳ Pendientes ({counts.cargarConCobertura})
+        <button onClick={() => changeFilter("CARGAR")} className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all duration-200 ${activeFilter === "CARGAR" ? "bg-blue-500/30 text-blue-300 shadow-lg shadow-blue-500/20" : "text-slate-400 hover:text-white hover:bg-white/10"}`}>
+          ⏳ Pendientes <span className="opacity-60">({counts.cargarConCobertura})</span>
         </button>
-        <button onClick={() => changeFilter("CARGADO")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "CARGADO" ? "bg-green-600 text-white" : "text-slate-400"}`}>
-          ✅ Cargados ({counts.cargados})
+        <button onClick={() => changeFilter("CARGADO")} className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all duration-200 ${activeFilter === "CARGADO" ? "bg-emerald-500/30 text-emerald-300 shadow-lg shadow-emerald-500/20" : "text-slate-400 hover:text-white hover:bg-white/10"}`}>
+          ✅ Cargados <span className="opacity-60">({counts.cargados})</span>
         </button>
-        <button onClick={() => changeFilter("A DROPEAR")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "A DROPEAR" ? "bg-yellow-600 text-white" : "text-slate-400"}`}>
-          ⚠️ Dropear ({counts.aDropear})
+        <button onClick={() => changeFilter("A DROPEAR")} className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all duration-200 ${activeFilter === "A DROPEAR" ? "bg-amber-500/30 text-amber-300 shadow-lg shadow-amber-500/20" : "text-slate-400 hover:text-white hover:bg-white/10"}`}>
+          ⚠️ Dropear <span className="opacity-60">({counts.aDropear})</span>
         </button>
-        <button onClick={() => changeFilter("CANCELADO")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "CANCELADO" ? "bg-red-600 text-white" : "text-slate-400"}`}>
-          ❌ Cancelado ({counts.cancelados})
+        <button onClick={() => changeFilter("CANCELADO")} className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all duration-200 ${activeFilter === "CANCELADO" ? "bg-rose-500/30 text-rose-300 shadow-lg shadow-rose-500/20" : "text-slate-400 hover:text-white hover:bg-white/10"}`}>
+          ❌ Cancelado <span className="opacity-60">({counts.cancelados})</span>
         </button>
-        <div className="flex-1"></div>
-        <div className="flex gap-0.5">
-          <button onClick={() => setCoverageFilter("all")} className={`px-1.5 py-0.5 rounded text-[10px] ${coverageFilter === "all" ? "bg-slate-700" : "text-slate-500"}`}>
-            🌍 Todas
-          </button>
-          <button onClick={() => setCoverageFilter("covered")} className={`px-1.5 py-0.5 rounded text-[10px] ${coverageFilter === "covered" ? "bg-green-600" : "text-slate-500"}`}>
-            ✅ Con cobertura ({counts.cargarConCobertura})
-          </button>
-          <button onClick={() => setCoverageFilter("uncovered")} className={`px-1.5 py-0.5 rounded text-[10px] ${coverageFilter === "uncovered" ? "bg-red-600" : "text-slate-500"}`}>
-            ❌ Sin cobertura ({counts.cargarSinCobertura})
-          </button>
-        </div>
+        <div className="w-px h-5 bg-slate-700/50 mx-1" />
+        <button onClick={() => setCoverageFilter("all")} className={`px-2 py-1 rounded-lg text-[10px] transition-all duration-200 ${coverageFilter === "all" ? "bg-white/20 text-white" : "text-slate-400 hover:text-white hover:bg-white/10"}`}>
+          🌍 Todas
+        </button>
+        <button onClick={() => setCoverageFilter("covered")} className={`px-2 py-1 rounded-lg text-[10px] transition-all duration-200 ${coverageFilter === "covered" ? "bg-emerald-500/30 text-emerald-300" : "text-slate-400 hover:text-white hover:bg-white/10"}`}>
+          ✅ Con cobertura
+        </button>
+        <button onClick={() => setCoverageFilter("uncovered")} className={`px-2 py-1 rounded-lg text-[10px] transition-all duration-200 ${coverageFilter === "uncovered" ? "bg-rose-500/30 text-rose-300" : "text-slate-400 hover:text-white hover:bg-white/10"}`}>
+          ❌ Sin cobertura
+        </button>
       </div>
 
-      {/* Buscador */}
-      <div className="flex gap-1 flex-shrink-0">
+      {/* ─── BUSCADOR Y FILTRO DE FECHAS ─── */}
+      <div className="flex flex-wrap items-center gap-1.5 flex-shrink-0 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 px-3 py-2">
         <div className="flex gap-0.5">
-          <button onClick={() => setSearchType("product")} className={`px-1.5 py-0.5 rounded text-[10px] ${searchType === "product" ? "bg-blue-600" : "bg-slate-800"}`}>
+          <button onClick={() => setSearchType("product")} className={`px-2 py-0.5 rounded-lg text-[10px] transition-all duration-200 ${searchType === "product" ? "bg-blue-500/30 text-blue-300" : "text-slate-400 hover:text-white hover:bg-white/10"}`}>
             🏷️ Producto
           </button>
-          <button onClick={() => setSearchType("city")} className={`px-1.5 py-0.5 rounded text-[10px] ${searchType === "city" ? "bg-blue-600" : "bg-slate-800"}`}>
+          <button onClick={() => setSearchType("city")} className={`px-2 py-0.5 rounded-lg text-[10px] transition-all duration-200 ${searchType === "city" ? "bg-blue-500/30 text-blue-300" : "text-slate-400 hover:text-white hover:bg-white/10"}`}>
             📍 Ciudad
           </button>
-          <button onClick={() => setSearchType("all")} className={`px-1.5 py-0.5 rounded text-[10px] ${searchType === "all" ? "bg-blue-600" : "bg-slate-800"}`}>
+          <button onClick={() => setSearchType("all")} className={`px-2 py-0.5 rounded-lg text-[10px] transition-all duration-200 ${searchType === "all" ? "bg-blue-500/30 text-blue-300" : "text-slate-400 hover:text-white hover:bg-white/10"}`}>
             🔍 Todo
           </button>
         </div>
         <input
-          className="flex-1 bg-slate-800 rounded px-2 py-0.5 text-[11px] border border-slate-700 focus:outline-none focus:border-blue-500"
+          className="flex-1 min-w-[120px] bg-slate-800/80 rounded-lg px-3 py-1 text-[11px] border border-slate-700/50 focus:outline-none focus:border-blue-500 transition-all duration-200 placeholder:text-slate-500"
           placeholder={searchType === "product" ? "Buscar producto..." : searchType === "city" ? "Buscar ciudad..." : "Buscar en todos los campos..."}
           value={searchType === "product" ? productSearch : searchType === "city" ? cityFilter : search}
           onChange={(e) => {
@@ -1182,46 +1220,76 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             else setSearch(e.target.value);
           }}
         />
+        <div className="w-px h-5 bg-slate-700/50 mx-0.5" />
+        
+        {/* ─── NUEVO: FILTRO DE FECHAS ─── */}
+        <div className="flex items-center gap-1.5">
+          <input
+            type="date"
+            className="bg-slate-800/80 rounded-lg px-2 py-1 text-[10px] border border-slate-700/50 focus:outline-none focus:border-blue-500 transition-all duration-200 text-slate-300 w-[120px]"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            placeholder="Desde"
+          />
+          <span className="text-[10px] text-slate-500">→</span>
+          <input
+            type="date"
+            className="bg-slate-800/80 rounded-lg px-2 py-1 text-[10px] border border-slate-700/50 focus:outline-none focus:border-blue-500 transition-all duration-200 text-slate-300 w-[120px]"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            placeholder="Hasta"
+          />
+          {(dateFrom || dateTo) && (
+            <button
+              className="px-1.5 py-0.5 text-[10px] bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 rounded-lg transition-all duration-200"
+              onClick={() => { setDateFrom(""); setDateTo(""); }}
+            >
+              ✖
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="text-[9px] text-slate-500 flex-shrink-0 flex justify-between items-center">
         <span>Mostrando {filteredOrders.length} de {sheetOrders.length} filas</span>
         {selectedRows.size > 0 && (
-          <span className="text-blue-400">{selectedRows.size} seleccionados</span>
+          <span className="text-blue-400 font-medium">{selectedRows.size} seleccionados</span>
+        )}
+        {(dateFrom || dateTo) && (
+          <span className="text-amber-400">📅 Filtro por fechas activo</span>
         )}
       </div>
 
-      {/* Tabla */}
-      <div className="flex-1 min-h-0 overflow-auto rounded border border-slate-800">
+      {/* ─── TABLA MODERNA ─── */}
+      <div className="flex-1 min-h-0 overflow-auto rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm">
         <table className="w-full text-xs">
-          <thead className="bg-slate-800 sticky top-0 z-10">
-            <tr className="border-b border-slate-700">
-              {/* ─── NUEVO: Checkbox para seleccionar todos ─── */}
-              <th className="px-1.5 py-1.5 text-center text-[10px] font-medium text-slate-400 w-8">
+          <thead className="bg-gradient-to-r from-slate-800/80 to-slate-900/80 sticky top-0 z-10 backdrop-blur-sm">
+            <tr className="border-b border-white/10">
+              <th className="px-2 py-2 text-center text-[10px] font-medium text-slate-400 w-8">
                 <input
                   type="checkbox"
                   checked={selectAll}
                   onChange={toggleSelectAll}
-                  className="w-3.5 h-3.5 rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                  className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-2 focus:ring-blue-500 cursor-pointer transition-all"
                   disabled={filteredOrders.length === 0 || bulkActionLoading}
                 />
               </th>
-              <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">#</th>
-              <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">ID</th>
-              <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">Fecha</th>
-              <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">Cliente</th>
-              <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">Teléfono</th>
-              <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">Ciudad</th>
-              <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">Departamento</th>
-              <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">Delivery</th>
-              <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">Producto</th>
-              <th className="px-1.5 py-1.5 text-center text-[10px] font-medium text-slate-400">Cant</th>
-              <th className="px-1.5 py-1.5 text-right text-[10px] font-medium text-slate-400">Venta</th>
-              <th className="px-1.5 py-1.5 text-center text-[10px] font-medium text-slate-400">Estado</th>
-              <th className="px-1.5 py-1.5 text-center text-[10px] font-medium text-slate-400">Acciones</th>
+              <th className="px-2 py-2 text-left text-[10px] font-medium text-slate-400">#</th>
+              <th className="px-2 py-2 text-left text-[10px] font-medium text-slate-400">ID</th>
+              <th className="px-2 py-2 text-left text-[10px] font-medium text-slate-400">Fecha</th>
+              <th className="px-2 py-2 text-left text-[10px] font-medium text-slate-400">Cliente</th>
+              <th className="px-2 py-2 text-left text-[10px] font-medium text-slate-400">Teléfono</th>
+              <th className="px-2 py-2 text-left text-[10px] font-medium text-slate-400">Ciudad</th>
+              <th className="px-2 py-2 text-left text-[10px] font-medium text-slate-400">Depto.</th>
+              <th className="px-2 py-2 text-left text-[10px] font-medium text-slate-400">Delivery</th>
+              <th className="px-2 py-2 text-left text-[10px] font-medium text-slate-400">Producto</th>
+              <th className="px-2 py-2 text-center text-[10px] font-medium text-slate-400">Cant</th>
+              <th className="px-2 py-2 text-right text-[10px] font-medium text-slate-400">Venta</th>
+              <th className="px-2 py-2 text-center text-[10px] font-medium text-slate-400">Estado</th>
+              <th className="px-2 py-2 text-center text-[10px] font-medium text-slate-400">Acciones</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-slate-800">
+          <tbody className="divide-y divide-white/5">
             {filteredOrders.map(({ order, idx, rowKey }) => {
               const status = getRowStatus(rowKey);
               const city = order[colKeys.city] || "";
@@ -1236,47 +1304,46 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               const isSelected = selectedRows.has(rowKey);
 
               return (
-                <tr key={rowKey} className={`${getRowClassName(status, covered)} ${isSelected ? 'ring-1 ring-blue-500/50 bg-blue-500/5' : ''}`}>
-                  {/* ─── NUEVO: Checkbox individual ─── */}
-                  <td className="px-1.5 py-1 text-center">
+                <tr key={rowKey} className={`${getRowClassName(status, covered)} ${isSelected ? 'ring-1 ring-blue-500/40 bg-blue-500/10' : ''} transition-colors duration-150`}>
+                  <td className="px-2 py-1.5 text-center">
                     <input
                       type="checkbox"
                       checked={isSelected}
                       onChange={() => toggleRowSelection(rowKey)}
-                      className="w-3.5 h-3.5 rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                      className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-2 focus:ring-blue-500 cursor-pointer transition-all"
                       disabled={bulkActionLoading}
                     />
                   </td>
-                  <td className="px-1.5 py-1 text-[10px] text-slate-400 font-mono">{rowDisplay}</td>
-                  <td className="px-1.5 py-1 text-[10px] font-mono">
-                    {orderNumber ? <span className="text-green-400">{orderNumber}</span> : <span className="text-slate-600">—</span>}
+                  <td className="px-2 py-1.5 text-[10px] text-slate-400 font-mono">{rowDisplay}</td>
+                  <td className="px-2 py-1.5 text-[10px] font-mono">
+                    {orderNumber ? <span className="text-emerald-400">{orderNumber}</span> : <span className="text-slate-600">—</span>}
                   </td>
-                  <td className="px-1.5 py-1 text-[10px]">{orderDate}</td>
-                  <td className="px-1.5 py-1 text-[10px] font-medium truncate max-w-[100px]" title={order[colKeys.name] || ""}>
+                  <td className="px-2 py-1.5 text-[10px] text-slate-300">{orderDate}</td>
+                  <td className="px-2 py-1.5 text-[10px] font-medium truncate max-w-[100px] text-white" title={order[colKeys.name] || ""}>
                     {order[colKeys.name]?.substring(0, 20) || "—"}
                   </td>
-                  <td className="px-1.5 py-1 text-[10px]">{order[colKeys.phone]?.substring(0, 15) || "—"}</td>
-                  <td className="px-1.5 py-1 text-[10px]">
-                    <div className={covered ? "text-green-400" : "text-red-400"}>{city?.substring(0, 25) || "—"}</div>
+                  <td className="px-2 py-1.5 text-[10px] text-slate-300">{order[colKeys.phone]?.substring(0, 15) || "—"}</td>
+                  <td className="px-2 py-1.5 text-[10px]">
+                    <div className={covered ? "text-emerald-400 font-medium" : "text-rose-400 font-medium"}>{city?.substring(0, 25) || "—"}</div>
                   </td>
-                  <td className="px-1.5 py-1 text-[10px]">
+                  <td className="px-2 py-1.5 text-[10px]">
                     <div className={departamento ? "text-blue-400 font-medium" : "text-slate-500"}>{departamento || "—"}</div>
                   </td>
-                  <td className="px-1.5 py-1 text-[10px]">
+                  <td className="px-2 py-1.5 text-[10px]">
                     {deliveryPrice
-                      ? <span className="text-orange-400 font-medium">{nf(deliveryPrice)} Gs</span>
+                      ? <span className="text-amber-400 font-medium">{nf(deliveryPrice)} Gs</span>
                       : <span className="text-slate-500">—</span>}
                   </td>
-                  <td className="px-1.5 py-1 text-[10px] max-w-[150px] truncate" title={order[colKeys.product] || ""}>
+                  <td className="px-2 py-1.5 text-[10px] max-w-[150px] truncate text-slate-300" title={order[colKeys.product] || ""}>
                     {order[colKeys.product]?.substring(0, 25) || "—"}
                   </td>
-                  <td className="px-1.5 py-1 text-[10px] text-center">{parseQuantity(order[colKeys.qty])}</td>
-                  <td className="px-1.5 py-1 text-[10px] text-right text-green-400">
+                  <td className="px-2 py-1.5 text-[10px] text-center text-slate-300">{parseQuantity(order[colKeys.qty])}</td>
+                  <td className="px-2 py-1.5 text-[10px] text-right text-emerald-400 font-medium">
                     {salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}
                   </td>
-                  <td className="px-1.5 py-1 text-center">
+                  <td className="px-2 py-1.5 text-center">
                     <select
-                      className="bg-slate-800 border border-slate-700 rounded px-1 py-0.5 text-[10px] focus:outline-none focus:border-blue-500"
+                      className="bg-slate-800/80 border border-slate-700/50 rounded-lg px-1.5 py-0.5 text-[10px] focus:outline-none focus:border-blue-500 transition-all duration-200 cursor-pointer hover:border-slate-600"
                       value={status}
                       onChange={(e) => {
                         const newStatus = e.target.value as OrderStatus;
@@ -1307,24 +1374,24 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                       <option value="CARGADO_MANUAL">✍️ Manual</option>
                     </select>
                   </td>
-                  <td className="px-1.5 py-1 text-center">
+                  <td className="px-2 py-1.5 text-center">
                     <div className="flex gap-0.5 justify-center">
                       {canLoad && (
                         <button
-                          className="px-1.5 py-0.5 text-[10px] bg-blue-600 hover:bg-blue-700 rounded transition-colors"
+                          className="px-2 py-0.5 text-[10px] bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 rounded-lg transition-all duration-200 shadow-lg shadow-blue-500/20 font-medium"
                           onClick={() => handleDirectSave(order, rowKey)}
                         >
                           Cargar
                         </button>
                       )}
                       <button
-                        className="px-1.5 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 rounded transition-colors"
+                        className="px-2 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 rounded-lg transition-all duration-200"
                         onClick={() => { setSelectedOrder({ order, rowKey }); setShowGuideModal(true); }}
                       >
                         📄 Guía
                       </button>
                       <button
-                        className="px-1.5 py-0.5 text-[10px] bg-purple-700 hover:bg-purple-600 rounded transition-colors"
+                        className="px-2 py-0.5 text-[10px] bg-purple-700/80 hover:bg-purple-700 rounded-lg transition-all duration-200"
                         onClick={() => handleOpenForm(order, rowKey)}
                       >
                         Formulario
@@ -1336,8 +1403,12 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             })}
             {filteredOrders.length === 0 && (
               <tr>
-                <td colSpan={14} className="text-center py-4 text-slate-500 text-[10px]">
-                  No hay pedidos para mostrar
+                <td colSpan={14} className="text-center py-8 text-slate-500 text-[10px]">
+                  {sheetOrders.length === 0 ? (
+                    <span>📭 No hay pedidos cargados. Hacé clic en "Leer Sheet" para comenzar.</span>
+                  ) : (
+                    <span>🔍 No hay pedidos que coincidan con los filtros</span>
+                  )}
                 </td>
               </tr>
             )}
