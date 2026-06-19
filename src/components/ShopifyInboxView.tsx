@@ -261,6 +261,11 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [selectedOrder, setSelectedOrder] = useState<{ order: SheetOrder; rowKey: string } | null>(null);
   const [showGuideModal, setShowGuideModal] = useState(false);
 
+  // ─── NUEVO: Estado para selección múltiple ───
+  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
+  const [selectAll, setSelectAll] = useState(false);
+  const [bulkActionLoading, setBulkActionLoading] = useState(false);
+
   const colKeys = useMemo(() => {
     const h = sheetHeaders;
     const find = (...candidates: string[]) => {
@@ -291,16 +296,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   
   // Obtener la clave estable de una fila: usa __row del sheet, fallback a idx
   const getRowKey = useCallback((order: SheetOrder, idx: number): string => {
-    // Si el order tiene __row (del endpoint corregido), usarlo
     if (order.__row) {
       return String(order.__row);
     }
-    // Fallback: idx (pero esto es inestable, debería venir __row siempre)
     console.warn(`⚠️ Fila ${idx} sin __row, usando idx como fallback`);
     return String(idx);
   }, []);
 
-  // getRowStatus ahora recibe rowKey (string) en lugar de idx
   const getRowStatus = useCallback((rowKey: string): OrderStatus => {
     return rowStatuses[rowKey] || "CARGAR";
   }, [rowStatuses]);
@@ -322,7 +324,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         const statusMap: Record<string, OrderStatus> = {};
         const orderNumberMap: Record<string, string> = {};
         data.forEach(item => {
-          // row_index ahora es el __row real (string)
           const rowKey = String(item.row_index);
           statusMap[rowKey] = item.status as OrderStatus;
           if (item.order_number) orderNumberMap[rowKey] = item.order_number;
@@ -337,7 +338,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     finally { setLoadingStatuses(false); }
   }, [myEmail, sheetUrl]);
 
-  // persistRowStatus: usa rowKey (que es __row) directamente
   const persistRowStatus = useCallback(async (rowKey: string, status: OrderStatus, orderNumber?: string) => {
     if (!myEmail || !sheetUrl) {
       toast.error("Falta email o URL del sheet");
@@ -351,7 +351,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           .upsert({
             user_email: myEmail,
             sheet_url: sheetUrl,
-            row_index: rowKey, // ahora es string (__row)
+            row_index: rowKey,
             status: status,
             order_number: orderNumber || null,
             updated_at: new Date().toISOString()
@@ -386,9 +386,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   }, [myEmail, sheetUrl, loadStatusesFromDatabase]);
 
-  // setRowStatus: actualiza UI inmediatamente Y persiste en BD
   const setRowStatus = useCallback(async (rowKey: string, status: OrderStatus, orderNumber?: string) => {
-    // 1. UPDATE LOCAL INMEDIATO
     if (status === "CARGAR") {
       setRowStatuses(prev => {
         const next = { ...prev };
@@ -406,8 +404,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         setRowOrderNumbers(prev => ({ ...prev, [rowKey]: orderNumber }));
       }
     }
-
-    // 2. PERSISTIR EN BD
     await persistRowStatus(rowKey, status, orderNumber);
   }, [persistRowStatus]);
 
@@ -552,6 +548,178 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     toast.success(`✅ ${count} cargados | ❌ ${errors} errores`);
   };
 
+  // ─── NUEVO: Funciones para selección múltiple ───
+
+  // Toggle selección de una fila
+  const toggleRowSelection = (rowKey: string) => {
+    setSelectedRows(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(rowKey)) {
+        newSet.delete(rowKey);
+      } else {
+        newSet.add(rowKey);
+      }
+      return newSet;
+    });
+  };
+
+  // Seleccionar/Deseleccionar todos
+  const toggleSelectAll = () => {
+    if (selectAll) {
+      setSelectedRows(new Set());
+    } else {
+      const allKeys = filteredOrders.map(item => item.rowKey);
+      setSelectedRows(new Set(allKeys));
+    }
+    setSelectAll(!selectAll);
+  };
+
+  // Acción en lote: Cambiar estado de múltiples filas
+  const bulkChangeStatus = async (newStatus: OrderStatus) => {
+    if (selectedRows.size === 0) {
+      toast.warning("⚠️ Seleccioná al menos una fila");
+      return;
+    }
+
+    setBulkActionLoading(true);
+    let successCount = 0;
+    let errorCount = 0;
+
+    const statusMessages: Record<OrderStatus, string> = {
+      "CANCELADO": "❌ Cancelado",
+      "A DROPEAR": "⚠️ A Dropear",
+      "CARGADO": "✅ Cargado Auto",
+      "CARGADO_MANUAL": "✍️ Cargado Manual",
+      "CARGAR": "⏳ Pendiente"
+    };
+
+    // Procesar en lotes de 10 para no sobrecargar
+    const rows = Array.from(selectedRows);
+    const batchSize = 10;
+    
+    for (let i = 0; i < rows.length; i += batchSize) {
+      const batch = rows.slice(i, i + batchSize);
+      const promises = batch.map(async (rowKey) => {
+        try {
+          // Obtener el orderNumber actual si existe
+          const orderNumber = getRowOrderNumber(rowKey);
+          
+          // Actualizar UI localmente
+          if (newStatus === "CARGAR") {
+            setRowStatuses(prev => {
+              const next = { ...prev };
+              delete next[rowKey];
+              return next;
+            });
+            setRowOrderNumbers(prev => {
+              const next = { ...prev };
+              delete next[rowKey];
+              return next;
+            });
+          } else {
+            setRowStatuses(prev => ({ ...prev, [rowKey]: newStatus }));
+          }
+
+          // Persistir en BD
+          await persistRowStatus(rowKey, newStatus, orderNumber || undefined);
+          successCount++;
+        } catch (error) {
+          console.error(`Error al cambiar estado de fila ${rowKey}:`, error);
+          errorCount++;
+        }
+      });
+
+      await Promise.all(promises);
+      
+      // Mostrar progreso
+      toast.info(`⏳ Procesando... ${Math.min(i + batchSize, rows.length)}/${rows.length}`);
+    }
+
+    // Limpiar selección
+    setSelectedRows(new Set());
+    setSelectAll(false);
+    setBulkActionLoading(false);
+
+    toast.success(`✅ Estados actualizados: ${successCount} exitosos, ${errorCount} errores`);
+  };
+
+  // Acción en lote: Cargar múltiples pedidos
+  const bulkLoadOrders = async () => {
+    if (selectedRows.size === 0) {
+      toast.warning("⚠️ Seleccioná al menos una fila");
+      return;
+    }
+
+    setBulkActionLoading(true);
+    let successCount = 0;
+    let errorCount = 0;
+    let skippedCount = 0;
+
+    const rows = Array.from(selectedRows);
+    
+    // Primero, verificar qué filas son cargables
+    const loadableRows: { rowKey: string; order: SheetOrder }[] = [];
+    
+    for (const rowKey of rows) {
+      const status = getRowStatus(rowKey);
+      if (status !== "CARGAR") {
+        skippedCount++;
+        continue;
+      }
+      
+      // Encontrar el order correspondiente
+      const order = sheetOrders.find((o, idx) => getRowKey(o, idx) === rowKey);
+      if (!order) {
+        errorCount++;
+        continue;
+      }
+      
+      const city = order[colKeys.city] || "";
+      if (!hasCoverage(city)) {
+        skippedCount++;
+        continue;
+      }
+      
+      loadableRows.push({ rowKey, order });
+    }
+
+    if (loadableRows.length === 0) {
+      toast.warning(`⚠️ Ninguna fila seleccionada es cargable (${skippedCount} no cargables)`);
+      setBulkActionLoading(false);
+      return;
+    }
+
+    toast.info(`⏳ Cargando ${loadableRows.length} pedidos...`);
+
+    // Procesar en lotes de 5 para no sobrecargar
+    const batchSize = 5;
+    for (let i = 0; i < loadableRows.length; i += batchSize) {
+      const batch = loadableRows.slice(i, i + batchSize);
+      const promises = batch.map(async ({ rowKey, order }) => {
+        try {
+          const success = await loadOrder(order, rowKey, "auto");
+          if (success) successCount++;
+          else errorCount++;
+        } catch (error) {
+          console.error(`Error al cargar pedido ${rowKey}:`, error);
+          errorCount++;
+        }
+      });
+
+      await Promise.all(promises);
+      
+      // Mostrar progreso
+      toast.info(`⏳ Progreso: ${Math.min(i + batchSize, loadableRows.length)}/${loadableRows.length}`);
+    }
+
+    // Limpiar selección
+    setSelectedRows(new Set());
+    setSelectAll(false);
+    setBulkActionLoading(false);
+
+    toast.success(`✅ Pedidos cargados: ${successCount} exitosos, ${errorCount} errores, ${skippedCount} omitidos`);
+  };
+
   const toggleAutoLoad = () => {
     setAutoLoad(!autoLoad);
     toast.info(!autoLoad ? "🤖 Auto-carga activada" : "⏹️ Auto-carga desactivada");
@@ -665,6 +833,17 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         return true;
       });
   }, [sheetOrders, activeFilter, search, productSearch, cityFilter, searchType, coverageFilter, colKeys, getRowKey, getRowStatus]);
+
+  // ─── NUEVO: Efecto para mantener selectAll sincronizado ───
+  useEffect(() => {
+    if (filteredOrders.length === 0) {
+      setSelectAll(false);
+      return;
+    }
+    const allKeys = filteredOrders.map(item => item.rowKey);
+    const allSelected = allKeys.every(key => selectedRows.has(key));
+    setSelectAll(allSelected);
+  }, [filteredOrders, selectedRows]);
 
   const changeFilter = (filter: FilterType) => setActiveFilter(filter);
 
@@ -896,6 +1075,59 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         {lastSync && <span className="text-[9px] text-slate-500 self-center">🔄 {lastSync.toLocaleTimeString("es-PY")}</span>}
       </div>
 
+      {/* ─── NUEVO: Barra de acciones en lote ─── */}
+      {selectedRows.size > 0 && (
+        <div className="flex flex-wrap items-center gap-1 p-1.5 bg-blue-500/10 rounded border border-blue-500/20 flex-shrink-0">
+          <span className="text-[10px] text-blue-400 font-medium mr-1">
+            ✅ {selectedRows.size} seleccionado{selectedRows.size > 1 ? 's' : ''}
+          </span>
+          <div className="h-4 w-px bg-slate-600 mx-1" />
+          
+          <select
+            className="bg-slate-800 border border-slate-700 rounded px-1.5 py-0.5 text-[10px] focus:outline-none focus:border-blue-500"
+            onChange={(e) => {
+              const value = e.target.value;
+              if (value) {
+                bulkChangeStatus(value as OrderStatus);
+                e.target.value = "";
+              }
+            }}
+            defaultValue=""
+            disabled={bulkActionLoading}
+          >
+            <option value="">📝 Cambiar estado...</option>
+            <option value="CARGAR">⏳ Pendiente</option>
+            <option value="A DROPEAR">⚠️ Dropear</option>
+            <option value="CANCELADO">❌ Cancelado</option>
+            <option value="CARGADO">✅ Auto</option>
+            <option value="CARGADO_MANUAL">✍️ Manual</option>
+          </select>
+
+          <button
+            className="px-1.5 py-0.5 text-[10px] bg-emerald-600 hover:bg-emerald-700 rounded transition-colors disabled:opacity-50"
+            onClick={bulkLoadOrders}
+            disabled={bulkActionLoading}
+          >
+            🚀 Cargar seleccionados
+          </button>
+
+          <button
+            className="px-1.5 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 rounded transition-colors disabled:opacity-50"
+            onClick={() => {
+              setSelectedRows(new Set());
+              setSelectAll(false);
+            }}
+            disabled={bulkActionLoading}
+          >
+            ✖ Limpiar
+          </button>
+
+          {bulkActionLoading && (
+            <span className="text-[10px] text-yellow-400 animate-pulse ml-1">⏳ Procesando...</span>
+          )}
+        </div>
+      )}
+
       {/* Filtros */}
       <div className="flex flex-wrap gap-0.5 flex-shrink-0">
         <button onClick={() => changeFilter("TODOS")} className={`px-1.5 py-0.5 rounded text-[10px] ${activeFilter === "TODOS" ? "bg-slate-700 text-white" : "text-slate-400"}`}>
@@ -952,13 +1184,28 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         />
       </div>
 
-      <div className="text-[9px] text-slate-500 flex-shrink-0">Mostrando {filteredOrders.length} de {sheetOrders.length} filas</div>
+      <div className="text-[9px] text-slate-500 flex-shrink-0 flex justify-between items-center">
+        <span>Mostrando {filteredOrders.length} de {sheetOrders.length} filas</span>
+        {selectedRows.size > 0 && (
+          <span className="text-blue-400">{selectedRows.size} seleccionados</span>
+        )}
+      </div>
 
       {/* Tabla */}
       <div className="flex-1 min-h-0 overflow-auto rounded border border-slate-800">
         <table className="w-full text-xs">
           <thead className="bg-slate-800 sticky top-0 z-10">
             <tr className="border-b border-slate-700">
+              {/* ─── NUEVO: Checkbox para seleccionar todos ─── */}
+              <th className="px-1.5 py-1.5 text-center text-[10px] font-medium text-slate-400 w-8">
+                <input
+                  type="checkbox"
+                  checked={selectAll}
+                  onChange={toggleSelectAll}
+                  className="w-3.5 h-3.5 rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                  disabled={filteredOrders.length === 0 || bulkActionLoading}
+                />
+              </th>
               <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">#</th>
               <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">ID</th>
               <th className="px-1.5 py-1.5 text-left text-[10px] font-medium text-slate-400">Fecha</th>
@@ -985,11 +1232,21 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               const canLoad = status === "CARGAR" && covered && salePrice > 0;
               const orderNumber = getRowOrderNumber(rowKey);
               const departamento = getCityDepartment(city);
-              // Mostrar el número de fila REAL del sheet
               const rowDisplay = order.__row || String(idx + 1);
+              const isSelected = selectedRows.has(rowKey);
 
               return (
-                <tr key={rowKey} className={getRowClassName(status, covered)}>
+                <tr key={rowKey} className={`${getRowClassName(status, covered)} ${isSelected ? 'ring-1 ring-blue-500/50 bg-blue-500/5' : ''}`}>
+                  {/* ─── NUEVO: Checkbox individual ─── */}
+                  <td className="px-1.5 py-1 text-center">
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleRowSelection(rowKey)}
+                      className="w-3.5 h-3.5 rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-1 focus:ring-blue-500 cursor-pointer"
+                      disabled={bulkActionLoading}
+                    />
+                  </td>
                   <td className="px-1.5 py-1 text-[10px] text-slate-400 font-mono">{rowDisplay}</td>
                   <td className="px-1.5 py-1 text-[10px] font-mono">
                     {orderNumber ? <span className="text-green-400">{orderNumber}</span> : <span className="text-slate-600">—</span>}
@@ -1018,7 +1275,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                     {salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}
                   </td>
                   <td className="px-1.5 py-1 text-center">
-                    {/* ─── SELECT CON FIX COMPLETO ─── */}
                     <select
                       className="bg-slate-800 border border-slate-700 rounded px-1 py-0.5 text-[10px] focus:outline-none focus:border-blue-500"
                       value={status}
@@ -1026,7 +1282,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                         const newStatus = e.target.value as OrderStatus;
                         console.log(`🔄 Cambiando estado de fila ${rowKey} (real #${rowDisplay}) de ${status} a ${newStatus}`);
 
-                        // UPDATE LOCAL INMEDIATO — React recalcula filteredOrders en el mismo ciclo
                         if (newStatus === "CARGAR") {
                           setRowStatuses(prev => {
                             const next = { ...prev };
@@ -1042,7 +1297,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                           setRowStatuses(prev => ({ ...prev, [rowKey]: newStatus }));
                         }
 
-                        // PERSISTIR EN BD (no bloquea UI, maneja error internamente)
                         persistRowStatus(rowKey, newStatus, orderNumber || undefined);
                       }}
                     >
@@ -1082,7 +1336,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             })}
             {filteredOrders.length === 0 && (
               <tr>
-                <td colSpan={13} className="text-center py-4 text-slate-500 text-[10px]">
+                <td colSpan={14} className="text-center py-4 text-slate-500 text-[10px]">
                   No hay pedidos para mostrar
                 </td>
               </tr>
