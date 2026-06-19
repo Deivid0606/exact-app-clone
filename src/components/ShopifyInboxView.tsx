@@ -249,25 +249,30 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   
   const [autoLoad, setAutoLoad] = useState<boolean>(() => localStorage.getItem(AUTO_LOAD_KEY) === "true");
   
-  // 🔥 Filtro "Pendientes" por defecto al entrar
+  // 🔥 Filtro: Pendientes + Con cobertura por defecto
   const [activeFilter, setActiveFilter] = useState<FilterType>(() => {
     const saved = localStorage.getItem(ACTIVE_FILTER_KEY) as FilterType;
-    return saved || "CARGAR"; // <-- Por defecto: Pendientes
+    return saved || "CARGAR";
   });
   
   const [searchType, setSearchType] = useState<"all" | "product" | "city">("product");
   const [productSearch, setProductSearch] = useState("");
   const [cityFilter, setCityFilter] = useState("");
-  const [coverageFilter, setCoverageFilter] = useState<"all" | "covered" | "uncovered">("all");
+  
+  // 🔥 Coverage filter por defecto: "covered" (con cobertura)
+  const [coverageFilter, setCoverageFilter] = useState<"all" | "covered" | "uncovered">(() => {
+    return "covered";
+  });
+  
   const [search, setSearch] = useState("");
   const [selectedOrder, setSelectedOrder] = useState<{ order: SheetOrder; rowKey: string } | null>(null);
   const [showGuideModal, setShowGuideModal] = useState(false);
 
-  // ─── NUEVO: Filtro de fechas ───
+  // ─── FILTRO DE FECHAS ───
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
 
-  // ─── NUEVO: Estado para selección múltiple ───
+  // ─── SELECCIÓN MÚLTIPLE ───
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [selectAll, setSelectAll] = useState(false);
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
@@ -302,7 +307,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     if (order.__row) {
       return String(order.__row);
     }
-    console.warn(`⚠️ Fila ${idx} sin __row, usando idx como fallback`);
     return String(idx);
   }, []);
 
@@ -333,9 +337,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         });
         setRowStatuses(statusMap);
         setRowOrderNumbers(orderNumberMap);
-        console.log("📊 Estados cargados desde BD (usando __row):", statusMap);
-      } else if (error) {
-        console.error("Error cargando estados:", error);
       }
     } catch (err) { console.error(err); }
     finally { setLoadingStatuses(false); }
@@ -346,7 +347,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       toast.error("Falta email o URL del sheet");
       return;
     }
-    console.log(`📝 Persistiendo estado: Fila ${rowKey} -> "${status}"`);
     try {
       if (status !== "CARGAR") {
         const { error } = await supabase
@@ -362,7 +362,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             onConflict: 'user_email,sheet_url,row_index'
           });
         if (error) throw error;
-        console.log(`✅ Estado persistido: ${status}`);
         const statusMessages: Record<OrderStatus, string> = {
           "CANCELADO": "❌ Cancelado",
           "A DROPEAR": "⚠️ A Dropear",
@@ -379,7 +378,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           .eq("sheet_url", sheetUrl)
           .eq("row_index", rowKey);
         if (error) throw error;
-        console.log(`✅ Estado eliminado (Pendiente)`);
         toast.success(`✅ Estado: ⏳ Pendiente`);
       }
     } catch (error: any) {
@@ -418,8 +416,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'sheet_row_statuses', filter: `user_email=eq.${myEmail}` },
-        (payload) => {
-          console.log('🔄 Cambio en tiempo real:', payload);
+        () => {
           loadStatusesFromDatabase();
         }
       )
@@ -433,17 +430,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   useEffect(() => { supabase.from("products").select("*").then(({ data }) => setProducts(data || [])); }, []);
   useEffect(() => { if (myEmail && sheetUrl) loadStatusesFromDatabase(); }, [myEmail, sheetUrl, loadStatusesFromDatabase]);
   useEffect(() => { if (sheetUrl && !initialLoadDone) { readSheet(); setInitialLoadDone(true); } }, [sheetUrl]);
-
-  useEffect(() => {
-    if (sheetOrders.length > 0 && colKeys.city) {
-      const uniqueCities = [...new Set(sheetOrders.map(o => o[colKeys.city]).filter(c => c))];
-      console.log("🏙️ CIUDADES ENCONTRADAS EN EL SHEET:");
-      uniqueCities.forEach(city => {
-        const depto = getCityDepartment(city);
-        console.log(`  - "${city}" → Depto: ${depto || "❌ NO ENCONTRADO"}`);
-      });
-    }
-  }, [sheetOrders, colKeys.city]);
 
   const readSheet = useCallback(async () => {
     if (!sheetUrl) { toast.error("Configurá tu URL de Google Sheet"); return; }
@@ -514,10 +500,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     };
 
     const { error } = await supabase.from("orders").insert(payload);
-    if (error) { toast.error("Error al guardar: " + error.message); console.error("Error detallado:", error); return false; }
+    if (error) { toast.error("Error al guardar: " + error.message); return false; }
 
     await setRowStatus(rowKey, newStatus, orderId);
-    toast.success(`✅ Pedido ${orderId} cargado | Delivery: ${nf(deliveryPrice)} Gs | Depto: ${departamento || "?"}`);
+    toast.success(`✅ Pedido ${orderId} cargado | Delivery: ${nf(deliveryPrice)} Gs`);
     return true;
   }, [colKeys, matchProduct, myEmail, setRowStatus]);
 
@@ -551,8 +537,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     toast.success(`✅ ${count} cargados | ❌ ${errors} errores`);
   };
 
-  // ─── NUEVO: Funciones para selección múltiple ───
-
+  // ─── SELECCIÓN MÚLTIPLE ───
   const toggleRowSelection = (rowKey: string) => {
     setSelectedRows(prev => {
       const newSet = new Set(prev);
@@ -612,7 +597,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           await persistRowStatus(rowKey, newStatus, orderNumber || undefined);
           successCount++;
         } catch (error) {
-          console.error(`Error al cambiar estado de fila ${rowKey}:`, error);
           errorCount++;
         }
       });
@@ -681,7 +665,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           if (success) successCount++;
           else errorCount++;
         } catch (error) {
-          console.error(`Error al cargar pedido ${rowKey}:`, error);
           errorCount++;
         }
       });
@@ -727,7 +710,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return { principales, extras };
   };
 
-  // ─── ESTADÍSTICAS CON __row ───
+  // ─── ESTADÍSTICAS ───
   const dashboardStats = useMemo(() => {
     let pendientesConCobertura = 0, pendientesSinCobertura = 0, cargados = 0, dropeados = 0, cancelados = 0;
     sheetOrders.forEach((order, idx) => {
@@ -768,7 +751,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return { cargarConCobertura, cargarSinCobertura, cargados, aDropear, cancelados, total: sheetOrders.length };
   }, [sheetOrders, colKeys, getRowKey, getRowStatus]);
 
-  // ─── FILTERED ORDERS CON __row Y FILTRO DE FECHAS ───
+  // ─── FILTERED ORDERS ───
   const filteredOrders = useMemo(() => {
     return sheetOrders
       .map((order, idx) => ({ order, idx, rowKey: getRowKey(order, idx) }))
@@ -777,7 +760,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         const city = order[colKeys.city] || "";
         const covered = hasCoverage(city);
 
-        // ─── FILTRO DE ESTADO ───
         let estadoMatch = true;
         switch (activeFilter) {
           case "CARGAR":    estadoMatch = status === "CARGAR"; break;
@@ -788,7 +770,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         }
         if (!estadoMatch) return false;
 
-        // ─── FILTRO DE COBERTURA ───
         let coberturaMatch = true;
         switch (coverageFilter) {
           case "covered":   coberturaMatch = covered === true; break;
@@ -797,7 +778,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         }
         if (!coberturaMatch) return false;
 
-        // ─── NUEVO: FILTRO DE FECHAS ───
         let dateMatch = true;
         if (dateFrom || dateTo) {
           const orderDateStr = order[colKeys.date] || "";
@@ -815,14 +795,11 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                   if (orderDate > toDate) dateMatch = false;
                 }
               }
-            } catch (e) {
-              // Si no se puede parsear la fecha, no filtrar
-            }
+            } catch (e) {}
           }
         }
         if (!dateMatch) return false;
 
-        // ─── BÚSQUEDA ───
         if (searchType === "product" && productSearch.trim()) {
           const product = order[colKeys.product] || "";
           return product.toLowerCase().includes(productSearch.toLowerCase());
@@ -839,7 +816,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       });
   }, [sheetOrders, activeFilter, search, productSearch, cityFilter, searchType, coverageFilter, dateFrom, dateTo, colKeys, getRowKey, getRowStatus]);
 
-  // ─── NUEVO: Efecto para mantener selectAll sincronizado ───
+  // ─── SYNC SELECT ALL ───
   useEffect(() => {
     if (filteredOrders.length === 0) {
       setSelectAll(false);
@@ -857,7 +834,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     if (status === "A DROPEAR") return "bg-amber-500/5 hover:bg-amber-500/10";
     if (status === "CANCELADO") return "bg-rose-500/5 hover:bg-rose-500/10";
     if (!hasCoverageCity && status === "CARGAR") return "bg-orange-500/5 hover:bg-orange-500/10";
-    return "hover:bg-slate-800/30";
+    return "hover:bg-white/5";
   };
 
   const renderGuideModal = () => {
@@ -878,27 +855,25 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const unitPrice = quantity > 1 ? Math.round(salePrice / quantity) : salePrice;
 
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4 animate-in fade-in duration-200" onClick={() => setShowGuideModal(false)}>
-        <div className="bg-slate-900 rounded-2xl border border-slate-700/50 shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
-          <div className="sticky top-0 bg-slate-900/95 backdrop-blur-sm border-b border-slate-700/50 px-6 py-4 flex justify-between items-center z-10">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => setShowGuideModal(false)}>
+        <div className="bg-slate-900 rounded-xl border border-slate-700 max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
+          <div className="sticky top-0 bg-slate-900 border-b border-slate-700 px-6 py-4 flex justify-between items-center z-10">
             <div>
-              <h2 className="text-xl font-bold text-white flex items-center gap-3">
-                <span className="text-2xl">📦</span>
-                GUÍA DE ENVÍO
+              <h2 className="text-lg font-bold text-white flex items-center gap-3">
+                📦 GUÍA DE ENVÍO
                 {orderNumber && (
                   <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20">
                     {orderNumber}
                   </span>
                 )}
               </h2>
-              <p className="text-[10px] text-slate-400 mt-0.5">Fila real #{order.__row || '?'} · {getOrderDate(order)}</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">Fila #{order.__row || '?'} · {getOrderDate(order)}</p>
             </div>
-            <button onClick={() => setShowGuideModal(false)} className="text-slate-400 hover:text-white text-2xl leading-none transition-colors w-8 h-8 flex items-center justify-center rounded-lg hover:bg-slate-800">×</button>
+            <button onClick={() => setShowGuideModal(false)} className="text-slate-400 hover:text-white text-2xl transition-colors">×</button>
           </div>
           <div className="p-6 space-y-4">
-            {/* Resto del modal igual que antes */}
             <div className="grid grid-cols-2 gap-3">
-              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+              <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
                 <div className="text-[9px] text-slate-400 uppercase tracking-wider">Estado actual</div>
                 <div className="mt-1">
                   <span className={`inline-block px-3 py-1 rounded-full text-[11px] font-semibold ${
@@ -914,13 +889,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                   </span>
                 </div>
               </div>
-              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+              <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
                 <div className="text-[9px] text-slate-400 uppercase tracking-wider">Cobertura de envío</div>
                 <div className="mt-1">
                   {covered ? (
                     <>
                       <div className="text-emerald-400 font-semibold text-sm">✅ CON COBERTURA</div>
-                      {deliveryPrice && <div className="text-[10px] text-slate-400 mt-0.5">Costo delivery: {nf(deliveryPrice)} Gs</div>}
+                      {deliveryPrice && <div className="text-[10px] text-slate-400 mt-0.5">Costo: {nf(deliveryPrice)} Gs</div>}
                     </>
                   ) : (
                     <div className="text-rose-400 font-semibold text-sm">❌ SIN COBERTURA</div>
@@ -929,7 +904,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               </div>
             </div>
 
-            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+            <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
               <h3 className="text-xs font-bold text-white mb-3 flex items-center gap-2"><span className="text-base">👤</span> DATOS DEL CLIENTE</h3>
               <div className="grid grid-cols-2 gap-3 text-[12px]">
                 <div className="col-span-2 md:col-span-1">
@@ -937,11 +912,11 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                   <div className="text-white font-medium mt-0.5">{order[colKeys.name] || "—"}</div>
                 </div>
                 <div className="col-span-2 md:col-span-1">
-                  <div className="text-slate-400 text-[9px] uppercase tracking-wider">Teléfono / WhatsApp</div>
+                  <div className="text-slate-400 text-[9px] uppercase tracking-wider">Teléfono</div>
                   <div className="text-white mt-0.5">{order[colKeys.phone] || "—"}</div>
                 </div>
                 <div className="col-span-2 md:col-span-1">
-                  <div className="text-slate-400 text-[9px] uppercase tracking-wider">Ciudad / Localidad</div>
+                  <div className="text-slate-400 text-[9px] uppercase tracking-wider">Ciudad</div>
                   <div className={`mt-0.5 font-medium ${covered ? "text-emerald-400" : "text-rose-400"}`}>{order[colKeys.city] || "—"}</div>
                 </div>
                 <div className="col-span-2 md:col-span-1">
@@ -949,13 +924,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                   <div className="text-white mt-0.5 font-medium">{departamento || "—"}</div>
                 </div>
                 <div className="col-span-2">
-                  <div className="text-slate-400 text-[9px] uppercase tracking-wider">Calle / Dirección</div>
+                  <div className="text-slate-400 text-[9px] uppercase tracking-wider">Dirección</div>
                   <div className="text-white mt-0.5">{order[colKeys.street] || "—"}</div>
                 </div>
               </div>
             </div>
 
-            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+            <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
               <h3 className="text-xs font-bold text-white mb-3 flex items-center gap-2"><span className="text-base">📦</span> DETALLE DEL PRODUCTO</h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-[12px]">
@@ -969,7 +944,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                   </thead>
                   <tbody>
                     <tr className="border-b border-slate-700/50">
-                      <td className="py-2 text-white font-medium truncate max-w-[200px]" title={productName}>{productName || "—"}</td>
+                      <td className="py-2 text-white font-medium">{productName || "—"}</td>
                       <td className="py-2 text-center text-white">{quantity}</td>
                       <td className="py-2 text-right text-white">{nf(unitPrice)} Gs</td>
                       <td className="py-2 text-right text-emerald-400 font-semibold">{nf(salePrice)} Gs</td>
@@ -979,38 +954,37 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               </div>
               {matched && (
                 <div className="mt-2 pt-2 border-t border-slate-700/50 text-[10px] text-slate-400">
-                  <span className="text-slate-500">SKU:</span> {matched.sku || "—"} &nbsp;|&nbsp;
-                  <span className="text-slate-500">Costo proveedor:</span> {nf(matched.provider_price_gs || 0)} Gs
+                  SKU: {matched.sku || "—"} · Costo: {nf(matched.provider_price_gs || 0)} Gs
                 </div>
               )}
             </div>
 
-            <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
-              <h3 className="text-xs font-bold text-white mb-3 flex items-center gap-2"><span className="text-base">💰</span> RESUMEN DE COSTOS</h3>
+            <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
+              <h3 className="text-xs font-bold text-white mb-3 flex items-center gap-2"><span className="text-base">💰</span> RESUMEN</h3>
               <div className="space-y-2">
                 <div className="flex justify-between text-[12px]">
-                  <span className="text-slate-400">Subtotal productos:</span>
+                  <span className="text-slate-400">Subtotal:</span>
                   <span className="text-white">{nf(salePrice)} Gs</span>
                 </div>
                 <div className="flex justify-between text-[12px]">
-                  <span className="text-slate-400">Costo de envío:</span>
+                  <span className="text-slate-400">Envío:</span>
                   <span className={deliveryPrice ? "text-amber-400" : "text-slate-500"}>{deliveryPrice ? nf(deliveryPrice) : "0"} Gs</span>
                 </div>
                 {matched && (
                   <div className="flex justify-between text-[12px] pt-1 border-t border-slate-700/50">
-                    <span className="text-slate-400">Comisión del vendedor:</span>
+                    <span className="text-slate-400">Comisión:</span>
                     <span className="text-blue-400 font-semibold">{nf(salePrice - (matched.provider_price_gs || 0) - (deliveryPrice || 0))} Gs</span>
                   </div>
                 )}
                 <div className="flex justify-between text-[14px] pt-2 border-t border-slate-700">
-                  <span className="font-bold text-white">TOTAL A PAGAR:</span>
-                  <span className="font-bold text-emerald-400 text-base">{nf(totalConEnvio)} Gs</span>
+                  <span className="font-bold text-white">TOTAL:</span>
+                  <span className="font-bold text-emerald-400">{nf(totalConEnvio)} Gs</span>
                 </div>
               </div>
             </div>
 
             {Object.keys(extras).length > 0 && (
-              <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700/50">
+              <div className="bg-slate-800/50 rounded-lg p-4 border border-slate-700/50">
                 <h3 className="text-xs font-bold text-white mb-3 flex items-center gap-2"><span className="text-base">📋</span> INFORMACIÓN ADICIONAL</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
                   {Object.entries(extras).map(([key, value]) => (
@@ -1024,8 +998,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             )}
 
             <div className="text-center pt-2">
-              <div className="text-[9px] text-slate-500">Esta guía fue generada automáticamente el {new Date().toLocaleString("es-PY")}</div>
-              <div className="text-[8px] text-slate-600 mt-1">Documento válido para entrega - E-commerce DCANP Group</div>
+              <div className="text-[9px] text-slate-500">Generado el {new Date().toLocaleString("es-PY")}</div>
             </div>
           </div>
         </div>
@@ -1045,86 +1018,86 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   }
 
   return (
-    <div className="h-full flex flex-col space-y-3 p-3 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-950">
-      {/* ─── HEADER MODERNO ─── */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-white/5 backdrop-blur-sm rounded-2xl border border-white/10 px-4 py-3 flex-shrink-0">
+    <div className="h-full flex flex-col space-y-2 p-4 bg-[#0f0f12]">
+      {/* ─── HEADER ─── */}
+      <div className="flex flex-wrap items-center justify-between gap-3 bg-[#1a1a1f] border border-[#2a2a30] rounded-xl px-4 py-3 flex-shrink-0">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-purple-600 flex items-center justify-center text-lg shadow-lg shadow-blue-500/20">
+          <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-600/30 flex items-center justify-center text-lg">
             📦
           </div>
           <div>
             <h1 className="text-sm font-bold text-white">Shopify Inbox</h1>
-            <p className="text-[10px] text-slate-400">Panel de gestión de pedidos</p>
+            <p className="text-[10px] text-slate-500">Panel de gestión de pedidos</p>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-slate-500 bg-black/30 px-3 py-1 rounded-full">
+          <span className="text-[10px] text-slate-400 bg-[#1f1f26] px-3 py-1 rounded-full border border-[#2a2a30]">
             {sheetOrders.length} pedidos
           </span>
           {lastSync && (
-            <span className="text-[9px] text-slate-500 bg-black/30 px-3 py-1 rounded-full">
+            <span className="text-[9px] text-slate-500 bg-[#1f1f26] px-3 py-1 rounded-full border border-[#2a2a30]">
               🔄 {lastSync.toLocaleTimeString("es-PY")}
             </span>
           )}
         </div>
       </div>
 
-      {/* ─── DASHBOARD MODERNO ─── */}
+      {/* ─── DASHBOARD ─── */}
       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2 flex-shrink-0">
-        <div className="bg-gradient-to-br from-blue-500/10 to-blue-600/5 rounded-xl p-3 text-center border border-blue-500/20 hover:border-blue-500/40 transition-all duration-200">
+        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-3 text-center hover:border-blue-500/40 transition-all duration-200">
           <div className="text-xl font-bold text-blue-400">{dashboardStats.pendientesConCobertura}</div>
-          <div className="text-[9px] text-slate-400 mt-0.5">Pendientes con cobertura</div>
+          <div className="text-[9px] text-slate-500 mt-0.5">Con cobertura</div>
         </div>
-        <div className="bg-gradient-to-br from-orange-500/10 to-orange-600/5 rounded-xl p-3 text-center border border-orange-500/20 hover:border-orange-500/40 transition-all duration-200">
+        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-3 text-center hover:border-orange-500/40 transition-all duration-200">
           <div className="text-xl font-bold text-orange-400">{dashboardStats.pendientesSinCobertura}</div>
-          <div className="text-[9px] text-slate-400 mt-0.5">Pendientes sin cobertura</div>
+          <div className="text-[9px] text-slate-500 mt-0.5">Sin cobertura</div>
         </div>
-        <div className="bg-gradient-to-br from-emerald-500/10 to-emerald-600/5 rounded-xl p-3 text-center border border-emerald-500/20 hover:border-emerald-500/40 transition-all duration-200">
+        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-3 text-center hover:border-emerald-500/40 transition-all duration-200">
           <div className="text-xl font-bold text-emerald-400">{dashboardStats.cargados}</div>
-          <div className="text-[9px] text-slate-400 mt-0.5">Cargados</div>
+          <div className="text-[9px] text-slate-500 mt-0.5">Cargados</div>
         </div>
-        <div className="bg-gradient-to-br from-amber-500/10 to-amber-600/5 rounded-xl p-3 text-center border border-amber-500/20 hover:border-amber-500/40 transition-all duration-200">
+        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-3 text-center hover:border-amber-500/40 transition-all duration-200">
           <div className="text-xl font-bold text-amber-400">{dashboardStats.dropeados}</div>
-          <div className="text-[9px] text-slate-400 mt-0.5">Dropeados</div>
+          <div className="text-[9px] text-slate-500 mt-0.5">Dropeados</div>
         </div>
-        <div className="bg-gradient-to-br from-rose-500/10 to-rose-600/5 rounded-xl p-3 text-center border border-rose-500/20 hover:border-rose-500/40 transition-all duration-200">
+        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-3 text-center hover:border-rose-500/40 transition-all duration-200">
           <div className="text-xl font-bold text-rose-400">{dashboardStats.cancelados}</div>
-          <div className="text-[9px] text-slate-400 mt-0.5">Cancelados</div>
+          <div className="text-[9px] text-slate-500 mt-0.5">Cancelados</div>
         </div>
-        <div className="bg-gradient-to-br from-purple-500/10 to-purple-600/5 rounded-xl p-3 text-center border border-purple-500/20 hover:border-purple-500/40 transition-all duration-200">
+        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-3 text-center hover:border-purple-500/40 transition-all duration-200">
           <div className="text-xl font-bold text-purple-400">{dashboardStats.totalPedidos}</div>
-          <div className="text-[9px] text-slate-400 mt-0.5">Total Pedidos</div>
+          <div className="text-[9px] text-slate-500 mt-0.5">Total</div>
         </div>
       </div>
 
       {/* ─── CONTROLES ─── */}
-      <div className="flex flex-wrap items-center gap-1.5 flex-shrink-0 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 px-3 py-2">
-        <button className="px-3 py-1 text-[11px] bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 rounded-lg transition-all duration-200 shadow-lg shadow-blue-500/20 font-medium" onClick={() => readSheet()} disabled={loading}>
+      <div className="flex flex-wrap items-center gap-1.5 flex-shrink-0 bg-[#1a1a1f] border border-[#2a2a30] rounded-xl px-3 py-2">
+        <button className="px-3 py-1 text-[11px] bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all duration-200 font-medium" onClick={() => readSheet()} disabled={loading}>
           {loading ? "⏳ Leyendo..." : "📊 Leer Sheet"}
         </button>
-        <button className="px-3 py-1 text-[11px] bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 rounded-lg transition-all duration-200 shadow-lg shadow-emerald-500/20 font-medium" onClick={handleBulkLoad}>
+        <button className="px-3 py-1 text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-all duration-200 font-medium" onClick={handleBulkLoad}>
           🚀 Cargar todos
         </button>
-        <button className={`px-3 py-1 text-[11px] rounded-lg transition-all duration-200 font-medium ${autoLoad ? "bg-gradient-to-r from-emerald-600 to-emerald-700 shadow-lg shadow-emerald-500/20" : "bg-slate-700 hover:bg-slate-600"}`} onClick={toggleAutoLoad}>
+        <button className={`px-3 py-1 text-[11px] rounded-lg transition-all duration-200 font-medium ${autoLoad ? "bg-emerald-600 hover:bg-emerald-700 text-white" : "bg-[#2a2a30] hover:bg-[#3a3a44] text-slate-300"}`} onClick={toggleAutoLoad}>
           {autoLoad ? "🤖 Auto ON" : "🤖 Auto OFF"}
         </button>
-        <button className="px-3 py-1 text-[11px] bg-rose-600/80 hover:bg-rose-600 rounded-lg transition-all duration-200" onClick={() => loadStatusesFromDatabase()}>
-          🔄 Recargar estados
+        <button className="px-3 py-1 text-[11px] bg-rose-600/80 hover:bg-rose-600 text-white rounded-lg transition-all duration-200" onClick={() => loadStatusesFromDatabase()}>
+          🔄 Recargar
         </button>
         <div className="flex-1"></div>
-        <span className="text-[9px] text-slate-500">v2.0 PRO</span>
+        <span className="text-[9px] text-slate-600">v2.0</span>
       </div>
 
       {/* ─── BARRA DE ACCIONES EN LOTE ─── */}
       {selectedRows.size > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 p-2 bg-gradient-to-r from-blue-500/10 to-purple-500/10 rounded-xl border border-blue-500/20 flex-shrink-0 animate-in slide-in-from-top duration-300">
+        <div className="flex flex-wrap items-center gap-1.5 p-2 bg-blue-600/10 border border-blue-600/30 rounded-xl flex-shrink-0">
           <span className="text-[10px] text-blue-400 font-medium mr-1">
             ✅ {selectedRows.size} seleccionado{selectedRows.size > 1 ? 's' : ''}
           </span>
-          <div className="h-5 w-px bg-slate-600/50 mx-1" />
+          <div className="h-5 w-px bg-[#2a2a30]" />
           
           <select
-            className="bg-slate-800 border border-slate-700 rounded-lg px-2 py-0.5 text-[10px] focus:outline-none focus:border-blue-500 transition-colors"
+            className="bg-[#1f1f26] border border-[#2a2a30] rounded-lg px-2 py-0.5 text-[10px] text-white focus:outline-none focus:border-blue-500 transition-colors"
             onChange={(e) => {
               const value = e.target.value;
               if (value) {
@@ -1144,7 +1117,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           </select>
 
           <button
-            className="px-2 py-0.5 text-[10px] bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 rounded-lg transition-all duration-200 disabled:opacity-50 font-medium"
+            className="px-2 py-0.5 text-[10px] bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-all duration-200 disabled:opacity-50 font-medium"
             onClick={bulkLoadOrders}
             disabled={bulkActionLoading}
           >
@@ -1152,7 +1125,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           </button>
 
           <button
-            className="px-2 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 rounded-lg transition-all duration-200 disabled:opacity-50"
+            className="px-2 py-0.5 text-[10px] bg-[#2a2a30] hover:bg-[#3a3a44] text-slate-300 rounded-lg transition-all duration-200 disabled:opacity-50"
             onClick={() => {
               setSelectedRows(new Set());
               setSelectAll(false);
@@ -1169,49 +1142,49 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       )}
 
       {/* ─── FILTROS ─── */}
-      <div className="flex flex-wrap items-center gap-1 flex-shrink-0 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 px-3 py-2">
-        <button onClick={() => changeFilter("TODOS")} className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all duration-200 ${activeFilter === "TODOS" ? "bg-white/20 text-white shadow-lg" : "text-slate-400 hover:text-white hover:bg-white/10"}`}>
+      <div className="flex flex-wrap items-center gap-1 flex-shrink-0 bg-[#1a1a1f] border border-[#2a2a30] rounded-xl px-3 py-2">
+        <button onClick={() => changeFilter("TODOS")} className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all duration-200 ${activeFilter === "TODOS" ? "bg-white/10 text-white" : "text-slate-500 hover:text-white hover:bg-white/5"}`}>
           📋 Todos <span className="opacity-60">({counts.total})</span>
         </button>
-        <button onClick={() => changeFilter("CARGAR")} className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all duration-200 ${activeFilter === "CARGAR" ? "bg-blue-500/30 text-blue-300 shadow-lg shadow-blue-500/20" : "text-slate-400 hover:text-white hover:bg-white/10"}`}>
+        <button onClick={() => changeFilter("CARGAR")} className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all duration-200 ${activeFilter === "CARGAR" ? "bg-blue-600/30 text-blue-300" : "text-slate-500 hover:text-white hover:bg-white/5"}`}>
           ⏳ Pendientes <span className="opacity-60">({counts.cargarConCobertura})</span>
         </button>
-        <button onClick={() => changeFilter("CARGADO")} className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all duration-200 ${activeFilter === "CARGADO" ? "bg-emerald-500/30 text-emerald-300 shadow-lg shadow-emerald-500/20" : "text-slate-400 hover:text-white hover:bg-white/10"}`}>
+        <button onClick={() => changeFilter("CARGADO")} className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all duration-200 ${activeFilter === "CARGADO" ? "bg-emerald-600/30 text-emerald-300" : "text-slate-500 hover:text-white hover:bg-white/5"}`}>
           ✅ Cargados <span className="opacity-60">({counts.cargados})</span>
         </button>
-        <button onClick={() => changeFilter("A DROPEAR")} className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all duration-200 ${activeFilter === "A DROPEAR" ? "bg-amber-500/30 text-amber-300 shadow-lg shadow-amber-500/20" : "text-slate-400 hover:text-white hover:bg-white/10"}`}>
+        <button onClick={() => changeFilter("A DROPEAR")} className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all duration-200 ${activeFilter === "A DROPEAR" ? "bg-amber-600/30 text-amber-300" : "text-slate-500 hover:text-white hover:bg-white/5"}`}>
           ⚠️ Dropear <span className="opacity-60">({counts.aDropear})</span>
         </button>
-        <button onClick={() => changeFilter("CANCELADO")} className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all duration-200 ${activeFilter === "CANCELADO" ? "bg-rose-500/30 text-rose-300 shadow-lg shadow-rose-500/20" : "text-slate-400 hover:text-white hover:bg-white/10"}`}>
+        <button onClick={() => changeFilter("CANCELADO")} className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all duration-200 ${activeFilter === "CANCELADO" ? "bg-rose-600/30 text-rose-300" : "text-slate-500 hover:text-white hover:bg-white/5"}`}>
           ❌ Cancelado <span className="opacity-60">({counts.cancelados})</span>
         </button>
-        <div className="w-px h-5 bg-slate-700/50 mx-1" />
-        <button onClick={() => setCoverageFilter("all")} className={`px-2 py-1 rounded-lg text-[10px] transition-all duration-200 ${coverageFilter === "all" ? "bg-white/20 text-white" : "text-slate-400 hover:text-white hover:bg-white/10"}`}>
+        <div className="w-px h-5 bg-[#2a2a30] mx-1" />
+        <button onClick={() => setCoverageFilter("all")} className={`px-2 py-1 rounded-lg text-[10px] transition-all duration-200 ${coverageFilter === "all" ? "bg-white/10 text-white" : "text-slate-500 hover:text-white hover:bg-white/5"}`}>
           🌍 Todas
         </button>
-        <button onClick={() => setCoverageFilter("covered")} className={`px-2 py-1 rounded-lg text-[10px] transition-all duration-200 ${coverageFilter === "covered" ? "bg-emerald-500/30 text-emerald-300" : "text-slate-400 hover:text-white hover:bg-white/10"}`}>
+        <button onClick={() => setCoverageFilter("covered")} className={`px-2 py-1 rounded-lg text-[10px] transition-all duration-200 ${coverageFilter === "covered" ? "bg-emerald-600/30 text-emerald-300" : "text-slate-500 hover:text-white hover:bg-white/5"}`}>
           ✅ Con cobertura
         </button>
-        <button onClick={() => setCoverageFilter("uncovered")} className={`px-2 py-1 rounded-lg text-[10px] transition-all duration-200 ${coverageFilter === "uncovered" ? "bg-rose-500/30 text-rose-300" : "text-slate-400 hover:text-white hover:bg-white/10"}`}>
+        <button onClick={() => setCoverageFilter("uncovered")} className={`px-2 py-1 rounded-lg text-[10px] transition-all duration-200 ${coverageFilter === "uncovered" ? "bg-rose-600/30 text-rose-300" : "text-slate-500 hover:text-white hover:bg-white/5"}`}>
           ❌ Sin cobertura
         </button>
       </div>
 
-      {/* ─── BUSCADOR Y FILTRO DE FECHAS ─── */}
-      <div className="flex flex-wrap items-center gap-1.5 flex-shrink-0 bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 px-3 py-2">
+      {/* ─── BUSCADOR Y FECHAS ─── */}
+      <div className="flex flex-wrap items-center gap-1.5 flex-shrink-0 bg-[#1a1a1f] border border-[#2a2a30] rounded-xl px-3 py-2">
         <div className="flex gap-0.5">
-          <button onClick={() => setSearchType("product")} className={`px-2 py-0.5 rounded-lg text-[10px] transition-all duration-200 ${searchType === "product" ? "bg-blue-500/30 text-blue-300" : "text-slate-400 hover:text-white hover:bg-white/10"}`}>
+          <button onClick={() => setSearchType("product")} className={`px-2 py-0.5 rounded-lg text-[10px] transition-all duration-200 ${searchType === "product" ? "bg-blue-600/30 text-blue-300" : "text-slate-500 hover:text-white hover:bg-white/5"}`}>
             🏷️ Producto
           </button>
-          <button onClick={() => setSearchType("city")} className={`px-2 py-0.5 rounded-lg text-[10px] transition-all duration-200 ${searchType === "city" ? "bg-blue-500/30 text-blue-300" : "text-slate-400 hover:text-white hover:bg-white/10"}`}>
+          <button onClick={() => setSearchType("city")} className={`px-2 py-0.5 rounded-lg text-[10px] transition-all duration-200 ${searchType === "city" ? "bg-blue-600/30 text-blue-300" : "text-slate-500 hover:text-white hover:bg-white/5"}`}>
             📍 Ciudad
           </button>
-          <button onClick={() => setSearchType("all")} className={`px-2 py-0.5 rounded-lg text-[10px] transition-all duration-200 ${searchType === "all" ? "bg-blue-500/30 text-blue-300" : "text-slate-400 hover:text-white hover:bg-white/10"}`}>
+          <button onClick={() => setSearchType("all")} className={`px-2 py-0.5 rounded-lg text-[10px] transition-all duration-200 ${searchType === "all" ? "bg-blue-600/30 text-blue-300" : "text-slate-500 hover:text-white hover:bg-white/5"}`}>
             🔍 Todo
           </button>
         </div>
         <input
-          className="flex-1 min-w-[120px] bg-slate-800/80 rounded-lg px-3 py-1 text-[11px] border border-slate-700/50 focus:outline-none focus:border-blue-500 transition-all duration-200 placeholder:text-slate-500"
+          className="flex-1 min-w-[120px] bg-[#1f1f26] rounded-lg px-3 py-1 text-[11px] text-white border border-[#2a2a30] focus:outline-none focus:border-blue-500 transition-all duration-200 placeholder:text-slate-600"
           placeholder={searchType === "product" ? "Buscar producto..." : searchType === "city" ? "Buscar ciudad..." : "Buscar en todos los campos..."}
           value={searchType === "product" ? productSearch : searchType === "city" ? cityFilter : search}
           onChange={(e) => {
@@ -1220,28 +1193,27 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             else setSearch(e.target.value);
           }}
         />
-        <div className="w-px h-5 bg-slate-700/50 mx-0.5" />
+        <div className="w-px h-5 bg-[#2a2a30] mx-0.5" />
         
-        {/* ─── NUEVO: FILTRO DE FECHAS ─── */}
         <div className="flex items-center gap-1.5">
           <input
             type="date"
-            className="bg-slate-800/80 rounded-lg px-2 py-1 text-[10px] border border-slate-700/50 focus:outline-none focus:border-blue-500 transition-all duration-200 text-slate-300 w-[120px]"
+            className="bg-[#1f1f26] rounded-lg px-2 py-1 text-[10px] text-white border border-[#2a2a30] focus:outline-none focus:border-blue-500 transition-all duration-200 w-[120px]"
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
             placeholder="Desde"
           />
-          <span className="text-[10px] text-slate-500">→</span>
+          <span className="text-[10px] text-slate-600">→</span>
           <input
             type="date"
-            className="bg-slate-800/80 rounded-lg px-2 py-1 text-[10px] border border-slate-700/50 focus:outline-none focus:border-blue-500 transition-all duration-200 text-slate-300 w-[120px]"
+            className="bg-[#1f1f26] rounded-lg px-2 py-1 text-[10px] text-white border border-[#2a2a30] focus:outline-none focus:border-blue-500 transition-all duration-200 w-[120px]"
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
             placeholder="Hasta"
           />
           {(dateFrom || dateTo) && (
             <button
-              className="px-1.5 py-0.5 text-[10px] bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 rounded-lg transition-all duration-200"
+              className="px-1.5 py-0.5 text-[10px] bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 rounded-lg transition-all duration-200"
               onClick={() => { setDateFrom(""); setDateTo(""); }}
             >
               ✖
@@ -1256,21 +1228,21 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
           <span className="text-blue-400 font-medium">{selectedRows.size} seleccionados</span>
         )}
         {(dateFrom || dateTo) && (
-          <span className="text-amber-400">📅 Filtro por fechas activo</span>
+          <span className="text-amber-400">📅 Filtro por fechas</span>
         )}
       </div>
 
-      {/* ─── TABLA MODERNA ─── */}
-      <div className="flex-1 min-h-0 overflow-auto rounded-2xl border border-white/10 bg-white/5 backdrop-blur-sm">
+      {/* ─── TABLA ─── */}
+      <div className="flex-1 min-h-0 overflow-auto rounded-xl border border-[#2a2a30] bg-[#0f0f12]">
         <table className="w-full text-xs">
-          <thead className="bg-gradient-to-r from-slate-800/80 to-slate-900/80 sticky top-0 z-10 backdrop-blur-sm">
-            <tr className="border-b border-white/10">
+          <thead className="bg-[#1a1a1f] sticky top-0 z-10">
+            <tr className="border-b border-[#2a2a30]">
               <th className="px-2 py-2 text-center text-[10px] font-medium text-slate-400 w-8">
                 <input
                   type="checkbox"
                   checked={selectAll}
                   onChange={toggleSelectAll}
-                  className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-2 focus:ring-blue-500 cursor-pointer transition-all"
+                  className="w-4 h-4 rounded border-[#2a2a30] bg-[#1f1f26] text-blue-500 focus:ring-2 focus:ring-blue-500 cursor-pointer transition-all"
                   disabled={filteredOrders.length === 0 || bulkActionLoading}
                 />
               </th>
@@ -1289,7 +1261,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               <th className="px-2 py-2 text-center text-[10px] font-medium text-slate-400">Acciones</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-white/5">
+          <tbody className="divide-y divide-[#1a1a1f]">
             {filteredOrders.map(({ order, idx, rowKey }) => {
               const status = getRowStatus(rowKey);
               const city = order[colKeys.city] || "";
@@ -1304,17 +1276,17 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               const isSelected = selectedRows.has(rowKey);
 
               return (
-                <tr key={rowKey} className={`${getRowClassName(status, covered)} ${isSelected ? 'ring-1 ring-blue-500/40 bg-blue-500/10' : ''} transition-colors duration-150`}>
+                <tr key={rowKey} className={`${getRowClassName(status, covered)} ${isSelected ? 'bg-blue-600/10 border-l-2 border-blue-500' : ''} transition-colors duration-150`}>
                   <td className="px-2 py-1.5 text-center">
                     <input
                       type="checkbox"
                       checked={isSelected}
                       onChange={() => toggleRowSelection(rowKey)}
-                      className="w-4 h-4 rounded border-slate-600 bg-slate-700 text-blue-500 focus:ring-2 focus:ring-blue-500 cursor-pointer transition-all"
+                      className="w-4 h-4 rounded border-[#2a2a30] bg-[#1f1f26] text-blue-500 focus:ring-2 focus:ring-blue-500 cursor-pointer transition-all"
                       disabled={bulkActionLoading}
                     />
                   </td>
-                  <td className="px-2 py-1.5 text-[10px] text-slate-400 font-mono">{rowDisplay}</td>
+                  <td className="px-2 py-1.5 text-[10px] text-slate-500 font-mono">{rowDisplay}</td>
                   <td className="px-2 py-1.5 text-[10px] font-mono">
                     {orderNumber ? <span className="text-emerald-400">{orderNumber}</span> : <span className="text-slate-600">—</span>}
                   </td>
@@ -1343,12 +1315,11 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                   </td>
                   <td className="px-2 py-1.5 text-center">
                     <select
-                      className="bg-slate-800/80 border border-slate-700/50 rounded-lg px-1.5 py-0.5 text-[10px] focus:outline-none focus:border-blue-500 transition-all duration-200 cursor-pointer hover:border-slate-600"
+                      className="bg-[#1f1f26] border border-[#2a2a30] rounded-lg px-1.5 py-0.5 text-[10px] text-white focus:outline-none focus:border-blue-500 transition-all duration-200 cursor-pointer hover:border-slate-600"
                       value={status}
                       onChange={(e) => {
                         const newStatus = e.target.value as OrderStatus;
-                        console.log(`🔄 Cambiando estado de fila ${rowKey} (real #${rowDisplay}) de ${status} a ${newStatus}`);
-
+                        
                         if (newStatus === "CARGAR") {
                           setRowStatuses(prev => {
                             const next = { ...prev };
@@ -1378,20 +1349,20 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                     <div className="flex gap-0.5 justify-center">
                       {canLoad && (
                         <button
-                          className="px-2 py-0.5 text-[10px] bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 rounded-lg transition-all duration-200 shadow-lg shadow-blue-500/20 font-medium"
+                          className="px-2 py-0.5 text-[10px] bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all duration-200 font-medium"
                           onClick={() => handleDirectSave(order, rowKey)}
                         >
                           Cargar
                         </button>
                       )}
                       <button
-                        className="px-2 py-0.5 text-[10px] bg-slate-700 hover:bg-slate-600 rounded-lg transition-all duration-200"
+                        className="px-2 py-0.5 text-[10px] bg-[#2a2a30] hover:bg-[#3a3a44] text-slate-300 rounded-lg transition-all duration-200"
                         onClick={() => { setSelectedOrder({ order, rowKey }); setShowGuideModal(true); }}
                       >
                         📄 Guía
                       </button>
                       <button
-                        className="px-2 py-0.5 text-[10px] bg-purple-700/80 hover:bg-purple-700 rounded-lg transition-all duration-200"
+                        className="px-2 py-0.5 text-[10px] bg-purple-700/80 hover:bg-purple-700 text-white rounded-lg transition-all duration-200"
                         onClick={() => handleOpenForm(order, rowKey)}
                       >
                         Formulario
