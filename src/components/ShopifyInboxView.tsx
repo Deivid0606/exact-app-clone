@@ -844,53 +844,147 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return "hover:bg-white/5";
   };
 
-  // ─── COMPONENTE DE GRÁFICO DE TORTA SIMPLE ───
-  const PieChart = ({ data }: { data: { label: string; value: number; color: string }[] }) => {
+  // ─── UI HELPERS PRO ───
+  const statusTheme: Record<OrderStatus, { label: string; badge: string; dot: string; row: string }> = {
+    "CARGAR": {
+      label: "Pendiente",
+      badge: "bg-blue-500/12 text-blue-200 border-blue-400/25",
+      dot: "bg-blue-400",
+      row: "hover:bg-blue-500/5"
+    },
+    "A DROPEAR": {
+      label: "A dropear",
+      badge: "bg-amber-500/12 text-amber-200 border-amber-400/25",
+      dot: "bg-amber-400",
+      row: "bg-amber-500/5 hover:bg-amber-500/10"
+    },
+    "CARGADO": {
+      label: "Cargado auto",
+      badge: "bg-emerald-500/12 text-emerald-200 border-emerald-400/25",
+      dot: "bg-emerald-400",
+      row: "bg-emerald-500/5 hover:bg-emerald-500/10"
+    },
+    "CARGADO_MANUAL": {
+      label: "Cargado manual",
+      badge: "bg-teal-500/12 text-teal-200 border-teal-400/25",
+      dot: "bg-teal-400",
+      row: "bg-teal-500/5 hover:bg-teal-500/10"
+    },
+    "CANCELADO": {
+      label: "Cancelado",
+      badge: "bg-rose-500/12 text-rose-200 border-rose-400/25",
+      dot: "bg-rose-400",
+      row: "bg-rose-500/5 hover:bg-rose-500/10"
+    }
+  };
+
+  const getProRowClassName = (status: OrderStatus, hasCoverageCity: boolean) => {
+    if (!hasCoverageCity && status === "CARGAR") return "bg-orange-500/5 hover:bg-orange-500/10";
+    return statusTheme[status]?.row || getRowClassName(status, hasCoverageCity);
+  };
+
+  const MetricCard = ({
+    title,
+    value,
+    subtitle,
+    icon,
+    tone = "blue"
+  }: {
+    title: string;
+    value: string | number;
+    subtitle?: string;
+    icon: string;
+    tone?: "blue" | "emerald" | "amber" | "rose" | "violet" | "cyan";
+  }) => {
+    const tones = {
+      blue: "from-blue-500/18 to-cyan-500/8 border-blue-400/20 text-blue-200 shadow-blue-950/20",
+      emerald: "from-emerald-500/18 to-teal-500/8 border-emerald-400/20 text-emerald-200 shadow-emerald-950/20",
+      amber: "from-amber-500/18 to-orange-500/8 border-amber-400/20 text-amber-200 shadow-amber-950/20",
+      rose: "from-rose-500/18 to-pink-500/8 border-rose-400/20 text-rose-200 shadow-rose-950/20",
+      violet: "from-violet-500/18 to-fuchsia-500/8 border-violet-400/20 text-violet-200 shadow-violet-950/20",
+      cyan: "from-cyan-500/18 to-sky-500/8 border-cyan-400/20 text-cyan-200 shadow-cyan-950/20"
+    };
+
+    return (
+      <div className={`relative overflow-hidden rounded-2xl border bg-gradient-to-br ${tones[tone]} p-4 shadow-xl transition-all duration-300 hover:-translate-y-0.5 hover:border-white/20`}>
+        <div className="absolute -right-6 -top-6 h-20 w-20 rounded-full bg-white/5 blur-xl" />
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400">{title}</p>
+            <p className="mt-2 text-2xl font-black tracking-tight text-white md:text-3xl">{value}</p>
+          </div>
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/8 text-xl shadow-inner">
+            {icon}
+          </div>
+        </div>
+        {subtitle && <p className="mt-2 text-xs font-semibold text-slate-400">{subtitle}</p>}
+      </div>
+    );
+  };
+
+  const StatusBadge = ({ status }: { status: OrderStatus }) => (
+    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-black ${statusTheme[status].badge}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${statusTheme[status].dot}`} />
+      {statusTheme[status].label}
+    </span>
+  );
+
+  const DonutChart = ({ data }: { data: { label: string; value: number; color: string }[] }) => {
     const total = data.reduce((sum, d) => sum + d.value, 0);
-    if (total === 0) return <div className="text-center text-slate-500 text-[10px] py-4">Sin datos</div>;
-    
-    let currentAngle = 0;
-    const segments = data.map(d => {
-      const percentage = (d.value / total) * 100;
-      const angle = (percentage / 100) * 360;
-      const start = currentAngle;
-      currentAngle += angle;
-      return { ...d, percentage, start, angle };
+    if (total === 0) {
+      return <div className="flex h-48 items-center justify-center rounded-2xl border border-slate-800 bg-slate-950/60 text-sm text-slate-500">Sin datos</div>;
+    }
+
+    let currentAngle = -90;
+    const radius = 42;
+    const center = 50;
+    const circumference = 2 * Math.PI * radius;
+
+    const segments = data.map((d) => {
+      const percent = d.value / total;
+      const dash = percent * circumference;
+      const rotation = currentAngle;
+      currentAngle += percent * 360;
+      return { ...d, percent, dash, rotation };
     });
 
     return (
-      <div className="flex flex-col items-center gap-3">
-        <div className="relative w-32 h-32">
-          <svg viewBox="0 0 100 100" className="transform -rotate-90">
-            {segments.map((seg, i) => {
-              if (seg.value === 0) return null;
-              const r = 40;
-              const cx = 50;
-              const cy = 50;
-              const startRad = (seg.start * Math.PI) / 180;
-              const endRad = ((seg.start + seg.angle) * Math.PI) / 180;
-              const x1 = cx + r * Math.cos(startRad);
-              const y1 = cy + r * Math.sin(startRad);
-              const x2 = cx + r * Math.cos(endRad);
-              const y2 = cy + r * Math.sin(endRad);
-              const largeArc = seg.angle > 180 ? 1 : 0;
-              
-              return (
-                <path
-                  key={i}
-                  d={`M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2} Z`}
-                  fill={seg.color}
-                  className="transition-all duration-300 hover:opacity-80 cursor-pointer"
-                />
-              );
-            })}
+      <div className="grid gap-4 md:grid-cols-[190px_1fr] md:items-center">
+        <div className="relative mx-auto h-44 w-44">
+          <svg viewBox="0 0 100 100" className="h-full w-full drop-shadow-[0_0_24px_rgba(59,130,246,0.22)]">
+            <circle cx={center} cy={center} r={radius} fill="none" stroke="rgba(30,41,59,.9)" strokeWidth="13" />
+            {segments.map((seg, i) => (
+              <circle
+                key={seg.label}
+                cx={center}
+                cy={center}
+                r={radius}
+                fill="none"
+                stroke={seg.color}
+                strokeWidth="13"
+                strokeDasharray={`${seg.dash} ${circumference - seg.dash}`}
+                strokeLinecap="round"
+                transform={`rotate(${seg.rotation} ${center} ${center})`}
+                className="transition-opacity duration-300 hover:opacity-80"
+              />
+            ))}
           </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center">
+            <span className="text-2xl font-black text-white">{total}</span>
+            <span className="text-[10px] font-bold uppercase tracking-[0.18em] text-slate-500">pedidos</span>
+          </div>
         </div>
-        <div className="flex flex-wrap gap-2 justify-center">
-          {segments.map((seg, i) => (
-            <div key={i} className="flex items-center gap-1.5">
-              <div className="w-2.5 h-2.5 rounded" style={{ backgroundColor: seg.color }} />
-              <span className="text-[9px] text-slate-300">{seg.label} <span className="text-slate-500">({Math.round(seg.percentage)}%)</span></span>
+        <div className="space-y-2">
+          {segments.map((seg) => (
+            <div key={seg.label} className="flex items-center justify-between rounded-xl border border-slate-800/70 bg-slate-950/45 px-3 py-2">
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: seg.color }} />
+                <span className="text-sm font-bold text-slate-200">{seg.label}</span>
+              </div>
+              <div className="text-right">
+                <div className="text-sm font-black text-white">{seg.value}</div>
+                <div className="text-[10px] text-slate-500">{Math.round(seg.percent * 100)}%</div>
+              </div>
             </div>
           ))}
         </div>
@@ -898,16 +992,17 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     );
   };
 
-  // ─── COMPONENTE DE BARRA DE PROGRESO ───
   const ProgressBar = ({ value, total, label, color }: { value: number; total: number; label: string; color: string }) => {
     const percentage = total > 0 ? Math.round((value / total) * 100) : 0;
     return (
-      <div className="flex items-center gap-2">
-        <span className="text-[9px] text-slate-400 w-16 truncate">{label}</span>
-        <div className="flex-1 h-1.5 bg-[#1f1f26] rounded-full overflow-hidden">
-          <div className="h-full rounded-full transition-all duration-500" style={{ width: `${percentage}%`, backgroundColor: color }} />
+      <div className="space-y-2">
+        <div className="flex items-center justify-between text-xs">
+          <span className="font-bold text-slate-300">{label}</span>
+          <span className="font-black text-white">{value} · {percentage}%</span>
         </div>
-        <span className="text-[9px] text-slate-400 w-8 text-right">{percentage}%</span>
+        <div className="h-3 overflow-hidden rounded-full bg-slate-950 ring-1 ring-slate-800">
+          <div className="h-full rounded-full transition-all duration-700" style={{ width: `${percentage}%`, backgroundColor: color }} />
+        </div>
       </div>
     );
   };
@@ -928,153 +1023,105 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const { extras } = getAllFields(order);
     const totalConEnvio = salePrice + (deliveryPrice || 0);
     const unitPrice = quantity > 1 ? Math.round(salePrice / quantity) : salePrice;
+    const commission = matched ? salePrice - (matched.provider_price_gs || 0) - (deliveryPrice || 0) : 0;
 
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" onClick={() => setShowGuideModal(false)}>
-        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl max-w-3xl w-full max-h-[90vh] overflow-y-auto shadow-2xl" onClick={(e) => e.stopPropagation()}>
-          <div className="sticky top-0 bg-[#1a1a1f] border-b border-[#2a2a30] px-6 py-4 flex justify-between items-center z-10">
-            <div>
-              <h2 className="text-lg font-bold text-white flex items-center gap-3">
-                📦 GUÍA DE ENVÍO
-                {orderNumber && (
-                  <span className="text-[10px] font-mono text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-full border border-emerald-500/20">
-                    {orderNumber}
-                  </span>
-                )}
-              </h2>
-              <p className="text-[10px] text-slate-500 mt-0.5">Fila #{order.__row || '?'} · {getOrderDate(order)}</p>
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/78 p-4 backdrop-blur-md" onClick={() => setShowGuideModal(false)}>
+        <div className="max-h-[92vh] w-full max-w-4xl overflow-hidden rounded-3xl border border-slate-700/70 bg-slate-950 shadow-2xl shadow-black/60" onClick={(e) => e.stopPropagation()}>
+          <div className="sticky top-0 z-10 border-b border-slate-800 bg-slate-950/95 px-6 py-5 backdrop-blur-xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.24em] text-cyan-300">Guía de envío</p>
+                <h2 className="mt-1 flex flex-wrap items-center gap-3 text-2xl font-black text-white">
+                  Pedido #{order.__row || "?"}
+                  {orderNumber && <span className="rounded-full border border-emerald-400/25 bg-emerald-500/10 px-3 py-1 text-xs font-mono font-black text-emerald-300">{orderNumber}</span>}
+                </h2>
+                <p className="mt-1 text-sm text-slate-400">{getOrderDate(order)} · {order[colKeys.name] || "Cliente sin nombre"}</p>
+              </div>
+              <button onClick={() => setShowGuideModal(false)} className="rounded-2xl border border-slate-800 bg-slate-900 px-3 py-1.5 text-xl font-bold text-slate-400 transition hover:text-white">×</button>
             </div>
-            <button onClick={() => setShowGuideModal(false)} className="text-slate-400 hover:text-white text-2xl transition-colors">×</button>
           </div>
-          <div className="p-6 space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="bg-[#0f0f12] rounded-lg p-4 border border-[#2a2a30]">
-                <div className="text-[9px] text-slate-500 uppercase tracking-wider">Estado actual</div>
-                <div className="mt-1">
-                  <span className={`inline-block px-3 py-1 rounded-full text-[11px] font-semibold ${
-                    status === "CARGADO" || status === "CARGADO_MANUAL" ? "bg-emerald-500/20 text-emerald-400" :
-                    status === "A DROPEAR" ? "bg-amber-500/20 text-amber-400" :
-                    status === "CANCELADO" ? "bg-rose-500/20 text-rose-400" :
-                    "bg-blue-500/20 text-blue-400"
-                  }`}>
-                    {status === "CARGADO" ? "✅ CARGADO AUTOMÁTICO" :
-                     status === "CARGADO_MANUAL" ? "✍️ CARGADO MANUAL" :
-                     status === "A DROPEAR" ? "⚠️ A DROPEAR" :
-                     status === "CANCELADO" ? "❌ CANCELADO" : "⏳ PENDIENTE"}
-                  </span>
+
+          <div className="max-h-[calc(92vh-108px)] overflow-y-auto p-6">
+            <div className="grid gap-4 md:grid-cols-4">
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 md:col-span-2">
+                <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">Estado actual</p>
+                <div className="mt-3"><StatusBadge status={status} /></div>
+              </div>
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 md:col-span-2">
+                <p className="text-xs font-black uppercase tracking-[0.18em] text-slate-500">Cobertura</p>
+                <div className={`mt-3 text-lg font-black ${covered ? "text-emerald-300" : "text-rose-300"}`}>
+                  {covered ? "✅ Con cobertura" : "❌ Sin cobertura"}
+                </div>
+                {deliveryPrice && <p className="mt-1 text-sm font-bold text-amber-300">Delivery: {nf(deliveryPrice)} Gs</p>}
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+                <h3 className="mb-4 text-sm font-black uppercase tracking-[0.18em] text-white">👤 Datos del cliente</h3>
+                <div className="grid gap-4 text-sm">
+                  <div><p className="text-xs font-bold text-slate-500">Nombre</p><p className="mt-1 font-bold text-white">{order[colKeys.name] || "—"}</p></div>
+                  <div><p className="text-xs font-bold text-slate-500">Teléfono</p><p className="mt-1 font-bold text-white">{order[colKeys.phone] || "—"}</p></div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div><p className="text-xs font-bold text-slate-500">Ciudad</p><p className={`mt-1 font-black ${covered ? "text-emerald-300" : "text-rose-300"}`}>{city || "—"}</p></div>
+                    <div><p className="text-xs font-bold text-slate-500">Departamento</p><p className="mt-1 font-bold text-cyan-300">{departamento || "—"}</p></div>
+                  </div>
+                  <div><p className="text-xs font-bold text-slate-500">Dirección</p><p className="mt-1 font-bold text-white">{order[colKeys.street] || "—"}</p></div>
                 </div>
               </div>
-              <div className="bg-[#0f0f12] rounded-lg p-4 border border-[#2a2a30]">
-                <div className="text-[9px] text-slate-500 uppercase tracking-wider">Cobertura</div>
-                <div className="mt-1">
-                  {covered ? (
-                    <>
-                      <div className="text-emerald-400 font-semibold text-sm">✅ CON COBERTURA</div>
-                      {deliveryPrice && <div className="text-[10px] text-slate-500 mt-0.5">Costo: {nf(deliveryPrice)} Gs</div>}
-                    </>
-                  ) : (
-                    <div className="text-rose-400 font-semibold text-sm">❌ SIN COBERTURA</div>
-                  )}
+
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+                <h3 className="mb-4 text-sm font-black uppercase tracking-[0.18em] text-white">💰 Resumen financiero</h3>
+                <div className="space-y-3 text-sm">
+                  <div className="flex justify-between"><span className="text-slate-400">Subtotal</span><span className="font-black text-white">{nf(salePrice)} Gs</span></div>
+                  <div className="flex justify-between"><span className="text-slate-400">Envío</span><span className="font-black text-amber-300">{deliveryPrice ? nf(deliveryPrice) : "0"} Gs</span></div>
+                  {matched && <div className="flex justify-between"><span className="text-slate-400">Comisión estimada</span><span className="font-black text-blue-300">{nf(commission)} Gs</span></div>}
+                  <div className="border-t border-slate-800 pt-4">
+                    <div className="flex justify-between text-lg"><span className="font-black text-white">TOTAL</span><span className="font-black text-emerald-300">{nf(totalConEnvio)} Gs</span></div>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="bg-[#0f0f12] rounded-lg p-4 border border-[#2a2a30]">
-              <h3 className="text-xs font-bold text-white mb-3">👤 DATOS DEL CLIENTE</h3>
-              <div className="grid grid-cols-2 gap-3 text-[12px]">
-                <div className="col-span-2 md:col-span-1">
-                  <div className="text-slate-500 text-[9px] uppercase tracking-wider">Nombre</div>
-                  <div className="text-white font-medium mt-0.5">{order[colKeys.name] || "—"}</div>
-                </div>
-                <div className="col-span-2 md:col-span-1">
-                  <div className="text-slate-500 text-[9px] uppercase tracking-wider">Teléfono</div>
-                  <div className="text-white mt-0.5">{order[colKeys.phone] || "—"}</div>
-                </div>
-                <div className="col-span-2 md:col-span-1">
-                  <div className="text-slate-500 text-[9px] uppercase tracking-wider">Ciudad</div>
-                  <div className={`mt-0.5 font-medium ${covered ? "text-emerald-400" : "text-rose-400"}`}>{order[colKeys.city] || "—"}</div>
-                </div>
-                <div className="col-span-2 md:col-span-1">
-                  <div className="text-slate-500 text-[9px] uppercase tracking-wider">Departamento</div>
-                  <div className="text-white mt-0.5 font-medium">{departamento || "—"}</div>
-                </div>
-                <div className="col-span-2">
-                  <div className="text-slate-500 text-[9px] uppercase tracking-wider">Dirección</div>
-                  <div className="text-white mt-0.5">{order[colKeys.street] || "—"}</div>
-                </div>
-              </div>
-            </div>
-
-            <div className="bg-[#0f0f12] rounded-lg p-4 border border-[#2a2a30]">
-              <h3 className="text-xs font-bold text-white mb-3">📦 DETALLE DEL PRODUCTO</h3>
+            <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+              <h3 className="mb-4 text-sm font-black uppercase tracking-[0.18em] text-white">📦 Producto</h3>
               <div className="overflow-x-auto">
-                <table className="w-full text-[12px]">
-                  <thead className="border-b border-[#2a2a30]">
-                    <tr className="text-slate-500 text-[9px] uppercase tracking-wider">
-                      <th className="text-left py-1">Producto</th>
-                      <th className="text-center w-16">Cant.</th>
-                      <th className="text-right w-28">Precio Unit.</th>
-                      <th className="text-right w-28">Subtotal</th>
+                <table className="w-full min-w-[560px] text-sm">
+                  <thead className="text-xs uppercase tracking-[0.16em] text-slate-500">
+                    <tr className="border-b border-slate-800">
+                      <th className="py-2 text-left">Producto</th>
+                      <th className="py-2 text-center">Cantidad</th>
+                      <th className="py-2 text-right">Precio unit.</th>
+                      <th className="py-2 text-right">Subtotal</th>
                     </tr>
                   </thead>
                   <tbody>
-                    <tr className="border-b border-[#2a2a30]/50">
-                      <td className="py-2 text-white font-medium">{productName || "—"}</td>
-                      <td className="py-2 text-center text-white">{quantity}</td>
-                      <td className="py-2 text-right text-white">{nf(unitPrice)} Gs</td>
-                      <td className="py-2 text-right text-emerald-400 font-semibold">{nf(salePrice)} Gs</td>
+                    <tr className="border-b border-slate-800/70">
+                      <td className="py-3 font-bold text-white">{productName || "—"}</td>
+                      <td className="py-3 text-center font-bold text-white">{quantity}</td>
+                      <td className="py-3 text-right font-bold text-white">{nf(unitPrice)} Gs</td>
+                      <td className="py-3 text-right font-black text-emerald-300">{nf(salePrice)} Gs</td>
                     </tr>
                   </tbody>
                 </table>
               </div>
-              {matched && (
-                <div className="mt-2 pt-2 border-t border-[#2a2a30]/50 text-[10px] text-slate-500">
-                  SKU: {matched.sku || "—"} · Costo: {nf(matched.provider_price_gs || 0)} Gs
-                </div>
-              )}
-            </div>
-
-            <div className="bg-[#0f0f12] rounded-lg p-4 border border-[#2a2a30]">
-              <h3 className="text-xs font-bold text-white mb-3">💰 RESUMEN</h3>
-              <div className="space-y-2">
-                <div className="flex justify-between text-[12px]">
-                  <span className="text-slate-500">Subtotal:</span>
-                  <span className="text-white">{nf(salePrice)} Gs</span>
-                </div>
-                <div className="flex justify-between text-[12px]">
-                  <span className="text-slate-500">Envío:</span>
-                  <span className={deliveryPrice ? "text-amber-400" : "text-slate-500"}>{deliveryPrice ? nf(deliveryPrice) : "0"} Gs</span>
-                </div>
-                {matched && (
-                  <div className="flex justify-between text-[12px] pt-1 border-t border-[#2a2a30]/50">
-                    <span className="text-slate-500">Comisión:</span>
-                    <span className="text-blue-400 font-semibold">{nf(salePrice - (matched.provider_price_gs || 0) - (deliveryPrice || 0))} Gs</span>
-                  </div>
-                )}
-                <div className="flex justify-between text-[14px] pt-2 border-t border-[#2a2a30]">
-                  <span className="font-bold text-white">TOTAL:</span>
-                  <span className="font-bold text-emerald-400">{nf(totalConEnvio)} Gs</span>
-                </div>
-              </div>
+              {matched && <p className="mt-3 text-xs font-bold text-slate-500">SKU: {matched.sku || "—"} · Costo: {nf(matched.provider_price_gs || 0)} Gs</p>}
             </div>
 
             {Object.keys(extras).length > 0 && (
-              <div className="bg-[#0f0f12] rounded-lg p-4 border border-[#2a2a30]">
-                <h3 className="text-xs font-bold text-white mb-3">📋 INFORMACIÓN ADICIONAL</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-[11px]">
+              <div className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-5">
+                <h3 className="mb-4 text-sm font-black uppercase tracking-[0.18em] text-white">📋 Información adicional</h3>
+                <div className="grid gap-3 md:grid-cols-2">
                   {Object.entries(extras).map(([key, value]) => (
-                    <div key={key} className="flex">
-                      <span className="text-slate-500 min-w-[100px]">{key}:</span>
-                      <span className="text-white ml-2 break-all">{value}</span>
+                    <div key={key} className="rounded-xl border border-slate-800 bg-slate-950/50 p-3 text-sm">
+                      <p className="text-xs font-bold text-slate-500">{key}</p>
+                      <p className="mt-1 break-words font-semibold text-slate-200">{value}</p>
                     </div>
                   ))}
                 </div>
               </div>
             )}
-
-            <div className="text-center pt-2">
-              <div className="text-[9px] text-slate-600">Generado el {new Date().toLocaleString("es-PY")}</div>
-            </div>
           </div>
         </div>
       </div>
@@ -1083,457 +1130,359 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
   if (loadingStatuses) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <div className="flex flex-col items-center gap-3">
-          <div className="animate-spin rounded-full h-10 w-10 border-2 border-blue-500 border-t-transparent"></div>
-          <span className="text-sm text-slate-400">Cargando pedidos...</span>
+      <div className="flex h-64 items-center justify-center bg-slate-950">
+        <div className="flex flex-col items-center gap-4 rounded-3xl border border-slate-800 bg-slate-900/70 px-10 py-8 shadow-2xl">
+          <div className="h-12 w-12 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
+          <span className="text-sm font-bold text-slate-300">Cargando pedidos...</span>
         </div>
       </div>
     );
   }
 
-  // ─── DATOS PARA GRÁFICOS ───
-  const pieData = [
-    { label: 'Pendientes', value: dashboardStats.pendientesConCobertura + dashboardStats.pendientesSinCobertura, color: '#3b82f6' },
-    { label: 'Cargados', value: dashboardStats.cargados, color: '#10b981' },
-    { label: 'Dropear', value: dashboardStats.dropeados, color: '#f59e0b' },
-    { label: 'Cancelados', value: dashboardStats.cancelados, color: '#ef4444' },
-  ].filter(d => d.value > 0);
+  // ─── DATOS PARA DASHBOARD PRO ───
+  const pendingTotal = dashboardStats.pendientesConCobertura + dashboardStats.pendientesSinCobertura;
+  const commissionTotal = sheetOrders.reduce((sum, order, idx) => {
+    const rowKey = getRowKey(order, idx);
+    const status = getRowStatus(rowKey);
+    if (status !== "CARGADO" && status !== "CARGADO_MANUAL") return sum;
+    const productName = order[colKeys.product] || "";
+    const matched = matchProduct(productName);
+    const salePrice = getAmountFromRow(order, colKeys.amount);
+    const deliveryPrice = getCityDeliveryPrice(order[colKeys.city] || "") || 0;
+    return sum + (salePrice - ((matched?.provider_price_gs || 0) + deliveryPrice));
+  }, 0);
+  const avgTicket = dashboardStats.cargados > 0 ? Math.round(dashboardStats.totalVenta / dashboardStats.cargados) : 0;
+  const cancelRate = dashboardStats.totalPedidos > 0 ? Math.round((dashboardStats.cancelados / dashboardStats.totalPedidos) * 100) : 0;
 
-  const coverageData = [
-    { label: 'Con cobertura', value: dashboardStats.pendientesConCobertura, color: '#10b981' },
-    { label: 'Sin cobertura', value: dashboardStats.pendientesSinCobertura, color: '#ef4444' },
+  const cityRanking = Object.entries(sheetOrders.reduce((acc: Record<string, number>, order) => {
+    const city = order[colKeys.city] || "Sin ciudad";
+    acc[city] = (acc[city] || 0) + 1;
+    return acc;
+  }, {})).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+  const productRanking = Object.entries(sheetOrders.reduce((acc: Record<string, number>, order) => {
+    const product = order[colKeys.product] || "Sin producto";
+    acc[product] = (acc[product] || 0) + 1;
+    return acc;
+  }, {})).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+  const maxCityCount = Math.max(1, ...cityRanking.map(([, value]) => value));
+  const maxProductCount = Math.max(1, ...productRanking.map(([, value]) => value));
+
+  const pieData = [
+    { label: "Pendientes", value: pendingTotal, color: "#3b82f6" },
+    { label: "Cargados", value: dashboardStats.cargados, color: "#10b981" },
+    { label: "Dropear", value: dashboardStats.dropeados, color: "#f59e0b" },
+    { label: "Cancelados", value: dashboardStats.cancelados, color: "#ef4444" },
   ].filter(d => d.value > 0);
 
   return (
-    <div className="h-full flex flex-col space-y-3 p-4 bg-[#0f0f12] overflow-auto">
-      {/* ─── HEADER ─── */}
-      <div className="flex flex-wrap items-center justify-between gap-3 bg-[#1a1a1f] border border-[#2a2a30] rounded-xl px-4 py-3 flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-blue-600/20 border border-blue-600/30 flex items-center justify-center text-lg">
-            📦
-          </div>
-          <div>
-            <h1 className="text-sm font-bold text-white">Shopify Inbox</h1>
-            <p className="text-[10px] text-slate-500">Panel de gestión de pedidos</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-[10px] text-slate-400 bg-[#1f1f26] px-3 py-1 rounded-full border border-[#2a2a30]">
-            {sheetOrders.length} pedidos
-          </span>
-          {lastSync && (
-            <span className="text-[9px] text-slate-500 bg-[#1f1f26] px-3 py-1 rounded-full border border-[#2a2a30]">
-              🔄 {lastSync.toLocaleTimeString("es-PY")}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* ─── DASHBOARD KPIS ─── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3 flex-shrink-0">
-        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-4 hover:border-blue-500/40 transition-all duration-200">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-slate-500">Pendientes</span>
-            <span className="text-lg">⏳</span>
-          </div>
-          <div className="text-2xl font-bold text-blue-400 mt-1">{dashboardStats.pendientesConCobertura + dashboardStats.pendientesSinCobertura}</div>
-          <div className="flex gap-2 mt-1">
-            <span className="text-[8px] text-emerald-400">✅ {dashboardStats.pendientesConCobertura}</span>
-            <span className="text-[8px] text-rose-400">❌ {dashboardStats.pendientesSinCobertura}</span>
-          </div>
-        </div>
-
-        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-4 hover:border-emerald-500/40 transition-all duration-200">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-slate-500">Cargados</span>
-            <span className="text-lg">✅</span>
-          </div>
-          <div className="text-2xl font-bold text-emerald-400 mt-1">{dashboardStats.cargados}</div>
-          <div className="text-[8px] text-slate-500 mt-1">Tasa: {dashboardStats.tasaCargados}%</div>
-        </div>
-
-        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-4 hover:border-amber-500/40 transition-all duration-200">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-slate-500">Dropear</span>
-            <span className="text-lg">⚠️</span>
-          </div>
-          <div className="text-2xl font-bold text-amber-400 mt-1">{dashboardStats.dropeados}</div>
-        </div>
-
-        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-4 hover:border-rose-500/40 transition-all duration-200">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-slate-500">Cancelados</span>
-            <span className="text-lg">❌</span>
-          </div>
-          <div className="text-2xl font-bold text-rose-400 mt-1">{dashboardStats.cancelados}</div>
-        </div>
-
-        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-4 hover:border-purple-500/40 transition-all duration-200">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-slate-500">Total</span>
-            <span className="text-lg">📊</span>
-          </div>
-          <div className="text-2xl font-bold text-purple-400 mt-1">{dashboardStats.totalPedidos}</div>
-        </div>
-
-        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-4 hover:border-emerald-500/40 transition-all duration-200">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-slate-500">Ventas</span>
-            <span className="text-lg">💰</span>
-          </div>
-          <div className="text-xl font-bold text-emerald-400 mt-1">{nf(dashboardStats.totalVenta)}</div>
-          <div className="text-[8px] text-slate-500 mt-1">Gs</div>
-        </div>
-      </div>
-
-      {/* ─── GRÁFICOS ─── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 flex-shrink-0">
-        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-4">
-          <h3 className="text-xs font-bold text-white mb-3">📊 Distribución de estados</h3>
-          <PieChart data={pieData} />
-        </div>
-        <div className="bg-[#1a1a1f] border border-[#2a2a30] rounded-xl p-4">
-          <h3 className="text-xs font-bold text-white mb-3">📈 Cobertura de envíos</h3>
-          <div className="space-y-3">
-            <ProgressBar 
-              value={dashboardStats.pendientesConCobertura} 
-              total={dashboardStats.pendientesConCobertura + dashboardStats.pendientesSinCobertura} 
-              label="Con cobertura" 
-              color="#10b981" 
-            />
-            <ProgressBar 
-              value={dashboardStats.pendientesSinCobertura} 
-              total={dashboardStats.pendientesConCobertura + dashboardStats.pendientesSinCobertura} 
-              label="Sin cobertura" 
-              color="#ef4444" 
-            />
-            <div className="flex justify-between pt-2 border-t border-[#2a2a30]">
-              <span className="text-[10px] text-slate-500">Tasa de cobertura</span>
-              <span className="text-[10px] font-bold text-emerald-400">{dashboardStats.tasaCobertura}%</span>
+    <div className="relative h-full overflow-auto bg-slate-950 p-4 text-slate-100 md:p-6">
+      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,rgba(37,99,235,0.18),transparent_30%),radial-gradient(circle_at_top_right,rgba(16,185,129,0.12),transparent_32%)]" />
+      <div className="relative mx-auto flex max-w-[1800px] flex-col gap-4">
+        {/* HEADER */}
+        <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-5 shadow-2xl shadow-black/30 backdrop-blur-xl">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+            <div className="flex items-center gap-4">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-cyan-400 text-2xl shadow-lg shadow-blue-950/40">📦</div>
+              <div>
+                <p className="text-xs font-black uppercase tracking-[0.24em] text-cyan-300">Panel operativo</p>
+                <h1 className="text-2xl font-black tracking-tight text-white md:text-3xl">Shopify Inbox PRO</h1>
+                <p className="text-sm font-medium text-slate-400">Pedidos, cobertura, carga automática y métricas en tiempo real.</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-xs font-bold text-slate-300">{sheetOrders.length} pedidos</span>
+              {lastSync && <span className="rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-xs font-bold text-slate-400">🔄 {lastSync.toLocaleTimeString("es-PY")}</span>}
+              <button className="rounded-2xl bg-gradient-to-r from-blue-600 to-cyan-500 px-4 py-2.5 text-sm font-black text-white shadow-lg shadow-blue-950/40 transition hover:-translate-y-0.5 disabled:opacity-50" onClick={() => readSheet()} disabled={loading}>
+                {loading ? "⏳ Leyendo..." : "📊 Leer Sheet"}
+              </button>
+              <button className="rounded-2xl bg-gradient-to-r from-emerald-600 to-teal-500 px-4 py-2.5 text-sm font-black text-white shadow-lg shadow-emerald-950/40 transition hover:-translate-y-0.5" onClick={handleBulkLoad}>
+                🚀 Cargar todos
+              </button>
+              <button className={`rounded-2xl px-4 py-2.5 text-sm font-black shadow-lg transition hover:-translate-y-0.5 ${autoLoad ? "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-400/25" : "bg-slate-800 text-slate-300 ring-1 ring-slate-700"}`} onClick={toggleAutoLoad}>
+                {autoLoad ? "🤖 Auto ON" : "🤖 Auto OFF"}
+              </button>
+              <button className="rounded-2xl bg-slate-800 px-4 py-2.5 text-sm font-black text-slate-300 ring-1 ring-slate-700 transition hover:-translate-y-0.5 hover:text-white" onClick={() => loadStatusesFromDatabase()}>
+                🔄 Recargar
+              </button>
             </div>
           </div>
         </div>
-      </div>
 
-      {/* ─── CONTROLES ─── */}
-      <div className="flex flex-wrap items-center gap-1.5 flex-shrink-0 bg-[#1a1a1f] border border-[#2a2a30] rounded-xl px-3 py-2">
-        <button className="px-3 py-1 text-[11px] bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all duration-200 font-medium" onClick={() => readSheet()} disabled={loading}>
-          {loading ? "⏳ Leyendo..." : "📊 Leer Sheet"}
-        </button>
-        <button className="px-3 py-1 text-[11px] bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-all duration-200 font-medium" onClick={handleBulkLoad}>
-          🚀 Cargar todos
-        </button>
-        <button className={`px-3 py-1 text-[11px] rounded-lg transition-all duration-200 font-medium ${autoLoad ? "bg-emerald-600 hover:bg-emerald-700 text-white" : "bg-[#2a2a30] hover:bg-[#3a3a44] text-slate-300"}`} onClick={toggleAutoLoad}>
-          {autoLoad ? "🤖 Auto ON" : "🤖 Auto OFF"}
-        </button>
-        <button className="px-3 py-1 text-[11px] bg-rose-600/80 hover:bg-rose-600 text-white rounded-lg transition-all duration-200" onClick={() => loadStatusesFromDatabase()}>
-          🔄 Recargar
-        </button>
-        <div className="flex-1"></div>
-        <span className="text-[9px] text-slate-600">v2.0 PRO</span>
-      </div>
-
-      {/* ─── BARRA DE ACCIONES EN LOTE ─── */}
-      {selectedRows.size > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 p-2 bg-blue-600/10 border border-blue-600/30 rounded-xl flex-shrink-0">
-          <span className="text-[10px] text-blue-400 font-medium mr-1">
-            ✅ {selectedRows.size} seleccionado{selectedRows.size > 1 ? 's' : ''}
-          </span>
-          <div className="h-5 w-px bg-[#2a2a30]" />
-          
-          <select
-            className="bg-[#1f1f26] border border-[#2a2a30] rounded-lg px-2 py-0.5 text-[10px] text-white focus:outline-none focus:border-blue-500 transition-colors"
-            onChange={(e) => {
-              const value = e.target.value;
-              if (value) {
-                bulkChangeStatus(value as OrderStatus);
-                e.target.value = "";
-              }
-            }}
-            defaultValue=""
-            disabled={bulkActionLoading}
-          >
-            <option value="">📝 Cambiar estado...</option>
-            <option value="CARGAR">⏳ Pendiente</option>
-            <option value="A DROPEAR">⚠️ Dropear</option>
-            <option value="CANCELADO">❌ Cancelado</option>
-            <option value="CARGADO">✅ Auto</option>
-            <option value="CARGADO_MANUAL">✍️ Manual</option>
-          </select>
-
-          <button
-            className="px-2 py-0.5 text-[10px] bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-all duration-200 disabled:opacity-50 font-medium"
-            onClick={bulkLoadOrders}
-            disabled={bulkActionLoading}
-          >
-            🚀 Cargar seleccionados
-          </button>
-
-          <button
-            className="px-2 py-0.5 text-[10px] bg-[#2a2a30] hover:bg-[#3a3a44] text-slate-300 rounded-lg transition-all duration-200 disabled:opacity-50"
-            onClick={() => {
-              setSelectedRows(new Set());
-              setSelectAll(false);
-            }}
-            disabled={bulkActionLoading}
-          >
-            ✖ Limpiar
-          </button>
-
-          {bulkActionLoading && (
-            <span className="text-[10px] text-amber-400 animate-pulse ml-1">⏳ Procesando...</span>
-          )}
+        {/* KPIS */}
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
+          <MetricCard title="Ventas" value={`${nf(dashboardStats.totalVenta)} Gs`} subtitle="Total de pedidos cargados" icon="💰" tone="emerald" />
+          <MetricCard title="Pedidos" value={dashboardStats.totalPedidos} subtitle={`${filteredOrders.length} visibles`} icon="📊" tone="violet" />
+          <MetricCard title="Pendientes" value={pendingTotal} subtitle={`✅ ${dashboardStats.pendientesConCobertura} · ❌ ${dashboardStats.pendientesSinCobertura}`} icon="⏳" tone="blue" />
+          <MetricCard title="Cargados" value={dashboardStats.cargados} subtitle={`Tasa ${dashboardStats.tasaCargados}%`} icon="✅" tone="emerald" />
+          <MetricCard title="Comisión" value={`${nf(commissionTotal)} Gs`} subtitle={`Ticket promedio ${nf(avgTicket)} Gs`} icon="🏦" tone="cyan" />
+          <MetricCard title="Cancelados" value={dashboardStats.cancelados} subtitle={`Tasa ${cancelRate}%`} icon="❌" tone="rose" />
         </div>
-      )}
 
-      {/* ─── FILTROS ─── */}
-      <div className="flex flex-wrap items-center gap-1 flex-shrink-0 bg-[#1a1a1f] border border-[#2a2a30] rounded-xl px-3 py-2">
-        <button onClick={() => changeFilter("TODOS")} className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all duration-200 ${activeFilter === "TODOS" ? "bg-white/10 text-white" : "text-slate-500 hover:text-white hover:bg-white/5"}`}>
-          📋 Todos <span className="opacity-60">({counts.total})</span>
-        </button>
-        <button onClick={() => changeFilter("CARGAR")} className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all duration-200 ${activeFilter === "CARGAR" ? "bg-blue-600/30 text-blue-300" : "text-slate-500 hover:text-white hover:bg-white/5"}`}>
-          ⏳ Pendientes <span className="opacity-60">({counts.cargarConCobertura})</span>
-        </button>
-        <button onClick={() => changeFilter("CARGADO")} className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all duration-200 ${activeFilter === "CARGADO" ? "bg-emerald-600/30 text-emerald-300" : "text-slate-500 hover:text-white hover:bg-white/5"}`}>
-          ✅ Cargados <span className="opacity-60">({counts.cargados})</span>
-        </button>
-        <button onClick={() => changeFilter("A DROPEAR")} className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all duration-200 ${activeFilter === "A DROPEAR" ? "bg-amber-600/30 text-amber-300" : "text-slate-500 hover:text-white hover:bg-white/5"}`}>
-          ⚠️ Dropear <span className="opacity-60">({counts.aDropear})</span>
-        </button>
-        <button onClick={() => changeFilter("CANCELADO")} className={`px-2.5 py-1 rounded-lg text-[10px] font-medium transition-all duration-200 ${activeFilter === "CANCELADO" ? "bg-rose-600/30 text-rose-300" : "text-slate-500 hover:text-white hover:bg-white/5"}`}>
-          ❌ Cancelado <span className="opacity-60">({counts.cancelados})</span>
-        </button>
-        <div className="w-px h-5 bg-[#2a2a30] mx-1" />
-        <button onClick={() => setCoverageFilter("all")} className={`px-2 py-1 rounded-lg text-[10px] transition-all duration-200 ${coverageFilter === "all" ? "bg-white/10 text-white" : "text-slate-500 hover:text-white hover:bg-white/5"}`}>
-          🌍 Todas
-        </button>
-        <button onClick={() => setCoverageFilter("covered")} className={`px-2 py-1 rounded-lg text-[10px] transition-all duration-200 ${coverageFilter === "covered" ? "bg-emerald-600/30 text-emerald-300" : "text-slate-500 hover:text-white hover:bg-white/5"}`}>
-          ✅ Con cobertura
-        </button>
-        <button onClick={() => setCoverageFilter("uncovered")} className={`px-2 py-1 rounded-lg text-[10px] transition-all duration-200 ${coverageFilter === "uncovered" ? "bg-rose-600/30 text-rose-300" : "text-slate-500 hover:text-white hover:bg-white/5"}`}>
-          ❌ Sin cobertura
-        </button>
-      </div>
+        {/* GRAFICOS */}
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
+          <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-5 shadow-xl shadow-black/20 backdrop-blur-xl xl:col-span-1">
+            <div className="mb-5 flex items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-black text-white">Distribución de estados</h2>
+                <p className="text-sm font-medium text-slate-400">Vista general del flujo.</p>
+              </div>
+              <span className="rounded-full bg-blue-500/10 px-3 py-1 text-xs font-black text-blue-300 ring-1 ring-blue-400/20">Live</span>
+            </div>
+            <DonutChart data={pieData} />
+          </div>
 
-      {/* ─── BUSCADOR Y FECHAS ─── */}
-      <div className="flex flex-wrap items-center gap-1.5 flex-shrink-0 bg-[#1a1a1f] border border-[#2a2a30] rounded-xl px-3 py-2">
-        <div className="flex gap-0.5">
-          <button onClick={() => setSearchType("product")} className={`px-2 py-0.5 rounded-lg text-[10px] transition-all duration-200 ${searchType === "product" ? "bg-blue-600/30 text-blue-300" : "text-slate-500 hover:text-white hover:bg-white/5"}`}>
-            🏷️ Producto
-          </button>
-          <button onClick={() => setSearchType("city")} className={`px-2 py-0.5 rounded-lg text-[10px] transition-all duration-200 ${searchType === "city" ? "bg-blue-600/30 text-blue-300" : "text-slate-500 hover:text-white hover:bg-white/5"}`}>
-            📍 Ciudad
-          </button>
-          <button onClick={() => setSearchType("all")} className={`px-2 py-0.5 rounded-lg text-[10px] transition-all duration-200 ${searchType === "all" ? "bg-blue-600/30 text-blue-300" : "text-slate-500 hover:text-white hover:bg-white/5"}`}>
-            🔍 Todo
-          </button>
+          <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-5 shadow-xl shadow-black/20 backdrop-blur-xl xl:col-span-1">
+            <h2 className="text-lg font-black text-white">Cobertura</h2>
+            <p className="mb-5 text-sm font-medium text-slate-400">Pendientes con y sin cobertura.</p>
+            <div className="space-y-5">
+              <ProgressBar value={dashboardStats.pendientesConCobertura} total={pendingTotal} label="Con cobertura" color="#10b981" />
+              <ProgressBar value={dashboardStats.pendientesSinCobertura} total={pendingTotal} label="Sin cobertura" color="#ef4444" />
+              <div className="rounded-2xl border border-emerald-400/15 bg-emerald-500/8 p-4">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-bold text-slate-300">Tasa de cobertura</span>
+                  <span className="text-2xl font-black text-emerald-300">{dashboardStats.tasaCobertura}%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-5 shadow-xl shadow-black/20 backdrop-blur-xl xl:col-span-1">
+            <h2 className="text-lg font-black text-white">Top ciudades</h2>
+            <p className="mb-5 text-sm font-medium text-slate-400">Mayor volumen de pedidos.</p>
+            <div className="space-y-3">
+              {cityRanking.length === 0 && <div className="text-sm text-slate-500">Sin datos</div>}
+              {cityRanking.map(([city, value]) => (
+                <div key={city} className="space-y-2">
+                  <div className="flex justify-between gap-3 text-sm"><span className="truncate font-bold text-slate-200">{city}</span><span className="font-black text-white">{value}</span></div>
+                  <div className="h-2 overflow-hidden rounded-full bg-slate-950"><div className="h-full rounded-full bg-gradient-to-r from-blue-600 to-cyan-400" style={{ width: `${Math.round((value / maxCityCount) * 100)}%` }} /></div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
-        <input
-          className="flex-1 min-w-[120px] bg-[#1f1f26] rounded-lg px-3 py-1 text-[11px] text-white border border-[#2a2a30] focus:outline-none focus:border-blue-500 transition-all duration-200 placeholder:text-slate-600"
-          placeholder={searchType === "product" ? "Buscar producto..." : searchType === "city" ? "Buscar ciudad..." : "Buscar en todos los campos..."}
-          value={searchType === "product" ? productSearch : searchType === "city" ? cityFilter : search}
-          onChange={(e) => {
-            if (searchType === "product") setProductSearch(e.target.value);
-            else if (searchType === "city") setCityFilter(e.target.value);
-            else setSearch(e.target.value);
-          }}
-        />
-        <div className="w-px h-5 bg-[#2a2a30] mx-0.5" />
-        
-        <div className="flex items-center gap-1.5">
-          <input
-            type="date"
-            className="bg-[#1f1f26] rounded-lg px-2 py-1 text-[10px] text-white border border-[#2a2a30] focus:outline-none focus:border-blue-500 transition-all duration-200 w-[120px]"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-            placeholder="Desde"
-          />
-          <span className="text-[10px] text-slate-600">→</span>
-          <input
-            type="date"
-            className="bg-[#1f1f26] rounded-lg px-2 py-1 text-[10px] text-white border border-[#2a2a30] focus:outline-none focus:border-blue-500 transition-all duration-200 w-[120px]"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            placeholder="Hasta"
-          />
-          {(dateFrom || dateTo) && (
-            <button
-              className="px-1.5 py-0.5 text-[10px] bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 rounded-lg transition-all duration-200"
-              onClick={() => { setDateFrom(""); setDateTo(""); }}
-            >
-              ✖
-            </button>
-          )}
-        </div>
-      </div>
 
-      <div className="text-[9px] text-slate-500 flex-shrink-0 flex justify-between items-center">
-        <span>Mostrando {filteredOrders.length} de {sheetOrders.length} filas</span>
+        {/* FILTROS */}
+        <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-4 shadow-xl shadow-black/20 backdrop-blur-xl">
+          <div className="flex flex-col gap-4 2xl:flex-row 2xl:items-center 2xl:justify-between">
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => changeFilter("TODOS")} className={`rounded-2xl px-4 py-2 text-sm font-black transition ${activeFilter === "TODOS" ? "bg-white text-slate-950" : "bg-slate-800/80 text-slate-300 ring-1 ring-slate-700 hover:text-white"}`}>📋 Todos <span className="opacity-70">({counts.total})</span></button>
+              <button onClick={() => changeFilter("CARGAR")} className={`rounded-2xl px-4 py-2 text-sm font-black transition ${activeFilter === "CARGAR" ? "bg-blue-500/20 text-blue-200 ring-1 ring-blue-400/25" : "bg-slate-800/80 text-slate-300 ring-1 ring-slate-700 hover:text-white"}`}>⏳ Pendientes <span className="opacity-70">({counts.cargarConCobertura})</span></button>
+              <button onClick={() => changeFilter("CARGADO")} className={`rounded-2xl px-4 py-2 text-sm font-black transition ${activeFilter === "CARGADO" ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-400/25" : "bg-slate-800/80 text-slate-300 ring-1 ring-slate-700 hover:text-white"}`}>✅ Cargados <span className="opacity-70">({counts.cargados})</span></button>
+              <button onClick={() => changeFilter("A DROPEAR")} className={`rounded-2xl px-4 py-2 text-sm font-black transition ${activeFilter === "A DROPEAR" ? "bg-amber-500/20 text-amber-200 ring-1 ring-amber-400/25" : "bg-slate-800/80 text-slate-300 ring-1 ring-slate-700 hover:text-white"}`}>⚠️ Dropear <span className="opacity-70">({counts.aDropear})</span></button>
+              <button onClick={() => changeFilter("CANCELADO")} className={`rounded-2xl px-4 py-2 text-sm font-black transition ${activeFilter === "CANCELADO" ? "bg-rose-500/20 text-rose-200 ring-1 ring-rose-400/25" : "bg-slate-800/80 text-slate-300 ring-1 ring-slate-700 hover:text-white"}`}>❌ Cancelado <span className="opacity-70">({counts.cancelados})</span></button>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button onClick={() => setCoverageFilter("all")} className={`rounded-2xl px-3 py-2 text-sm font-black transition ${coverageFilter === "all" ? "bg-white text-slate-950" : "bg-slate-800/80 text-slate-300 ring-1 ring-slate-700"}`}>🌍 Todas</button>
+              <button onClick={() => setCoverageFilter("covered")} className={`rounded-2xl px-3 py-2 text-sm font-black transition ${coverageFilter === "covered" ? "bg-emerald-500/20 text-emerald-200 ring-1 ring-emerald-400/25" : "bg-slate-800/80 text-slate-300 ring-1 ring-slate-700"}`}>✅ Con cobertura</button>
+              <button onClick={() => setCoverageFilter("uncovered")} className={`rounded-2xl px-3 py-2 text-sm font-black transition ${coverageFilter === "uncovered" ? "bg-rose-500/20 text-rose-200 ring-1 ring-rose-400/25" : "bg-slate-800/80 text-slate-300 ring-1 ring-slate-700"}`}>❌ Sin cobertura</button>
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-3 xl:grid-cols-[auto_1fr_auto] xl:items-center">
+            <div className="flex gap-1 rounded-2xl border border-slate-800 bg-slate-950/60 p-1">
+              <button onClick={() => setSearchType("product")} className={`rounded-xl px-3 py-2 text-xs font-black transition ${searchType === "product" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"}`}>🏷️ Producto</button>
+              <button onClick={() => setSearchType("city")} className={`rounded-xl px-3 py-2 text-xs font-black transition ${searchType === "city" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"}`}>📍 Ciudad</button>
+              <button onClick={() => setSearchType("all")} className={`rounded-xl px-3 py-2 text-xs font-black transition ${searchType === "all" ? "bg-blue-600 text-white" : "text-slate-400 hover:text-white"}`}>🔍 Todo</button>
+            </div>
+
+            <input
+              className="min-w-[220px] rounded-2xl border border-slate-800 bg-slate-950/70 px-4 py-3 text-sm font-semibold text-white outline-none transition placeholder:text-slate-600 focus:border-cyan-400 focus:ring-2 focus:ring-cyan-400/10"
+              placeholder={searchType === "product" ? "Buscar producto..." : searchType === "city" ? "Buscar ciudad..." : "Buscar en todos los campos..."}
+              value={searchType === "product" ? productSearch : searchType === "city" ? cityFilter : search}
+              onChange={(e) => {
+                if (searchType === "product") setProductSearch(e.target.value);
+                else if (searchType === "city") setCityFilter(e.target.value);
+                else setSearch(e.target.value);
+              }}
+            />
+
+            <div className="flex flex-wrap items-center gap-2">
+              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="rounded-2xl border border-slate-800 bg-slate-950/70 px-3 py-3 text-sm font-semibold text-slate-200 outline-none focus:border-cyan-400" />
+              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="rounded-2xl border border-slate-800 bg-slate-950/70 px-3 py-3 text-sm font-semibold text-slate-200 outline-none focus:border-cyan-400" />
+              {(dateFrom || dateTo) && <button className="rounded-2xl bg-slate-800 px-3 py-3 text-sm font-black text-slate-300 ring-1 ring-slate-700" onClick={() => { setDateFrom(""); setDateTo(""); }}>✖</button>}
+            </div>
+          </div>
+        </div>
+
+        {/* ACCIONES EN LOTE */}
         {selectedRows.size > 0 && (
-          <span className="text-blue-400 font-medium">{selectedRows.size} seleccionados</span>
+          <div className="sticky top-3 z-20 flex flex-wrap items-center gap-2 rounded-3xl border border-blue-400/25 bg-blue-950/70 p-3 shadow-2xl shadow-blue-950/30 backdrop-blur-xl">
+            <span className="rounded-full bg-blue-500/15 px-4 py-2 text-sm font-black text-blue-200">✅ {selectedRows.size} seleccionado{selectedRows.size > 1 ? "s" : ""}</span>
+            <select
+              className="rounded-2xl border border-slate-700 bg-slate-950 px-3 py-2 text-sm font-bold text-white outline-none focus:border-blue-400"
+              onChange={(e) => {
+                const value = e.target.value;
+                if (value) {
+                  bulkChangeStatus(value as OrderStatus);
+                  e.target.value = "";
+                }
+              }}
+              defaultValue=""
+              disabled={bulkActionLoading}
+            >
+              <option value="">📝 Cambiar estado...</option>
+              <option value="CARGAR">⏳ Pendiente</option>
+              <option value="A DROPEAR">⚠️ Dropear</option>
+              <option value="CANCELADO">❌ Cancelado</option>
+              <option value="CARGADO">✅ Auto</option>
+              <option value="CARGADO_MANUAL">✍️ Manual</option>
+            </select>
+            <button className="rounded-2xl bg-emerald-600 px-4 py-2 text-sm font-black text-white shadow-lg transition hover:-translate-y-0.5 disabled:opacity-50" onClick={bulkLoadOrders} disabled={bulkActionLoading}>🚀 Cargar seleccionados</button>
+            <button className="rounded-2xl bg-slate-800 px-4 py-2 text-sm font-black text-slate-300 ring-1 ring-slate-700 transition hover:text-white disabled:opacity-50" onClick={() => { setSelectedRows(new Set()); setSelectAll(false); }} disabled={bulkActionLoading}>✖ Limpiar</button>
+            {bulkActionLoading && <span className="text-sm font-black text-amber-300 animate-pulse">⏳ Procesando...</span>}
+          </div>
         )}
-        {(dateFrom || dateTo) && (
-          <span className="text-amber-400">📅 Filtro por fechas</span>
-        )}
-      </div>
 
-      {/* ─── TABLA ─── */}
-      <div className="flex-1 min-h-0 overflow-auto rounded-xl border border-[#2a2a30] bg-[#0f0f12]">
-        <table className="w-full text-xs">
-          <thead className="bg-[#1a1a1f] sticky top-0 z-10">
-            <tr className="border-b border-[#2a2a30]">
-              <th className="px-2 py-2 text-center text-[10px] font-medium text-slate-400 w-8">
-                <input
-                  type="checkbox"
-                  checked={selectAll}
-                  onChange={toggleSelectAll}
-                  className="w-4 h-4 rounded border-[#2a2a30] bg-[#1f1f26] text-blue-500 focus:ring-2 focus:ring-blue-500 cursor-pointer transition-all"
-                  disabled={filteredOrders.length === 0 || bulkActionLoading}
-                />
-              </th>
-              <th className="px-2 py-2 text-left text-[10px] font-medium text-slate-400">#</th>
-              <th className="px-2 py-2 text-left text-[10px] font-medium text-slate-400">ID</th>
-              <th className="px-2 py-2 text-left text-[10px] font-medium text-slate-400">Fecha</th>
-              <th className="px-2 py-2 text-left text-[10px] font-medium text-slate-400">Cliente</th>
-              <th className="px-2 py-2 text-left text-[10px] font-medium text-slate-400">Teléfono</th>
-              <th className="px-2 py-2 text-left text-[10px] font-medium text-slate-400">Ciudad</th>
-              <th className="px-2 py-2 text-left text-[10px] font-medium text-slate-400">Depto.</th>
-              <th className="px-2 py-2 text-left text-[10px] font-medium text-slate-400">Delivery</th>
-              <th className="px-2 py-2 text-left text-[10px] font-medium text-slate-400">Producto</th>
-              <th className="px-2 py-2 text-center text-[10px] font-medium text-slate-400">Cant</th>
-              <th className="px-2 py-2 text-right text-[10px] font-medium text-slate-400">Venta</th>
-              <th className="px-2 py-2 text-center text-[10px] font-medium text-slate-400">Estado</th>
-              <th className="px-2 py-2 text-center text-[10px] font-medium text-slate-400">Acciones</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-[#1a1a1f]">
-            {filteredOrders.map(({ order, idx, rowKey }) => {
-              const status = getRowStatus(rowKey);
-              const city = order[colKeys.city] || "";
-              const deliveryPrice = getCityDeliveryPrice(city);
-              const covered = deliveryPrice !== null;
-              const salePrice = getDisplayAmount(order);
-              const orderDate = getOrderDate(order);
-              const canLoad = status === "CARGAR" && covered && salePrice > 0;
-              const orderNumber = getRowOrderNumber(rowKey);
-              const departamento = getCityDepartment(city);
-              const rowDisplay = order.__row || String(idx + 1);
-              const isSelected = selectedRows.has(rowKey);
+        {/* TABLA Y RANKING */}
+        <div className="grid gap-4 2xl:grid-cols-[1fr_340px]">
+          <div className="overflow-hidden rounded-3xl border border-slate-800/80 bg-slate-900/80 shadow-2xl shadow-black/20 backdrop-blur-xl">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-5 py-4">
+              <div>
+                <h2 className="text-lg font-black text-white">Pedidos</h2>
+                <p className="text-sm font-medium text-slate-400">Mostrando {filteredOrders.length} de {sheetOrders.length} filas</p>
+              </div>
+              {(dateFrom || dateTo) && <span className="rounded-full bg-amber-500/10 px-3 py-1 text-xs font-black text-amber-300 ring-1 ring-amber-400/25">📅 Filtro por fechas activo</span>}
+            </div>
 
-              return (
-                <tr key={rowKey} className={`${getRowClassName(status, covered)} ${isSelected ? 'bg-blue-600/10 border-l-2 border-blue-500' : ''} transition-colors duration-150`}>
-                  <td className="px-2 py-1.5 text-center">
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() => toggleRowSelection(rowKey)}
-                      className="w-4 h-4 rounded border-[#2a2a30] bg-[#1f1f26] text-blue-500 focus:ring-2 focus:ring-blue-500 cursor-pointer transition-all"
-                      disabled={bulkActionLoading}
-                    />
-                  </td>
-                  <td className="px-2 py-1.5 text-[10px] text-slate-500 font-mono">{rowDisplay}</td>
-                  <td className="px-2 py-1.5 text-[10px] font-mono">
-                    {orderNumber ? <span className="text-emerald-400">{orderNumber}</span> : <span className="text-slate-600">—</span>}
-                  </td>
-                  <td className="px-2 py-1.5 text-[10px] text-slate-300">{orderDate}</td>
-                  <td className="px-2 py-1.5 text-[10px] font-medium truncate max-w-[100px] text-white" title={order[colKeys.name] || ""}>
-                    {order[colKeys.name]?.substring(0, 20) || "—"}
-                  </td>
-                  <td className="px-2 py-1.5 text-[10px] text-slate-300">{order[colKeys.phone]?.substring(0, 15) || "—"}</td>
-                  <td className="px-2 py-1.5 text-[10px]">
-                    <div className={covered ? "text-emerald-400 font-medium" : "text-rose-400 font-medium"}>{city?.substring(0, 25) || "—"}</div>
-                  </td>
-                  <td className="px-2 py-1.5 text-[10px]">
-                    <div className={departamento ? "text-blue-400 font-medium" : "text-slate-500"}>{departamento || "—"}</div>
-                  </td>
-                  <td className="px-2 py-1.5 text-[10px]">
-                    {deliveryPrice
-                      ? <span className="text-amber-400 font-medium">{nf(deliveryPrice)} Gs</span>
-                      : <span className="text-slate-500">—</span>}
-                  </td>
-                  <td className="px-2 py-1.5 text-[10px] max-w-[150px] truncate text-slate-300" title={order[colKeys.product] || ""}>
-                    {order[colKeys.product]?.substring(0, 25) || "—"}
-                  </td>
-                  <td className="px-2 py-1.5 text-[10px] text-center text-slate-300">{parseQuantity(order[colKeys.qty])}</td>
-                  <td className="px-2 py-1.5 text-[10px] text-right text-emerald-400 font-medium">
-                    {salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}
-                  </td>
-                  <td className="px-2 py-1.5 text-center">
-                    <select
-                      className="bg-[#1f1f26] border border-[#2a2a30] rounded-lg px-1.5 py-0.5 text-[10px] text-white focus:outline-none focus:border-blue-500 transition-all duration-200 cursor-pointer hover:border-slate-600"
-                      value={status}
-                      onChange={(e) => {
-                        const newStatus = e.target.value as OrderStatus;
-                        
-                        if (newStatus === "CARGAR") {
-                          setRowStatuses(prev => {
-                            const next = { ...prev };
-                            delete next[rowKey];
-                            return next;
-                          });
-                          setRowOrderNumbers(prev => {
-                            const next = { ...prev };
-                            delete next[rowKey];
-                            return next;
-                          });
-                        } else {
-                          setRowStatuses(prev => ({ ...prev, [rowKey]: newStatus }));
-                        }
+            <div className="max-h-[720px] overflow-auto">
+              <table className="w-full min-w-[1220px] text-sm">
+                <thead className="sticky top-0 z-10 bg-slate-950/95 backdrop-blur-xl">
+                  <tr className="border-b border-slate-800 text-left text-xs uppercase tracking-[0.14em] text-slate-500">
+                    <th className="px-4 py-3 text-center w-12">
+                      <input type="checkbox" checked={selectAll} onChange={toggleSelectAll} className="h-4 w-4 rounded border-slate-700 bg-slate-950 text-blue-500 focus:ring-blue-500" disabled={filteredOrders.length === 0 || bulkActionLoading} />
+                    </th>
+                    <th className="px-3 py-3">#</th>
+                    <th className="px-3 py-3">ID</th>
+                    <th className="px-3 py-3">Fecha</th>
+                    <th className="px-3 py-3">Cliente</th>
+                    <th className="px-3 py-3">Teléfono</th>
+                    <th className="px-3 py-3">Ciudad</th>
+                    <th className="px-3 py-3">Depto.</th>
+                    <th className="px-3 py-3 text-right">Delivery</th>
+                    <th className="px-3 py-3">Producto</th>
+                    <th className="px-3 py-3 text-center">Cant</th>
+                    <th className="px-3 py-3 text-right">Venta</th>
+                    <th className="px-3 py-3 text-center">Estado</th>
+                    <th className="px-3 py-3 text-right">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800/70">
+                  {filteredOrders.map(({ order, idx, rowKey }) => {
+                    const status = getRowStatus(rowKey);
+                    const city = order[colKeys.city] || "";
+                    const deliveryPrice = getCityDeliveryPrice(city);
+                    const covered = deliveryPrice !== null;
+                    const salePrice = getDisplayAmount(order);
+                    const orderDate = getOrderDate(order);
+                    const canLoad = status === "CARGAR" && covered && salePrice > 0;
+                    const orderNumber = getRowOrderNumber(rowKey);
+                    const departamento = getCityDepartment(city);
+                    const rowDisplay = order.__row || String(idx + 1);
+                    const isSelected = selectedRows.has(rowKey);
 
-                        persistRowStatus(rowKey, newStatus, orderNumber || undefined);
-                      }}
-                    >
-                      <option value="CARGAR">⏳ Pendiente</option>
-                      <option value="A DROPEAR">⚠️ Dropear</option>
-                      <option value="CANCELADO">❌ Cancelado</option>
-                      <option value="CARGADO">✅ Auto</option>
-                      <option value="CARGADO_MANUAL">✍️ Manual</option>
-                    </select>
-                  </td>
-                  <td className="px-2 py-1.5 text-center">
-                    <div className="flex gap-0.5 justify-center">
-                      {canLoad && (
-                        <button
-                          className="px-2 py-0.5 text-[10px] bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all duration-200 font-medium"
-                          onClick={() => handleDirectSave(order, rowKey)}
-                        >
-                          Cargar
-                        </button>
-                      )}
-                      <button
-                        className="px-2 py-0.5 text-[10px] bg-[#2a2a30] hover:bg-[#3a3a44] text-slate-300 rounded-lg transition-all duration-200"
-                        onClick={() => { setSelectedOrder({ order, rowKey }); setShowGuideModal(true); }}
-                      >
-                        📄 Guía
-                      </button>
-                      <button
-                        className="px-2 py-0.5 text-[10px] bg-purple-700/80 hover:bg-purple-700 text-white rounded-lg transition-all duration-200"
-                        onClick={() => handleOpenForm(order, rowKey)}
-                      >
-                        Formulario
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-            {filteredOrders.length === 0 && (
-              <tr>
-                <td colSpan={14} className="text-center py-8 text-slate-500 text-[10px]">
-                  {sheetOrders.length === 0 ? (
-                    <span>📭 No hay pedidos cargados. Hacé clic en "Leer Sheet" para comenzar.</span>
-                  ) : (
-                    <span>🔍 No hay pedidos que coincidan con los filtros</span>
+                    return (
+                      <tr key={rowKey} className={`${getProRowClassName(status, covered)} ${isSelected ? "bg-blue-500/10 ring-1 ring-inset ring-blue-400/20" : ""} transition-colors`}>
+                        <td className="px-4 py-3 text-center">
+                          <input type="checkbox" checked={isSelected} onChange={() => toggleRowSelection(rowKey)} className="h-4 w-4 rounded border-slate-700 bg-slate-950 text-blue-500 focus:ring-blue-500" disabled={bulkActionLoading} />
+                        </td>
+                        <td className="px-3 py-3 font-mono text-xs font-bold text-slate-500">{rowDisplay}</td>
+                        <td className="px-3 py-3 font-mono text-xs">{orderNumber ? <span className="font-black text-emerald-300">{orderNumber}</span> : <span className="text-slate-600">—</span>}</td>
+                        <td className="px-3 py-3 font-semibold text-slate-300">{orderDate}</td>
+                        <td className="px-3 py-3"><div className="max-w-[170px] truncate font-black text-white" title={order[colKeys.name] || ""}>{order[colKeys.name] || "—"}</div></td>
+                        <td className="px-3 py-3 font-semibold text-slate-300">{order[colKeys.phone] || "—"}</td>
+                        <td className="px-3 py-3"><div className={`max-w-[170px] truncate font-black ${covered ? "text-emerald-300" : "text-rose-300"}`} title={city}>{city || "—"}</div></td>
+                        <td className="px-3 py-3"><span className={departamento ? "font-bold text-cyan-300" : "text-slate-500"}>{departamento || "—"}</span></td>
+                        <td className="px-3 py-3 text-right">{deliveryPrice ? <span className="font-black text-amber-300">{nf(deliveryPrice)} Gs</span> : <span className="text-slate-500">—</span>}</td>
+                        <td className="px-3 py-3"><div className="max-w-[220px] truncate font-semibold text-slate-300" title={order[colKeys.product] || ""}>{order[colKeys.product] || "—"}</div></td>
+                        <td className="px-3 py-3 text-center font-black text-white">{parseQuantity(order[colKeys.qty])}</td>
+                        <td className="px-3 py-3 text-right font-black text-emerald-300">{salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}</td>
+                        <td className="px-3 py-3 text-center">
+                          <div className="flex flex-col items-center gap-2">
+                            <StatusBadge status={status} />
+                            <select
+                              className="rounded-xl border border-slate-700 bg-slate-950 px-2 py-1 text-xs font-bold text-white outline-none transition focus:border-blue-400"
+                              value={status}
+                              onChange={(e) => {
+                                const newStatus = e.target.value as OrderStatus;
+                                if (newStatus === "CARGAR") {
+                                  setRowStatuses(prev => {
+                                    const next = { ...prev };
+                                    delete next[rowKey];
+                                    return next;
+                                  });
+                                  setRowOrderNumbers(prev => {
+                                    const next = { ...prev };
+                                    delete next[rowKey];
+                                    return next;
+                                  });
+                                } else {
+                                  setRowStatuses(prev => ({ ...prev, [rowKey]: newStatus }));
+                                }
+                                persistRowStatus(rowKey, newStatus, orderNumber || undefined);
+                              }}
+                            >
+                              <option value="CARGAR">⏳ Pendiente</option>
+                              <option value="A DROPEAR">⚠️ Dropear</option>
+                              <option value="CANCELADO">❌ Cancelado</option>
+                              <option value="CARGADO">✅ Auto</option>
+                              <option value="CARGADO_MANUAL">✍️ Manual</option>
+                            </select>
+                          </div>
+                        </td>
+                        <td className="px-3 py-3 text-right">
+                          <div className="flex justify-end gap-2">
+                            {canLoad && <button className="rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 px-3 py-2 text-xs font-black text-white shadow-lg shadow-blue-950/30 transition hover:-translate-y-0.5" onClick={() => handleDirectSave(order, rowKey)}>Cargar</button>}
+                            <button className="rounded-xl bg-slate-800 px-3 py-2 text-xs font-black text-slate-200 ring-1 ring-slate-700 transition hover:text-white" onClick={() => { setSelectedOrder({ order, rowKey }); setShowGuideModal(true); }}>📄 Guía</button>
+                            <button className="rounded-xl bg-violet-600/90 px-3 py-2 text-xs font-black text-white transition hover:bg-violet-600" onClick={() => handleOpenForm(order, rowKey)}>Formulario</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {filteredOrders.length === 0 && (
+                    <tr>
+                      <td colSpan={14} className="py-14 text-center text-sm font-bold text-slate-500">
+                        {sheetOrders.length === 0 ? "📭 No hay pedidos cargados. Hacé clic en Leer Sheet para comenzar." : "🔍 No hay pedidos que coincidan con los filtros."}
+                      </td>
+                    </tr>
                   )}
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+                </tbody>
+              </table>
+            </div>
+          </div>
 
-      {renderGuideModal()}
+          <aside className="space-y-4">
+            <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-5 shadow-xl shadow-black/20 backdrop-blur-xl">
+              <h2 className="text-lg font-black text-white">Top productos</h2>
+              <p className="mb-5 text-sm font-medium text-slate-400">Más repetidos en el sheet.</p>
+              <div className="space-y-3">
+                {productRanking.length === 0 && <div className="text-sm text-slate-500">Sin datos</div>}
+                {productRanking.map(([product, value]) => (
+                  <div key={product} className="space-y-2">
+                    <div className="flex justify-between gap-3 text-sm"><span className="truncate font-bold text-slate-200" title={product}>{product}</span><span className="font-black text-white">{value}</span></div>
+                    <div className="h-2 overflow-hidden rounded-full bg-slate-950"><div className="h-full rounded-full bg-gradient-to-r from-violet-600 to-fuchsia-400" style={{ width: `${Math.round((value / maxProductCount) * 100)}%` }} /></div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-5 shadow-xl shadow-black/20 backdrop-blur-xl">
+              <h2 className="text-lg font-black text-white">Resumen rápido</h2>
+              <div className="mt-4 space-y-3 text-sm">
+                <div className="flex justify-between rounded-2xl bg-slate-950/60 p-3"><span className="font-bold text-slate-400">Visible</span><span className="font-black text-white">{filteredOrders.length}</span></div>
+                <div className="flex justify-between rounded-2xl bg-slate-950/60 p-3"><span className="font-bold text-slate-400">Seleccionados</span><span className="font-black text-blue-300">{selectedRows.size}</span></div>
+                <div className="flex justify-between rounded-2xl bg-slate-950/60 p-3"><span className="font-bold text-slate-400">A dropear</span><span className="font-black text-amber-300">{dashboardStats.dropeados}</span></div>
+                <div className="flex justify-between rounded-2xl bg-slate-950/60 p-3"><span className="font-bold text-slate-400">Sin cobertura</span><span className="font-black text-rose-300">{dashboardStats.pendientesSinCobertura}</span></div>
+              </div>
+            </div>
+          </aside>
+        </div>
+
+        {renderGuideModal()}
+      </div>
     </div>
   );
 }
