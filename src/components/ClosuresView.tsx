@@ -607,7 +607,7 @@ export default function ClosuresView() {
     const map: Record<string, number> = {};
     products.forEach((p: any) => {
       if (p.sku) {
-        map[String(p.sku).trim()] = Number(p.real_cost_gs || p.provider_price_gs || 0);
+        map[String(p.sku).trim()] = Number(p.real_cost_gs || 0);
       }
     });
     return map;
@@ -625,7 +625,7 @@ export default function ClosuresView() {
         items.forEach((it: any) => {
           const sku = String(it.sku || '').trim();
           const qty = Number(it.qty || 1);
-          const unitCost = Number(it.real_cost_gs || it.provider_price_gs || productCostMap[sku] || 0);
+          const unitCost = Number(productCostMap[sku] || 0);
           productCost += unitCost * qty;
         });
       } catch {}
@@ -1030,45 +1030,47 @@ export default function ClosuresView() {
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Ya rendidos</div><div className="text-[22px] font-extrabold" style={{ color: '#4ade80' }}>{kpis.rendidos}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.montoRendido)}</div></div>
       </div>
 
-      <div className="app-card !p-4 mb-4 border-l-4 border-l-[#22c55e] bg-gradient-to-br from-[#22c55e]/10 to-[#3b82f6]/5">
-        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-          <div>
-            <h4 className="font-extrabold">💰 Panel de Ganancia Real</h4>
-            <p className="text-xs text-muted-foreground">Calculado sobre pedidos entregados/encomienda entregada visibles en el cierre.</p>
-          </div>
-          <span className="badge-status badge-entregado">Ganancia = venta - producto - delivery - comisión</span>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-          <div className="kpi-card border border-blue-500/20 bg-blue-500/10">
-            <div className="text-xs text-muted-foreground mb-1">Total cobrado</div>
-            <div className="text-[20px] font-extrabold">{nf(financialBreakdown.totalSales)}</div>
-            <div className="text-xs text-muted-foreground">Gs</div>
-          </div>
-          <div className="kpi-card border border-purple-500/20 bg-purple-500/10">
-            <div className="text-xs text-muted-foreground mb-1">Costo producto</div>
-            <div className="text-[20px] font-extrabold">{nf(financialBreakdown.productCost)}</div>
-            <div className="text-xs text-muted-foreground">Gs</div>
-          </div>
-          <div className="kpi-card border border-amber-500/20 bg-amber-500/10">
-            <div className="text-xs text-muted-foreground mb-1">Pago delivery</div>
-            <div className="text-[20px] font-extrabold">{nf(financialBreakdown.deliveryCost)}</div>
-            <div className="text-xs text-muted-foreground">Gs</div>
-          </div>
-          <div className="kpi-card border border-cyan-500/20 bg-cyan-500/10">
-            <div className="text-xs text-muted-foreground mb-1">Comisión vendedor</div>
-            <div className="text-[20px] font-extrabold">{nf(financialBreakdown.sellerCommission)}</div>
-            <div className="text-xs text-muted-foreground">Gs</div>
-          </div>
-          <div className="kpi-card border border-green-500/20 bg-green-500/10">
-            <div className="text-xs text-muted-foreground mb-1">Mi ganancia</div>
-            <div className="text-[22px] font-extrabold" style={{ color: financialBreakdown.realProfit >= 0 ? '#4ade80' : '#f87171' }}>
-              {nf(financialBreakdown.realProfit)}
+      {(isAdmin || isSupplier) && (
+        <div className="app-card !p-4 mb-4 border-l-4 border-l-[#22c55e] bg-gradient-to-br from-[#22c55e]/10 to-[#3b82f6]/5">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <div>
+              <h4 className="font-extrabold">💰 Panel de Ganancia Real</h4>
+              <p className="text-xs text-muted-foreground">Calculado sobre pedidos entregados/encomienda entregada visibles en el cierre.</p>
             </div>
-            <div className="text-xs text-muted-foreground">Gs</div>
+            <span className="badge-status badge-entregado">Ganancia = venta - costo real producto - delivery - comisión</span>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="kpi-card border border-blue-500/20 bg-blue-500/10">
+              <div className="text-xs text-muted-foreground mb-1">Total cobrado</div>
+              <div className="text-[20px] font-extrabold">{nf(financialBreakdown.totalSales)}</div>
+              <div className="text-xs text-muted-foreground">Gs</div>
+            </div>
+            <div className="kpi-card border border-purple-500/20 bg-purple-500/10">
+              <div className="text-xs text-muted-foreground mb-1">Costo real producto</div>
+              <div className="text-[20px] font-extrabold">{nf(financialBreakdown.productCost)}</div>
+              <div className="text-xs text-muted-foreground">Gs · real_cost_gs</div>
+            </div>
+            <div className="kpi-card border border-amber-500/20 bg-amber-500/10">
+              <div className="text-xs text-muted-foreground mb-1">Pago delivery</div>
+              <div className="text-[20px] font-extrabold">{nf(financialBreakdown.deliveryCost)}</div>
+              <div className="text-xs text-muted-foreground">Gs</div>
+            </div>
+            <div className="kpi-card border border-cyan-500/20 bg-cyan-500/10">
+              <div className="text-xs text-muted-foreground mb-1">Comisión vendedor</div>
+              <div className="text-[20px] font-extrabold">{nf(financialBreakdown.sellerCommission)}</div>
+              <div className="text-xs text-muted-foreground">Gs</div>
+            </div>
+            <div className="kpi-card border border-green-500/20 bg-green-500/10">
+              <div className="text-xs text-muted-foreground mb-1">Mi ganancia</div>
+              <div className="text-[22px] font-extrabold" style={{ color: financialBreakdown.realProfit >= 0 ? '#4ade80' : '#f87171' }}>
+                {nf(financialBreakdown.realProfit)}
+              </div>
+              <div className="text-xs text-muted-foreground">Gs</div>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div className="mb-4">
         <div className="relative">
