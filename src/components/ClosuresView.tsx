@@ -616,7 +616,15 @@ export default function ClosuresView() {
   const financialBreakdown = useMemo(() => {
     return delivered.reduce((acc, o) => {
       const total = Number(o.total_gs || 0);
-      const deliveryCost = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
+
+      // Delivery cobrado al vendedor al cargar el pedido.
+      // Este monto normalmente se guarda en orders.delivery_gs.
+      const deliveryCharged = Number(o.delivery_gs || 0);
+
+      // Pago real al repartidor. Si el pedido no tiene delivery_fee_gs, usa la tarifa configurada por ciudad/delivery.
+      const deliveryPaid = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
+
+      // Comisión que corresponde pagar al vendedor.
       const sellerCommission = Number(o.commission_gs || 0);
       let productCost = 0;
 
@@ -625,21 +633,30 @@ export default function ClosuresView() {
         items.forEach((it: any) => {
           const sku = String(it.sku || '').trim();
           const qty = Number(it.qty || 1);
+
+          // Costo del producto guiado SOLO por products.real_cost_gs.
           const unitCost = Number(productCostMap[sku] || 0);
           productCost += unitCost * qty;
         });
       } catch {}
 
+      const deliveryProfit = deliveryCharged - deliveryPaid;
+      const realProfit = total - productCost - sellerCommission - deliveryPaid;
+
       acc.totalSales += total;
       acc.productCost += productCost;
-      acc.deliveryCost += deliveryCost;
+      acc.deliveryCharged += deliveryCharged;
+      acc.deliveryPaid += deliveryPaid;
+      acc.deliveryProfit += deliveryProfit;
       acc.sellerCommission += sellerCommission;
-      acc.realProfit += total - productCost - deliveryCost - sellerCommission;
+      acc.realProfit += realProfit;
       return acc;
     }, {
       totalSales: 0,
       productCost: 0,
-      deliveryCost: 0,
+      deliveryCharged: 0,
+      deliveryPaid: 0,
+      deliveryProfit: 0,
       sellerCommission: 0,
       realProfit: 0,
     });
@@ -1037,10 +1054,10 @@ export default function ClosuresView() {
               <h4 className="font-extrabold">💰 Panel de Ganancia Real</h4>
               <p className="text-xs text-muted-foreground">Calculado sobre pedidos entregados/encomienda entregada visibles en el cierre.</p>
             </div>
-            <span className="badge-status badge-entregado">Ganancia = venta - costo real producto - delivery - comisión</span>
+            <span className="badge-status badge-entregado">Ganancia real = venta - costo real producto - pago delivery - comisión</span>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
             <div className="kpi-card border border-blue-500/20 bg-blue-500/10">
               <div className="text-xs text-muted-foreground mb-1">Total cobrado</div>
               <div className="text-[20px] font-extrabold">{nf(financialBreakdown.totalSales)}</div>
@@ -1051,23 +1068,41 @@ export default function ClosuresView() {
               <div className="text-[20px] font-extrabold">{nf(financialBreakdown.productCost)}</div>
               <div className="text-xs text-muted-foreground">Gs · real_cost_gs</div>
             </div>
+            <div className="kpi-card border border-sky-500/20 bg-sky-500/10">
+              <div className="text-xs text-muted-foreground mb-1">Delivery cobrado</div>
+              <div className="text-[20px] font-extrabold">{nf(financialBreakdown.deliveryCharged)}</div>
+              <div className="text-xs text-muted-foreground">orders.delivery_gs</div>
+            </div>
             <div className="kpi-card border border-amber-500/20 bg-amber-500/10">
               <div className="text-xs text-muted-foreground mb-1">Pago delivery</div>
-              <div className="text-[20px] font-extrabold">{nf(financialBreakdown.deliveryCost)}</div>
-              <div className="text-xs text-muted-foreground">Gs</div>
+              <div className="text-[20px] font-extrabold">{nf(financialBreakdown.deliveryPaid)}</div>
+              <div className="text-xs text-muted-foreground">delivery_fee_gs / tarifa</div>
+            </div>
+            <div className="kpi-card border border-emerald-500/20 bg-emerald-500/10">
+              <div className="text-xs text-muted-foreground mb-1">Ganancia delivery</div>
+              <div className="text-[20px] font-extrabold" style={{ color: financialBreakdown.deliveryProfit >= 0 ? '#4ade80' : '#f87171' }}>
+                {nf(financialBreakdown.deliveryProfit)}
+              </div>
+              <div className="text-xs text-muted-foreground">Cobrado - pagado</div>
             </div>
             <div className="kpi-card border border-cyan-500/20 bg-cyan-500/10">
               <div className="text-xs text-muted-foreground mb-1">Comisión vendedor</div>
               <div className="text-[20px] font-extrabold">{nf(financialBreakdown.sellerCommission)}</div>
-              <div className="text-xs text-muted-foreground">Gs</div>
+              <div className="text-xs text-muted-foreground">orders.commission_gs</div>
             </div>
             <div className="kpi-card border border-green-500/20 bg-green-500/10">
-              <div className="text-xs text-muted-foreground mb-1">Mi ganancia</div>
+              <div className="text-xs text-muted-foreground mb-1">Mi ganancia real</div>
               <div className="text-[22px] font-extrabold" style={{ color: financialBreakdown.realProfit >= 0 ? '#4ade80' : '#f87171' }}>
                 {nf(financialBreakdown.realProfit)}
               </div>
-              <div className="text-xs text-muted-foreground">Gs</div>
+              <div className="text-xs text-muted-foreground">Gs final</div>
             </div>
+          </div>
+
+          <div className="mt-3 rounded-xl border border-slate-700/70 bg-black/20 p-3 text-xs text-muted-foreground">
+            <strong className="text-foreground">Fórmula:</strong> Ganancia real = Total cobrado - Costo real producto - Comisión vendedor - Pago delivery.
+            <span className="mx-2 text-slate-500">|</span>
+            Ganancia delivery = Delivery cobrado - Pago delivery.
           </div>
         </div>
       )}
