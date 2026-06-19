@@ -567,6 +567,32 @@ export default function ClosuresView() {
     return Number(f?.fee_gs || 0);
   };
 
+  const productCostMap = useMemo(() => {
+    const m: Record<string, number> = {};
+    products.forEach((p: any) => {
+      if (p.sku) m[String(p.sku).trim()] = Number(p.real_cost_gs || 0);
+    });
+    return m;
+  }, [products]);
+
+  const getOrderRealProductCost = (order: any) => {
+    try {
+      const items = typeof order.items_json === 'string' ? JSON.parse(order.items_json) : (order.items_json || []);
+      return items.reduce((sum: number, it: any) => {
+        const sku = String(it.sku || '').trim();
+        const qty = Number(it.qty || 0);
+        const realCost = Number(productCostMap[sku] || 0);
+        return sum + (realCost * qty);
+      }, 0);
+    } catch {
+      return 0;
+    }
+  };
+
+  const getDeliveryFeeForOrder = (order: any) => {
+    return Number(order.delivery_fee_gs) || getFee(order.assigned_delivery || '', order.city || '');
+  };
+
   const delivered = useMemo(() => filteredOrders.filter(o => o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA'), [filteredOrders]);
   const rendidos = useMemo(() => delivered.filter(o => o.delivery_settled), [delivered]);
   const noRendidos = useMemo(() => delivered.filter(o => !o.delivery_settled), [delivered]);
@@ -586,11 +612,7 @@ export default function ClosuresView() {
       rendidos: rendidos.length,
       noRendidos: noRendidos.length,
       montoRendido: rendidos.reduce((s, o) => s + Number(o.total_gs || 0), 0),
-      // Neto real pendiente a rendir: total cobrado menos tarifa del delivery.
-      montoPendiente: noRendidos.reduce((s, o) => {
-        const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
-        return s + (Number(o.total_gs || 0) - fee);
-      }, 0),
+      montoPendiente: noRendidos.reduce((s, o) => s + Number(o.total_gs || 0), 0),
     };
   }, [filteredOrders, rendidos, noRendidos]);
 
@@ -602,65 +624,44 @@ export default function ClosuresView() {
     }, 0);
   }, [delivered]);
 
+  const financePanel = useMemo(() => {
+    const baseOrders = delivered;
+    let ventaProductos = 0;
+    let costoRealProductos = 0;
+    let deliveryCobrado = 0;
+    let pagoDelivery = 0;
+    let comisiones = 0;
 
-  const productCostMap = useMemo(() => {
-    const map: Record<string, number> = {};
-    products.forEach((p: any) => {
-      if (p.sku) {
-        map[String(p.sku).trim()] = Number(p.real_cost_gs || 0);
-      }
-    });
-    return map;
-  }, [products]);
-
-  const financialBreakdown = useMemo(() => {
-    return delivered.reduce((acc, o) => {
+    baseOrders.forEach((o: any) => {
       const total = Number(o.total_gs || 0);
-
-      // Delivery cobrado al vendedor al cargar el pedido.
-      // Este monto normalmente se guarda en orders.delivery_gs.
       const deliveryCharged = Number(o.delivery_gs || 0);
-
-      // Pago real al repartidor. Si el pedido no tiene delivery_fee_gs, usa la tarifa configurada por ciudad/delivery.
-      const deliveryPaid = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
-
-      // Comisión que corresponde pagar al vendedor.
       const sellerCommission = Number(o.commission_gs || 0);
-      let productCost = 0;
+      const realProductCost = getOrderRealProductCost(o);
+      const realDeliveryPayment = getDeliveryFeeForOrder(o);
 
-      try {
-        const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
-        items.forEach((it: any) => {
-          const sku = String(it.sku || '').trim();
-          const qty = Number(it.qty || 1);
-
-          // Costo del producto guiado SOLO por products.real_cost_gs.
-          const unitCost = Number(productCostMap[sku] || 0);
-          productCost += unitCost * qty;
-        });
-      } catch {}
-
-      const deliveryProfit = deliveryCharged - deliveryPaid;
-      const realProfit = total - productCost - sellerCommission - deliveryPaid;
-
-      acc.totalSales += total;
-      acc.productCost += productCost;
-      acc.deliveryCharged += deliveryCharged;
-      acc.deliveryPaid += deliveryPaid;
-      acc.deliveryProfit += deliveryProfit;
-      acc.sellerCommission += sellerCommission;
-      acc.realProfit += realProfit;
-      return acc;
-    }, {
-      totalSales: 0,
-      productCost: 0,
-      deliveryCharged: 0,
-      deliveryPaid: 0,
-      deliveryProfit: 0,
-      sellerCommission: 0,
-      realProfit: 0,
+      ventaProductos += total;
+      costoRealProductos += realProductCost;
+      deliveryCobrado += deliveryCharged;
+      pagoDelivery += realDeliveryPayment;
+      comisiones += sellerCommission;
     });
+
+    const gananciaProductos = ventaProductos - costoRealProductos;
+    const gananciaDelivery = deliveryCobrado - pagoDelivery;
+    const utilidadFinal = gananciaProductos + gananciaDelivery - comisiones;
+
+    return {
+      ventaProductos,
+      costoRealProductos,
+      gananciaProductos,
+      deliveryCobrado,
+      pagoDelivery,
+      gananciaDelivery,
+      comisiones,
+      utilidadFinal,
+    };
   }, [delivered, productCostMap, fees]);
+
 
   // Función principal para cambiar estado con validación
   const handleStatusChangeWithValidation = async (orderId: string, newStatus: string) => {
@@ -1043,66 +1044,61 @@ export default function ClosuresView() {
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">ENCOMIENDAS</div><div className="text-[22px] font-extrabold">{kpis.encomiendas}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.encomiendaRev)}</div></div>
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Ganancia Delivery</div><div className="text-[22px] font-extrabold">{nf(kpis.deliveryFee)}</div></div>
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Neto a Rendir</div><div className="text-[22px] font-extrabold">{nf(netRendir)}</div></div>
-        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Pendientes rendir</div><div className="text-[22px] font-extrabold" style={{ color: '#eab308' }}>{kpis.noRendidos}</div><div className="text-xs text-muted-foreground">Neto a rendir: Gs {nf(kpis.montoPendiente)}</div></div>
+        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Pendientes rendir</div><div className="text-[22px] font-extrabold" style={{ color: '#eab308' }}>{kpis.noRendidos}</div><div className="text-xs text-muted-foreground">Neto (Gs) {nf(noRendidos.reduce((s, o) => s + (Number(o.total_gs || 0) - getDeliveryFeeForOrder(o)), 0))}</div></div>
         <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Ya rendidos</div><div className="text-[22px] font-extrabold" style={{ color: '#4ade80' }}>{kpis.rendidos}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.montoRendido)}</div></div>
       </div>
 
-      {(isAdmin || isSupplier) && (
-        <div className="app-card !p-4 mb-4 border-l-4 border-l-[#22c55e] bg-gradient-to-br from-[#22c55e]/10 to-[#3b82f6]/5">
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
+      {(isAdmin || isSupplier) && delivered.length > 0 && (
+        <div className="app-card !p-4 mb-4 border border-emerald-500/30 bg-emerald-500/5">
+          <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
             <div>
-              <h4 className="font-extrabold">💰 Panel de Ganancia Real</h4>
-              <p className="text-xs text-muted-foreground">Calculado sobre pedidos entregados/encomienda entregada visibles en el cierre.</p>
+              <h4 className="font-extrabold text-lg">💰 Panel de Ganancia Real</h4>
+              <p className="text-xs text-muted-foreground">
+                Calculado con pedidos entregados/encomienda entregada del período. El costo del producto usa products.real_cost_gs.
+              </p>
             </div>
-            <span className="badge-status badge-entregado">Ganancia real = venta - costo real producto - pago delivery - comisión</span>
+            <div className="text-right">
+              <div className="text-xs text-muted-foreground">UTILIDAD FINAL</div>
+              <div className="text-2xl font-extrabold text-emerald-400">Gs {nf(financePanel.utilidadFinal)}</div>
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-3">
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-3">
             <div className="kpi-card border border-blue-500/20 bg-blue-500/10">
-              <div className="text-xs text-muted-foreground mb-1">Total cobrado</div>
-              <div className="text-[20px] font-extrabold">{nf(financialBreakdown.totalSales)}</div>
-              <div className="text-xs text-muted-foreground">Gs</div>
-            </div>
-            <div className="kpi-card border border-purple-500/20 bg-purple-500/10">
-              <div className="text-xs text-muted-foreground mb-1">Costo real producto</div>
-              <div className="text-[20px] font-extrabold">{nf(financialBreakdown.productCost)}</div>
-              <div className="text-xs text-muted-foreground">Gs · real_cost_gs</div>
-            </div>
-            <div className="kpi-card border border-sky-500/20 bg-sky-500/10">
-              <div className="text-xs text-muted-foreground mb-1">Delivery cobrado</div>
-              <div className="text-[20px] font-extrabold">{nf(financialBreakdown.deliveryCharged)}</div>
-              <div className="text-xs text-muted-foreground">orders.delivery_gs</div>
-            </div>
-            <div className="kpi-card border border-amber-500/20 bg-amber-500/10">
-              <div className="text-xs text-muted-foreground mb-1">Pago delivery</div>
-              <div className="text-[20px] font-extrabold">{nf(financialBreakdown.deliveryPaid)}</div>
-              <div className="text-xs text-muted-foreground">delivery_fee_gs / tarifa</div>
-            </div>
-            <div className="kpi-card border border-emerald-500/20 bg-emerald-500/10">
-              <div className="text-xs text-muted-foreground mb-1">Ganancia delivery</div>
-              <div className="text-[20px] font-extrabold" style={{ color: financialBreakdown.deliveryProfit >= 0 ? '#4ade80' : '#f87171' }}>
-                {nf(financialBreakdown.deliveryProfit)}
+              <div className="text-xs text-blue-200 mb-2 font-bold">📦 Resumen productos</div>
+              <div className="flex justify-between text-xs mb-1"><span>Venta productos</span><strong>Gs {nf(financePanel.ventaProductos)}</strong></div>
+              <div className="flex justify-between text-xs mb-1"><span>Costo real productos</span><strong className="text-red-400">- Gs {nf(financePanel.costoRealProductos)}</strong></div>
+              <div className="border-t border-blue-500/20 mt-2 pt-2 flex justify-between text-sm">
+                <span className="font-bold">Ganancia productos</span>
+                <strong className="text-blue-300">Gs {nf(financePanel.gananciaProductos)}</strong>
               </div>
-              <div className="text-xs text-muted-foreground">Cobrado - pagado</div>
             </div>
-            <div className="kpi-card border border-cyan-500/20 bg-cyan-500/10">
-              <div className="text-xs text-muted-foreground mb-1">Comisión vendedor</div>
-              <div className="text-[20px] font-extrabold">{nf(financialBreakdown.sellerCommission)}</div>
-              <div className="text-xs text-muted-foreground">orders.commission_gs</div>
-            </div>
-            <div className="kpi-card border border-green-500/20 bg-green-500/10">
-              <div className="text-xs text-muted-foreground mb-1">Mi ganancia real</div>
-              <div className="text-[22px] font-extrabold" style={{ color: financialBreakdown.realProfit >= 0 ? '#4ade80' : '#f87171' }}>
-                {nf(financialBreakdown.realProfit)}
-              </div>
-              <div className="text-xs text-muted-foreground">Gs final</div>
-            </div>
-          </div>
 
-          <div className="mt-3 rounded-xl border border-slate-700/70 bg-black/20 p-3 text-xs text-muted-foreground">
-            <strong className="text-foreground">Fórmula:</strong> Ganancia real = Total cobrado - Costo real producto - Comisión vendedor - Pago delivery.
-            <span className="mx-2 text-slate-500">|</span>
-            Ganancia delivery = Delivery cobrado - Pago delivery.
+            <div className="kpi-card border border-cyan-500/20 bg-cyan-500/10">
+              <div className="text-xs text-cyan-200 mb-2 font-bold">🚚 Resumen delivery</div>
+              <div className="flex justify-between text-xs mb-1"><span>Delivery cobrado</span><strong>Gs {nf(financePanel.deliveryCobrado)}</strong></div>
+              <div className="flex justify-between text-xs mb-1"><span>Pago delivery</span><strong className="text-red-400">- Gs {nf(financePanel.pagoDelivery)}</strong></div>
+              <div className="border-t border-cyan-500/20 mt-2 pt-2 flex justify-between text-sm">
+                <span className="font-bold">Ganancia delivery</span>
+                <strong className="text-cyan-300">Gs {nf(financePanel.gananciaDelivery)}</strong>
+              </div>
+            </div>
+
+            <div className="kpi-card border border-amber-500/20 bg-amber-500/10">
+              <div className="text-xs text-amber-200 mb-2 font-bold">👨‍💼 Comisiones</div>
+              <div className="flex justify-between text-xs mb-1"><span>Comisión vendedor</span><strong className="text-red-400">- Gs {nf(financePanel.comisiones)}</strong></div>
+              <div className="border-t border-amber-500/20 mt-2 pt-2 text-[11px] text-muted-foreground">
+                Tomado desde orders.commission_gs
+              </div>
+            </div>
+
+            <div className="kpi-card border border-emerald-500/20 bg-emerald-500/10">
+              <div className="text-xs text-emerald-200 mb-2 font-bold">💎 Utilidad neta final</div>
+              <div className="text-[11px] text-muted-foreground mb-2">
+                Ganancia productos + Ganancia delivery - Comisiones
+              </div>
+              <div className="text-3xl font-extrabold text-emerald-400">Gs {nf(financePanel.utilidadFinal)}</div>
+            </div>
           </div>
         </div>
       )}
