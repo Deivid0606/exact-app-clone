@@ -309,28 +309,49 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return rowOrderNumbers[rowKey] || null;
   }, [rowOrderNumbers]);
 
+  // ─── FIX: paginado para traer TODAS las filas, sin importar cuántas sean ───
+  // Supabase/PostgREST devuelve por defecto un máximo de 1000 filas por consulta.
+  // Si el usuario ya tiene más de 1000 estados guardados, el .select() sin
+  // .range() los recorta silenciosamente (sin error) y la app nunca ve esos
+  // estados "de más" -> los pedidos correspondientes vuelven a aparecer como
+  // "Pendiente" aunque ya hayan sido cambiados y guardados correctamente.
   const loadStatusesFromDatabase = useCallback(async () => {
     if (!myEmail || !sheetUrl) return;
     setLoadingStatuses(true);
     try {
-      const { data, error } = await supabase
-        .from("sheet_row_statuses")
-        .select("row_index, status, order_number")
-        .eq("user_email", myEmail)
-        .eq("sheet_url", sheetUrl);
-      if (!error && data) {
-        const statusMap: Record<string, OrderStatus> = {};
-        const orderNumberMap: Record<string, string> = {};
-        data.forEach(item => {
+      const statusMap: Record<string, OrderStatus> = {};
+      const orderNumberMap: Record<string, string> = {};
+      const pageSize = 1000;
+      let from = 0;
+      let keepGoing = true;
+
+      while (keepGoing) {
+        const { data, error } = await supabase
+          .from("sheet_row_statuses")
+          .select("row_index, status, order_number")
+          .eq("user_email", myEmail)
+          .eq("sheet_url", sheetUrl)
+          .range(from, from + pageSize - 1);
+
+        if (error) throw error;
+
+        (data || []).forEach(item => {
           const rowKey = String(item.row_index);
           statusMap[rowKey] = item.status as OrderStatus;
           if (item.order_number) orderNumberMap[rowKey] = item.order_number;
         });
-        setRowStatuses(statusMap);
-        setRowOrderNumbers(orderNumberMap);
+
+        keepGoing = (data?.length || 0) === pageSize;
+        from += pageSize;
       }
-    } catch (err) { console.error(err); }
-    finally { setLoadingStatuses(false); }
+
+      setRowStatuses(statusMap);
+      setRowOrderNumbers(orderNumberMap);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingStatuses(false);
+    }
   }, [myEmail, sheetUrl]);
 
   const persistRowStatus = useCallback(async (rowKey: string, status: OrderStatus, orderNumber?: string) => {
@@ -416,7 +437,37 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
   useEffect(() => { localStorage.setItem(AUTO_LOAD_KEY, autoLoad.toString()); }, [autoLoad]);
   useEffect(() => { localStorage.setItem(ACTIVE_FILTER_KEY, activeFilter); }, [activeFilter]);
-  useEffect(() => { supabase.from("products").select("*").then(({ data }) => setProducts(data || [])); }, []);
+
+  // ─── FIX: mismo paginado para products, por si el catálogo supera las 1000 filas ───
+  useEffect(() => {
+    const loadAllProducts = async () => {
+      try {
+        const pageSize = 1000;
+        let from = 0;
+        let allProducts: any[] = [];
+        let keepGoing = true;
+
+        while (keepGoing) {
+          const { data, error } = await supabase
+            .from("products")
+            .select("*")
+            .range(from, from + pageSize - 1);
+
+          if (error) throw error;
+
+          allProducts = allProducts.concat(data || []);
+          keepGoing = (data?.length || 0) === pageSize;
+          from += pageSize;
+        }
+
+        setProducts(allProducts);
+      } catch (err) {
+        console.error("Error cargando productos:", err);
+      }
+    };
+    loadAllProducts();
+  }, []);
+
   useEffect(() => { if (myEmail && sheetUrl) loadStatusesFromDatabase(); }, [myEmail, sheetUrl, loadStatusesFromDatabase]);
   useEffect(() => { if (sheetUrl && !initialLoadDone) { readSheet(); setInitialLoadDone(true); } }, [sheetUrl]);
 
