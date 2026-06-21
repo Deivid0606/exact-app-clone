@@ -187,14 +187,18 @@ export default function RatesView() {
           <div className="flex flex-wrap gap-2">
             <div className="flex-1 min-w-[200px]">
               <label className="app-label">Delivery</label>
-              {role === 'PROVEEDOR' ? (
-                <input className="app-input" placeholder="email del delivery" value={drEmail} onChange={e => setDrEmail(e.target.value)} />
-              ) : (
-                <select className="app-input" value={drEmail} onChange={e => setDrEmail(e.target.value)}>
-                  <option value="">Seleccionar delivery…</option>
-                  {deliveries.map(d => <option key={d.email} value={d.email}>{d.name || d.email}</option>)}
-                </select>
-              )}
+              <select 
+                className="app-input" 
+                value={drEmail} 
+                onChange={e => setDrEmail(e.target.value)}
+              >
+                <option value="">Seleccionar delivery…</option>
+                {deliveries.map(d => (
+                  <option key={d.email} value={d.email}>
+                    {d.name || d.email}
+                  </option>
+                ))}
+              </select>
             </div>
             <div className="flex-1 min-w-[160px]">
               <label className="app-label">Ciudad</label>
