@@ -244,8 +244,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [loadingStatuses, setLoadingStatuses] = useState(true);
   const [products, setProducts] = useState<any[]>([]);
   
-  const [rowStatuses, setRowStatuses] = useState<Record<string, OrderStatus>>({});
-  const [rowOrderNumbers, setRowOrderNumbers] = useState<Record<string, string>>({});
+  // CAMBIADO: Record<number, OrderStatus> en lugar de Record<string, OrderStatus>
+  const [rowStatuses, setRowStatuses] = useState<Record<number, OrderStatus>>({});
+  const [rowOrderNumbers, setRowOrderNumbers] = useState<Record<number, string>>({});
   
   const [autoLoad, setAutoLoad] = useState<boolean>(() => localStorage.getItem(AUTO_LOAD_KEY) === "true");
   const [activeFilter, setActiveFilter] = useState<FilterType>(() => {
@@ -258,13 +259,14 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [cityFilter, setCityFilter] = useState("");
   const [coverageFilter, setCoverageFilter] = useState<"all" | "covered" | "uncovered">("covered");
   const [search, setSearch] = useState("");
-  const [selectedOrder, setSelectedOrder] = useState<{ order: SheetOrder; rowKey: string } | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<{ order: SheetOrder; rowKey: number } | null>(null);
   const [showGuideModal, setShowGuideModal] = useState(false);
 
   const [dateFrom, setDateFrom] = useState<string>("");
   const [dateTo, setDateTo] = useState<string>("");
 
-  const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
+  // CAMBIADO: Set<number> en lugar de Set<string>
+  const [selectedRows, setSelectedRows] = useState<Set<number>>(new Set());
   const [selectAll, setSelectAll] = useState(false);
   const [bulkActionLoading, setBulkActionLoading] = useState(false);
 
@@ -294,21 +296,23 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     };
   }, [sheetHeaders]);
 
-  const getRowKey = useCallback((order: SheetOrder, idx: number): string => {
+  // CAMBIADO: getRowKey devuelve number
+  const getRowKey = useCallback((order: SheetOrder, idx: number): number => {
     if (order.__row) {
-      return String(order.__row);
+      return Number(order.__row);
     }
-    return String(idx);
+    return idx;
   }, []);
 
-  const getRowStatus = useCallback((rowKey: string): OrderStatus => {
+  const getRowStatus = useCallback((rowKey: number): OrderStatus => {
     return rowStatuses[rowKey] || "CARGAR";
   }, [rowStatuses]);
 
-  const getRowOrderNumber = useCallback((rowKey: string): string | null => {
+  const getRowOrderNumber = useCallback((rowKey: number): string | null => {
     return rowOrderNumbers[rowKey] || null;
   }, [rowOrderNumbers]);
 
+  // CAMBIADO: loadStatusesFromDatabase usa number
   const loadStatusesFromDatabase = useCallback(async () => {
     if (!myEmail || !sheetUrl) return;
     setLoadingStatuses(true);
@@ -319,21 +323,25 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         .eq("user_email", myEmail)
         .eq("sheet_url", sheetUrl);
       if (!error && data) {
-        const statusMap: Record<string, OrderStatus> = {};
-        const orderNumberMap: Record<string, string> = {};
+        const statusMap: Record<number, OrderStatus> = {};
+        const orderNumberMap: Record<number, string> = {};
         data.forEach(item => {
-          const rowKey = String(item.row_index);
+          const rowKey = item.row_index; // Ya es number
           statusMap[rowKey] = item.status as OrderStatus;
           if (item.order_number) orderNumberMap[rowKey] = item.order_number;
         });
         setRowStatuses(statusMap);
         setRowOrderNumbers(orderNumberMap);
+      } else {
+        setRowStatuses({});
+        setRowOrderNumbers({});
       }
     } catch (err) { console.error(err); }
     finally { setLoadingStatuses(false); }
   }, [myEmail, sheetUrl]);
 
-  const persistRowStatus = useCallback(async (rowKey: string, status: OrderStatus, orderNumber?: string) => {
+  // CAMBIADO: persistRowStatus usa number
+  const persistRowStatus = useCallback(async (rowKey: number, status: OrderStatus, orderNumber?: string) => {
     if (!myEmail || !sheetUrl) {
       toast.error("Falta email o URL del sheet");
       return;
@@ -371,6 +379,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         if (error) throw error;
         toast.success(`✅ Estado: ⏳ Pendiente`);
       }
+      await loadStatusesFromDatabase();
     } catch (error: any) {
       console.error("❌ Error al persistir estado:", error);
       toast.error(`Error: ${error.message}`);
@@ -378,7 +387,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     }
   }, [myEmail, sheetUrl, loadStatusesFromDatabase]);
 
-  const setRowStatus = useCallback(async (rowKey: string, status: OrderStatus, orderNumber?: string) => {
+  // CAMBIADO: setRowStatus usa number
+  const setRowStatus = useCallback(async (rowKey: number, status: OrderStatus, orderNumber?: string) => {
     if (status === "CARGAR") {
       setRowStatuses(prev => {
         const next = { ...prev };
@@ -445,7 +455,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
            null;
   }, [products]);
 
-  const loadOrder = useCallback(async (order: SheetOrder, rowKey: string, source: "auto" | "manual" = "auto") => {
+  const loadOrder = useCallback(async (order: SheetOrder, rowKey: number, source: "auto" | "manual" = "auto") => {
     const productName = order[colKeys.product] || "";
     const matched = matchProduct(productName);
     if (!matched) { toast.error(`❌ Producto no detectado: "${productName}"`); return false; }
@@ -496,9 +506,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return true;
   }, [colKeys, matchProduct, myEmail, setRowStatus]);
 
-  const handleDirectSave = (order: SheetOrder, rowKey: string) => loadOrder(order, rowKey, "auto");
+  const handleDirectSave = (order: SheetOrder, rowKey: number) => loadOrder(order, rowKey, "auto");
 
-  const handleOpenForm = (order: SheetOrder, rowKey: string) => {
+  const handleOpenForm = (order: SheetOrder, rowKey: number) => {
     if (onSheetConfirm) onSheetConfirm({
       customer: order[colKeys.name] || "",
       phone: extractPhoneNumber(order[colKeys.phone] || ""),
@@ -526,7 +536,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     toast.success(`✅ ${count} cargados | ❌ ${errors} errores`);
   };
 
-  const toggleRowSelection = (rowKey: string) => {
+  const toggleRowSelection = (rowKey: number) => {
     setSelectedRows(prev => {
       const newSet = new Set(prev);
       if (newSet.has(rowKey)) {
@@ -548,6 +558,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     setSelectAll(!selectAll);
   };
 
+  // CAMBIADO: bulkChangeStatus corregido
   const bulkChangeStatus = async (newStatus: OrderStatus) => {
     if (selectedRows.size === 0) {
       toast.warning("⚠️ Seleccioná al menos una fila");
@@ -559,39 +570,57 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     let errorCount = 0;
 
     const rows = Array.from(selectedRows);
-    const batchSize = 10;
     
-    for (let i = 0; i < rows.length; i += batchSize) {
-      const batch = rows.slice(i, i + batchSize);
-      const promises = batch.map(async (rowKey) => {
-        try {
-          const orderNumber = getRowOrderNumber(rowKey);
+    for (const rowKey of rows) {
+      try {
+        const orderNumber = getRowOrderNumber(rowKey);
+        
+        if (newStatus === "CARGAR") {
+          const { error } = await supabase
+            .from("sheet_row_statuses")
+            .delete()
+            .eq("user_email", myEmail)
+            .eq("sheet_url", sheetUrl)
+            .eq("row_index", rowKey);
           
-          if (newStatus === "CARGAR") {
-            setRowStatuses(prev => {
-              const next = { ...prev };
-              delete next[rowKey];
-              return next;
+          if (error) throw error;
+          
+          setRowStatuses(prev => {
+            const next = { ...prev };
+            delete next[rowKey];
+            return next;
+          });
+          setRowOrderNumbers(prev => {
+            const next = { ...prev };
+            delete next[rowKey];
+            return next;
+          });
+        } else {
+          const { error } = await supabase
+            .from("sheet_row_statuses")
+            .upsert({
+              user_email: myEmail,
+              sheet_url: sheetUrl,
+              row_index: rowKey,
+              status: newStatus,
+              order_number: orderNumber || null,
+              updated_at: new Date().toISOString()
+            }, {
+              onConflict: 'user_email,sheet_url,row_index'
             });
-            setRowOrderNumbers(prev => {
-              const next = { ...prev };
-              delete next[rowKey];
-              return next;
-            });
-          } else {
-            setRowStatuses(prev => ({ ...prev, [rowKey]: newStatus }));
-          }
-
-          await persistRowStatus(rowKey, newStatus, orderNumber || undefined);
-          successCount++;
-        } catch (error) {
-          errorCount++;
+          
+          if (error) throw error;
+          setRowStatuses(prev => ({ ...prev, [rowKey]: newStatus }));
         }
-      });
-
-      await Promise.all(promises);
-      toast.info(`⏳ Procesando... ${Math.min(i + batchSize, rows.length)}/${rows.length}`);
+        
+        successCount++;
+      } catch (error) {
+        console.error(`Error en fila ${rowKey}:`, error);
+        errorCount++;
+      }
     }
+
+    await loadStatusesFromDatabase();
 
     setSelectedRows(new Set());
     setSelectAll(false);
@@ -600,6 +629,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     toast.success(`✅ Estados actualizados: ${successCount} exitosos, ${errorCount} errores`);
   };
 
+  // CAMBIADO: bulkLoadOrders usa number
   const bulkLoadOrders = async () => {
     if (selectedRows.size === 0) {
       toast.warning("⚠️ Seleccioná al menos una fila");
@@ -612,7 +642,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     let skippedCount = 0;
 
     const rows = Array.from(selectedRows);
-    const loadableRows: { rowKey: string; order: SheetOrder }[] = [];
+    const loadableRows: { rowKey: number; order: SheetOrder }[] = [];
     
     for (const rowKey of rows) {
       const status = getRowStatus(rowKey);
@@ -698,7 +728,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return { principales, extras };
   };
 
-  // ─── ESTADÍSTICAS PARA DASHBOARD ───
   const dashboardStats = useMemo(() => {
     let pendientesConCobertura = 0, pendientesSinCobertura = 0, cargados = 0, dropeados = 0, cancelados = 0;
     let totalVenta = 0;
@@ -759,7 +788,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return { cargarConCobertura, cargarSinCobertura, cargados, aDropear, cancelados, total: sheetOrders.length };
   }, [sheetOrders, colKeys, getRowKey, getRowStatus]);
 
-  // ─── FILTERED ORDERS ───
   const filteredOrders = useMemo(() => {
     return sheetOrders
       .map((order, idx) => ({ order, idx, rowKey: getRowKey(order, idx) }))
@@ -844,7 +872,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return "hover:bg-white/5";
   };
 
-  // ─── UI HELPERS PRO ───
   const statusTheme: Record<OrderStatus, { label: string; badge: string; dot: string; row: string }> = {
     "CARGAR": {
       label: "Pendiente",
@@ -1139,7 +1166,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     );
   }
 
-  // ─── DATOS PARA DASHBOARD PRO ───
   const pendingTotal = dashboardStats.pendientesConCobertura + dashboardStats.pendientesSinCobertura;
   const commissionTotal = sheetOrders.reduce((sum, order, idx) => {
     const rowKey = getRowKey(order, idx);
@@ -1405,23 +1431,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                             <select
                               className="rounded-xl border border-slate-700 bg-slate-950 px-2 py-1 text-xs font-bold text-white outline-none transition focus:border-blue-400"
                               value={status}
-                              onChange={(e) => {
+                              onChange={async (e) => {
                                 const newStatus = e.target.value as OrderStatus;
-                                if (newStatus === "CARGAR") {
-                                  setRowStatuses(prev => {
-                                    const next = { ...prev };
-                                    delete next[rowKey];
-                                    return next;
-                                  });
-                                  setRowOrderNumbers(prev => {
-                                    const next = { ...prev };
-                                    delete next[rowKey];
-                                    return next;
-                                  });
-                                } else {
-                                  setRowStatuses(prev => ({ ...prev, [rowKey]: newStatus }));
-                                }
-                                persistRowStatus(rowKey, newStatus, orderNumber || undefined);
+                                await setRowStatus(rowKey, newStatus, orderNumber || undefined);
                               }}
                             >
                               <option value="CARGAR">⏳ Pendiente</option>
