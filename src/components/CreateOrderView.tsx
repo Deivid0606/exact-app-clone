@@ -1,30 +1,39 @@
-import { useState, useEffect, useMemo } from 'react';
-import { supabase } from '@/integrations/supabase/client';
-import { useAuth } from '@/hooks/useAuth';
-import { toast } from 'sonner';
-import { BuyerHistoryModal } from '@/components/BuyerHistoryModal';
-import { Loader2, History, CheckCircle, AlertCircle } from 'lucide-react';
+import { useState, useEffect, useMemo } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useAuth } from "@/hooks/useAuth";
+import { toast } from "sonner";
+import { BuyerHistoryModal } from "@/components/BuyerHistoryModal";
+import { Loader2, History, CheckCircle, AlertCircle } from "lucide-react";
 
-const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
+const nf = (n: number) => new Intl.NumberFormat("es-PY").format(n);
 
-const normalizeEmail = (value: any) => String(value || '').trim().toLowerCase();
+const normalizeEmail = (value: any) =>
+  String(value || "")
+    .trim()
+    .toLowerCase();
 
 const normalizeRole = (value: any) => {
-  const r = String(value || '').trim().toLowerCase();
+  const r = String(value || "")
+    .trim()
+    .toLowerCase();
 
-  if (['admin', 'administrador'].includes(r)) return 'admin';
-  if (['provider', 'proveedor'].includes(r)) return 'provider';
-  if (['seller', 'vendedor'].includes(r)) return 'seller';
-  if (['despachante', 'dispatcher'].includes(r)) return 'despachante';
-  if (['delivery', 'repartidor'].includes(r)) return 'delivery';
+  if (["admin", "administrador"].includes(r)) return "admin";
+  if (["provider", "proveedor"].includes(r)) return "provider";
+  if (["seller", "vendedor"].includes(r)) return "seller";
+  if (["despachante", "dispatcher"].includes(r)) return "despachante";
+  if (["delivery", "repartidor"].includes(r)) return "delivery";
 
   return r;
 };
 
 const parsePrivateEmails = (value: any): string[] =>
-  String(value || '')
-    .split(',')
-    .map((e) => String(e || '').trim().toLowerCase())
+  String(value || "")
+    .split(",")
+    .map((e) =>
+      String(e || "")
+        .trim()
+        .toLowerCase(),
+    )
     .filter(Boolean);
 
 const isPrivateProduct = (product: any) =>
@@ -39,13 +48,13 @@ const canAccessProduct = (product: any, profile: any) => {
 
   if (!role || !userEmail) return false;
 
-  if (role === 'admin') return true;
+  if (role === "admin") return true;
 
-  if (role === 'provider') {
+  if (role === "provider") {
     return providerEmail === userEmail;
   }
 
-  if (['seller', 'despachante', 'delivery'].includes(role)) {
+  if (["seller", "despachante", "delivery"].includes(role)) {
     if (!isPrivate) return true;
     return privateEmails.includes(userEmail);
   }
@@ -55,8 +64,8 @@ const canAccessProduct = (product: any, profile: any) => {
 
 // Función para extraer SOLO los últimos 6 dígitos del teléfono
 const getLast6Digits = (phone: string): string => {
-  if (!phone) return '';
-  const digits = phone.toString().replace(/\D/g, '');
+  if (!phone) return "";
+  const digits = phone.toString().replace(/\D/g, "");
   return digits.slice(-6);
 };
 
@@ -69,9 +78,9 @@ const generateNormalOrderId = async (): Promise<string> => {
     const newOrderNumber = `A${timestamp}${micro}${random}`;
 
     const { data: existing } = await supabase
-      .from('orders')
-      .select('order_number')
-      .eq('order_number', newOrderNumber)
+      .from("orders")
+      .select("order_number")
+      .eq("order_number", newOrderNumber)
       .maybeSingle();
 
     if (existing) {
@@ -80,73 +89,87 @@ const generateNormalOrderId = async (): Promise<string> => {
 
     return newOrderNumber;
   } catch (err) {
-    console.error('Error en generateNormalOrderId:', err);
-    const uuid = crypto.randomUUID().replace(/-/g, '').substring(0, 10);
+    console.error("Error en generateNormalOrderId:", err);
+    const uuid = crypto.randomUUID().replace(/-/g, "").substring(0, 10);
     return `A${Date.now()}${uuid}`;
   }
 };
 
 // Mapeo de ciudades a departamentos
 const ciudadDepartamentoMap: { [key: string]: string } = {
-  "Altos": "Cordillera",
-  "Aregua": "Central",
-  "Asuncion": "Capital",
-  "Asunción": "Capital",
-  "Atyra": "Cordillera",
-  "Atyrá": "Cordillera",
+  Altos: "Cordillera",
+  Aregua: "Central",
+  Asuncion: "Capital",
+  Asunción: "Capital",
+  Atyra: "Cordillera",
+  Atyrá: "Cordillera",
   "Benjamín Aceval": "Presidente Hayes",
-  "Caacupe": "Cordillera",
-  "Capiata": "Central",
+  Caacupe: "Cordillera",
+  Capiata: "Central",
   "Ciudad del este - ALTO PARANÁ": "Alto Paraná",
   "Colonia Yguazu - ALTO PARANÁ": "Alto Paraná",
-  "Emboscada": "Cordillera",
+  Emboscada: "Cordillera",
   "Eusebio Ayala": "Cordillera",
   "Fernando de la Mora": "Central",
-  "Guarambare": "Central",
+  Guarambare: "Central",
   "Hernandarias - ALTO PARANÁ": "Alto Paraná",
   "INTERIOR PAGO ANTICIPADO": "Varios",
-  "Ita": "Central",
+  Ita: "Central",
   "Itacurubí de la Cordillera": "Cordillera",
-  "Itaugua": "Central",
+  Itaugua: "Central",
   "J. Augusto Saldívar": "Central",
   "Juan leon malloriquin - ALTO PARANÁ": "Alto Paraná",
-  "Lambare": "Central",
-  "Limpio": "Central",
+  Lambare: "Central",
+  Limpio: "Central",
   "Loma Grande": "Cordillera",
-  "Luque": "Central",
+  Luque: "Central",
   "Mariano Roque Alonso": "Central",
   "Minga Guazu - ALTO PARANÁ": "Alto Paraná",
-  "Ñemby": "Central",
+  Ñemby: "Central",
   "Nueva Italia": "Cordillera",
-  "Paraguarí": "Paraguarí",
-  "PIRAYÚ": "Paraguarí",
-  "Piribebuy": "Cordillera",
+  Paraguarí: "Paraguarí",
+  PIRAYÚ: "Paraguarí",
+  Piribebuy: "Cordillera",
   "Presidente franco": "Alto Paraná",
   "Puerto Pdte. Franco - ALTO PARANÁ": "Alto Paraná",
-  "Remansito": "Presidente Hayes",
+  Remansito: "Presidente Hayes",
   "San Alberto - ALTO PARANÁ": "Alto Paraná",
   "San Antonio": "Central",
   "San Bernardino": "Cordillera",
   "San Lorenzo": "Central",
   "SANTA RITA - ALTO PARANÁ": "Alto Paraná",
-  "Tobatí": "Cordillera",
+  Tobatí: "Cordillera",
   "Villa Elisa": "Central",
   "Villa Hayes": "Presidente Hayes",
-  "Villarrica": "Guairá",
-  "Villeta": "Paraguarí",
-  "YAGUARON": "Paraguarí",
-  "Yguazu": "Alto Paraná",
+  Villarrica: "Guairá",
+  Villeta: "Paraguarí",
+  YAGUARON: "Paraguarí",
+  Yguazu: "Alto Paraná",
   "YGUAZU - ALTO PARANÁ": "Alto Paraná",
-  "Ypacaraí": "Cordillera",
-  "Ypane": "Central",
+  Ypacaraí: "Cordillera",
+  Ypane: "Central",
 };
 
 // Departamentos disponibles
 const DEPARTAMENTOS = [
-  "Capital", "Central", "Alto Paraná", "Itapúa", "Cordillera",
-  "Caaguazú", "Guairá", "Ñeembucú", "Concepción", "Amambay",
-  "Canindeyú", "Caazapá", "Misiones", "Paraguarí", "Presidente Hayes",
-  "Boquerón", "Alto Paraguay", "Varios"
+  "Capital",
+  "Central",
+  "Alto Paraná",
+  "Itapúa",
+  "Cordillera",
+  "Caaguazú",
+  "Guairá",
+  "Ñeembucú",
+  "Concepción",
+  "Amambay",
+  "Canindeyú",
+  "Caazapá",
+  "Misiones",
+  "Paraguarí",
+  "Presidente Hayes",
+  "Boquerón",
+  "Alto Paraguay",
+  "Varios",
 ];
 
 const CreateOrderView = ({
@@ -176,39 +199,41 @@ const CreateOrderView = ({
   const [products, setProducts] = useState<any[]>([]);
   const [clientPrices, setClientPrices] = useState<any[]>([]);
   const [userFavorites, setUserFavorites] = useState<Set<string>>(new Set());
-  const [customer, setCustomer] = useState('');
-  const [phone, setPhone] = useState('');
-  
+  const [customer, setCustomer] = useState("");
+  const [phone, setPhone] = useState("");
+
   // Estados para departamento y ciudad
-  const [departamento, setDepartamento] = useState('');
-  const [city, setCity] = useState('');
+  const [departamento, setDepartamento] = useState("");
+  const [city, setCity] = useState("");
   const [ciudadesFiltradas, setCiudadesFiltradas] = useState<any[]>([]);
-  
-  const [street, setStreet] = useState('');
-  const [district, setDistrict] = useState('');
-  const [email, setEmail] = useState('');
-  const [obs, setObs] = useState('');
-  const [items, setItems] = useState<{ sku: string; sale_gs: number; qty: number }[]>([
-    { sku: '', sale_gs: 0, qty: 1 },
-  ]);
+
+  const [street, setStreet] = useState("");
+  const [district, setDistrict] = useState("");
+  const [email, setEmail] = useState("");
+  const [obs, setObs] = useState("");
+  const [items, setItems] = useState<
+    { sku: string; sale_gs: number; qty: number }[]
+  >([{ sku: "", sale_gs: 0, qty: 1 }]);
   const [saving, setSaving] = useState(false);
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [showHistoryModal, setShowHistoryModal] = useState(false);
   const [checkingHistory, setCheckingHistory] = useState(false);
   const [hasHistory, setHasHistory] = useState(false);
-  const [clientStatus, setClientStatus] = useState<'new' | 'regular' | 'problematic' | null>(null);
+  const [clientStatus, setClientStatus] = useState<
+    "new" | "regular" | "problematic" | null
+  >(null);
 
   // Obtener departamentos que TIENEN AL MENOS UNA CIUDAD en clientPrices
   const departamentosConCiudades = useMemo(() => {
     const deptosConCiudades = new Set<string>();
-    
-    clientPrices.forEach(c => {
+
+    clientPrices.forEach((c) => {
       const depto = c.departamento || ciudadDepartamentoMap[c.city];
-      if (depto && depto !== 'Sin asignar') {
+      if (depto && depto !== "Sin asignar") {
         deptosConCiudades.add(depto);
       }
     });
-    
+
     // Solo mostrar departamentos que tienen ciudades cargadas y ordenarlos
     return Array.from(deptosConCiudades).sort();
   }, [clientPrices]);
@@ -216,14 +241,14 @@ const CreateOrderView = ({
   // Filtrar ciudades cuando cambia el departamento
   useEffect(() => {
     if (departamento) {
-      const filtradas = clientPrices.filter(c => {
+      const filtradas = clientPrices.filter((c) => {
         const depto = c.departamento || ciudadDepartamentoMap[c.city];
         return depto === departamento;
       });
       setCiudadesFiltradas(filtradas);
       // Resetear ciudad cuando cambia departamento
-      if (city && !filtradas.find(c => c.city === city)) {
-        setCity('');
+      if (city && !filtradas.find((c) => c.city === city)) {
+        setCity("");
       }
     } else {
       setCiudadesFiltradas(clientPrices);
@@ -232,36 +257,36 @@ const CreateOrderView = ({
 
   useEffect(() => {
     if (!profile?.email) {
-      localStorage.setItem('pending_order_url', window.location.href);
+      localStorage.setItem("pending_order_url", window.location.href);
       return;
     }
 
     const params = new URLSearchParams(window.location.search);
 
-    const origen = params.get('origen');
-    const nombre = params.get('nombre');
-    const telefono = params.get('telefono');
-    const ciudad = params.get('ciudad');
-    const calle = params.get('calle');
-    const producto = params.get('producto');
-    const cantidad = params.get('cantidad');
-    const total = params.get('total');
-    const pago = params.get('pago');
+    const origen = params.get("origen");
+    const nombre = params.get("nombre");
+    const telefono = params.get("telefono");
+    const ciudad = params.get("ciudad");
+    const calle = params.get("calle");
+    const producto = params.get("producto");
+    const cantidad = params.get("cantidad");
+    const total = params.get("total");
+    const pago = params.get("pago");
 
-    if (origen !== 'seller-skyline') return;
+    if (origen !== "seller-skyline") return;
 
     if (nombre) setCustomer(nombre);
     if (telefono) setPhone(telefono);
     if (ciudad) setCity(ciudad);
     if (calle) setStreet(calle);
 
-    const totalNumber = Number(String(total || '').replace(/\D/g, '')) || 0;
+    const totalNumber = Number(String(total || "").replace(/\D/g, "")) || 0;
     const qtyNumber = Number(cantidad || 1) || 1;
 
     if (producto || totalNumber || qtyNumber) {
       setItems([
         {
-          sku: '',
+          sku: "",
           sale_gs: totalNumber,
           qty: qtyNumber,
         },
@@ -269,14 +294,14 @@ const CreateOrderView = ({
 
       setObs(
         [
-          producto ? `Producto: ${producto}` : '',
-          pago ? `Forma de pago: ${pago}` : '',
+          producto ? `Producto: ${producto}` : "",
+          pago ? `Forma de pago: ${pago}` : "",
         ]
           .filter(Boolean)
-          .join(' | ')
+          .join(" | "),
       );
 
-      toast.success('Pedido recibido desde Seller Skyline');
+      toast.success("Pedido recibido desde Seller Skyline");
     }
   }, [profile?.email]);
 
@@ -290,40 +315,45 @@ const CreateOrderView = ({
     setCheckingHistory(true);
     try {
       const last6Digits = getLast6Digits(phoneNumber);
-      
+
       const { data: orders, error } = await supabase
-        .from('orders')
-        .select('id, status, total_gs, created_at')
+        .from("orders")
+        .select("id, status, total_gs, created_at")
         .or(`phone.ilike.%${last6Digits}`);
 
       if (error) throw error;
-      
-      const matchingOrders = orders?.filter(order => {
-        const orderLast6 = getLast6Digits(order.phone);
-        return orderLast6 === last6Digits;
-      }) || [];
-      
+
+      const matchingOrders =
+        orders?.filter((order) => {
+          const orderLast6 = getLast6Digits(order.phone);
+          return orderLast6 === last6Digits;
+        }) || [];
+
       const hasOrders = matchingOrders.length > 0;
       setHasHistory(hasOrders);
-      
+
       if (hasOrders) {
-        const cancelled = matchingOrders.filter(o => o.status === 'cancelled' || o.status === 'cancelado').length;
-        const returned = matchingOrders.filter(o => o.status === 'returned' || o.status === 'devuelto').length;
+        const cancelled = matchingOrders.filter(
+          (o) => o.status === "cancelled" || o.status === "cancelado",
+        ).length;
+        const returned = matchingOrders.filter(
+          (o) => o.status === "returned" || o.status === "devuelto",
+        ).length;
         const problemCount = cancelled + returned;
         const problemRate = problemCount / matchingOrders.length;
-        
+
         if (problemRate >= 0.5) {
-          setClientStatus('problematic');
+          setClientStatus("problematic");
         } else if (problemCount > 0) {
-          setClientStatus('regular');
+          setClientStatus("regular");
         } else {
-          setClientStatus('regular');
+          setClientStatus("regular");
         }
       } else {
-        setClientStatus('new');
+        setClientStatus("new");
       }
     } catch (error) {
-      console.error('Error verificando historial:', error);
+      console.error("Error verificando historial:", error);
       setHasHistory(false);
       setClientStatus(null);
     } finally {
@@ -348,9 +378,9 @@ const CreateOrderView = ({
 
     try {
       const { data, error } = await supabase
-        .from('user_favorites')
-        .select('product_id')
-        .eq('user_email', profile.email);
+        .from("user_favorites")
+        .select("product_id")
+        .eq("user_email", profile.email);
 
       if (error) throw error;
 
@@ -358,7 +388,7 @@ const CreateOrderView = ({
       setUserFavorites(favoriteSet);
       return favoriteSet;
     } catch (error) {
-      console.error('Error cargando favoritos:', error);
+      console.error("Error cargando favoritos:", error);
       return new Set<string>();
     }
   };
@@ -373,14 +403,16 @@ const CreateOrderView = ({
         const favoritesSet = await loadUserFavorites();
 
         const { data: productsData, error: productsError } = await supabase
-          .from('products')
-          .select('*')
-          .order('title');
+          .from("products")
+          .select("*")
+          .order("title");
 
         if (productsError) throw productsError;
 
         const allProducts = productsData || [];
-        const visibleProducts = allProducts.filter((p: any) => canAccessProduct(p, profile));
+        const visibleProducts = allProducts.filter((p: any) =>
+          canAccessProduct(p, profile),
+        );
 
         const filteredProducts = visibleProducts.filter((p: any) => {
           const isPrivate = p.is_private === true;
@@ -400,18 +432,19 @@ const CreateOrderView = ({
 
         // Cargar precios con departamento
         const { data: pricesData, error: pricesError } = await supabase
-          .from('client_prices')
-          .select('*')
-          .order('city');
+          .from("client_prices")
+          .select("*")
+          .order("city");
 
         if (pricesError) throw pricesError;
 
         // Si la tabla no tiene columna departamento, usar el mapa
-        const pricesConDepto = (pricesData || []).map(p => ({
+        const pricesConDepto = (pricesData || []).map((p) => ({
           ...p,
-          departamento: p.departamento || ciudadDepartamentoMap[p.city] || 'Sin asignar'
+          departamento:
+            p.departamento || ciudadDepartamentoMap[p.city] || "Sin asignar",
         }));
-        
+
         setClientPrices(pricesConDepto);
 
         if (sheetPrefill) {
@@ -423,16 +456,22 @@ const CreateOrderView = ({
           if (sheetPrefill.obs) setObs(sheetPrefill.obs);
 
           const normCity = (s: string) =>
-            s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+            s
+              .toLowerCase()
+              .normalize("NFD")
+              .replace(/[\u0300-\u036f]/g, "")
+              .trim();
 
-          const sheetCityNorm = normCity(sheetPrefill.city || '');
+          const sheetCityNorm = normCity(sheetPrefill.city || "");
 
           const findCity = (prices: any[]) => {
-            const exact = prices.find((c: any) => normCity(c.city || '') === sheetCityNorm);
+            const exact = prices.find(
+              (c: any) => normCity(c.city || "") === sheetCityNorm,
+            );
             if (exact) return exact;
 
             const partial = prices.find((c: any) => {
-              const pc = normCity(c.city || '');
+              const pc = normCity(c.city || "");
               return sheetCityNorm.includes(pc) || pc.includes(sheetCityNorm);
             });
             if (partial) return partial;
@@ -444,7 +483,7 @@ const CreateOrderView = ({
 
             for (const part of parts) {
               const m = prices.find((c: any) => {
-                const pc = normCity(c.city || '');
+                const pc = normCity(c.city || "");
                 return pc.includes(part) || part.includes(pc);
               });
               if (m) return m;
@@ -457,7 +496,8 @@ const CreateOrderView = ({
           if (cityMatch) {
             setCity(cityMatch.city);
             // Auto-select department
-            const depto = cityMatch.departamento || ciudadDepartamentoMap[cityMatch.city];
+            const depto =
+              cityMatch.departamento || ciudadDepartamentoMap[cityMatch.city];
             if (depto) setDepartamento(depto);
           } else if (sheetPrefill.city) {
             setCity(sheetPrefill.city);
@@ -466,13 +506,13 @@ const CreateOrderView = ({
           if (sheetPrefill.productTitle) {
             const titleLower = sheetPrefill.productTitle.toLowerCase().trim();
             const cleanTitle = titleLower
-              .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '')
+              .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, "")
               .trim();
 
             const exactMatch = filteredProducts.find(
               (p: any) =>
                 p.title?.toLowerCase().trim() === titleLower ||
-                p.title?.toLowerCase().trim() === cleanTitle
+                p.title?.toLowerCase().trim() === cleanTitle,
             );
 
             if (exactMatch && exactMatch.sku) {
@@ -486,8 +526,10 @@ const CreateOrderView = ({
               toast.success(`🎯 Producto detectado: ${exactMatch.title}`);
             } else {
               const partialMatch = filteredProducts.find((p: any) => {
-                const pTitle = p.title?.toLowerCase().trim() || '';
-                return pTitle.includes(cleanTitle) || cleanTitle.includes(pTitle);
+                const pTitle = p.title?.toLowerCase().trim() || "";
+                return (
+                  pTitle.includes(cleanTitle) || cleanTitle.includes(pTitle)
+                );
               });
 
               if (partialMatch && partialMatch.sku) {
@@ -498,17 +540,19 @@ const CreateOrderView = ({
                     qty: sheetPrefill.qty || 1,
                   },
                 ]);
-                toast.success(`🎯 Producto detectado (parcial): ${partialMatch.title}`);
+                toast.success(
+                  `🎯 Producto detectado (parcial): ${partialMatch.title}`,
+                );
               } else {
                 setItems([
                   {
-                    sku: '',
+                    sku: "",
                     sale_gs: sheetPrefill.totalGs || 0,
                     qty: sheetPrefill.qty || 1,
                   },
                 ]);
                 toast.info(
-                  `⚠️ Producto "${sheetPrefill.productTitle}" no encontrado en catálogo. Elegilo manualmente.`
+                  `⚠️ Producto "${sheetPrefill.productTitle}" no encontrado en catálogo. Elegilo manualmente.`,
                 );
               }
             }
@@ -517,15 +561,22 @@ const CreateOrderView = ({
           onPrefillConsumed?.();
         }
       } catch (error: any) {
-        console.error('Error cargando datos de CreateOrderView:', error);
-        toast.error(error?.message || 'No se pudieron cargar los productos');
+        console.error("Error cargando datos de CreateOrderView:", error);
+        toast.error(error?.message || "No se pudieron cargar los productos");
       } finally {
         setLoadingProducts(false);
       }
     };
 
     loadData();
-  }, [initialSku, onSkuConsumed, sheetPrefill, onPrefillConsumed, profile?.email, profile?.role]);
+  }, [
+    initialSku,
+    onSkuConsumed,
+    sheetPrefill,
+    onPrefillConsumed,
+    profile?.email,
+    profile?.role,
+  ]);
 
   const catalogMap: Record<string, any> = useMemo(() => {
     const map: Record<string, any> = {};
@@ -536,12 +587,12 @@ const CreateOrderView = ({
   }, [products]);
 
   const deliveryPrice =
-    clientPrices.find((c) => c.city?.toLowerCase() === city.toLowerCase())?.price_gs || 0;
+    clientPrices.find((c) => c.city?.toLowerCase() === city.toLowerCase())
+      ?.price_gs || 0;
 
-  const totalVenta = items.reduce(
-    (s, i) => s + Number(i.sale_gs || 0) * Number(i.qty || 0),
-    0
-  );
+  // sale_gs representa el PRECIO TOTAL de cada línea, no el precio unitario.
+  // Ejemplo: 2 plumeros por 129.000 Gs => sale_gs = 129000 y qty = 2.
+  const totalVenta = items.reduce((s, i) => s + Number(i.sale_gs || 0), 0);
 
   const totalProv = items.reduce((s, i) => {
     const p = catalogMap[i.sku];
@@ -550,7 +601,7 @@ const CreateOrderView = ({
 
   const commission = totalVenta - (totalProv + Number(deliveryPrice || 0));
 
-  const addItem = () => setItems([...items, { sku: '', sale_gs: 0, qty: 1 }]);
+  const addItem = () => setItems([...items, { sku: "", sale_gs: 0, qty: 1 }]);
 
   const removeItem = (idx: number) => {
     setItems(items.filter((_, i) => i !== idx));
@@ -560,7 +611,7 @@ const CreateOrderView = ({
     const copy = [...items];
     (copy[idx] as any)[field] = value;
 
-    if (field === 'sku') {
+    if (field === "sku") {
       const selected = catalogMap[value];
       if (selected && !copy[idx].sale_gs) {
         copy[idx].sale_gs = Number(selected.sale_price_gs || 0);
@@ -571,31 +622,35 @@ const CreateOrderView = ({
   };
 
   const resetForm = () => {
-    setCustomer('');
-    setPhone('');
-    setDepartamento('');
-    setCity('');
-    setStreet('');
-    setDistrict('');
-    setEmail('');
-    setObs('');
-    setItems([{ sku: '', sale_gs: 0, qty: 1 }]);
+    setCustomer("");
+    setPhone("");
+    setDepartamento("");
+    setCity("");
+    setStreet("");
+    setDistrict("");
+    setEmail("");
+    setObs("");
+    setItems([{ sku: "", sale_gs: 0, qty: 1 }]);
   };
 
   const saveOrder = async () => {
     if (saving) return;
 
     if (!customer || !phone || !city) {
-      toast.error('Completá cliente / teléfono / ciudad');
+      toast.error("Completá cliente / teléfono / ciudad");
       return;
     }
 
     const validItems = items.filter(
-      (i) => i.sku && Number(i.sale_gs) > 0 && Number(i.qty) > 0 && catalogMap[i.sku]
+      (i) =>
+        i.sku &&
+        Number(i.sale_gs) > 0 &&
+        Number(i.qty) > 0 &&
+        catalogMap[i.sku],
     );
 
     if (validItems.length === 0) {
-      toast.error('Agregá al menos 1 ítem válido');
+      toast.error("Agregá al menos 1 ítem válido");
       return;
     }
 
@@ -605,7 +660,11 @@ const CreateOrderView = ({
       const orderNumber = await generateNormalOrderId();
 
       const providerEmails = [
-        ...new Set(validItems.map((i) => catalogMap[i.sku]?.provider_email).filter(Boolean)),
+        ...new Set(
+          validItems
+            .map((i) => catalogMap[i.sku]?.provider_email)
+            .filter(Boolean),
+        ),
       ];
 
       const payload = {
@@ -625,25 +684,25 @@ const CreateOrderView = ({
           sale_gs: Number(i.sale_gs),
           qty: Number(i.qty),
           provider_price_gs: Number(catalogMap[i.sku]?.provider_price_gs || 0),
-          provider_email: catalogMap[i.sku]?.provider_email || '',
+          provider_email: catalogMap[i.sku]?.provider_email || "",
         })),
         total_gs: totalVenta,
         delivery_gs: Number(deliveryPrice),
         commission_gs: commission,
-        provider_emails_list: providerEmails.join(','),
+        provider_emails_list: providerEmails.join(","),
       };
 
       const { data: insertedOrder, error: insertError } = await supabase
-        .from('orders')
+        .from("orders")
         .insert(payload)
-        .select('id, order_number')
+        .select("id, order_number")
         .single();
 
       if (insertError) throw insertError;
 
       const generatedOrderNumber = insertedOrder?.order_number || orderNumber;
 
-      const { error: newsError } = await supabase.from('news').insert({
+      const { error: newsError } = await supabase.from("news").insert({
         order_id: String(generatedOrderNumber),
         actor_email: profile?.email,
         role_scope: profile?.role,
@@ -651,14 +710,14 @@ const CreateOrderView = ({
       });
 
       if (newsError) {
-        console.error('Error al crear noticia:', newsError);
+        console.error("Error al crear noticia:", newsError);
       }
 
       toast.success(`✅ Pedido ${generatedOrderNumber} guardado`);
       resetForm();
     } catch (error: any) {
-      console.error('Error guardando pedido:', error);
-      toast.error(error?.message || 'No se pudo guardar el pedido');
+      console.error("Error guardando pedido:", error);
+      toast.error(error?.message || "No se pudo guardar el pedido");
     } finally {
       setSaving(false);
     }
@@ -699,12 +758,10 @@ const CreateOrderView = ({
                   ) : (
                     <History className="w-4 h-4" />
                   )}
-                  <span className="hidden sm:inline text-sm">
-                    Historial
-                  </span>
+                  <span className="hidden sm:inline text-sm">Historial</span>
                 </button>
               </div>
-              
+
               {/* Indicador de estado del cliente */}
               {phone && phone.length >= 6 && !checkingHistory && (
                 <div className="text-xs mt-1.5 flex items-center gap-2">
@@ -739,8 +796,10 @@ const CreateOrderView = ({
                   onChange={(e) => setDepartamento(e.target.value)}
                 >
                   <option value="">Selecciona departamento…</option>
-                  {departamentosConCiudades.map(depto => (
-                    <option key={depto} value={depto}>{depto}</option>
+                  {departamentosConCiudades.map((depto) => (
+                    <option key={depto} value={depto}>
+                      {depto}
+                    </option>
                   ))}
                 </select>
               </>
@@ -751,14 +810,32 @@ const CreateOrderView = ({
             <select
               className="app-input w-full min-w-0 text-base"
               value={city}
-              onChange={(e) => setCity(e.target.value)}
+              onChange={(e) => {
+                const selectedCity = e.target.value;
+                setCity(selectedCity);
+
+                if (!selectedCity) {
+                  setDepartamento("");
+                  return;
+                }
+
+                // Detectar automáticamente el departamento de la ciudad elegida.
+                const selectedCityData = clientPrices.find(
+                  (c) => c.city === selectedCity,
+                );
+
+                const detectedDepartment =
+                  selectedCityData?.departamento ||
+                  ciudadDepartamentoMap[selectedCity] ||
+                  "";
+
+                setDepartamento(detectedDepartment);
+              }}
             >
               <option value="">
-                {departamentosConCiudades.length === 0 
-                  ? 'No hay ciudades cargadas…' 
-                  : !departamento && departamentosConCiudades.length > 0
-                    ? 'Primero selecciona un departamento…'
-                    : 'Selecciona ciudad…'}
+                {departamentosConCiudades.length === 0
+                  ? "No hay ciudades cargadas…"
+                  : "Selecciona ciudad…"}
               </option>
               {ciudadesFiltradas.map((c) => (
                 <option key={c.id} value={c.city}>
@@ -823,19 +900,21 @@ const CreateOrderView = ({
                     <select
                       className="app-input w-full min-w-0 text-base"
                       value={item.sku}
-                      onChange={(e) => updateItem(idx, 'sku', e.target.value)}
+                      onChange={(e) => updateItem(idx, "sku", e.target.value)}
                     >
                       <option value="">
-                        {loadingProducts ? 'Cargando productos…' : 'Seleccionar producto…'}
+                        {loadingProducts
+                          ? "Cargando productos…"
+                          : "Seleccionar producto…"}
                       </option>
                       {products.map((p) => (
                         <option key={p.id} value={p.sku}>
                           {p.title} — {p.sku}
-                          {userFavorites.has(p.id) ? ' ⭐' : ''}
-                          {p.is_private ? ' 🔒' : ''}
+                          {userFavorites.has(p.id) ? " ⭐" : ""}
+                          {p.is_private ? " 🔒" : ""}
                           {` (Stock: ${p.stock || 0})`}
                           {` (Prov ${nf(Number(p.provider_price_gs || 0))})`}
-                          {p.provider_email ? ` [${p.provider_email}]` : ''}
+                          {p.provider_email ? ` [${p.provider_email}]` : ""}
                         </option>
                       ))}
                     </select>
@@ -844,7 +923,8 @@ const CreateOrderView = ({
                   <div className="w-full min-w-0 md:col-span-2">
                     <label className="app-label !mt-0">Proveedor</label>
                     <div className="chip w-full break-words text-[10px]">
-                      Prov: {nf(Number(catalogMap[item.sku]?.provider_price_gs || 0))}
+                      Prov:{" "}
+                      {nf(Number(catalogMap[item.sku]?.provider_price_gs || 0))}
                     </div>
                   </div>
 
@@ -854,8 +934,10 @@ const CreateOrderView = ({
                       className="app-input w-full min-w-0 text-base"
                       type="number"
                       placeholder="Venta TOTAL (Gs)"
-                      value={item.sale_gs || ''}
-                      onChange={(e) => updateItem(idx, 'sale_gs', Number(e.target.value))}
+                      value={item.sale_gs || ""}
+                      onChange={(e) =>
+                        updateItem(idx, "sale_gs", Number(e.target.value))
+                      }
                     />
                   </div>
 
@@ -866,12 +948,16 @@ const CreateOrderView = ({
                       type="number"
                       placeholder="Cant."
                       value={item.qty}
-                      onChange={(e) => updateItem(idx, 'qty', Number(e.target.value))}
+                      onChange={(e) =>
+                        updateItem(idx, "qty", Number(e.target.value))
+                      }
                     />
                   </div>
 
                   <div className="w-full min-w-0 md:col-span-1">
-                    <label className="app-label !mt-0 hidden opacity-0 md:block">Acción</label>
+                    <label className="app-label !mt-0 hidden opacity-0 md:block">
+                      Acción
+                    </label>
                     <button
                       className="nav-btn w-full text-xs"
                       onClick={() => removeItem(idx)}
@@ -883,13 +969,20 @@ const CreateOrderView = ({
 
                 <div className="mt-2">
                   <span className="chip break-words text-[10px]">
-                    Prov×Cant: {nf(Number(catalogMap[item.sku]?.provider_price_gs || 0) * item.qty)}
+                    Prov×Cant:{" "}
+                    {nf(
+                      Number(catalogMap[item.sku]?.provider_price_gs || 0) *
+                        item.qty,
+                    )}
                   </span>
                 </div>
               </div>
             ))}
 
-            <button className="nav-btn active mt-2 w-full text-xs sm:w-auto" onClick={addItem}>
+            <button
+              className="nav-btn active mt-2 w-full text-xs sm:w-auto"
+              onClick={addItem}
+            >
               + Agregar ítem
             </button>
 
@@ -933,7 +1026,7 @@ const CreateOrderView = ({
                     <span className="btn-spinner" /> Guardando...
                   </span>
                 ) : (
-                  'Guardar pedido'
+                  "Guardar pedido"
                 )}
               </button>
             </div>
