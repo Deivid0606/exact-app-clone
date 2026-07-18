@@ -30,10 +30,18 @@ interface OrderRow {
 }
 
 interface DeliveryStock {
+  id: string;
   delivery_email: string;
-  product_sku: string;
+  product_id: string;
   quantity: number;
-  product_name?: string;
+}
+
+interface Product {
+  id: string;
+  title: string;
+  sku: string | null;
+  image_url: string | null;
+  provider_email: string | null;
 }
 
 type KpiTone = 'blue' | 'emerald' | 'amber' | 'rose' | 'violet' | 'cyan' | 'pink';
@@ -219,7 +227,7 @@ export default function Dashboard() {
   });
   const [dateTo, setDateTo] = useState(() => todayPY());
   const [orders, setOrders] = useState<OrderRow[]>([]);
-  const [products, setProducts] = useState<any[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [deliveryRates, setDeliveryRates] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
   const [deliveryStocks, setDeliveryStocks] = useState<DeliveryStock[]>([]);
@@ -240,7 +248,7 @@ export default function Dashboard() {
       supabase.from('orders').select('*').gte('created_at', from).lte('created_at', to),
       supabase.from('orders').select('*').gte('assigned_at', from).lte('assigned_at', to),
       supabase.from('orders').select('*').gte('delivered_at', from).lte('delivered_at', to),
-      supabase.from('products').select('*'),
+      supabase.from('products').select('id, title, sku, image_url, provider_email'),
       supabase.from('delivery_fees').select('*'),
       supabase.from('delivery_stock').select('*'),
       supabase.from('profiles').select('id, email, full_name, avatar_url, role'),
@@ -263,7 +271,7 @@ export default function Dashboard() {
 
   const costMap = useMemo(() => {
     const m: Record<string, number> = {};
-    products.forEach(p => { if (p.sku) m[p.sku.trim()] = Number(p.real_cost_gs || p.provider_price_gs || 0); });
+    products.forEach(p => { if (p.sku) m[p.sku.trim()] = Number(p.real_cost_gs || 0); });
     return m;
   }, [products]);
 
@@ -275,13 +283,19 @@ export default function Dashboard() {
 
   const productImageMap = useMemo(() => {
     const m: Record<string, string> = {};
-    products.forEach(p => { if (p.sku && p.image_url) m[p.sku.trim()] = p.image_url; });
+    products.forEach(p => { if (p.id && p.image_url) m[p.id] = p.image_url; });
     return m;
   }, [products]);
 
   const productNameMap = useMemo(() => {
     const m: Record<string, string> = {};
-    products.forEach(p => { if (p.sku && p.title) m[p.sku.trim()] = p.title; });
+    products.forEach(p => { if (p.id && p.title) m[p.id] = p.title; });
+    return m;
+  }, [products]);
+
+  const productSkuMap = useMemo(() => {
+    const m: Record<string, string> = {};
+    products.forEach(p => { if (p.id && p.sku) m[p.id] = p.sku; });
     return m;
   }, [products]);
 
@@ -390,7 +404,6 @@ export default function Dashboard() {
       if (!sellerEmail) return;
 
       if (role === 'PROVEEDOR') {
-        // Solo mostrar vendedores que vendieron productos del proveedor
         try {
           const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
           let hasProviderProduct = false;
@@ -482,24 +495,34 @@ export default function Dashboard() {
   const deliveryStockData = useMemo(() => {
     if (role !== 'ADMIN' && role !== 'PROVEEDOR') return [];
 
+    // Si es PROVEEDOR, filtrar productos que le pertenecen
+    const providerProductIds = new Set<string>();
+    if (role === 'PROVEEDOR') {
+      products.forEach(p => {
+        if (p.provider_email?.toLowerCase() === email.toLowerCase()) {
+          providerProductIds.add(p.id);
+        }
+      });
+    }
+
     const stocks = deliveryStocks
       .filter(s => {
         if (role === 'PROVEEDOR') {
-          // Verificar que el producto pertenece al proveedor
-          return skuProviderMap[s.product_sku] === email.toLowerCase();
+          return providerProductIds.has(s.product_id);
         }
         return true;
       })
       .map(s => ({
         ...s,
-        productName: productNameMap[s.product_sku] || s.product_sku,
-        image: productImageMap[s.product_sku],
+        productName: productNameMap[s.product_id] || s.product_id,
+        sku: productSkuMap[s.product_id] || '',
+        image: productImageMap[s.product_id],
       }))
       .sort((a, b) => b.quantity - a.quantity)
       .slice(0, 10);
 
     return stocks;
-  }, [deliveryStocks, role, email, skuProviderMap, productNameMap, productImageMap]);
+  }, [deliveryStocks, role, email, products, productNameMap, productSkuMap, productImageMap]);
 
   // Estadísticas de delivery stock
   const deliveryStockStats = useMemo(() => {
@@ -572,6 +595,14 @@ export default function Dashboard() {
       } catch {}
     });
 
+    // Buscar imagen del producto por SKU
+    const skuToImage: Record<string, string> = {};
+    products.forEach(p => {
+      if (p.sku && p.image_url) {
+        skuToImage[p.sku.trim()] = p.image_url;
+      }
+    });
+
     return Object.entries(map)
       .sort(([,a], [,b]) => b.qty - a.qty)
       .slice(0, 10)
@@ -579,9 +610,9 @@ export default function Dashboard() {
         name,
         qty: data.qty,
         delivered: data.delivered,
-        image: productImageMap[data.sku] || null
+        image: skuToImage[data.sku] || null
       }));
-  }, [createdRangeOrders, deliveredRangeOrders, productImageMap]);
+  }, [createdRangeOrders, deliveredRangeOrders, products]);
 
   const mapCities = useMemo(() => {
     const byCity: Record<string, { qty: number; delivered: number; revenue: number }> = {};
@@ -718,28 +749,37 @@ export default function Dashboard() {
           )}
 
           {/* Stock Disponible por Delivery - solo ADMIN y PROVEEDOR */}
-          {(role === 'ADMIN' || role === 'PROVEEDOR') && deliveryStockData.length > 0 && (
+          {(role === 'ADMIN' || role === 'PROVEEDOR') && (
             <div className="rounded-2xl border border-cyan-500/30 bg-gradient-to-br from-cyan-500/10 to-blue-500/5 p-5 shadow-2xl shadow-black/20">
               <div className="mb-4 flex items-center justify-between gap-3">
                 <div>
                   <h3 className="text-base font-black text-white">📦 Stock Disponible por Delivery</h3>
                   <p className="text-xs font-semibold text-slate-400">
-                    {deliveryStockStats.totalProducts} productos • {nf(deliveryStockStats.totalUnits)} unidades totales
+                    {deliveryStockData.length > 0 
+                      ? `${deliveryStockStats.totalProducts} productos • ${nf(deliveryStockStats.totalUnits)} unidades totales`
+                      : 'No hay stock asignado a deliveries'
+                    }
                   </p>
                 </div>
                 <span className="rounded-full bg-cyan-500/20 px-3 py-1 text-xs font-black text-cyan-300">📊</span>
               </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {deliveryStockData.map((stock, index) => (
-                  <DeliveryStockCard
-                    key={index}
-                    productName={stock.productName}
-                    sku={stock.product_sku}
-                    quantity={stock.quantity}
-                    image={stock.image}
-                  />
-                ))}
-              </div>
+              {deliveryStockData.length > 0 ? (
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {deliveryStockData.map((stock, index) => (
+                    <DeliveryStockCard
+                      key={index}
+                      productName={stock.productName}
+                      sku={stock.sku || stock.product_id}
+                      quantity={stock.quantity}
+                      image={stock.image}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="flex h-[100px] items-center justify-center rounded-xl border border-dashed border-slate-700 text-sm font-bold text-slate-500">
+                  No hay stock asignado a deliveries {role === 'PROVEEDOR' ? 'para tus productos' : ''}
+                </div>
+              )}
             </div>
           )}
 
