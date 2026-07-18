@@ -9,8 +9,7 @@ import {
   TrendingUp, TrendingDown, ShoppingBag, Truck, XCircle, 
   Users, DollarSign, Package, MapPin, Award, Clock, 
   AlertCircle, CheckCircle, BarChart3, PieChart as PieChartIcon,
-  Calendar, Filter, Download, RefreshCw, ChevronDown,
-  Eye, Edit, Trash2, MoreVertical, UserPlus, Box
+  Filter, Download, RefreshCw, ChevronDown, Box, UserPlus
 } from 'lucide-react';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(Math.round(Number(n || 0)));
@@ -75,6 +74,17 @@ interface DeliveryWithStock {
     quantity: number;
     image?: string;
   }[];
+}
+
+interface SellerCommission {
+  seller_email: string;
+  seller_name: string;
+  seller_avatar?: string;
+  total_delivered: number;
+  total_commission: number;
+  pending_commission: number;
+  settled_commission: number;
+  orders: OrderRow[];
 }
 
 type KpiTone = 'blue' | 'emerald' | 'amber' | 'rose' | 'violet' | 'cyan' | 'pink' | 'indigo' | 'slate';
@@ -228,111 +238,86 @@ const ActionButton = ({ children, variant = 'primary', onClick, icon: Icon, load
   );
 };
 
-// ─── Tabla de Comisiones ──────────────────────────────────────────────────────
+// ─── Tabla de Comisiones (filtrada por proveedor) ──────────────────────────
 
-const CommissionsTable = ({ commissions, onSettle }: {
-  commissions: any[];
+const CommissionsTable = ({ commissions, onSettle, isLoading }: {
+  commissions: SellerCommission[];
   onSettle: (email: string) => void;
-}) => (
-  <div className="overflow-x-auto">
-    <table className="w-full text-sm">
-      <thead>
-        <tr className="border-b border-white/10">
-          <th className="text-left py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Vendedor</th>
-          <th className="text-center py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Entregas</th>
-          <th className="text-center py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Total Comisión</th>
-          <th className="text-center py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Pendiente</th>
-          <th className="text-center py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Liquidado</th>
-          <th className="text-right py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Acción</th>
-        </tr>
-      </thead>
-      <tbody>
-        {commissions.map(comm => (
-          <tr key={comm.seller_email} className="border-b border-white/5 hover:bg-white/5 transition-all">
-            <td className="py-3 px-3">
-              <div className="flex items-center gap-3">
-                <div className="h-9 w-9 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-white font-bold text-sm">
-                  {comm.seller_avatar ? (
-                    <img src={comm.seller_avatar} alt={comm.seller_name} className="h-full w-full rounded-full object-cover" />
-                  ) : (
-                    comm.seller_name?.charAt(0).toUpperCase() || 'V'
-                  )}
-                </div>
-                <div>
-                  <div className="font-bold text-white">{comm.seller_name}</div>
-                  <div className="text-xs text-slate-400">{comm.seller_email}</div>
-                </div>
-              </div>
-            </td>
-            <td className="text-center py-3 px-3 font-bold text-white">{comm.total_delivered}</td>
-            <td className="text-center py-3 px-3 font-bold text-emerald-400">{nf(comm.total_commission)} Gs</td>
-            <td className="text-center py-3 px-3 font-bold text-amber-400">{nf(comm.pending_commission)} Gs</td>
-            <td className="text-center py-3 px-3 font-bold text-cyan-400">{nf(comm.settled_commission)} Gs</td>
-            <td className="text-right py-3 px-3">
-              <ActionButton 
-                variant="success" 
-                onClick={() => onSettle(comm.seller_email)}
-                disabled={comm.pending_commission === 0}
-                icon={CheckCircle}
-              >
-                Liquidar
-              </ActionButton>
-            </td>
+  isLoading?: boolean;
+}) => {
+  if (isLoading) {
+    return (
+      <div className="text-center py-8">
+        <div className="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-cyan-400" />
+        <p className="text-sm text-slate-400 mt-2">Cargando comisiones...</p>
+      </div>
+    );
+  }
+
+  if (commissions.length === 0) {
+    return (
+      <div className="text-center py-8">
+        <DollarSign className="h-10 w-10 text-slate-500 mx-auto mb-2" />
+        <p className="text-slate-400 font-medium">No hay comisiones pendientes</p>
+        <p className="text-sm text-slate-500">Los vendedores aparecerán aquí cuando tengan pedidos entregados</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-white/10">
+            <th className="text-left py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Vendedor</th>
+            <th className="text-center py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Entregas</th>
+            <th className="text-center py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Total Comisión</th>
+            <th className="text-center py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Pendiente</th>
+            <th className="text-center py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Liquidado</th>
+            <th className="text-right py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Acción</th>
           </tr>
-        ))}
-      </tbody>
-    </table>
-  </div>
-);
-
-// ─── Componente: Top Bar ──────────────────────────────────────────────────────
-
-const TopBar = ({ dateFrom, dateTo, onDateChange, onRefresh, loading }: {
-  dateFrom: string;
-  dateTo: string;
-  onDateChange: (from: string, to: string) => void;
-  onRefresh: () => void;
-  loading: boolean;
-}) => (
-  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-5 rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.03] to-white/[0.01] backdrop-blur-sm">
-    <div className="flex items-center gap-4">
-      <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center shadow-lg shadow-blue-500/25">
-        <BarChart3 className="h-6 w-6 text-white" />
-      </div>
-      <div>
-        <h1 className="text-2xl font-black text-white tracking-tight">Dashboard</h1>
-        <p className="text-xs text-slate-400">Panel de control empresarial</p>
-      </div>
+        </thead>
+        <tbody>
+          {commissions.map((comm) => (
+            <tr key={comm.seller_email} className="border-b border-white/5 hover:bg-white/5 transition-all">
+              <td className="py-3 px-3">
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                    {comm.seller_avatar ? (
+                      <img src={comm.seller_avatar} alt={comm.seller_name} className="h-full w-full rounded-full object-cover" />
+                    ) : (
+                      comm.seller_name?.charAt(0).toUpperCase() || 'V'
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-bold text-white truncate">{comm.seller_name}</div>
+                    <div className="text-xs text-slate-400 truncate">{comm.seller_email}</div>
+                  </div>
+                </div>
+              </td>
+              <td className="text-center py-3 px-3 font-bold text-white">{comm.total_delivered}</td>
+              <td className="text-center py-3 px-3 font-bold text-emerald-400">{nf(comm.total_commission)} Gs</td>
+              <td className="text-center py-3 px-3 font-bold text-amber-400">{nf(comm.pending_commission)} Gs</td>
+              <td className="text-center py-3 px-3 font-bold text-cyan-400">{nf(comm.settled_commission)} Gs</td>
+              <td className="text-right py-3 px-3">
+                <ActionButton 
+                  variant="success" 
+                  onClick={() => onSettle(comm.seller_email)}
+                  disabled={comm.pending_commission === 0}
+                  icon={CheckCircle}
+                >
+                  Liquidar
+                </ActionButton>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
+  );
+};
 
-    <div className="flex flex-wrap items-center gap-3">
-      <div className="flex items-center gap-2 bg-black/30 rounded-xl border border-white/10 p-1">
-        <input
-          type="date"
-          className="bg-transparent px-3 py-1.5 text-xs font-medium text-white outline-none border-0 focus:ring-0"
-          value={dateFrom}
-          onChange={e => onDateChange(e.target.value, dateTo)}
-        />
-        <span className="text-slate-500 text-xs">→</span>
-        <input
-          type="date"
-          className="bg-transparent px-3 py-1.5 text-xs font-medium text-white outline-none border-0 focus:ring-0"
-          value={dateTo}
-          onChange={e => onDateChange(dateFrom, e.target.value)}
-        />
-      </div>
-      
-      <ActionButton variant="secondary" onClick={onRefresh} icon={RefreshCw} loading={loading}>
-        Actualizar
-      </ActionButton>
-      <ActionButton variant="secondary" icon={Download}>
-        Exportar
-      </ActionButton>
-    </div>
-  </div>
-);
-
-// ─── Componente: Stock por Delivery (mejorado) ──────────────────────────────
+// ─── Componente: Stock por Delivery ──────────────────────────────────────────
 
 const DeliveryStockSection = ({ deliveries, onManage }: {
   deliveries: DeliveryWithStock[];
@@ -452,6 +437,53 @@ const DeliveryStockSection = ({ deliveries, onManage }: {
   );
 };
 
+// ─── Top Bar ──────────────────────────────────────────────────────────────────
+
+const TopBar = ({ dateFrom, dateTo, onDateChange, onRefresh, loading }: {
+  dateFrom: string;
+  dateTo: string;
+  onDateChange: (from: string, to: string) => void;
+  onRefresh: () => void;
+  loading: boolean;
+}) => (
+  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-5 rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.03] to-white/[0.01] backdrop-blur-sm">
+    <div className="flex items-center gap-4">
+      <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center shadow-lg shadow-blue-500/25">
+        <BarChart3 className="h-6 w-6 text-white" />
+      </div>
+      <div>
+        <h1 className="text-2xl font-black text-white tracking-tight">Dashboard</h1>
+        <p className="text-xs text-slate-400">Panel de control empresarial</p>
+      </div>
+    </div>
+
+    <div className="flex flex-wrap items-center gap-3">
+      <div className="flex items-center gap-2 bg-black/30 rounded-xl border border-white/10 p-1">
+        <input
+          type="date"
+          className="bg-transparent px-3 py-1.5 text-xs font-medium text-white outline-none border-0 focus:ring-0"
+          value={dateFrom}
+          onChange={e => onDateChange(e.target.value, dateTo)}
+        />
+        <span className="text-slate-500 text-xs">→</span>
+        <input
+          type="date"
+          className="bg-transparent px-3 py-1.5 text-xs font-medium text-white outline-none border-0 focus:ring-0"
+          value={dateTo}
+          onChange={e => onDateChange(dateFrom, e.target.value)}
+        />
+      </div>
+      
+      <ActionButton variant="secondary" onClick={onRefresh} icon={RefreshCw} loading={loading}>
+        Actualizar
+      </ActionButton>
+      <ActionButton variant="secondary" icon={Download}>
+        Exportar
+      </ActionButton>
+    </div>
+  </div>
+);
+
 // ─── Dashboard Principal ──────────────────────────────────────────────────────
 
 export default function Dashboard() {
@@ -473,9 +505,6 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(false);
   const [deliveryStocks, setDeliveryStocks] = useState<DeliveryStock[]>([]);
   const [profiles, setProfiles] = useState<Profile[]>([]);
-  const [adSpend, setAdSpend] = useState(() => {
-    try { return Number(localStorage.getItem('provider_ad_spend') || 0); } catch { return 0; }
-  });
 
   const loadDashboard = useCallback(async () => {
     setLoading(true);
@@ -727,7 +756,7 @@ export default function Dashboard() {
       .slice(0, 10);
   }, [deliveredRangeOrders, role, email, skuProviderMap, profileMap, deliveryRates]);
 
-  // ─── Stock por Delivery (MEJORADO) ────────────────────────────────────────────
+  // ─── Stock por Delivery ──────────────────────────────────────────────────────
 
   const deliveryStockData = useMemo((): DeliveryWithStock[] => {
     if (role !== 'ADMIN' && role !== 'PROVEEDOR') return [];
@@ -744,7 +773,6 @@ export default function Dashboard() {
     const grouped: Record<string, DeliveryWithStock> = {};
 
     deliveryStocks.forEach(stock => {
-      // Filtrar por proveedor si es necesario
       if (role === 'PROVEEDOR' && !providerProductIds.has(stock.product_id)) return;
       
       const product = productMap[stock.product_id];
@@ -779,17 +807,18 @@ export default function Dashboard() {
       .sort((a, b) => b.total_units - a.total_units);
   }, [deliveryStocks, role, email, products, productMap, profileMap]);
 
-  // ─── Comisiones por Vendedor ────────────────────────────────────────────────
+  // ─── COMISIONES POR VENDEDOR (FILTRADAS POR PROVEEDOR) ────────────────────
 
-  const sellerCommissions = useMemo(() => {
+  const sellerCommissions = useMemo((): SellerCommission[] => {
     if (role !== 'ADMIN' && role !== 'PROVEEDOR') return [];
 
-    const sellerMap: Record<string, any> = {};
+    const sellerMap: Record<string, SellerCommission> = {};
 
     deliveredRangeOrders.forEach(o => {
       const sellerEmail = o.created_by?.toLowerCase() || '';
       if (!sellerEmail) return;
       
+      // 🔥 FILTRO CRUCIAL: Solo procesar pedidos que contengan productos del proveedor
       if (role === 'PROVEEDOR') {
         try {
           const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
@@ -800,12 +829,49 @@ export default function Dashboard() {
               hasProviderProduct = true;
             }
           });
-          if (!hasProviderProduct) return;
-        } catch { return; }
+          if (!hasProviderProduct) return; // Saltar pedidos sin productos del proveedor
+        } catch { 
+          return; // Si hay error, saltar este pedido
+        }
       }
 
-      const commission = Number(o.commission_gs || 0);
-      const isSettled = o.commission_settled || false;
+      // Calcular la comisión REAL del vendedor solo para productos del proveedor
+      let sellerCommission = 0;
+      let productCount = 0;
+
+      try {
+        const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
+        items.forEach((it: any) => {
+          const sku = String(it.sku || '').trim();
+          const productProvider = skuProviderMap[sku] || '';
+          
+          // Solo contar productos del proveedor actual
+          if (role === 'PROVEEDOR' && productProvider === email.toLowerCase()) {
+            const qty = Number(it.qty || 0);
+            // La comisión del vendedor es un porcentaje del precio de venta
+            // Usamos commission_gs del pedido o calculamos un porcentaje
+            const itemCommission = Number(o.commission_gs || 0) * (qty / (items.length || 1));
+            sellerCommission += itemCommission;
+            productCount += qty;
+          } else if (role === 'ADMIN') {
+            // Para ADMIN, mostrar todas las comisiones
+            const qty = Number(it.qty || 0);
+            const itemCommission = Number(o.commission_gs || 0) * (qty / (items.length || 1));
+            sellerCommission += itemCommission;
+            productCount += qty;
+          }
+        });
+      } catch {
+        // Si no se puede parsear items_json, usar commission_gs del pedido
+        if (role === 'ADMIN') {
+          sellerCommission = Number(o.commission_gs || 0);
+        } else {
+          return; // Para proveedor, si no se puede parsear, saltar
+        }
+      }
+
+      // Si la comisión es 0 y es proveedor, saltar
+      if (role === 'PROVEEDOR' && sellerCommission === 0) return;
 
       if (!sellerMap[sellerEmail]) {
         const sellerProfile = profileMap[sellerEmail];
@@ -821,17 +887,19 @@ export default function Dashboard() {
         };
       }
 
-      sellerMap[sellerEmail].total_delivered++;
-      sellerMap[sellerEmail].total_commission += commission;
-      if (isSettled) {
-        sellerMap[sellerEmail].settled_commission += commission;
+      sellerMap[sellerEmail].total_delivered += productCount || 1;
+      sellerMap[sellerEmail].total_commission += sellerCommission;
+      
+      if (o.commission_settled) {
+        sellerMap[sellerEmail].settled_commission += sellerCommission;
       } else {
-        sellerMap[sellerEmail].pending_commission += commission;
+        sellerMap[sellerEmail].pending_commission += sellerCommission;
       }
       sellerMap[sellerEmail].orders.push(o);
     });
 
     return Object.values(sellerMap)
+      .filter(s => s.total_commission > 0) // Solo mostrar vendedores con comisiones
       .sort((a, b) => b.pending_commission - a.pending_commission);
   }, [deliveredRangeOrders, role, email, skuProviderMap, profileMap]);
 
@@ -1070,29 +1138,37 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Comisiones Pendientes - ADMIN & PROVEEDOR */}
-        {(role === 'ADMIN' || role === 'PROVEEDOR') && sellerCommissions.length > 0 && (
+        {/* COMISIONES PENDIENTES - FILTRADAS POR PROVEEDOR */}
+        {(role === 'ADMIN' || role === 'PROVEEDOR') && (
           <div className="rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/5 to-teal-500/5 p-5 shadow-xl">
             <SectionHeader 
               title="💰 Comisiones Pendientes a Pagar" 
-              subtitle="Pedidos entregados con estado rendido"
+              subtitle={role === 'PROVEEDOR' 
+                ? "Comisiones de tus productos entregados" 
+                : "Comisiones de todos los vendedores"
+              }
               action={
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold text-emerald-400 bg-emerald-500/20 px-3 py-1 rounded-full">
                     Total: {nf(sellerCommissions.reduce((sum, s) => sum + s.pending_commission, 0))} Gs
                   </span>
-                  <ActionButton variant="success" icon={CheckCircle}>Liquidar todo</ActionButton>
+                  {sellerCommissions.length > 0 && (
+                    <ActionButton variant="success" icon={CheckCircle}>
+                      Liquidar todo
+                    </ActionButton>
+                  )}
                 </div>
               }
             />
             <CommissionsTable 
               commissions={sellerCommissions} 
               onSettle={handleSettleCommission}
+              isLoading={loading}
             />
           </div>
         )}
 
-        {/* STOCK POR DELIVERY - MEJORADO Y MÁS GRANDE */}
+        {/* STOCK POR DELIVERY */}
         {(role === 'ADMIN' || role === 'PROVEEDOR') && (
           <div className="rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/5 to-blue-500/5 p-5 shadow-xl">
             <SectionHeader 
@@ -1112,8 +1188,6 @@ export default function Dashboard() {
                 </div>
               }
             />
-            
-            {/* Componente de Stock mejorado */}
             <DeliveryStockSection 
               deliveries={deliveryStockData} 
               onManage={handleManageStock}
@@ -1125,10 +1199,7 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
           {/* Ventas por día */}
           <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-xl">
-            <SectionHeader 
-              title="Ventas por día" 
-              subtitle="Total vendido por día"
-            />
+            <SectionHeader title="Ventas por día" subtitle="Total vendido por día" />
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={barData}>
@@ -1159,10 +1230,7 @@ export default function Dashboard() {
 
           {/* Ventas vs Entregas */}
           <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-xl">
-            <SectionHeader 
-              title="Ventas vs Entregas" 
-              subtitle="Comparativa diaria"
-            />
+            <SectionHeader title="Ventas vs Entregas" subtitle="Comparativa diaria" />
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={lineData}>
@@ -1192,10 +1260,7 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
           {/* Distribución de estados */}
           <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-xl">
-            <SectionHeader 
-              title="Distribución de estados" 
-              subtitle="Pedidos por estado"
-            />
+            <SectionHeader title="Distribución de estados" subtitle="Pedidos por estado" />
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
@@ -1230,10 +1295,7 @@ export default function Dashboard() {
 
           {/* Top Productos */}
           <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-xl">
-            <SectionHeader 
-              title="Top Productos" 
-              subtitle="Vendido vs Entregado"
-            />
+            <SectionHeader title="Top Productos" subtitle="Vendido vs Entregado" />
             <div className="space-y-2 max-h-72 overflow-y-auto pr-2">
               {topProducts.map((product, index) => (
                 <div key={index} className="flex items-center gap-3 rounded-lg bg-white/5 p-2 hover:bg-white/10 transition-all">
@@ -1270,10 +1332,7 @@ export default function Dashboard() {
 
         {/* Top Ciudades */}
         <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-xl">
-          <SectionHeader 
-            title="Top Ciudades" 
-            subtitle="Mayor volumen de pedidos"
-          />
+          <SectionHeader title="Top Ciudades" subtitle="Mayor volumen de pedidos" />
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
             {mapCities.map((city, index) => (
               <div key={index} className="rounded-xl bg-white/5 p-3 border border-white/5 hover:bg-white/10 transition-all">
