@@ -178,6 +178,87 @@ interface DeliveryStockRow {
   quantity: number;
 }
 
+interface CommissionMovementRow {
+  id: string;
+  source_table: string;
+  seller_email: string;
+  provider_email: string;
+  amount: number;
+  status: string;
+  order_ids: string[];
+  created_at: string | null;
+  paid_at: string | null;
+}
+
+const PAYMENT_TABLES = [
+  'commission_requests',
+  'commission_payments',
+  'commission_payouts',
+  'commission_withdrawals',
+] as const;
+
+const PAID_COMMISSION_STATES = new Set([
+  'pagado', 'pagada', 'paid', 'completado', 'completada', 'completed',
+  'aprobado y pagado', 'approved and paid', 'finalizado', 'finalizada',
+]);
+
+const REQUESTED_COMMISSION_STATES = new Set([
+  'pendiente', 'pending', 'solicitado', 'solicitada', 'requested',
+  'en revision', 'en revisión', 'processing', 'procesando', 'aprobado', 'aprobada', 'approved',
+]);
+
+const REJECTED_COMMISSION_STATES = new Set([
+  'rechazado', 'rechazada', 'rejected', 'cancelado', 'cancelada', 'cancelled', 'canceled', 'anulado', 'anulada',
+]);
+
+const getFirstValue = (row: any, keys: string[]) => {
+  for (const key of keys) {
+    const value = row?.[key];
+    if (value !== undefined && value !== null && String(value).trim() !== '') return value;
+  }
+  return null;
+};
+
+const parseOrderIds = (value: any): string[] => {
+  if (!value) return [];
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => typeof item === 'object' ? item?.id || item?.order_id : item)
+      .filter(Boolean)
+      .map(String);
+  }
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parseOrderIds(parsed);
+    } catch {}
+    return value.split(',').map((item) => item.trim()).filter(Boolean);
+  }
+  return [];
+};
+
+const normalizeCommissionMovement = (row: any, sourceTable: string): CommissionMovementRow => ({
+  id: String(row?.id || `${sourceTable}-${Math.random()}`),
+  source_table: sourceTable,
+  seller_email: normalizeEmail(getFirstValue(row, [
+    'seller_email', 'vendedor_email', 'user_email', 'requested_by',
+    'requester_email', 'email', 'created_by',
+  ])),
+  provider_email: normalizeEmail(getFirstValue(row, [
+    'provider_email', 'proveedor_email', 'supplier_email', 'owner_email',
+  ])),
+  amount: Math.max(0, Number(getFirstValue(row, [
+    'amount_gs', 'commission_gs', 'total_gs', 'amount', 'monto_gs',
+    'requested_amount_gs', 'paid_amount_gs', 'total_commission_gs',
+  ]) || 0)),
+  status: norm(getFirstValue(row, ['status', 'estado', 'payment_status', 'request_status']) || 'pendiente'),
+  order_ids: parseOrderIds(getFirstValue(row, [
+    'order_ids', 'orders', 'pedido_ids', 'commission_order_ids',
+  ])),
+  created_at: getFirstValue(row, ['created_at', 'requested_at', 'date']) as string | null,
+  paid_at: getFirstValue(row, ['paid_at', 'completed_at', 'approved_at', 'payment_date']) as string | null,
+});
+
 type Tone = 'blue' | 'emerald' | 'amber' | 'rose' | 'violet' | 'cyan';
 
 function KpiCard({
@@ -250,6 +331,7 @@ export default function Dashboard() {
   const [profiles, setProfiles] = useState<ProfileRow[]>([]);
   const [deliveryStocks, setDeliveryStocks] = useState<DeliveryStockRow[]>([]);
   const [deliveryRates, setDeliveryRates] = useState<Record<string, number>>({});
+  const [commissionMovements, setCommissionMovements] = useState<CommissionMovementRow[]>([]);
   const [loading, setLoading] = useState(false);
 
   const isAdmin = role === 'ADMIN' || role === 'ADMINISTRADOR';
@@ -257,6 +339,39 @@ export default function Dashboard() {
   const isSeller = role === 'VENDEDOR' || role === 'SELLER';
   const isDeliveryUser = role === 'DELIVERY' || role === 'REPARTIDOR';
   const canSeeGlobalPanels = isAdmin || isProvider;
+
+  const loadCommissionMovements = async () => {
+    const collected: CommissionMovementRow[] = [];
+
+    for (const table of PAYMENT_TABLES) {
+      const { data, error } = await supabase.from(table).select('*');
+
+      // Si la tabla no existe, se ignora. Así el Dashboard funciona con cualquiera
+      // de los nombres usados por los módulos de solicitudes/pagos.
+      if (error) {
+        const message = String(error.message || '').toLowerCase();
+        const missingTable =
+          message.includes('does not exist') ||
+          message.includes('could not find the table') ||
+          message.includes('relation') ||
+          error.code === '42P01' ||
+          error.code === 'PGRST205';
+
+        if (!missingTable) console.error(`Error cargando ${table}:`, error);
+        continue;
+      }
+
+      (data || []).forEach((row: any) => {
+        collected.push(normalizeCommissionMovement(row, table));
+      });
+    }
+
+    const unique = new Map<string, CommissionMovementRow>();
+    collected.forEach((movement) => {
+      unique.set(`${movement.source_table}:${movement.id}`, movement);
+    });
+    setCommissionMovements(Array.from(unique.values()));
+  };
 
   const loadDashboard = async () => {
     setLoading(true);
@@ -304,6 +419,7 @@ export default function Dashboard() {
     ].filter(Boolean);
 
     if (errors.length) console.error('Errores cargando Dashboard:', errors);
+    await loadCommissionMovements();
     setLoading(false);
   };
 
@@ -397,8 +513,50 @@ export default function Dashboard() {
     return normalizeEmail(order.provider_email) === target ? 1 : 0;
   };
 
+  const commissionOrderProviderIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!isProvider) return ids;
+    settledDeliveredOrders.forEach((order) => {
+      if (getProviderShare(order, email) > 0) ids.add(order.id);
+    });
+    return ids;
+  }, [isProvider, settledDeliveredOrders, email, productById, productBySku]);
+
+  const paymentTotalsBySeller = useMemo(() => {
+    const map = new Map<string, { paid: number; requested: number }>();
+
+    commissionMovements.forEach((movement) => {
+      if (!movement.seller_email || movement.amount <= 0) return;
+      if (REJECTED_COMMISSION_STATES.has(movement.status)) return;
+
+      if (isProvider) {
+        const directProviderMatch = movement.provider_email === email;
+        const orderMatch =
+          movement.order_ids.length > 0 &&
+          movement.order_ids.some((orderId) => commissionOrderProviderIds.has(orderId));
+
+        // Para proveedor nunca se mezclan pagos declarados para otro proveedor.
+        if (movement.provider_email && !directProviderMatch) return;
+        if (!movement.provider_email && movement.order_ids.length > 0 && !orderMatch) return;
+        if (!movement.provider_email && movement.order_ids.length === 0) return;
+      }
+
+      const current = map.get(movement.seller_email) || { paid: 0, requested: 0 };
+
+      if (PAID_COMMISSION_STATES.has(movement.status) || movement.paid_at) {
+        current.paid += movement.amount;
+      } else if (REQUESTED_COMMISSION_STATES.has(movement.status)) {
+        current.requested += movement.amount;
+      }
+
+      map.set(movement.seller_email, current);
+    });
+
+    return map;
+  }, [commissionMovements, isProvider, email, commissionOrderProviderIds]);
+
   const sellerCommissionRows = useMemo(() => {
-    if (!canSeeGlobalPanels) return [];
+    if (!canSeeGlobalPanels && !isSeller) return [];
 
     const map = new Map<
       string,
@@ -409,7 +567,10 @@ export default function Dashboard() {
         orders: number;
         units: number;
         sales: number;
-        commission: number;
+        generated: number;
+        requested: number;
+        paid: number;
+        available: number;
         products: Set<string>;
       }
     >();
@@ -417,6 +578,7 @@ export default function Dashboard() {
     settledDeliveredOrders.forEach((order) => {
       const sellerEmail = getSellerEmail(order);
       if (!sellerEmail) return;
+      if (isSeller && sellerEmail !== email) return;
 
       const providerShare = isProvider ? getProviderShare(order, email) : 1;
       if (providerShare <= 0) return;
@@ -429,7 +591,10 @@ export default function Dashboard() {
         orders: 0,
         units: 0,
         sales: 0,
-        commission: 0,
+        generated: 0,
+        requested: 0,
+        paid: 0,
+        available: 0,
         products: new Set<string>(),
       };
 
@@ -449,34 +614,49 @@ export default function Dashboard() {
       current.orders += 1;
       current.units += relevantUnits;
       current.sales += relevantSales > 0 ? relevantSales : Number(order.total_gs || 0) * providerShare;
-      current.commission += Number(order.commission_gs || 0) * providerShare;
+      current.generated += Number(order.commission_gs || 0) * providerShare;
       map.set(sellerEmail, current);
     });
 
     return Array.from(map.values())
-      .map((row) => ({ ...row, products: Array.from(row.products).sort() }))
-      .sort((a, b) => b.commission - a.commission || b.orders - a.orders);
+      .map((row) => {
+        const payment = paymentTotalsBySeller.get(row.email) || { paid: 0, requested: 0 };
+        const paid = Math.min(row.generated, payment.paid);
+        const requested = Math.min(Math.max(0, row.generated - paid), payment.requested);
+        const available = Math.max(0, row.generated - paid - requested);
+
+        return {
+          ...row,
+          paid,
+          requested,
+          available,
+          products: Array.from(row.products).sort(),
+        };
+      })
+      .sort((a, b) => b.available - a.available || b.generated - a.generated);
   }, [
     canSeeGlobalPanels,
+    isSeller,
     settledDeliveredOrders,
     isProvider,
     email,
     profileMap,
     productById,
     productBySku,
+    paymentTotalsBySeller,
   ]);
 
-  const commissions = useMemo(() => {
-    if (canSeeGlobalPanels) {
-      return sellerCommissionRows.reduce((sum, row) => sum + row.commission, 0);
-    }
-
-    if (isSeller) {
-      return settledDeliveredOrders.reduce((sum, order) => sum + Number(order.commission_gs || 0), 0);
-    }
-
-    return 0;
-  }, [canSeeGlobalPanels, sellerCommissionRows, isSeller, settledDeliveredOrders]);
+  const commissionSummary = useMemo(() => {
+    return sellerCommissionRows.reduce(
+      (sum, row) => ({
+        generated: sum.generated + row.generated,
+        available: sum.available + row.available,
+        requested: sum.requested + row.requested,
+        paid: sum.paid + row.paid,
+      }),
+      { generated: 0, available: 0, requested: 0, paid: 0 },
+    );
+  }, [sellerCommissionRows]);
 
   const pendingRenderByDelivery = useMemo(() => {
     const map = new Map<
@@ -620,11 +800,14 @@ export default function Dashboard() {
       deliveredValue,
       canceled,
       settled: settledDeliveredOrders.length,
-      commissions,
+      commissions: commissionSummary.generated,
+      availableCommission: commissionSummary.available,
+      requestedCommission: commissionSummary.requested,
+      paidCommission: commissionSummary.paid,
       pendingMoney,
       pendingOrders,
     };
-  }, [createdOrders, deliveredOrders, settledDeliveredOrders, commissions, pendingRenderByDelivery]);
+  }, [createdOrders, deliveredOrders, settledDeliveredOrders, commissionSummary, pendingRenderByDelivery]);
 
   const barData = useMemo(() => {
     const map: Record<string, number> = {};
@@ -690,16 +873,18 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div
-          className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${
-            canSeeGlobalPanels ? 'xl:grid-cols-4' : 'xl:grid-cols-3'
-          }`}
-        >
+        <div className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${
+          canSeeGlobalPanels ? 'xl:grid-cols-4 2xl:grid-cols-6' : 'xl:grid-cols-4'
+        }`}>
           <KpiCard title="Pedidos" value={nf(kpis.orders)} subtitle="Creados en el rango" icon="📦" tone="blue" />
           <KpiCard title="Entregados" value={nf(kpis.delivered)} subtitle={`${nf(kpis.deliveredValue)} Gs`} icon="✅" tone="emerald" />
-          <KpiCard title="Comisiones rendidas" value={`${nf(kpis.commissions)} Gs`} subtitle={`${nf(kpis.settled)} pedidos entregados y rendidos`} icon="💰" tone="violet" />
+          <KpiCard title="Disponible para cobrar" value={`${nf(kpis.availableCommission)} Gs`} subtitle="Rendido, sin solicitar ni pagar" icon="💵" tone="emerald" />
+          <KpiCard title="Comisiones pagadas" value={`${nf(kpis.paidCommission)} Gs`} subtitle="Pagos finalizados" icon="✅" tone="cyan" />
           {canSeeGlobalPanels && (
-            <KpiCard title="Pendiente a rendir" value={`${nf(kpis.pendingMoney)} Gs`} subtitle={`${nf(kpis.pendingOrders)} pedidos, delivery descontado`} icon="🧾" tone="amber" />
+            <>
+              <KpiCard title="En solicitud" value={`${nf(kpis.requestedCommission)} Gs`} subtitle="Pendiente o aprobada, aún no pagada" icon="⏳" tone="violet" />
+              <KpiCard title="Pendiente a rendir" value={`${nf(kpis.pendingMoney)} Gs`} subtitle={`${nf(kpis.pendingOrders)} pedidos, delivery descontado`} icon="🧾" tone="amber" />
+            </>
           )}
         </div>
 
@@ -800,27 +985,30 @@ export default function Dashboard() {
           <section className="rounded-2xl border border-emerald-500/20 bg-slate-950/70 p-5">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
-                <h2 className="text-lg font-black">💰 Comisiones rendidas por vendedor</h2>
+                <h2 className="text-lg font-black">💰 Estado de comisiones por vendedor</h2>
                 <p className="text-xs font-semibold text-slate-400">
-                  Solo pedidos ENTREGADOS o ENCOMIENDA ENTREGADA con estado RENDIDO.
-                  {isProvider ? ' Se muestran únicamente las comisiones generadas por tus productos.' : ''}
+                  Separa lo disponible para cobrar, lo que está en solicitud y lo que ya fue pagado.
+                  {isProvider ? ' Solo se muestran las comisiones correspondientes a tus productos.' : ''}
                 </p>
               </div>
               <div className="rounded-xl bg-emerald-500/10 px-4 py-2 text-sm font-black text-emerald-300">
-                Total: {nf(kpis.commissions)} Gs
+                Generado: {nf(kpis.commissions)} Gs
               </div>
             </div>
 
             {sellerCommissionRows.length ? (
               <div className="overflow-x-auto rounded-2xl border border-white/10">
-                <table className="w-full min-w-[900px] text-left">
+                <table className="w-full min-w-[1180px] text-left">
                   <thead className="bg-slate-900/90 text-[10px] font-black uppercase tracking-wider text-slate-400">
                     <tr>
                       <th className="px-4 py-3">Vendedor</th>
                       <th className="px-4 py-3 text-center">Pedidos rendidos</th>
                       <th className="px-4 py-3 text-center">Unidades</th>
                       <th className="px-4 py-3 text-right">Venta correspondiente</th>
-                      <th className="px-4 py-3 text-right">Comisión</th>
+                      <th className="px-4 py-3 text-right">Generada</th>
+                      <th className="px-4 py-3 text-right">Disponible</th>
+                      <th className="px-4 py-3 text-right">En solicitud</th>
+                      <th className="px-4 py-3 text-right">Pagada</th>
                       <th className="px-4 py-3">Productos</th>
                     </tr>
                   </thead>
@@ -839,8 +1027,17 @@ export default function Dashboard() {
                         <td className="px-4 py-3 text-center text-lg font-black text-white">{nf(seller.orders)}</td>
                         <td className="px-4 py-3 text-center font-black text-cyan-300">{nf(seller.units)}</td>
                         <td className="px-4 py-3 text-right font-black text-slate-200">{nf(seller.sales)} Gs</td>
+                        <td className="px-4 py-3 text-right font-black text-slate-200">
+                          {nf(seller.generated)} Gs
+                        </td>
                         <td className="px-4 py-3 text-right text-lg font-black text-emerald-300">
-                          {nf(seller.commission)} Gs
+                          {nf(seller.available)} Gs
+                        </td>
+                        <td className="px-4 py-3 text-right font-black text-amber-300">
+                          {nf(seller.requested)} Gs
+                        </td>
+                        <td className="px-4 py-3 text-right font-black text-cyan-300">
+                          {nf(seller.paid)} Gs
                         </td>
                         <td className="max-w-[360px] px-4 py-3">
                           <div className="line-clamp-2 text-xs font-semibold text-slate-400">
