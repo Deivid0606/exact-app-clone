@@ -3,15 +3,14 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend, LineChart, Line, AreaChart, Area,
-  ComposedChart, Scatter, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis
+  PieChart, Pie, Cell, Legend, LineChart, Line
 } from 'recharts';
 import { 
   TrendingUp, TrendingDown, ShoppingBag, Truck, XCircle, 
   Users, DollarSign, Package, MapPin, Award, Clock, 
   AlertCircle, CheckCircle, BarChart3, PieChart as PieChartIcon,
   Calendar, Filter, Download, RefreshCw, ChevronDown,
-  Eye, Edit, Trash2, MoreVertical, UserPlus
+  Eye, Edit, Trash2, MoreVertical, UserPlus, Box
 } from 'lucide-react';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(Math.round(Number(n || 0)));
@@ -43,21 +42,24 @@ interface DeliveryStock {
   delivery_email: string;
   product_id: string;
   quantity: number;
-  delivery_name?: string;
-  product_name?: string;
-  product_sku?: string;
-  product_image?: string;
 }
 
-interface SellerCommission {
-  seller_email: string;
-  seller_name: string;
-  seller_avatar?: string;
-  total_delivered: number;
-  total_commission: number;
-  pending_commission: number;
-  settled_commission: number;
-  orders: OrderRow[];
+interface Product {
+  id: string;
+  title: string;
+  sku: string | null;
+  image_url: string | null;
+  provider_email: string | null;
+  real_cost_gs?: number;
+  provider_price_gs?: number;
+}
+
+interface Profile {
+  id: string;
+  email: string;
+  full_name: string | null;
+  avatar_url: string | null;
+  role: string;
 }
 
 interface DeliveryWithStock {
@@ -67,6 +69,7 @@ interface DeliveryWithStock {
   total_products: number;
   total_units: number;
   products: {
+    id: string;
     name: string;
     sku: string;
     quantity: number;
@@ -74,7 +77,7 @@ interface DeliveryWithStock {
   }[];
 }
 
-type KpiTone = 'blue' | 'emerald' | 'amber' | 'rose' | 'violet' | 'cyan' | 'pink' | 'indigo';
+type KpiTone = 'blue' | 'emerald' | 'amber' | 'rose' | 'violet' | 'cyan' | 'pink' | 'indigo' | 'slate';
 
 const todayPY = () => {
   const d = new Date();
@@ -117,7 +120,7 @@ function mergeOrders(...groups: any[][]): OrderRow[] {
   return Array.from(map.values());
 }
 
-// ─── Componentes UI Premium ──────────────────────────────────────────────────
+// ─── Componentes UI ──────────────────────────────────────────────────────────
 
 const StatCard = ({ 
   title, value, subtitle, icon: Icon, trend, trendValue, tone = 'blue', isLoading 
@@ -140,6 +143,7 @@ const StatCard = ({
     cyan: 'from-cyan-500/20 to-blue-500/10 border-cyan-500/20 text-cyan-300 shadow-cyan-500/5',
     pink: 'from-pink-500/20 to-rose-500/10 border-pink-500/20 text-pink-300 shadow-pink-500/5',
     indigo: 'from-indigo-500/20 to-violet-500/10 border-indigo-500/20 text-indigo-300 shadow-indigo-500/5',
+    slate: 'from-slate-500/20 to-slate-600/10 border-slate-500/20 text-slate-300 shadow-slate-500/5',
   };
 
   return (
@@ -166,7 +170,7 @@ const StatCard = ({
             </div>
           )}
         </div>
-        <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-${tone}-500/20 to-${tone}-500/5 border border-white/10 shadow-inner`}>
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-white/5 shadow-inner">
           <Icon className="h-5 w-5 text-white/80" />
         </div>
       </div>
@@ -192,24 +196,26 @@ const SectionHeader = ({ title, subtitle, action, icon }: {
   </div>
 );
 
-const ActionButton = ({ children, variant = 'primary', onClick, icon: Icon, loading }: {
+const ActionButton = ({ children, variant = 'primary', onClick, icon: Icon, loading, disabled }: {
   children: React.ReactNode;
-  variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger' | 'success';
   onClick?: () => void;
   icon?: React.ElementType;
   loading?: boolean;
+  disabled?: boolean;
 }) => {
   const variants = {
     primary: 'bg-gradient-to-r from-blue-600 to-cyan-500 text-white hover:shadow-lg hover:shadow-blue-500/25 border-0',
     secondary: 'bg-slate-800/80 text-slate-200 border border-slate-700 hover:bg-slate-700/80',
     ghost: 'bg-transparent text-slate-400 border border-slate-700/50 hover:bg-slate-800/50',
     danger: 'bg-gradient-to-r from-rose-600 to-red-500 text-white hover:shadow-lg hover:shadow-rose-500/25 border-0',
+    success: 'bg-gradient-to-r from-emerald-600 to-teal-500 text-white hover:shadow-lg hover:shadow-emerald-500/25 border-0',
   };
 
   return (
     <button
       onClick={onClick}
-      disabled={loading}
+      disabled={loading || disabled}
       className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]}`}
     >
       {loading ? (
@@ -222,159 +228,64 @@ const ActionButton = ({ children, variant = 'primary', onClick, icon: Icon, load
   );
 };
 
-// ─── Modal: Stock por Delivery ──────────────────────────────────────────────
-
-const DeliveryStockModal = ({ 
-  isOpen, onClose, deliveries, onAssign 
-}: {
-  isOpen: boolean;
-  onClose: () => void;
-  deliveries: DeliveryWithStock[];
-  onAssign: (assignments: { delivery_email: string; product_id: string; quantity: number }[]) => void;
-}) => {
-  const [selectedDelivery, setSelectedDelivery] = useState<string | null>(null);
-  const [quantities, setQuantities] = useState<Record<string, Record<string, number>>>({});
-
-  if (!isOpen) return null;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={onClose}>
-      <div className="relative w-full max-w-4xl max-h-[90vh] overflow-auto rounded-2xl bg-gradient-to-br from-[#0a0d14] via-[#0f1320] to-[#05070b] border border-white/10 shadow-2xl" onClick={e => e.stopPropagation()}>
-        <div className="sticky top-0 z-10 flex items-center justify-between p-5 border-b border-white/10 bg-[#0f1320]/95 backdrop-blur-sm">
-          <div>
-            <h3 className="text-xl font-black text-white flex items-center gap-2">
-              <Package className="h-5 w-5 text-cyan-400" />
-              Gestión de Stock por Delivery
-            </h3>
-            <p className="text-xs text-slate-400">Asignar y gestionar stock de productos para cada delivery</p>
-          </div>
-          <button onClick={onClose} className="rounded-full p-2 hover:bg-white/10 transition-all">
-            <XCircle className="h-5 w-5 text-slate-400" />
-          </button>
-        </div>
-
-        <div className="p-5 space-y-6">
-          {deliveries.length === 0 ? (
-            <div className="text-center py-12 text-slate-500">
-              <Users className="h-12 w-12 mx-auto mb-3 opacity-50" />
-              <p className="font-medium">No hay deliveries registrados</p>
-              <p className="text-sm">Los deliveries aparecerán aquí cuando tengan stock asignado</p>
-            </div>
-          ) : (
-            deliveries.map(delivery => (
-              <div key={delivery.email} className="rounded-xl border border-white/10 bg-white/5 p-4 hover:bg-white/10 transition-all">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="h-10 w-10 rounded-full bg-gradient-to-br from-cyan-500 to-blue-500 flex items-center justify-center text-white font-bold text-sm">
-                    {delivery.avatar ? (
-                      <img src={delivery.avatar} alt={delivery.name} className="h-full w-full rounded-full object-cover" />
-                    ) : (
-                      delivery.name.charAt(0).toUpperCase()
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <div className="font-bold text-white">{delivery.name}</div>
-                    <div className="text-xs text-slate-400">{delivery.email}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-sm font-bold text-cyan-400">{delivery.total_units} unidades</div>
-                    <div className="text-xs text-slate-400">{delivery.total_products} productos</div>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                  {delivery.products.map(product => (
-                    <div key={product.sku} className="flex items-center gap-2 rounded-lg bg-black/30 p-2 border border-white/5">
-                      {product.image ? (
-                        <img src={product.image} alt={product.name} className="h-8 w-8 rounded object-cover" />
-                      ) : (
-                        <div className="h-8 w-8 rounded bg-slate-700/50 flex items-center justify-center text-xs">📦</div>
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <div className="text-xs font-medium text-white truncate">{product.name}</div>
-                        <div className="text-[10px] text-slate-400">SKU: {product.sku}</div>
-                      </div>
-                      <div className="text-sm font-bold text-emerald-400">{product.quantity}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ))
-          )}
-        </div>
-
-        <div className="sticky bottom-0 p-5 border-t border-white/10 bg-[#0f1320]/95 backdrop-blur-sm flex gap-3">
-          <ActionButton variant="secondary" onClick={onClose}>Cerrar</ActionButton>
-          <ActionButton variant="primary" onClick={() => {}} icon={Save}>
-            Guardar cambios
-          </ActionButton>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// ─── Componente: Tabla de Comisiones ──────────────────────────────────────
+// ─── Tabla de Comisiones ──────────────────────────────────────────────────────
 
 const CommissionsTable = ({ commissions, onSettle }: {
-  commissions: SellerCommission[];
+  commissions: any[];
   onSettle: (email: string) => void;
-}) => {
-  const [expanded, setExpanded] = useState<string | null>(null);
-
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-white/10">
-            <th className="text-left py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Vendedor</th>
-            <th className="text-center py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Entregas</th>
-            <th className="text-center py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Total Comisión</th>
-            <th className="text-center py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Pendiente</th>
-            <th className="text-center py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Liquidado</th>
-            <th className="text-right py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Acción</th>
-          </tr>
-        </thead>
-        <tbody>
-          {commissions.map(comm => (
-            <tr key={comm.seller_email} className="border-b border-white/5 hover:bg-white/5 transition-all">
-              <td className="py-3 px-3">
-                <div className="flex items-center gap-3">
-                  <div className="h-9 w-9 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-white font-bold text-sm">
-                    {comm.seller_avatar ? (
-                      <img src={comm.seller_avatar} alt={comm.seller_name} className="h-full w-full rounded-full object-cover" />
-                    ) : (
-                      comm.seller_name.charAt(0).toUpperCase()
-                    )}
-                  </div>
-                  <div>
-                    <div className="font-bold text-white">{comm.seller_name}</div>
-                    <div className="text-xs text-slate-400">{comm.seller_email}</div>
-                  </div>
+}) => (
+  <div className="overflow-x-auto">
+    <table className="w-full text-sm">
+      <thead>
+        <tr className="border-b border-white/10">
+          <th className="text-left py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Vendedor</th>
+          <th className="text-center py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Entregas</th>
+          <th className="text-center py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Total Comisión</th>
+          <th className="text-center py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Pendiente</th>
+          <th className="text-center py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Liquidado</th>
+          <th className="text-right py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Acción</th>
+        </tr>
+      </thead>
+      <tbody>
+        {commissions.map(comm => (
+          <tr key={comm.seller_email} className="border-b border-white/5 hover:bg-white/5 transition-all">
+            <td className="py-3 px-3">
+              <div className="flex items-center gap-3">
+                <div className="h-9 w-9 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-white font-bold text-sm">
+                  {comm.seller_avatar ? (
+                    <img src={comm.seller_avatar} alt={comm.seller_name} className="h-full w-full rounded-full object-cover" />
+                  ) : (
+                    comm.seller_name?.charAt(0).toUpperCase() || 'V'
+                  )}
                 </div>
-              </td>
-              <td className="text-center py-3 px-3 font-bold text-white">{comm.total_delivered}</td>
-              <td className="text-center py-3 px-3 font-bold text-emerald-400">{nf(comm.total_commission)} Gs</td>
-              <td className="text-center py-3 px-3 font-bold text-amber-400">{nf(comm.pending_commission)} Gs</td>
-              <td className="text-center py-3 px-3 font-bold text-cyan-400">{nf(comm.settled_commission)} Gs</td>
-              <td className="text-right py-3 px-3">
-                <ActionButton 
-                  variant="primary" 
-                  size="sm" 
-                  onClick={() => onSettle(comm.seller_email)}
-                  disabled={comm.pending_commission === 0}
-                >
-                  Liquidar
-                </ActionButton>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-};
+                <div>
+                  <div className="font-bold text-white">{comm.seller_name}</div>
+                  <div className="text-xs text-slate-400">{comm.seller_email}</div>
+                </div>
+              </div>
+            </td>
+            <td className="text-center py-3 px-3 font-bold text-white">{comm.total_delivered}</td>
+            <td className="text-center py-3 px-3 font-bold text-emerald-400">{nf(comm.total_commission)} Gs</td>
+            <td className="text-center py-3 px-3 font-bold text-amber-400">{nf(comm.pending_commission)} Gs</td>
+            <td className="text-center py-3 px-3 font-bold text-cyan-400">{nf(comm.settled_commission)} Gs</td>
+            <td className="text-right py-3 px-3">
+              <ActionButton 
+                variant="success" 
+                onClick={() => onSettle(comm.seller_email)}
+                disabled={comm.pending_commission === 0}
+                icon={CheckCircle}
+              >
+                Liquidar
+              </ActionButton>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+);
 
-// ─── Componente: Top Bar ────────────────────────────────────────────────────
+// ─── Componente: Top Bar ──────────────────────────────────────────────────────
 
 const TopBar = ({ dateFrom, dateTo, onDateChange, onRefresh, loading }: {
   dateFrom: string;
@@ -414,11 +325,6 @@ const TopBar = ({ dateFrom, dateTo, onDateChange, onRefresh, loading }: {
       <ActionButton variant="secondary" onClick={onRefresh} icon={RefreshCw} loading={loading}>
         Actualizar
       </ActionButton>
-      
-      <ActionButton variant="secondary" icon={Filter}>
-        Filtrar
-      </ActionButton>
-      
       <ActionButton variant="secondary" icon={Download}>
         Exportar
       </ActionButton>
@@ -426,55 +332,127 @@ const TopBar = ({ dateFrom, dateTo, onDateChange, onRefresh, loading }: {
   </div>
 );
 
-// ─── Componente: Delivery Stock Card ──────────────────────────────────────
+// ─── Componente: Stock por Delivery (mejorado) ──────────────────────────────
 
-const DeliveryStockCard = ({ delivery }: { delivery: DeliveryWithStock }) => {
-  const [expanded, setExpanded] = useState(false);
+const DeliveryStockSection = ({ deliveries, onManage }: {
+  deliveries: DeliveryWithStock[];
+  onManage: () => void;
+}) => {
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  if (deliveries.length === 0) {
+    return (
+      <div className="rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/5 to-blue-500/5 p-8 text-center">
+        <Package className="h-12 w-12 text-cyan-400/50 mx-auto mb-3" />
+        <p className="text-white/60 font-medium">No hay stock asignado a deliveries</p>
+        <p className="text-sm text-slate-500">Asigna stock desde el módulo de productos</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="rounded-xl border border-white/10 bg-white/5 p-4 hover:bg-white/10 transition-all cursor-pointer" onClick={() => setExpanded(!expanded)}>
-      <div className="flex items-center gap-3">
-        <div className="h-11 w-11 rounded-full bg-gradient-to-br from-cyan-500 to-blue-500 flex items-center justify-center text-white font-bold">
-          {delivery.avatar ? (
-            <img src={delivery.avatar} alt={delivery.name} className="h-full w-full rounded-full object-cover" />
-          ) : (
-            delivery.name.charAt(0).toUpperCase()
-          )}
+    <div className="space-y-4">
+      {/* Resumen */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="rounded-xl bg-white/5 p-3 border border-white/5 text-center">
+          <div className="text-2xl font-black text-cyan-400">{deliveries.length}</div>
+          <div className="text-xs text-slate-400">Deliveries</div>
         </div>
-        <div className="flex-1 min-w-0">
-          <div className="font-bold text-white">{delivery.name}</div>
-          <div className="text-xs text-slate-400">{delivery.email}</div>
+        <div className="rounded-xl bg-white/5 p-3 border border-white/5 text-center">
+          <div className="text-2xl font-black text-emerald-400">
+            {nf(deliveries.reduce((sum, d) => sum + d.total_products, 0))}
+          </div>
+          <div className="text-xs text-slate-400">Productos distintos</div>
         </div>
-        <div className="text-right">
-          <div className="text-sm font-bold text-cyan-400">{delivery.total_units} uds.</div>
-          <div className="text-xs text-slate-400">{delivery.total_products} productos</div>
+        <div className="rounded-xl bg-white/5 p-3 border border-white/5 text-center">
+          <div className="text-2xl font-black text-blue-400">
+            {nf(deliveries.reduce((sum, d) => sum + d.total_units, 0))}
+          </div>
+          <div className="text-xs text-slate-400">Unidades totales</div>
         </div>
-        <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+        <div className="rounded-xl bg-white/5 p-3 border border-white/5 text-center">
+          <div className="text-2xl font-black text-violet-400">
+            {nf(deliveries.filter(d => d.total_units > 0).length)}
+          </div>
+          <div className="text-xs text-slate-400">Con stock activo</div>
+        </div>
       </div>
 
-      {expanded && (
-        <div className="mt-3 pt-3 border-t border-white/10 grid grid-cols-1 sm:grid-cols-2 gap-2">
-          {delivery.products.map(p => (
-            <div key={p.sku} className="flex items-center gap-2 rounded-lg bg-black/30 p-2">
-              {p.image ? (
-                <img src={p.image} alt={p.name} className="h-8 w-8 rounded object-cover" />
-              ) : (
-                <div className="h-8 w-8 rounded bg-slate-700/50 flex items-center justify-center">📦</div>
-              )}
-              <div className="flex-1 min-w-0">
-                <div className="text-xs font-medium text-white truncate">{p.name}</div>
-                <div className="text-[10px] text-slate-400">{p.sku}</div>
+      {/* Lista de Deliveries */}
+      <div className="grid grid-cols-1 gap-4">
+        {deliveries.map((delivery) => (
+          <div 
+            key={delivery.email} 
+            className="rounded-xl border border-white/10 bg-white/5 overflow-hidden hover:bg-white/[0.07] transition-all"
+          >
+            {/* Header del Delivery */}
+            <div 
+              className="flex items-center gap-4 p-4 cursor-pointer"
+              onClick={() => setExpanded(expanded === delivery.email ? null : delivery.email)}
+            >
+              <div className="h-12 w-12 rounded-full bg-gradient-to-br from-cyan-500 to-blue-500 flex items-center justify-center text-white font-bold text-base flex-shrink-0">
+                {delivery.avatar ? (
+                  <img src={delivery.avatar} alt={delivery.name} className="h-full w-full rounded-full object-cover" />
+                ) : (
+                  delivery.name?.charAt(0).toUpperCase() || 'D'
+                )}
               </div>
-              <div className="text-sm font-bold text-emerald-400">{p.quantity}</div>
+              
+              <div className="flex-1 min-w-0">
+                <div className="font-bold text-white text-base">{delivery.name}</div>
+                <div className="text-xs text-slate-400">{delivery.email}</div>
+              </div>
+              
+              <div className="flex items-center gap-4 text-sm">
+                <div className="text-center">
+                  <div className="font-bold text-cyan-400">{delivery.total_products}</div>
+                  <div className="text-[10px] text-slate-500">Productos</div>
+                </div>
+                <div className="text-center">
+                  <div className="font-bold text-emerald-400">{delivery.total_units}</div>
+                  <div className="text-[10px] text-slate-500">Unidades</div>
+                </div>
+                <ChevronDown className={`h-5 w-5 text-slate-400 transition-transform duration-300 ${expanded === delivery.email ? 'rotate-180' : ''}`} />
+              </div>
             </div>
-          ))}
-        </div>
-      )}
+
+            {/* Detalle de Productos (expandido) */}
+            {expanded === delivery.email && (
+              <div className="border-t border-white/10 p-4 bg-black/20">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {delivery.products.map((product) => (
+                    <div 
+                      key={product.id} 
+                      className="flex items-center gap-3 rounded-lg bg-white/5 p-3 border border-white/5 hover:bg-white/10 transition-all"
+                    >
+                      <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg border border-white/10 bg-slate-900">
+                        {product.image ? (
+                          <img src={product.image} alt={product.name} className="h-full w-full object-cover" />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-2xl">📦</div>
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium text-white text-sm truncate">{product.name}</div>
+                        <div className="text-xs text-slate-400">SKU: {product.sku}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-lg font-black text-emerald-400">{product.quantity}</div>
+                        <div className="text-[10px] text-slate-500">unidades</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
     </div>
   );
 };
 
-// ─── Dashboard Principal ──────────────────────────────────────────────────
+// ─── Dashboard Principal ──────────────────────────────────────────────────────
 
 export default function Dashboard() {
   const { profile } = useAuth();
@@ -490,12 +468,11 @@ export default function Dashboard() {
   });
   const [dateTo, setDateTo] = useState(() => todayPY());
   const [orders, setOrders] = useState<OrderRow[]>([]);
-  const [products, setProducts] = useState<any[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [deliveryRates, setDeliveryRates] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
   const [deliveryStocks, setDeliveryStocks] = useState<DeliveryStock[]>([]);
-  const [profiles, setProfiles] = useState<any[]>([]);
-  const [showStockModal, setShowStockModal] = useState(false);
+  const [profiles, setProfiles] = useState<Profile[]>([]);
   const [adSpend, setAdSpend] = useState(() => {
     try { return Number(localStorage.getItem('provider_ad_spend') || 0); } catch { return 0; }
   });
@@ -533,16 +510,16 @@ export default function Dashboard() {
 
   useEffect(() => { loadDashboard(); }, [loadDashboard]);
 
-  // ─── Mapeos ──────────────────────────────────────────────────────────────
+  // ─── Mapeos ──────────────────────────────────────────────────────────────────
 
   const profileMap = useMemo(() => {
-    const m: Record<string, any> = {};
+    const m: Record<string, Profile> = {};
     profiles.forEach(p => { if (p.email) m[p.email.toLowerCase()] = p; });
     return m;
   }, [profiles]);
 
   const productMap = useMemo(() => {
-    const m: Record<string, any> = {};
+    const m: Record<string, Product> = {};
     products.forEach(p => { if (p.id) m[p.id] = p; });
     return m;
   }, [products]);
@@ -559,7 +536,7 @@ export default function Dashboard() {
     return m;
   }, [products]);
 
-  // ─── Filtros ─────────────────────────────────────────────────────────────
+  // ─── Filtros ─────────────────────────────────────────────────────────────────
 
   const roleAllowed = (o: OrderRow) => {
     if (role === 'VENDEDOR' && (o.created_by || '').toLowerCase() !== email.toLowerCase()) return false;
@@ -573,7 +550,7 @@ export default function Dashboard() {
   const guidesRangeOrders = useMemo(() => filteredOrders.filter(o => inDateRange(o.assigned_at, dateFrom, dateTo)), [filteredOrders, dateFrom, dateTo]);
   const deliveredRangeOrders = useMemo(() => filteredOrders.filter(o => inDateRange(o.delivered_at, dateFrom, dateTo) && DELIVERED_STATES.has((o.status || '').toUpperCase())), [filteredOrders, dateFrom, dateTo]);
 
-  // ─── KPIs ────────────────────────────────────────────────────────────────
+  // ─── KPIs ────────────────────────────────────────────────────────────────────
 
   const kpis = useMemo(() => {
     let orderCount = 0, sold = 0, delivered = 0, canceled = 0, profit = 0;
@@ -643,7 +620,7 @@ export default function Dashboard() {
     };
   }, [createdRangeOrders, deliveredRangeOrders, guidesRangeOrders, role, email, costMap, deliveryRates, skuProviderMap]);
 
-  // ─── Top Sellers ────────────────────────────────────────────────────────
+  // ─── Top Sellers ─────────────────────────────────────────────────────────────
 
   const topSellers = useMemo(() => {
     if (role !== 'ADMIN' && role !== 'PROVEEDOR') return [];
@@ -698,7 +675,7 @@ export default function Dashboard() {
       .slice(0, 10);
   }, [createdRangeOrders, role, email, skuProviderMap, profileMap]);
 
-  // ─── Delivery Pendientes a Rendir ──────────────────────────────────────
+  // ─── Delivery Pendientes a Rendir ───────────────────────────────────────────
 
   const pendingDeliveries = useMemo(() => {
     if (role !== 'ADMIN' && role !== 'PROVEEDOR') return [];
@@ -750,7 +727,7 @@ export default function Dashboard() {
       .slice(0, 10);
   }, [deliveredRangeOrders, role, email, skuProviderMap, profileMap, deliveryRates]);
 
-  // ─── Stock por Delivery ─────────────────────────────────────────────────
+  // ─── Stock por Delivery (MEJORADO) ────────────────────────────────────────────
 
   const deliveryStockData = useMemo((): DeliveryWithStock[] => {
     if (role !== 'ADMIN' && role !== 'PROVEEDOR') return [];
@@ -767,6 +744,7 @@ export default function Dashboard() {
     const grouped: Record<string, DeliveryWithStock> = {};
 
     deliveryStocks.forEach(stock => {
+      // Filtrar por proveedor si es necesario
       if (role === 'PROVEEDOR' && !providerProductIds.has(stock.product_id)) return;
       
       const product = productMap[stock.product_id];
@@ -787,6 +765,7 @@ export default function Dashboard() {
       }
 
       grouped[stock.delivery_email].products.push({
+        id: product.id,
         name: product.title || product.sku || 'Producto',
         sku: product.sku || '',
         quantity: stock.quantity,
@@ -800,12 +779,12 @@ export default function Dashboard() {
       .sort((a, b) => b.total_units - a.total_units);
   }, [deliveryStocks, role, email, products, productMap, profileMap]);
 
-  // ─── Comisiones por Vendedor ───────────────────────────────────────────
+  // ─── Comisiones por Vendedor ────────────────────────────────────────────────
 
-  const sellerCommissions = useMemo((): SellerCommission[] => {
+  const sellerCommissions = useMemo(() => {
     if (role !== 'ADMIN' && role !== 'PROVEEDOR') return [];
 
-    const sellerMap: Record<string, SellerCommission> = {};
+    const sellerMap: Record<string, any> = {};
 
     deliveredRangeOrders.forEach(o => {
       const sellerEmail = o.created_by?.toLowerCase() || '';
@@ -856,7 +835,7 @@ export default function Dashboard() {
       .sort((a, b) => b.pending_commission - a.pending_commission);
   }, [deliveredRangeOrders, role, email, skuProviderMap, profileMap]);
 
-  // ─── Gráficos ───────────────────────────────────────────────────────────
+  // ─── Gráficos ────────────────────────────────────────────────────────────────
 
   const barData = useMemo(() => {
     const byDay: Record<string, number> = {};
@@ -968,7 +947,7 @@ export default function Dashboard() {
       }));
   }, [createdRangeOrders, deliveredRangeOrders]);
 
-  // ─── Handlers ───────────────────────────────────────────────────────────
+  // ─── Handlers ────────────────────────────────────────────────────────────────
 
   const handleRefresh = () => loadDashboard();
 
@@ -987,7 +966,11 @@ export default function Dashboard() {
     handleRefresh();
   };
 
-  // ─── Render ─────────────────────────────────────────────────────────────
+  const handleManageStock = () => {
+    toast.info('Abrir gestión de stock');
+  };
+
+  // ─── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen w-full bg-[#020617] p-4 md:p-6 text-slate-100">
@@ -1054,9 +1037,8 @@ export default function Dashboard() {
         {(role === 'ADMIN' || role === 'PROVEEDOR') && topSellers.length > 0 && (
           <div className="rounded-2xl border border-violet-500/20 bg-gradient-to-br from-violet-500/5 to-fuchsia-500/5 p-5 shadow-xl">
             <SectionHeader 
-              title="Top Vendedores" 
+              title="🏆 Top Vendedores" 
               subtitle="Mejor rendimiento por volumen de ventas"
-              icon={<Award className="h-5 w-5 text-violet-400" />}
               action={<ActionButton variant="secondary" icon={Users}>Ver todos</ActionButton>}
             />
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
@@ -1092,15 +1074,14 @@ export default function Dashboard() {
         {(role === 'ADMIN' || role === 'PROVEEDOR') && sellerCommissions.length > 0 && (
           <div className="rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/5 to-teal-500/5 p-5 shadow-xl">
             <SectionHeader 
-              title="Comisiones Pendientes a Pagar" 
+              title="💰 Comisiones Pendientes a Pagar" 
               subtitle="Pedidos entregados con estado rendido"
-              icon={<DollarSign className="h-5 w-5 text-emerald-400" />}
               action={
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold text-emerald-400 bg-emerald-500/20 px-3 py-1 rounded-full">
                     Total: {nf(sellerCommissions.reduce((sum, s) => sum + s.pending_commission, 0))} Gs
                   </span>
-                  <ActionButton variant="primary" icon={CheckCircle}>Liquidar todo</ActionButton>
+                  <ActionButton variant="success" icon={CheckCircle}>Liquidar todo</ActionButton>
                 </div>
               }
             />
@@ -1111,29 +1092,32 @@ export default function Dashboard() {
           </div>
         )}
 
-        {/* Stock por Delivery - ADMIN & PROVEEDOR */}
-        {(role === 'ADMIN' || role === 'PROVEEDOR') && deliveryStockData.length > 0 && (
+        {/* STOCK POR DELIVERY - MEJORADO Y MÁS GRANDE */}
+        {(role === 'ADMIN' || role === 'PROVEEDOR') && (
           <div className="rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/5 to-blue-500/5 p-5 shadow-xl">
             <SectionHeader 
-              title="Stock por Delivery" 
+              title="📦 Stock por Delivery" 
               subtitle={`${deliveryStockData.length} deliveries con stock asignado`}
-              icon={<Package className="h-5 w-5 text-cyan-400" />}
+              icon={<Box className="h-5 w-5 text-cyan-400" />}
               action={
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold text-cyan-400 bg-cyan-500/20 px-3 py-1 rounded-full">
-                    Total: {nf(deliveryStockData.reduce((sum, d) => sum + d.total_units, 0))} unidades
-                  </span>
-                  <ActionButton variant="primary" icon={UserPlus} onClick={() => setShowStockModal(true)}>
-                    Gestionar
+                <div className="flex items-center gap-3">
+                  {deliveryStockData.length > 0 && (
+                    <span className="text-xs font-bold text-cyan-400 bg-cyan-500/20 px-4 py-1.5 rounded-full">
+                      Total: {nf(deliveryStockData.reduce((sum, d) => sum + d.total_units, 0))} unidades
+                    </span>
+                  )}
+                  <ActionButton variant="primary" icon={UserPlus} onClick={handleManageStock}>
+                    Gestionar Stock
                   </ActionButton>
                 </div>
               }
             />
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-              {deliveryStockData.map((delivery, index) => (
-                <DeliveryStockCard key={index} delivery={delivery} />
-              ))}
-            </div>
+            
+            {/* Componente de Stock mejorado */}
+            <DeliveryStockSection 
+              deliveries={deliveryStockData} 
+              onManage={handleManageStock}
+            />
           </div>
         )}
 
@@ -1144,7 +1128,6 @@ export default function Dashboard() {
             <SectionHeader 
               title="Ventas por día" 
               subtitle="Total vendido por día"
-              icon={<BarChart3 className="h-5 w-5 text-blue-400" />}
             />
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
@@ -1179,7 +1162,6 @@ export default function Dashboard() {
             <SectionHeader 
               title="Ventas vs Entregas" 
               subtitle="Comparativa diaria"
-              icon={<TrendingUp className="h-5 w-5 text-emerald-400" />}
             />
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
@@ -1213,7 +1195,6 @@ export default function Dashboard() {
             <SectionHeader 
               title="Distribución de estados" 
               subtitle="Pedidos por estado"
-              icon={<PieChartIcon className="h-5 w-5 text-violet-400" />}
             />
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
@@ -1252,7 +1233,6 @@ export default function Dashboard() {
             <SectionHeader 
               title="Top Productos" 
               subtitle="Vendido vs Entregado"
-              icon={<Package className="h-5 w-5 text-fuchsia-400" />}
             />
             <div className="space-y-2 max-h-72 overflow-y-auto pr-2">
               {topProducts.map((product, index) => (
@@ -1293,7 +1273,6 @@ export default function Dashboard() {
           <SectionHeader 
             title="Top Ciudades" 
             subtitle="Mayor volumen de pedidos"
-            icon={<MapPin className="h-5 w-5 text-cyan-400" />}
           />
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
             {mapCities.map((city, index) => (
@@ -1343,17 +1322,6 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
-
-      {/* Modal de Stock por Delivery */}
-      <DeliveryStockModal
-        isOpen={showStockModal}
-        onClose={() => setShowStockModal(false)}
-        deliveries={deliveryStockData}
-        onAssign={(assignments) => {
-          console.log('Asignaciones:', assignments);
-          setShowStockModal(false);
-        }}
-      />
     </div>
   );
 }
