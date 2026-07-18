@@ -150,6 +150,8 @@ interface OrderRow {
   provider_email?: string | null;
   provider_emails_list?: string | null;
   items_json?: any;
+  commission_paid?: boolean | null;
+  paid_at?: string | null;
 }
 
 interface ProductRow {
@@ -178,86 +180,89 @@ interface DeliveryStockRow {
   quantity: number;
 }
 
-interface CommissionMovementRow {
+interface CommissionRequestRow {
   id: string;
-  source_table: string;
-  seller_email: string;
-  provider_email: string;
-  amount: number;
-  status: string;
-  order_ids: string[];
-  created_at: string | null;
-  paid_at: string | null;
+  vendor_email: string | null;
+  provider_email: string | null;
+  amount_gs: number | null;
+  status: string | null;
+  requested_at?: string | null;
+  approved_at?: string | null;
+  rejected_at?: string | null;
+  meta_json?: any;
 }
 
-const PAYMENT_TABLES = [
-  'commission_requests',
-  'commission_payments',
-  'commission_payouts',
-  'commission_withdrawals',
-] as const;
-
-const PAID_COMMISSION_STATES = new Set([
-  'pagado', 'pagada', 'paid', 'completado', 'completada', 'completed',
-  'aprobado y pagado', 'approved and paid', 'finalizado', 'finalizada',
-]);
-
-const REQUESTED_COMMISSION_STATES = new Set([
-  'pendiente', 'pending', 'solicitado', 'solicitada', 'requested',
-  'en revision', 'en revisión', 'processing', 'procesando', 'aprobado', 'aprobada', 'approved',
-]);
-
-const REJECTED_COMMISSION_STATES = new Set([
-  'rechazado', 'rechazada', 'rejected', 'cancelado', 'cancelada', 'cancelled', 'canceled', 'anulado', 'anulada',
-]);
-
-const getFirstValue = (row: any, keys: string[]) => {
-  for (const key of keys) {
-    const value = row?.[key];
-    if (value !== undefined && value !== null && String(value).trim() !== '') return value;
-  }
-  return null;
-};
-
-const parseOrderIds = (value: any): string[] => {
+const parseProviderEmailList = (value: unknown): string[] => {
   if (!value) return [];
+
   if (Array.isArray(value)) {
-    return value
-      .map((item) => typeof item === 'object' ? item?.id || item?.order_id : item)
-      .filter(Boolean)
-      .map(String);
+    return value.map(normalizeEmail).filter(Boolean);
   }
+
   if (typeof value === 'string') {
     try {
       const parsed = JSON.parse(value);
-      if (Array.isArray(parsed)) return parseOrderIds(parsed);
+      if (Array.isArray(parsed)) return parsed.map(normalizeEmail).filter(Boolean);
     } catch {}
-    return value.split(',').map((item) => item.trim()).filter(Boolean);
+
+    return value
+      .split(',')
+      .map(normalizeEmail)
+      .filter(Boolean);
   }
+
   return [];
 };
 
-const normalizeCommissionMovement = (row: any, sourceTable: string): CommissionMovementRow => ({
-  id: String(row?.id || `${sourceTable}-${Math.random()}`),
-  source_table: sourceTable,
-  seller_email: normalizeEmail(getFirstValue(row, [
-    'seller_email', 'vendedor_email', 'user_email', 'requested_by',
-    'requester_email', 'email', 'created_by',
-  ])),
-  provider_email: normalizeEmail(getFirstValue(row, [
-    'provider_email', 'proveedor_email', 'supplier_email', 'owner_email',
-  ])),
-  amount: Math.max(0, Number(getFirstValue(row, [
-    'amount_gs', 'commission_gs', 'total_gs', 'amount', 'monto_gs',
-    'requested_amount_gs', 'paid_amount_gs', 'total_commission_gs',
-  ]) || 0)),
-  status: norm(getFirstValue(row, ['status', 'estado', 'payment_status', 'request_status']) || 'pendiente'),
-  order_ids: parseOrderIds(getFirstValue(row, [
-    'order_ids', 'orders', 'pedido_ids', 'commission_order_ids',
-  ])),
-  created_at: getFirstValue(row, ['created_at', 'requested_at', 'date']) as string | null,
-  paid_at: getFirstValue(row, ['paid_at', 'completed_at', 'approved_at', 'payment_date']) as string | null,
-});
+const parseRequestOrderIds = (request: CommissionRequestRow): string[] => {
+  const rawMeta = request?.meta_json;
+  let meta: any = rawMeta;
+
+  if (typeof rawMeta === 'string') {
+    try {
+      meta = JSON.parse(rawMeta);
+    } catch {
+      meta = null;
+    }
+  }
+
+  const rawIds =
+    meta?.order_ids ||
+    meta?.orders ||
+    (request as any)?.order_ids ||
+    (request as any)?.pedido_ids ||
+    [];
+
+  if (Array.isArray(rawIds)) {
+    return rawIds
+      .map((value: any) =>
+        typeof value === 'object' ? value?.id || value?.order_id : value,
+      )
+      .filter(Boolean)
+      .map(String);
+  }
+
+  if (typeof rawIds === 'string') {
+    try {
+      const parsed = JSON.parse(rawIds);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .map((value: any) =>
+            typeof value === 'object' ? value?.id || value?.order_id : value,
+          )
+          .filter(Boolean)
+          .map(String);
+      }
+    } catch {}
+
+    return rawIds
+      .split(',')
+      .map((value: string) => value.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+};
 
 type Tone = 'blue' | 'emerald' | 'amber' | 'rose' | 'violet' | 'cyan';
 
@@ -331,7 +336,7 @@ export default function Dashboard() {
   const [profiles, setProfiles] = useState<ProfileRow[]>([]);
   const [deliveryStocks, setDeliveryStocks] = useState<DeliveryStockRow[]>([]);
   const [deliveryRates, setDeliveryRates] = useState<Record<string, number>>({});
-  const [commissionMovements, setCommissionMovements] = useState<CommissionMovementRow[]>([]);
+  const [commissionRequests, setCommissionRequests] = useState<CommissionRequestRow[]>([]);
   const [loading, setLoading] = useState(false);
 
   const isAdmin = role === 'ADMIN' || role === 'ADMINISTRADOR';
@@ -340,37 +345,19 @@ export default function Dashboard() {
   const isDeliveryUser = role === 'DELIVERY' || role === 'REPARTIDOR';
   const canSeeGlobalPanels = isAdmin || isProvider;
 
-  const loadCommissionMovements = async () => {
-    const collected: CommissionMovementRow[] = [];
+  const loadCommissionRequests = async () => {
+    const { data, error } = await supabase
+      .from('commission_requests')
+      .select('*')
+      .order('requested_at', { ascending: false });
 
-    for (const table of PAYMENT_TABLES) {
-      const { data, error } = await supabase.from(table).select('*');
-
-      // Si la tabla no existe, se ignora. Así el Dashboard funciona con cualquiera
-      // de los nombres usados por los módulos de solicitudes/pagos.
-      if (error) {
-        const message = String(error.message || '').toLowerCase();
-        const missingTable =
-          message.includes('does not exist') ||
-          message.includes('could not find the table') ||
-          message.includes('relation') ||
-          error.code === '42P01' ||
-          error.code === 'PGRST205';
-
-        if (!missingTable) console.error(`Error cargando ${table}:`, error);
-        continue;
-      }
-
-      (data || []).forEach((row: any) => {
-        collected.push(normalizeCommissionMovement(row, table));
-      });
+    if (error) {
+      console.error('Error cargando commission_requests:', error);
+      setCommissionRequests([]);
+      return;
     }
 
-    const unique = new Map<string, CommissionMovementRow>();
-    collected.forEach((movement) => {
-      unique.set(`${movement.source_table}:${movement.id}`, movement);
-    });
-    setCommissionMovements(Array.from(unique.values()));
+    setCommissionRequests((data || []) as CommissionRequestRow[]);
   };
 
   const loadDashboard = async () => {
@@ -419,7 +406,7 @@ export default function Dashboard() {
     ].filter(Boolean);
 
     if (errors.length) console.error('Errores cargando Dashboard:', errors);
-    await loadCommissionMovements();
+    await loadCommissionRequests();
     setLoading(false);
   };
 
@@ -513,47 +500,53 @@ export default function Dashboard() {
     return normalizeEmail(order.provider_email) === target ? 1 : 0;
   };
 
-  const commissionOrderProviderIds = useMemo(() => {
-    const ids = new Set<string>();
-    if (!isProvider) return ids;
-    settledDeliveredOrders.forEach((order) => {
-      if (getProviderShare(order, email) > 0) ids.add(order.id);
+  const getCommissionProviders = (order: OrderRow): string[] => {
+    const providerSet = new Set<string>();
+
+    safeItems(order).forEach((item) => {
+      const product = productById.get(itemProductId(item)) || productBySku.get(itemSku(item));
+      const providerEmail = normalizeEmail(product?.provider_email);
+      if (providerEmail) providerSet.add(providerEmail);
     });
-    return ids;
-  }, [isProvider, settledDeliveredOrders, email, productById, productBySku]);
 
-  const paymentTotalsBySeller = useMemo(() => {
-    const map = new Map<string, { paid: number; requested: number }>();
+    if (providerSet.size === 0) {
+      parseProviderEmailList(order.provider_emails_list).forEach((providerEmail) => {
+        providerSet.add(providerEmail);
+      });
+    }
 
-    commissionMovements.forEach((movement) => {
-      if (!movement.seller_email || movement.amount <= 0) return;
-      if (REJECTED_COMMISSION_STATES.has(movement.status)) return;
+    if (providerSet.size === 0) {
+      const directProvider = normalizeEmail(order.provider_email);
+      if (directProvider) providerSet.add(directProvider);
+    }
 
-      if (isProvider) {
-        const directProviderMatch = movement.provider_email === email;
-        const orderMatch =
-          movement.order_ids.length > 0 &&
-          movement.order_ids.some((orderId) => commissionOrderProviderIds.has(orderId));
+    return Array.from(providerSet);
+  };
 
-        // Para proveedor nunca se mezclan pagos declarados para otro proveedor.
-        if (movement.provider_email && !directProviderMatch) return;
-        if (!movement.provider_email && movement.order_ids.length > 0 && !orderMatch) return;
-        if (!movement.provider_email && movement.order_ids.length === 0) return;
-      }
+  const requestStatusByOrderProvider = useMemo(() => {
+    const map = new Map<string, 'PENDIENTE' | 'APROBADO'>();
 
-      const current = map.get(movement.seller_email) || { paid: 0, requested: 0 };
+    commissionRequests.forEach((request) => {
+      const status = String(request.status || '').toUpperCase().trim();
+      if (status !== 'PENDIENTE' && status !== 'APROBADO') return;
 
-      if (PAID_COMMISSION_STATES.has(movement.status) || movement.paid_at) {
-        current.paid += movement.amount;
-      } else if (REQUESTED_COMMISSION_STATES.has(movement.status)) {
-        current.requested += movement.amount;
-      }
+      const sellerEmail = normalizeEmail(request.vendor_email);
+      const providerEmail = normalizeEmail(request.provider_email);
+      if (!sellerEmail || !providerEmail) return;
 
-      map.set(movement.seller_email, current);
+      parseRequestOrderIds(request).forEach((orderId) => {
+        const key = `${orderId}::${sellerEmail}::${providerEmail}`;
+        const previous = map.get(key);
+
+        // APROBADO tiene prioridad sobre PENDIENTE.
+        if (status === 'APROBADO' || !previous) {
+          map.set(key, status);
+        }
+      });
     });
 
     return map;
-  }, [commissionMovements, isProvider, email, commissionOrderProviderIds]);
+  }, [commissionRequests]);
 
   const sellerCommissionRows = useMemo(() => {
     if (!canSeeGlobalPanels && !isSeller) return [];
@@ -580,8 +573,22 @@ export default function Dashboard() {
       if (!sellerEmail) return;
       if (isSeller && sellerEmail !== email) return;
 
-      const providerShare = isProvider ? getProviderShare(order, email) : 1;
-      if (providerShare <= 0) return;
+      const commissionProviders = getCommissionProviders(order);
+      if (commissionProviders.length === 0) return;
+
+      // La pantalla Solicitud de comisiones divide la comisión entre los
+      // proveedores únicos que participan en el pedido.
+      const providerCommission =
+        Number(order.commission_gs || 0) / Math.max(1, commissionProviders.length);
+
+      let commissionForView = Number(order.commission_gs || 0);
+      let requestProviderKey = '';
+
+      if (isProvider) {
+        if (!commissionProviders.includes(email)) return;
+        commissionForView = providerCommission;
+        requestProviderKey = email;
+      }
 
       const info = profileMap[sellerEmail];
       const current = map.get(sellerEmail) || {
@@ -603,7 +610,8 @@ export default function Dashboard() {
 
       safeItems(order).forEach((item) => {
         const product = productById.get(itemProductId(item)) || productBySku.get(itemSku(item));
-        const belongs = !isProvider || normalizeEmail(product?.provider_email || order.provider_email) === email;
+        const itemProvider = normalizeEmail(product?.provider_email || order.provider_email);
+        const belongs = !isProvider || itemProvider === email;
         if (!belongs) return;
 
         relevantUnits += itemQty(item);
@@ -613,26 +621,49 @@ export default function Dashboard() {
 
       current.orders += 1;
       current.units += relevantUnits;
-      current.sales += relevantSales > 0 ? relevantSales : Number(order.total_gs || 0) * providerShare;
-      current.generated += Number(order.commission_gs || 0) * providerShare;
+      current.sales +=
+        relevantSales > 0
+          ? relevantSales
+          : isProvider
+            ? Number(order.total_gs || 0) / Math.max(1, commissionProviders.length)
+            : Number(order.total_gs || 0);
+
+      current.generated += commissionForView;
+
+      const isPaidByOrder = Boolean(order.commission_paid);
+      let isPaidByRequest = false;
+      let isPendingRequest = false;
+
+      if (isProvider) {
+        const requestKey = `${order.id}::${sellerEmail}::${requestProviderKey}`;
+        const requestStatus = requestStatusByOrderProvider.get(requestKey);
+        isPaidByRequest = requestStatus === 'APROBADO';
+        isPendingRequest = requestStatus === 'PENDIENTE';
+      } else {
+        commissionProviders.forEach((providerEmail) => {
+          const requestKey = `${order.id}::${sellerEmail}::${providerEmail}`;
+          const requestStatus = requestStatusByOrderProvider.get(requestKey);
+          if (requestStatus === 'APROBADO') isPaidByRequest = true;
+          if (requestStatus === 'PENDIENTE') isPendingRequest = true;
+        });
+      }
+
+      if (isPaidByOrder || isPaidByRequest) {
+        current.paid += commissionForView;
+      } else if (isPendingRequest) {
+        current.requested += commissionForView;
+      } else {
+        current.available += commissionForView;
+      }
+
       map.set(sellerEmail, current);
     });
 
     return Array.from(map.values())
-      .map((row) => {
-        const payment = paymentTotalsBySeller.get(row.email) || { paid: 0, requested: 0 };
-        const paid = Math.min(row.generated, payment.paid);
-        const requested = Math.min(Math.max(0, row.generated - paid), payment.requested);
-        const available = Math.max(0, row.generated - paid - requested);
-
-        return {
-          ...row,
-          paid,
-          requested,
-          available,
-          products: Array.from(row.products).sort(),
-        };
-      })
+      .map((row) => ({
+        ...row,
+        products: Array.from(row.products).sort(),
+      }))
       .sort((a, b) => b.available - a.available || b.generated - a.generated);
   }, [
     canSeeGlobalPanels,
@@ -643,7 +674,7 @@ export default function Dashboard() {
     profileMap,
     productById,
     productBySku,
-    paymentTotalsBySeller,
+    requestStatusByOrderProvider,
   ]);
 
   const commissionSummary = useMemo(() => {
@@ -987,7 +1018,7 @@ export default function Dashboard() {
               <div>
                 <h2 className="text-lg font-black">💰 Estado de comisiones por vendedor</h2>
                 <p className="text-xs font-semibold text-slate-400">
-                  Separa lo disponible para cobrar, lo que está en solicitud y lo que ya fue pagado.
+                  Disponible: sin solicitud. En solicitud: PENDIENTE. Pagada: APROBADO o commission_paid = true.
                   {isProvider ? ' Solo se muestran las comisiones correspondientes a tus productos.' : ''}
                 </p>
               </div>
