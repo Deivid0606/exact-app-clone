@@ -1440,7 +1440,7 @@ export default function Dashboard() {
               <div>
                 <h2 className="text-lg font-black">💰 Estado de comisiones por vendedor</h2>
                 <p className="text-xs font-semibold text-slate-400">
-                  Histórico completo, sin filtro de fechas. Disponible = comisión RENDIDA no pagada menos solicitudes PENDIENTES. Pagada = solicitudes APROBADAS. Usa la misma regla de Solicitud y Pago de comisiones.
+                  CÁLCULO UNIFICADO V2: Disponible = comisiones RENDIDAS no pagadas menos solicitudes PENDIENTES. Pagada = solicitudes APROBADAS. Sin filtro de fechas.
                   {isProvider ? ' Solo se muestran las comisiones correspondientes a tus productos.' : ''}
                 </p>
               </div>
