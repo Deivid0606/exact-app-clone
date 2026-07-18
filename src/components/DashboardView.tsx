@@ -117,6 +117,22 @@ const itemSku = (item: any) =>
 const itemProductId = (item: any) =>
   String(item?.product_id || item?.producto_id || item?.productId || '').trim();
 
+
+const itemSaleValue = (item: any, product?: ProductRow) => {
+  const qty = itemQty(item);
+  const unitPrice = Number(
+    item?.sale_gs ||
+      item?.unit_price_gs ||
+      item?.price_gs ||
+      item?.precio_unitario ||
+      item?.precio ||
+      product?.suggested_price_gs ||
+      product?.provider_price_gs ||
+      0,
+  );
+  return Math.max(0, unitPrice * qty);
+};
+
 interface OrderRow {
   id: string;
   created_at: string;
@@ -143,6 +159,7 @@ interface ProductRow {
   image_url: string | null;
   provider_email: string | null;
   provider_price_gs?: number | null;
+  suggested_price_gs?: number | null;
   real_cost_gs?: number | null;
 }
 
@@ -351,29 +368,115 @@ export default function Dashboard() {
     [deliveredOrders],
   );
 
-  const providerSettledValue = useMemo(() => {
-    if (!isProvider) return 0;
+  const getProviderShare = (order: OrderRow, providerEmail: string) => {
+    const target = normalizeEmail(providerEmail);
+    const items = safeItems(order);
 
-    return settledDeliveredOrders.reduce((sum, order) => {
-      const items = safeItems(order);
-      return (
-        sum +
-        items.reduce((itemSum, item) => {
-          const product = productById.get(itemProductId(item)) || productBySku.get(itemSku(item));
-          if (normalizeEmail(product?.provider_email) !== email) return itemSum;
+    let allValue = 0;
+    let providerValue = 0;
+    let allUnits = 0;
+    let providerUnits = 0;
 
-          const qty = itemQty(item);
-          const providerPrice = Number(product?.provider_price_gs || product?.real_cost_gs || 0);
-          return itemSum + providerPrice * qty;
-        }, 0)
-      );
-    }, 0);
-  }, [isProvider, settledDeliveredOrders, productById, productBySku, email]);
+    items.forEach((item) => {
+      const product = productById.get(itemProductId(item)) || productBySku.get(itemSku(item));
+      const qty = itemQty(item);
+      const value = itemSaleValue(item, product);
+      const belongs = normalizeEmail(product?.provider_email || order.provider_email) === target;
+
+      allValue += value;
+      allUnits += qty;
+
+      if (belongs) {
+        providerValue += value;
+        providerUnits += qty;
+      }
+    });
+
+    if (allValue > 0) return Math.min(1, providerValue / allValue);
+    if (allUnits > 0) return Math.min(1, providerUnits / allUnits);
+    return normalizeEmail(order.provider_email) === target ? 1 : 0;
+  };
+
+  const sellerCommissionRows = useMemo(() => {
+    if (!canSeeGlobalPanels) return [];
+
+    const map = new Map<
+      string,
+      {
+        email: string;
+        name: string;
+        logo: string | null;
+        orders: number;
+        units: number;
+        sales: number;
+        commission: number;
+        products: Set<string>;
+      }
+    >();
+
+    settledDeliveredOrders.forEach((order) => {
+      const sellerEmail = getSellerEmail(order);
+      if (!sellerEmail) return;
+
+      const providerShare = isProvider ? getProviderShare(order, email) : 1;
+      if (providerShare <= 0) return;
+
+      const info = profileMap[sellerEmail];
+      const current = map.get(sellerEmail) || {
+        email: sellerEmail,
+        name: info?.name || sellerEmail,
+        logo: info?.logo_url || null,
+        orders: 0,
+        units: 0,
+        sales: 0,
+        commission: 0,
+        products: new Set<string>(),
+      };
+
+      let relevantUnits = 0;
+      let relevantSales = 0;
+
+      safeItems(order).forEach((item) => {
+        const product = productById.get(itemProductId(item)) || productBySku.get(itemSku(item));
+        const belongs = !isProvider || normalizeEmail(product?.provider_email || order.provider_email) === email;
+        if (!belongs) return;
+
+        relevantUnits += itemQty(item);
+        relevantSales += itemSaleValue(item, product);
+        if (product?.title) current.products.add(product.title);
+      });
+
+      current.orders += 1;
+      current.units += relevantUnits;
+      current.sales += relevantSales > 0 ? relevantSales : Number(order.total_gs || 0) * providerShare;
+      current.commission += Number(order.commission_gs || 0) * providerShare;
+      map.set(sellerEmail, current);
+    });
+
+    return Array.from(map.values())
+      .map((row) => ({ ...row, products: Array.from(row.products).sort() }))
+      .sort((a, b) => b.commission - a.commission || b.orders - a.orders);
+  }, [
+    canSeeGlobalPanels,
+    settledDeliveredOrders,
+    isProvider,
+    email,
+    profileMap,
+    productById,
+    productBySku,
+  ]);
 
   const commissions = useMemo(() => {
-    if (isProvider) return providerSettledValue;
-    return settledDeliveredOrders.reduce((sum, order) => sum + Number(order.commission_gs || 0), 0);
-  }, [isProvider, providerSettledValue, settledDeliveredOrders]);
+    if (canSeeGlobalPanels) {
+      return sellerCommissionRows.reduce((sum, row) => sum + row.commission, 0);
+    }
+
+    if (isSeller) {
+      return settledDeliveredOrders.reduce((sum, order) => sum + Number(order.commission_gs || 0), 0);
+    }
+
+    return 0;
+  }, [canSeeGlobalPanels, sellerCommissionRows, isSeller, settledDeliveredOrders]);
 
   const pendingRenderByDelivery = useMemo(() => {
     const map = new Map<
@@ -386,13 +489,13 @@ export default function Dashboard() {
       .forEach((order) => {
         const deliveryEmail = getDeliveryEmail(order);
         if (!deliveryEmail) return;
-        if (isProvider && !orderHasProviderProduct(order, email)) return;
-        if (isDeliveryUser && deliveryEmail !== email) return;
+        const providerShare = isProvider ? getProviderShare(order, email) : 1;
+        if (providerShare <= 0) return;
 
         const info = profileMap[deliveryEmail];
         const feeStored = Number(order.delivery_fee_gs || order.delivery_gs || 0);
         const fee = feeStored > 0 ? feeStored : Number(deliveryRates[norm(order.city)] || 0);
-        const amount = Math.max(0, Number(order.total_gs || 0) - fee);
+        const amount = Math.max(0, (Number(order.total_gs || 0) - fee) * providerShare);
         const current = map.get(deliveryEmail) || {
           email: deliveryEmail,
           name: info?.name || deliveryEmail,
@@ -407,7 +510,7 @@ export default function Dashboard() {
       });
 
     return Array.from(map.values()).sort((a, b) => b.money - a.money);
-  }, [orders, profiles, deliveryRates, isProvider, isDeliveryUser, email, productById, productBySku]);
+  }, [orders, profileMap, deliveryRates, isProvider, email, productById, productBySku]);
 
   const deliveryStockGroups = useMemo(() => {
     const map = new Map<
@@ -468,7 +571,8 @@ export default function Dashboard() {
     deliveredOrders.forEach((order) => {
       const sellerEmail = getSellerEmail(order);
       if (!sellerEmail) return;
-      if (isProvider && !orderHasProviderProduct(order, email)) return;
+      const providerShare = isProvider ? getProviderShare(order, email) : 1;
+      if (providerShare <= 0) return;
 
       const info = profileMap[sellerEmail];
       const current = map.get(sellerEmail) || {
@@ -480,9 +584,20 @@ export default function Dashboard() {
         units: 0,
       };
 
+      let relevantUnits = 0;
+      let relevantRevenue = 0;
+
+      safeItems(order).forEach((item) => {
+        const product = productById.get(itemProductId(item)) || productBySku.get(itemSku(item));
+        const belongs = !isProvider || normalizeEmail(product?.provider_email || order.provider_email) === email;
+        if (!belongs) return;
+        relevantUnits += itemQty(item);
+        relevantRevenue += itemSaleValue(item, product);
+      });
+
       current.delivered += 1;
-      current.revenue += Number(order.total_gs || 0);
-      current.units += safeItems(order).reduce((sum, item) => sum + itemQty(item), 0);
+      current.revenue += relevantRevenue > 0 ? relevantRevenue : Number(order.total_gs || 0) * providerShare;
+      current.units += relevantUnits;
       map.set(sellerEmail, current);
     });
 
@@ -536,8 +651,8 @@ export default function Dashboard() {
   }, [createdOrders]);
 
   return (
-    <div className="min-h-screen bg-[#05070c] text-white">
-      <div className="mx-auto max-w-[1700px] space-y-5 p-4 md:p-6">
+    <div className="min-h-screen w-full bg-[#05070c] text-white">
+      <div className="w-full max-w-none space-y-5 p-3 md:p-4 xl:p-5">
         <div className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-slate-950/80 p-5 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h1 className="text-2xl font-black tracking-tight md:text-3xl">Dashboard</h1>
@@ -575,11 +690,17 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <div
+          className={`grid grid-cols-1 gap-4 sm:grid-cols-2 ${
+            canSeeGlobalPanels ? 'xl:grid-cols-4' : 'xl:grid-cols-3'
+          }`}
+        >
           <KpiCard title="Pedidos" value={nf(kpis.orders)} subtitle="Creados en el rango" icon="📦" tone="blue" />
           <KpiCard title="Entregados" value={nf(kpis.delivered)} subtitle={`${nf(kpis.deliveredValue)} Gs`} icon="✅" tone="emerald" />
           <KpiCard title="Comisiones rendidas" value={`${nf(kpis.commissions)} Gs`} subtitle={`${nf(kpis.settled)} pedidos entregados y rendidos`} icon="💰" tone="violet" />
-          <KpiCard title="Pendiente a rendir" value={`${nf(kpis.pendingMoney)} Gs`} subtitle={`${nf(kpis.pendingOrders)} pedidos, delivery descontado`} icon="🧾" tone="amber" />
+          {canSeeGlobalPanels && (
+            <KpiCard title="Pendiente a rendir" value={`${nf(kpis.pendingMoney)} Gs`} subtitle={`${nf(kpis.pendingOrders)} pedidos, delivery descontado`} icon="🧾" tone="amber" />
+          )}
         </div>
 
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
@@ -629,7 +750,7 @@ export default function Dashboard() {
           </section>
         </div>
 
-        {(canSeeGlobalPanels || isDeliveryUser) && (
+        {canSeeGlobalPanels && (
           <section className="rounded-2xl border border-amber-500/20 bg-slate-950/70 p-5">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -670,6 +791,70 @@ export default function Dashboard() {
             ) : (
               <div className="rounded-xl border border-dashed border-white/10 py-12 text-center text-slate-500">
                 No hay pedidos pendientes a rendir.
+              </div>
+            )}
+          </section>
+        )}
+
+        {canSeeGlobalPanels && (
+          <section className="rounded-2xl border border-emerald-500/20 bg-slate-950/70 p-5">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-black">💰 Comisiones rendidas por vendedor</h2>
+                <p className="text-xs font-semibold text-slate-400">
+                  Solo pedidos ENTREGADOS o ENCOMIENDA ENTREGADA con estado RENDIDO.
+                  {isProvider ? ' Se muestran únicamente las comisiones generadas por tus productos.' : ''}
+                </p>
+              </div>
+              <div className="rounded-xl bg-emerald-500/10 px-4 py-2 text-sm font-black text-emerald-300">
+                Total: {nf(kpis.commissions)} Gs
+              </div>
+            </div>
+
+            {sellerCommissionRows.length ? (
+              <div className="overflow-x-auto rounded-2xl border border-white/10">
+                <table className="w-full min-w-[900px] text-left">
+                  <thead className="bg-slate-900/90 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                    <tr>
+                      <th className="px-4 py-3">Vendedor</th>
+                      <th className="px-4 py-3 text-center">Pedidos rendidos</th>
+                      <th className="px-4 py-3 text-center">Unidades</th>
+                      <th className="px-4 py-3 text-right">Venta correspondiente</th>
+                      <th className="px-4 py-3 text-right">Comisión</th>
+                      <th className="px-4 py-3">Productos</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/10 bg-slate-950/40">
+                    {sellerCommissionRows.map((seller) => (
+                      <tr key={seller.email} className="hover:bg-white/[0.03]">
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-3">
+                            <Avatar name={seller.name} logo={seller.logo} />
+                            <div className="min-w-0">
+                              <div className="truncate font-black text-white">{seller.name}</div>
+                              <div className="truncate text-xs text-slate-500">{seller.email}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center text-lg font-black text-white">{nf(seller.orders)}</td>
+                        <td className="px-4 py-3 text-center font-black text-cyan-300">{nf(seller.units)}</td>
+                        <td className="px-4 py-3 text-right font-black text-slate-200">{nf(seller.sales)} Gs</td>
+                        <td className="px-4 py-3 text-right text-lg font-black text-emerald-300">
+                          {nf(seller.commission)} Gs
+                        </td>
+                        <td className="max-w-[360px] px-4 py-3">
+                          <div className="line-clamp-2 text-xs font-semibold text-slate-400">
+                            {seller.products.length ? seller.products.join(', ') : 'Sin producto identificado'}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-white/10 py-12 text-center text-slate-500">
+                No hay comisiones rendidas para mostrar en este rango.
               </div>
             )}
           </section>
