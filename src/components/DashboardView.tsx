@@ -1,10 +1,18 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell, Legend, LineChart, Line
+  PieChart, Pie, Cell, Legend, LineChart, Line, AreaChart, Area,
+  ComposedChart, Scatter, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis
 } from 'recharts';
+import { 
+  TrendingUp, TrendingDown, ShoppingBag, Truck, XCircle, 
+  Users, DollarSign, Package, MapPin, Award, Clock, 
+  AlertCircle, CheckCircle, BarChart3, PieChart as PieChartIcon,
+  Calendar, Filter, Download, RefreshCw, ChevronDown,
+  Eye, Edit, Trash2, MoreVertical, UserPlus
+} from 'lucide-react';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(Math.round(Number(n || 0)));
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#22c55e', '#f97316', '#a855f7'];
@@ -27,6 +35,7 @@ interface OrderRow {
   delivery_settled: boolean | null;
   provider_emails_list: string | null;
   delivered_at: string | null;
+  commission_settled?: boolean | null;
 }
 
 interface DeliveryStock {
@@ -34,17 +43,38 @@ interface DeliveryStock {
   delivery_email: string;
   product_id: string;
   quantity: number;
+  delivery_name?: string;
+  product_name?: string;
+  product_sku?: string;
+  product_image?: string;
 }
 
-interface Product {
-  id: string;
-  title: string;
-  sku: string | null;
-  image_url: string | null;
-  provider_email: string | null;
+interface SellerCommission {
+  seller_email: string;
+  seller_name: string;
+  seller_avatar?: string;
+  total_delivered: number;
+  total_commission: number;
+  pending_commission: number;
+  settled_commission: number;
+  orders: OrderRow[];
 }
 
-type KpiTone = 'blue' | 'emerald' | 'amber' | 'rose' | 'violet' | 'cyan' | 'pink';
+interface DeliveryWithStock {
+  email: string;
+  name: string;
+  avatar?: string;
+  total_products: number;
+  total_units: number;
+  products: {
+    name: string;
+    sku: string;
+    quantity: number;
+    image?: string;
+  }[];
+}
+
+type KpiTone = 'blue' | 'emerald' | 'amber' | 'rose' | 'violet' | 'cyan' | 'pink' | 'indigo';
 
 const todayPY = () => {
   const d = new Date();
@@ -87,131 +117,364 @@ function mergeOrders(...groups: any[][]): OrderRow[] {
   return Array.from(map.values());
 }
 
-function KpiCard({ title, value, subtitle, icon, tone = 'blue' }: {
+// ─── Componentes UI Premium ──────────────────────────────────────────────────
+
+const StatCard = ({ 
+  title, value, subtitle, icon: Icon, trend, trendValue, tone = 'blue', isLoading 
+}: {
   title: string;
   value: string | number;
   subtitle?: string;
-  icon: string;
+  icon: React.ElementType;
+  trend?: 'up' | 'down' | 'neutral';
+  trendValue?: string;
   tone?: KpiTone;
-}) {
+  isLoading?: boolean;
+}) => {
   const tones: Record<KpiTone, string> = {
-    blue: 'from-blue-500/20 to-cyan-500/5 border-blue-500/25 text-blue-300 shadow-blue-500/10',
-    emerald: 'from-emerald-500/20 to-teal-500/5 border-emerald-500/25 text-emerald-300 shadow-emerald-500/10',
-    amber: 'from-amber-500/20 to-orange-500/5 border-amber-500/25 text-amber-300 shadow-amber-500/10',
-    rose: 'from-rose-500/20 to-red-500/5 border-rose-500/25 text-rose-300 shadow-rose-500/10',
-    violet: 'from-violet-500/20 to-fuchsia-500/5 border-violet-500/25 text-violet-300 shadow-violet-500/10',
-    cyan: 'from-cyan-500/20 to-blue-500/5 border-cyan-500/25 text-cyan-300 shadow-cyan-500/10',
-    pink: 'from-pink-500/20 to-rose-500/5 border-pink-500/25 text-pink-300 shadow-pink-500/10',
+    blue: 'from-blue-500/20 to-cyan-500/10 border-blue-500/20 text-blue-300 shadow-blue-500/5',
+    emerald: 'from-emerald-500/20 to-teal-500/10 border-emerald-500/20 text-emerald-300 shadow-emerald-500/5',
+    amber: 'from-amber-500/20 to-orange-500/10 border-amber-500/20 text-amber-300 shadow-amber-500/5',
+    rose: 'from-rose-500/20 to-red-500/10 border-rose-500/20 text-rose-300 shadow-rose-500/5',
+    violet: 'from-violet-500/20 to-fuchsia-500/10 border-violet-500/20 text-violet-300 shadow-violet-500/5',
+    cyan: 'from-cyan-500/20 to-blue-500/10 border-cyan-500/20 text-cyan-300 shadow-cyan-500/5',
+    pink: 'from-pink-500/20 to-rose-500/10 border-pink-500/20 text-pink-300 shadow-pink-500/5',
+    indigo: 'from-indigo-500/20 to-violet-500/10 border-indigo-500/20 text-indigo-300 shadow-indigo-500/5',
   };
 
   return (
-    <div className={`relative overflow-hidden rounded-2xl border bg-gradient-to-br ${tones[tone]} p-4 shadow-xl transition-all duration-200 hover:-translate-y-0.5 hover:border-white/20`}>
-      <div className="absolute -right-8 -top-8 h-24 w-24 rounded-full bg-white/5 blur-2xl" />
+    <div className={`relative overflow-hidden rounded-2xl border bg-gradient-to-br ${tones[tone]} p-5 shadow-lg transition-all duration-300 hover:scale-[1.02] hover:border-white/30 group`}>
+      <div className="absolute -right-12 -top-12 h-32 w-32 rounded-full bg-white/5 blur-2xl group-hover:scale-150 transition-transform duration-700" />
       <div className="relative flex items-start justify-between gap-3">
-        <div>
-          <div className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">{title}</div>
-          <div className="mt-2 text-2xl font-black leading-tight text-white md:text-3xl">{value}</div>
-          {subtitle && <div className="mt-2 text-[11px] font-bold text-slate-400">{subtitle}</div>}
+        <div className="flex-1 min-w-0">
+          <div className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">{title}</div>
+          {isLoading ? (
+            <div className="mt-2 h-8 w-32 animate-pulse rounded-lg bg-slate-700/50" />
+          ) : (
+            <div className="mt-1 text-2xl font-black leading-tight text-white md:text-3xl">{value}</div>
+          )}
+          {subtitle && <div className="mt-1 text-xs font-medium text-slate-400">{subtitle}</div>}
+          {trend && trendValue && (
+            <div className={`mt-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-black ${
+              trend === 'up' ? 'bg-emerald-500/20 text-emerald-400' :
+              trend === 'down' ? 'bg-rose-500/20 text-rose-400' :
+              'bg-slate-500/20 text-slate-400'
+            }`}>
+              {trend === 'up' && <TrendingUp className="h-3 w-3" />}
+              {trend === 'down' && <TrendingDown className="h-3 w-3" />}
+              {trendValue}
+            </div>
+          )}
         </div>
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/10 bg-slate-950/50 text-xl shadow-inner">
-          {icon}
+        <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-${tone}-500/20 to-${tone}-500/5 border border-white/10 shadow-inner`}>
+          <Icon className="h-5 w-5 text-white/80" />
         </div>
       </div>
     </div>
   );
-}
+};
 
-function TopSellerCard({ name, email, avatar, revenue, orders, delivered }: {
-  name: string;
-  email: string;
-  avatar?: string;
-  revenue: number;
-  orders: number;
-  delivered: number;
-}) {
+const SectionHeader = ({ title, subtitle, action, icon }: {
+  title: string;
+  subtitle?: string;
+  action?: React.ReactNode;
+  icon?: React.ReactNode;
+}) => (
+  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+    <div>
+      <div className="flex items-center gap-2">
+        {icon && <span className="text-xl">{icon}</span>}
+        <h3 className="text-lg font-black text-white tracking-tight">{title}</h3>
+      </div>
+      {subtitle && <p className="text-xs text-slate-400 mt-0.5">{subtitle}</p>}
+    </div>
+    {action && <div className="flex items-center gap-2">{action}</div>}
+  </div>
+);
+
+const ActionButton = ({ children, variant = 'primary', onClick, icon: Icon, loading }: {
+  children: React.ReactNode;
+  variant?: 'primary' | 'secondary' | 'ghost' | 'danger';
+  onClick?: () => void;
+  icon?: React.ElementType;
+  loading?: boolean;
+}) => {
+  const variants = {
+    primary: 'bg-gradient-to-r from-blue-600 to-cyan-500 text-white hover:shadow-lg hover:shadow-blue-500/25 border-0',
+    secondary: 'bg-slate-800/80 text-slate-200 border border-slate-700 hover:bg-slate-700/80',
+    ghost: 'bg-transparent text-slate-400 border border-slate-700/50 hover:bg-slate-800/50',
+    danger: 'bg-gradient-to-r from-rose-600 to-red-500 text-white hover:shadow-lg hover:shadow-rose-500/25 border-0',
+  };
+
   return (
-    <div className="flex items-center gap-3 rounded-xl bg-slate-800/50 p-3 transition hover:bg-slate-800/80 border border-slate-700/50">
-      <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-full border-2 border-violet-500/50 bg-slate-900">
-        {avatar ? (
-          <img src={avatar} alt={name} className="h-full w-full object-cover" />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center text-2xl bg-gradient-to-br from-violet-500 to-fuchsia-500">
-            {name.charAt(0).toUpperCase()}
+    <button
+      onClick={onClick}
+      disabled={loading}
+      className={`inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition-all duration-200 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed ${variants[variant]}`}
+    >
+      {loading ? (
+        <RefreshCw className="h-4 w-4 animate-spin" />
+      ) : (
+        Icon && <Icon className="h-4 w-4" />
+      )}
+      {children}
+    </button>
+  );
+};
+
+// ─── Modal: Stock por Delivery ──────────────────────────────────────────────
+
+const DeliveryStockModal = ({ 
+  isOpen, onClose, deliveries, onAssign 
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+  deliveries: DeliveryWithStock[];
+  onAssign: (assignments: { delivery_email: string; product_id: string; quantity: number }[]) => void;
+}) => {
+  const [selectedDelivery, setSelectedDelivery] = useState<string | null>(null);
+  const [quantities, setQuantities] = useState<Record<string, Record<string, number>>>({});
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4" onClick={onClose}>
+      <div className="relative w-full max-w-4xl max-h-[90vh] overflow-auto rounded-2xl bg-gradient-to-br from-[#0a0d14] via-[#0f1320] to-[#05070b] border border-white/10 shadow-2xl" onClick={e => e.stopPropagation()}>
+        <div className="sticky top-0 z-10 flex items-center justify-between p-5 border-b border-white/10 bg-[#0f1320]/95 backdrop-blur-sm">
+          <div>
+            <h3 className="text-xl font-black text-white flex items-center gap-2">
+              <Package className="h-5 w-5 text-cyan-400" />
+              Gestión de Stock por Delivery
+            </h3>
+            <p className="text-xs text-slate-400">Asignar y gestionar stock de productos para cada delivery</p>
           </div>
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-bold text-white">{name}</p>
-        <p className="truncate text-xs text-slate-400">{email}</p>
-      </div>
-      <div className="text-right">
-        <div className="text-sm font-black text-emerald-400">{nf(revenue)} Gs</div>
-        <div className="text-xs text-slate-400">
-          {nf(orders)} pedidos • {nf(delivered)} entregados
+          <button onClick={onClose} className="rounded-full p-2 hover:bg-white/10 transition-all">
+            <XCircle className="h-5 w-5 text-slate-400" />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-6">
+          {deliveries.length === 0 ? (
+            <div className="text-center py-12 text-slate-500">
+              <Users className="h-12 w-12 mx-auto mb-3 opacity-50" />
+              <p className="font-medium">No hay deliveries registrados</p>
+              <p className="text-sm">Los deliveries aparecerán aquí cuando tengan stock asignado</p>
+            </div>
+          ) : (
+            deliveries.map(delivery => (
+              <div key={delivery.email} className="rounded-xl border border-white/10 bg-white/5 p-4 hover:bg-white/10 transition-all">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="h-10 w-10 rounded-full bg-gradient-to-br from-cyan-500 to-blue-500 flex items-center justify-center text-white font-bold text-sm">
+                    {delivery.avatar ? (
+                      <img src={delivery.avatar} alt={delivery.name} className="h-full w-full rounded-full object-cover" />
+                    ) : (
+                      delivery.name.charAt(0).toUpperCase()
+                    )}
+                  </div>
+                  <div className="flex-1">
+                    <div className="font-bold text-white">{delivery.name}</div>
+                    <div className="text-xs text-slate-400">{delivery.email}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm font-bold text-cyan-400">{delivery.total_units} unidades</div>
+                    <div className="text-xs text-slate-400">{delivery.total_products} productos</div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                  {delivery.products.map(product => (
+                    <div key={product.sku} className="flex items-center gap-2 rounded-lg bg-black/30 p-2 border border-white/5">
+                      {product.image ? (
+                        <img src={product.image} alt={product.name} className="h-8 w-8 rounded object-cover" />
+                      ) : (
+                        <div className="h-8 w-8 rounded bg-slate-700/50 flex items-center justify-center text-xs">📦</div>
+                      )}
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-medium text-white truncate">{product.name}</div>
+                        <div className="text-[10px] text-slate-400">SKU: {product.sku}</div>
+                      </div>
+                      <div className="text-sm font-bold text-emerald-400">{product.quantity}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+
+        <div className="sticky bottom-0 p-5 border-t border-white/10 bg-[#0f1320]/95 backdrop-blur-sm flex gap-3">
+          <ActionButton variant="secondary" onClick={onClose}>Cerrar</ActionButton>
+          <ActionButton variant="primary" onClick={() => {}} icon={Save}>
+            Guardar cambios
+          </ActionButton>
         </div>
       </div>
     </div>
   );
-}
+};
 
-function DeliveryPendingCard({ name, email, avatar, pendingOrders, pendingAmount }: {
-  name: string;
-  email: string;
-  avatar?: string;
-  pendingOrders: number;
-  pendingAmount: number;
-}) {
+// ─── Componente: Tabla de Comisiones ──────────────────────────────────────
+
+const CommissionsTable = ({ commissions, onSettle }: {
+  commissions: SellerCommission[];
+  onSettle: (email: string) => void;
+}) => {
+  const [expanded, setExpanded] = useState<string | null>(null);
+
   return (
-    <div className="flex items-center gap-3 rounded-xl bg-slate-800/50 p-3 transition hover:bg-slate-800/80 border border-amber-500/30">
-      <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-full border-2 border-amber-500/50 bg-slate-900">
-        {avatar ? (
-          <img src={avatar} alt={name} className="h-full w-full object-cover" />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center text-2xl bg-gradient-to-br from-amber-500 to-orange-500">
-            {name.charAt(0).toUpperCase()}
-          </div>
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-bold text-white">{name}</p>
-        <p className="truncate text-xs text-slate-400">{email}</p>
-      </div>
-      <div className="text-right">
-        <div className="text-sm font-black text-amber-400">{nf(pendingOrders)} pendientes</div>
-        <div className="text-xs text-amber-300">{nf(pendingAmount)} Gs a rendir</div>
-      </div>
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-white/10">
+            <th className="text-left py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Vendedor</th>
+            <th className="text-center py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Entregas</th>
+            <th className="text-center py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Total Comisión</th>
+            <th className="text-center py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Pendiente</th>
+            <th className="text-center py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Liquidado</th>
+            <th className="text-right py-3 px-3 text-xs font-black uppercase tracking-wider text-slate-400">Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          {commissions.map(comm => (
+            <tr key={comm.seller_email} className="border-b border-white/5 hover:bg-white/5 transition-all">
+              <td className="py-3 px-3">
+                <div className="flex items-center gap-3">
+                  <div className="h-9 w-9 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-white font-bold text-sm">
+                    {comm.seller_avatar ? (
+                      <img src={comm.seller_avatar} alt={comm.seller_name} className="h-full w-full rounded-full object-cover" />
+                    ) : (
+                      comm.seller_name.charAt(0).toUpperCase()
+                    )}
+                  </div>
+                  <div>
+                    <div className="font-bold text-white">{comm.seller_name}</div>
+                    <div className="text-xs text-slate-400">{comm.seller_email}</div>
+                  </div>
+                </div>
+              </td>
+              <td className="text-center py-3 px-3 font-bold text-white">{comm.total_delivered}</td>
+              <td className="text-center py-3 px-3 font-bold text-emerald-400">{nf(comm.total_commission)} Gs</td>
+              <td className="text-center py-3 px-3 font-bold text-amber-400">{nf(comm.pending_commission)} Gs</td>
+              <td className="text-center py-3 px-3 font-bold text-cyan-400">{nf(comm.settled_commission)} Gs</td>
+              <td className="text-right py-3 px-3">
+                <ActionButton 
+                  variant="primary" 
+                  size="sm" 
+                  onClick={() => onSettle(comm.seller_email)}
+                  disabled={comm.pending_commission === 0}
+                >
+                  Liquidar
+                </ActionButton>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
-}
+};
 
-function DeliveryStockCard({ productName, sku, quantity, image }: {
-  productName: string;
-  sku: string;
-  quantity: number;
-  image?: string;
-}) {
+// ─── Componente: Top Bar ────────────────────────────────────────────────────
+
+const TopBar = ({ dateFrom, dateTo, onDateChange, onRefresh, loading }: {
+  dateFrom: string;
+  dateTo: string;
+  onDateChange: (from: string, to: string) => void;
+  onRefresh: () => void;
+  loading: boolean;
+}) => (
+  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-5 rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.03] to-white/[0.01] backdrop-blur-sm">
+    <div className="flex items-center gap-4">
+      <div className="h-12 w-12 rounded-xl bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center shadow-lg shadow-blue-500/25">
+        <BarChart3 className="h-6 w-6 text-white" />
+      </div>
+      <div>
+        <h1 className="text-2xl font-black text-white tracking-tight">Dashboard</h1>
+        <p className="text-xs text-slate-400">Panel de control empresarial</p>
+      </div>
+    </div>
+
+    <div className="flex flex-wrap items-center gap-3">
+      <div className="flex items-center gap-2 bg-black/30 rounded-xl border border-white/10 p-1">
+        <input
+          type="date"
+          className="bg-transparent px-3 py-1.5 text-xs font-medium text-white outline-none border-0 focus:ring-0"
+          value={dateFrom}
+          onChange={e => onDateChange(e.target.value, dateTo)}
+        />
+        <span className="text-slate-500 text-xs">→</span>
+        <input
+          type="date"
+          className="bg-transparent px-3 py-1.5 text-xs font-medium text-white outline-none border-0 focus:ring-0"
+          value={dateTo}
+          onChange={e => onDateChange(dateFrom, e.target.value)}
+        />
+      </div>
+      
+      <ActionButton variant="secondary" onClick={onRefresh} icon={RefreshCw} loading={loading}>
+        Actualizar
+      </ActionButton>
+      
+      <ActionButton variant="secondary" icon={Filter}>
+        Filtrar
+      </ActionButton>
+      
+      <ActionButton variant="secondary" icon={Download}>
+        Exportar
+      </ActionButton>
+    </div>
+  </div>
+);
+
+// ─── Componente: Delivery Stock Card ──────────────────────────────────────
+
+const DeliveryStockCard = ({ delivery }: { delivery: DeliveryWithStock }) => {
+  const [expanded, setExpanded] = useState(false);
+
   return (
-    <div className="flex items-center gap-3 rounded-xl bg-slate-800/50 p-3 transition hover:bg-slate-800/80 border border-cyan-500/30">
-      <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg border border-slate-700 bg-slate-900">
-        {image ? (
-          <img src={image} alt={productName} className="h-full w-full object-cover" />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center text-2xl">📦</div>
-        )}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-bold text-white">{productName}</p>
-        <p className="truncate text-xs text-slate-400">SKU: {sku}</p>
-      </div>
-      <div className="text-right">
-        <div className={`text-sm font-black ${quantity > 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-          {nf(quantity)} unidades
+    <div className="rounded-xl border border-white/10 bg-white/5 p-4 hover:bg-white/10 transition-all cursor-pointer" onClick={() => setExpanded(!expanded)}>
+      <div className="flex items-center gap-3">
+        <div className="h-11 w-11 rounded-full bg-gradient-to-br from-cyan-500 to-blue-500 flex items-center justify-center text-white font-bold">
+          {delivery.avatar ? (
+            <img src={delivery.avatar} alt={delivery.name} className="h-full w-full rounded-full object-cover" />
+          ) : (
+            delivery.name.charAt(0).toUpperCase()
+          )}
         </div>
-        <div className="text-xs text-slate-400">disponible</div>
+        <div className="flex-1 min-w-0">
+          <div className="font-bold text-white">{delivery.name}</div>
+          <div className="text-xs text-slate-400">{delivery.email}</div>
+        </div>
+        <div className="text-right">
+          <div className="text-sm font-bold text-cyan-400">{delivery.total_units} uds.</div>
+          <div className="text-xs text-slate-400">{delivery.total_products} productos</div>
+        </div>
+        <ChevronDown className={`h-4 w-4 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`} />
       </div>
+
+      {expanded && (
+        <div className="mt-3 pt-3 border-t border-white/10 grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {delivery.products.map(p => (
+            <div key={p.sku} className="flex items-center gap-2 rounded-lg bg-black/30 p-2">
+              {p.image ? (
+                <img src={p.image} alt={p.name} className="h-8 w-8 rounded object-cover" />
+              ) : (
+                <div className="h-8 w-8 rounded bg-slate-700/50 flex items-center justify-center">📦</div>
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-medium text-white truncate">{p.name}</div>
+                <div className="text-[10px] text-slate-400">{p.sku}</div>
+              </div>
+              <div className="text-sm font-bold text-emerald-400">{p.quantity}</div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
-}
+};
+
+// ─── Dashboard Principal ──────────────────────────────────────────────────
 
 export default function Dashboard() {
   const { profile } = useAuth();
@@ -227,16 +490,17 @@ export default function Dashboard() {
   });
   const [dateTo, setDateTo] = useState(() => todayPY());
   const [orders, setOrders] = useState<OrderRow[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
   const [deliveryRates, setDeliveryRates] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(false);
   const [deliveryStocks, setDeliveryStocks] = useState<DeliveryStock[]>([]);
   const [profiles, setProfiles] = useState<any[]>([]);
+  const [showStockModal, setShowStockModal] = useState(false);
   const [adSpend, setAdSpend] = useState(() => {
     try { return Number(localStorage.getItem('provider_ad_spend') || 0); } catch { return 0; }
   });
 
-  const loadDashboard = async () => {
+  const loadDashboard = useCallback(async () => {
     setLoading(true);
     const from = `${dateFrom}T00:00:00`;
     const to = `${dateTo}T23:59:59`;
@@ -248,7 +512,7 @@ export default function Dashboard() {
       supabase.from('orders').select('*').gte('created_at', from).lte('created_at', to),
       supabase.from('orders').select('*').gte('assigned_at', from).lte('assigned_at', to),
       supabase.from('orders').select('*').gte('delivered_at', from).lte('delivered_at', to),
-      supabase.from('products').select('id, title, sku, image_url, provider_email'),
+      supabase.from('products').select('id, title, sku, image_url, provider_email, real_cost_gs, provider_price_gs'),
       supabase.from('delivery_fees').select('*'),
       supabase.from('delivery_stock').select('*'),
       supabase.from('profiles').select('id, email, full_name, avatar_url, role'),
@@ -265,13 +529,27 @@ export default function Dashboard() {
     });
     setDeliveryRates(rm);
     setLoading(false);
-  };
+  }, [dateFrom, dateTo]);
 
-  useEffect(() => { loadDashboard(); }, [dateFrom, dateTo]);
+  useEffect(() => { loadDashboard(); }, [loadDashboard]);
+
+  // ─── Mapeos ──────────────────────────────────────────────────────────────
+
+  const profileMap = useMemo(() => {
+    const m: Record<string, any> = {};
+    profiles.forEach(p => { if (p.email) m[p.email.toLowerCase()] = p; });
+    return m;
+  }, [profiles]);
+
+  const productMap = useMemo(() => {
+    const m: Record<string, any> = {};
+    products.forEach(p => { if (p.id) m[p.id] = p; });
+    return m;
+  }, [products]);
 
   const costMap = useMemo(() => {
     const m: Record<string, number> = {};
-    products.forEach(p => { if (p.sku) m[p.sku.trim()] = Number(p.real_cost_gs || 0); });
+    products.forEach(p => { if (p.sku) m[p.sku.trim()] = Number(p.real_cost_gs || p.provider_price_gs || 0); });
     return m;
   }, [products]);
 
@@ -281,29 +559,7 @@ export default function Dashboard() {
     return m;
   }, [products]);
 
-  const productImageMap = useMemo(() => {
-    const m: Record<string, string> = {};
-    products.forEach(p => { if (p.id && p.image_url) m[p.id] = p.image_url; });
-    return m;
-  }, [products]);
-
-  const productNameMap = useMemo(() => {
-    const m: Record<string, string> = {};
-    products.forEach(p => { if (p.id && p.title) m[p.id] = p.title; });
-    return m;
-  }, [products]);
-
-  const productSkuMap = useMemo(() => {
-    const m: Record<string, string> = {};
-    products.forEach(p => { if (p.id && p.sku) m[p.id] = p.sku; });
-    return m;
-  }, [products]);
-
-  const profileMap = useMemo(() => {
-    const m: Record<string, any> = {};
-    profiles.forEach(p => { if (p.email) m[p.email.toLowerCase()] = p; });
-    return m;
-  }, [profiles]);
+  // ─── Filtros ─────────────────────────────────────────────────────────────
 
   const roleAllowed = (o: OrderRow) => {
     if (role === 'VENDEDOR' && (o.created_by || '').toLowerCase() !== email.toLowerCase()) return false;
@@ -313,10 +569,11 @@ export default function Dashboard() {
   };
 
   const filteredOrders = useMemo(() => orders.filter(roleAllowed), [orders, role, email]);
-
   const createdRangeOrders = useMemo(() => filteredOrders.filter(o => inDateRange(o.created_at, dateFrom, dateTo)), [filteredOrders, dateFrom, dateTo]);
   const guidesRangeOrders = useMemo(() => filteredOrders.filter(o => inDateRange(o.assigned_at, dateFrom, dateTo)), [filteredOrders, dateFrom, dateTo]);
   const deliveredRangeOrders = useMemo(() => filteredOrders.filter(o => inDateRange(o.delivered_at, dateFrom, dateTo) && DELIVERED_STATES.has((o.status || '').toUpperCase())), [filteredOrders, dateFrom, dateTo]);
+
+  // ─── KPIs ────────────────────────────────────────────────────────────────
 
   const kpis = useMemo(() => {
     let orderCount = 0, sold = 0, delivered = 0, canceled = 0, profit = 0;
@@ -386,7 +643,8 @@ export default function Dashboard() {
     };
   }, [createdRangeOrders, deliveredRangeOrders, guidesRangeOrders, role, email, costMap, deliveryRates, skuProviderMap]);
 
-  // Top Sellers (para ADMIN y PROVEEDOR)
+  // ─── Top Sellers ────────────────────────────────────────────────────────
+
   const topSellers = useMemo(() => {
     if (role !== 'ADMIN' && role !== 'PROVEEDOR') return [];
 
@@ -440,7 +698,8 @@ export default function Dashboard() {
       .slice(0, 10);
   }, [createdRangeOrders, role, email, skuProviderMap, profileMap]);
 
-  // Delivery pendientes a rendir (para ADMIN y PROVEEDOR)
+  // ─── Delivery Pendientes a Rendir ──────────────────────────────────────
+
   const pendingDeliveries = useMemo(() => {
     if (role !== 'ADMIN' && role !== 'PROVEEDOR') return [];
 
@@ -491,11 +750,11 @@ export default function Dashboard() {
       .slice(0, 10);
   }, [deliveredRangeOrders, role, email, skuProviderMap, profileMap, deliveryRates]);
 
-  // Stock disponible por delivery (para ADMIN y PROVEEDOR)
-  const deliveryStockData = useMemo(() => {
+  // ─── Stock por Delivery ─────────────────────────────────────────────────
+
+  const deliveryStockData = useMemo((): DeliveryWithStock[] => {
     if (role !== 'ADMIN' && role !== 'PROVEEDOR') return [];
 
-    // Si es PROVEEDOR, filtrar productos que le pertenecen
     const providerProductIds = new Set<string>();
     if (role === 'PROVEEDOR') {
       products.forEach(p => {
@@ -505,31 +764,99 @@ export default function Dashboard() {
       });
     }
 
-    const stocks = deliveryStocks
-      .filter(s => {
-        if (role === 'PROVEEDOR') {
-          return providerProductIds.has(s.product_id);
-        }
-        return true;
-      })
-      .map(s => ({
-        ...s,
-        productName: productNameMap[s.product_id] || s.product_id,
-        sku: productSkuMap[s.product_id] || '',
-        image: productImageMap[s.product_id],
-      }))
-      .sort((a, b) => b.quantity - a.quantity)
-      .slice(0, 10);
+    const grouped: Record<string, DeliveryWithStock> = {};
 
-    return stocks;
-  }, [deliveryStocks, role, email, products, productNameMap, productSkuMap, productImageMap]);
+    deliveryStocks.forEach(stock => {
+      if (role === 'PROVEEDOR' && !providerProductIds.has(stock.product_id)) return;
+      
+      const product = productMap[stock.product_id];
+      if (!product) return;
 
-  // Estadísticas de delivery stock
-  const deliveryStockStats = useMemo(() => {
-    const totalUnits = deliveryStockData.reduce((sum, s) => sum + s.quantity, 0);
-    const totalProducts = deliveryStockData.length;
-    return { totalUnits, totalProducts };
-  }, [deliveryStockData]);
+      const deliveryProfile = profileMap[stock.delivery_email];
+      if (!deliveryProfile) return;
+
+      if (!grouped[stock.delivery_email]) {
+        grouped[stock.delivery_email] = {
+          email: stock.delivery_email,
+          name: deliveryProfile.full_name || stock.delivery_email,
+          avatar: deliveryProfile.avatar_url,
+          total_products: 0,
+          total_units: 0,
+          products: [],
+        };
+      }
+
+      grouped[stock.delivery_email].products.push({
+        name: product.title || product.sku || 'Producto',
+        sku: product.sku || '',
+        quantity: stock.quantity,
+        image: product.image_url,
+      });
+      grouped[stock.delivery_email].total_products++;
+      grouped[stock.delivery_email].total_units += stock.quantity;
+    });
+
+    return Object.values(grouped)
+      .sort((a, b) => b.total_units - a.total_units);
+  }, [deliveryStocks, role, email, products, productMap, profileMap]);
+
+  // ─── Comisiones por Vendedor ───────────────────────────────────────────
+
+  const sellerCommissions = useMemo((): SellerCommission[] => {
+    if (role !== 'ADMIN' && role !== 'PROVEEDOR') return [];
+
+    const sellerMap: Record<string, SellerCommission> = {};
+
+    deliveredRangeOrders.forEach(o => {
+      const sellerEmail = o.created_by?.toLowerCase() || '';
+      if (!sellerEmail) return;
+      
+      if (role === 'PROVEEDOR') {
+        try {
+          const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
+          let hasProviderProduct = false;
+          items.forEach((it: any) => {
+            const sku = String(it.sku || '').trim();
+            if ((skuProviderMap[sku] || '') === email.toLowerCase()) {
+              hasProviderProduct = true;
+            }
+          });
+          if (!hasProviderProduct) return;
+        } catch { return; }
+      }
+
+      const commission = Number(o.commission_gs || 0);
+      const isSettled = o.commission_settled || false;
+
+      if (!sellerMap[sellerEmail]) {
+        const sellerProfile = profileMap[sellerEmail];
+        sellerMap[sellerEmail] = {
+          seller_email: sellerEmail,
+          seller_name: sellerProfile?.full_name || sellerEmail.split('@')[0] || 'Vendedor',
+          seller_avatar: sellerProfile?.avatar_url,
+          total_delivered: 0,
+          total_commission: 0,
+          pending_commission: 0,
+          settled_commission: 0,
+          orders: [],
+        };
+      }
+
+      sellerMap[sellerEmail].total_delivered++;
+      sellerMap[sellerEmail].total_commission += commission;
+      if (isSettled) {
+        sellerMap[sellerEmail].settled_commission += commission;
+      } else {
+        sellerMap[sellerEmail].pending_commission += commission;
+      }
+      sellerMap[sellerEmail].orders.push(o);
+    });
+
+    return Object.values(sellerMap)
+      .sort((a, b) => b.pending_commission - a.pending_commission);
+  }, [deliveredRangeOrders, role, email, skuProviderMap, profileMap]);
+
+  // ─── Gráficos ───────────────────────────────────────────────────────────
 
   const barData = useMemo(() => {
     const byDay: Record<string, number> = {};
@@ -595,7 +922,6 @@ export default function Dashboard() {
       } catch {}
     });
 
-    // Buscar imagen del producto por SKU
     const skuToImage: Record<string, string> = {};
     products.forEach(p => {
       if (p.sku && p.image_url) {
@@ -642,357 +968,392 @@ export default function Dashboard() {
       }));
   }, [createdRangeOrders, deliveredRangeOrders]);
 
-  const handleAdSpend = (val: number) => {
-    setAdSpend(val);
-    try { localStorage.setItem('provider_ad_spend', String(val)); } catch {}
+  // ─── Handlers ───────────────────────────────────────────────────────────
+
+  const handleRefresh = () => loadDashboard();
+
+  const handleSettleCommission = async (sellerEmail: string) => {
+    if (!confirm(`¿Liquidar todas las comisiones pendientes para ${sellerEmail}?`)) return;
+    
+    const sellerOrders = deliveredRangeOrders.filter(
+      o => o.created_by?.toLowerCase() === sellerEmail.toLowerCase() && !o.commission_settled
+    );
+
+    for (const order of sellerOrders) {
+      await supabase.from('orders').update({ commission_settled: true }).eq('id', order.id);
+    }
+
+    toast.success(`Comisiones liquidadas para ${sellerEmail}`);
+    handleRefresh();
   };
 
+  // ─── Render ─────────────────────────────────────────────────────────────
+
   return (
-    <div className="min-h-full w-full overflow-auto bg-[#020617] p-3 text-slate-100 md:p-5">
-      <div className="relative w-full overflow-hidden rounded-3xl border border-slate-800/80 bg-slate-950/80 p-4 shadow-2xl shadow-black/30 md:p-6">
-        <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(59,130,246,.18),transparent_30%),radial-gradient(circle_at_top_right,rgba(16,185,129,.14),transparent_28%)]" />
-        <div className="relative space-y-5">
-          {/* Header */}
-          <div className="flex flex-col justify-between gap-4 rounded-3xl border border-slate-700/70 bg-slate-900/70 p-4 shadow-xl shadow-black/20 xl:flex-row xl:items-center">
-            <div className="flex items-center gap-4">
-              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-400 text-2xl shadow-lg shadow-blue-500/20">📊</div>
-              <div>
-                <h2 className="text-2xl font-black leading-tight text-white md:text-3xl">Dashboard</h2>
-                <p className="text-xs font-semibold text-slate-400">Del {dateFrom} al {dateTo}</p>
-              </div>
-            </div>
+    <div className="min-h-screen w-full bg-[#020617] p-4 md:p-6 text-slate-100">
+      <div className="mx-auto max-w-7xl space-y-6">
+        
+        {/* Top Bar */}
+        <TopBar 
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          onDateChange={(from, to) => { setDateFrom(from); setDateTo(to); }}
+          onRefresh={handleRefresh}
+          loading={loading}
+        />
 
-            <div className="flex flex-wrap items-end gap-2">
-              <label className="flex flex-col gap-1 text-[10px] font-black uppercase tracking-widest text-slate-400">
-                Desde
-                <input type="date" className="h-10 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm font-bold text-white outline-none transition focus:border-cyan-400" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
-              </label>
-              <label className="flex flex-col gap-1 text-[10px] font-black uppercase tracking-widest text-slate-400">
-                Hasta
-                <input type="date" className="h-10 rounded-xl border border-slate-700 bg-slate-950 px-3 text-sm font-bold text-white outline-none transition focus:border-cyan-400" value={dateTo} onChange={e => setDateTo(e.target.value)} />
-              </label>
-              <button className="h-10 rounded-xl bg-gradient-to-r from-blue-600 to-cyan-500 px-5 text-sm font-black text-white shadow-lg shadow-blue-500/20 transition hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60" onClick={loadDashboard} disabled={loading}>
-                {loading ? '⏳ Cargando...' : 'Aplicar'}
-              </button>
-              <button className="h-10 rounded-xl border border-slate-700 bg-slate-800 px-4 text-sm font-black text-slate-200 transition hover:bg-slate-700" onClick={() => { 
-                const d = new Date();
-                d.setDate(1);
-                const y = d.getFullYear();
-                const m = String(d.getMonth() + 1).padStart(2, '0');
-                setDateFrom(`${y}-${m}-01`);
-                setDateTo(todayPY());
-              }}>
-                Mes Actual
-              </button>
-            </div>
-          </div>
+        {/* KPIs Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-4">
+          <StatCard 
+            title="Total Ventas" 
+            value={`${nf(kpis.sold)} Gs`} 
+            subtitle="Del 01 al 18" 
+            icon={DollarSign} 
+            tone="emerald"
+            trend="up"
+            trendValue="+12.5%"
+          />
+          <StatCard 
+            title="Pedidos" 
+            value={nf(kpis.orders)} 
+            subtitle="Total pedidos" 
+            icon={ShoppingBag} 
+            tone="blue"
+          />
+          <StatCard 
+            title="Entregados" 
+            value={nf(kpis.delivered)} 
+            subtitle="Del 01 al 18" 
+            icon={Truck} 
+            tone="cyan"
+          />
+          <StatCard 
+            title="Cancelados" 
+            value={nf(kpis.canceled)} 
+            subtitle="Del 01 al 18" 
+            icon={XCircle} 
+            tone="rose"
+          />
+          <StatCard 
+            title="Ganancia Hoy" 
+            value={`${nf(kpis.deliveredTodayProfit || kpis.profit)} Gs`} 
+            subtitle="Comisión de hoy" 
+            icon={TrendingUp} 
+            tone="violet"
+          />
+          <StatCard 
+            title="Guías" 
+            value={nf(kpis.guidesGenerated)} 
+            subtitle="Generadas" 
+            icon={Package} 
+            tone="amber"
+          />
+        </div>
 
-          {/* KPIs */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-6">
-            <KpiCard title="Total Vendido" value={`${nf(kpis.sold)} Gs`} subtitle="Del 01 al 18" icon="💰" tone="emerald" />
-            <KpiCard title="Pedidos Entregados" value={nf(kpis.delivered)} subtitle="Del 01 al 18" icon="✅" tone="blue" />
-            <KpiCard title="Pedidos Cancelados" value={nf(kpis.canceled)} subtitle="Del 01 al 18" icon="✕" tone="rose" />
-            <KpiCard title="Devueltos a Depósito" value={nf(0)} subtitle="Del 01 al 18" icon="↩️" tone="amber" />
-            <KpiCard title="Ganancia Hoy" value={`${nf(kpis.deliveredTodayProfit || kpis.profit)} Gs`} subtitle="Comisión de hoy" icon="⚡" tone="violet" />
-            <KpiCard title="Guías Generadas" value={nf(kpis.guidesGenerated)} subtitle="Del 01 al 18" icon="📦" tone="cyan" />
-          </div>
-
-          {/* Top Sellers - solo ADMIN y PROVEEDOR */}
-          {(role === 'ADMIN' || role === 'PROVEEDOR') && topSellers.length > 0 && (
-            <div className="rounded-2xl border border-violet-500/30 bg-gradient-to-br from-violet-500/10 to-fuchsia-500/5 p-5 shadow-2xl shadow-black/20">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-base font-black text-white">🏆 Top Mejores Vendedores</h3>
-                  <p className="text-xs font-semibold text-slate-400">Por volumen de ventas</p>
-                </div>
-                <span className="rounded-full bg-violet-500/20 px-3 py-1 text-xs font-black text-violet-300">⭐</span>
-              </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {topSellers.map((seller, index) => (
-                  <TopSellerCard
-                    key={index}
-                    name={seller.name}
-                    email={seller.email}
-                    avatar={seller.avatar}
-                    revenue={seller.revenue}
-                    orders={seller.orders}
-                    delivered={seller.delivered}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Delivery Pendientes a Rendir - solo ADMIN y PROVEEDOR */}
-          {(role === 'ADMIN' || role === 'PROVEEDOR') && pendingDeliveries.length > 0 && (
-            <div className="rounded-2xl border border-amber-500/30 bg-gradient-to-br from-amber-500/10 to-orange-500/5 p-5 shadow-2xl shadow-black/20">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-base font-black text-white">🚚 Delivery Pendientes a Rendir</h3>
-                  <p className="text-xs font-semibold text-slate-400">Pedidos entregados no liquidados</p>
-                </div>
-                <span className="rounded-full bg-amber-500/20 px-3 py-1 text-xs font-black text-amber-300">⏳</span>
-              </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {pendingDeliveries.map((delivery, index) => (
-                  <DeliveryPendingCard
-                    key={index}
-                    name={delivery.name}
-                    email={delivery.email}
-                    avatar={delivery.avatar}
-                    pendingOrders={delivery.pendingOrders}
-                    pendingAmount={delivery.pendingAmount}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Stock Disponible por Delivery - solo ADMIN y PROVEEDOR */}
-          {(role === 'ADMIN' || role === 'PROVEEDOR') && (
-            <div className="rounded-2xl border border-cyan-500/30 bg-gradient-to-br from-cyan-500/10 to-blue-500/5 p-5 shadow-2xl shadow-black/20">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-base font-black text-white">📦 Stock Disponible por Delivery</h3>
-                  <p className="text-xs font-semibold text-slate-400">
-                    {deliveryStockData.length > 0 
-                      ? `${deliveryStockStats.totalProducts} productos • ${nf(deliveryStockStats.totalUnits)} unidades totales`
-                      : 'No hay stock asignado a deliveries'
-                    }
-                  </p>
-                </div>
-                <span className="rounded-full bg-cyan-500/20 px-3 py-1 text-xs font-black text-cyan-300">📊</span>
-              </div>
-              {deliveryStockData.length > 0 ? (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                  {deliveryStockData.map((stock, index) => (
-                    <DeliveryStockCard
-                      key={index}
-                      productName={stock.productName}
-                      sku={stock.sku || stock.product_id}
-                      quantity={stock.quantity}
-                      image={stock.image}
-                    />
-                  ))}
-                </div>
-              ) : (
-                <div className="flex h-[100px] items-center justify-center rounded-xl border border-dashed border-slate-700 text-sm font-bold text-slate-500">
-                  No hay stock asignado a deliveries {role === 'PROVEEDOR' ? 'para tus productos' : ''}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Gráficos principales */}
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            {/* Ventas por día - Barras */}
-            <div className="rounded-2xl border border-slate-700/60 bg-slate-900/70 p-5 shadow-2xl shadow-black/20">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-base font-black text-white">Ventas por día</h3>
-                  <p className="text-xs font-semibold text-slate-400">Total vendido por día</p>
-                </div>
-                <span className="rounded-full bg-blue-500/10 px-3 py-1 text-xs font-black text-blue-300">Gs</span>
-              </div>
-              {barData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={barData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,.18)" />
-                    <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 11 }} />
-                    <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => nf(v)} />
-                    <Tooltip
-                      contentStyle={{ background: '#020617', border: '1px solid rgba(148,163,184,.25)', borderRadius: 14, color: '#fff' }}
-                      formatter={(v: number) => [nf(v) + ' Gs', 'Ventas']}
-                    />
-                    <Bar dataKey="value" fill="#3b82f6" radius={[10, 10, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="flex h-[240px] items-center justify-center rounded-xl border border-dashed border-slate-700 text-sm font-bold text-slate-500">Sin datos</div>
-              )}
-            </div>
-
-            {/* Ventas vs Entregas - Líneas */}
-            <div className="rounded-2xl border border-slate-700/60 bg-slate-900/70 p-5 shadow-2xl shadow-black/20">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-base font-black text-white">Ventas vs Entregas</h3>
-                  <p className="text-xs font-semibold text-slate-400">Comparativa diaria</p>
-                </div>
-                <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-black text-emerald-300">📈</span>
-              </div>
-              {lineData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={280}>
-                  <LineChart data={lineData}>
-                    <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,.18)" />
-                    <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 11 }} />
-                    <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => nf(v)} />
-                    <Tooltip
-                      contentStyle={{ background: '#020617', border: '1px solid rgba(148,163,184,.25)', borderRadius: 14, color: '#fff' }}
-                      formatter={(v: number) => [nf(v) + ' Gs', '']}
-                    />
-                    <Legend wrapperStyle={{ fontSize: 11, color: '#cbd5e1' }} />
-                    <Line type="monotone" dataKey="sold" stroke="#3b82f6" strokeWidth={3} dot={{ fill: '#3b82f6' }} name="Vendido" />
-                    <Line type="monotone" dataKey="delivered" stroke="#10b981" strokeWidth={3} dot={{ fill: '#10b981' }} name="Entregado" />
-                  </LineChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="flex h-[240px] items-center justify-center rounded-xl border border-dashed border-slate-700 text-sm font-bold text-slate-500">Sin datos</div>
-              )}
-            </div>
-          </div>
-
-          {/* Distribución de estados */}
-          <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-            <div className="rounded-2xl border border-slate-700/60 bg-slate-900/70 p-5 shadow-2xl shadow-black/20">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-base font-black text-white">Distribución de estados</h3>
-                  <p className="text-xs font-semibold text-slate-400">Pedidos por estado</p>
-                </div>
-                <span className="rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-black text-emerald-300">📊</span>
-              </div>
-              {pieData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={280}>
-                  <PieChart>
-                    <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={58} outerRadius={90} paddingAngle={3} label={({ percent }) => `${(percent * 100).toFixed(0)}%`}>
-                      {pieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-                    </Pie>
-                    <Tooltip contentStyle={{ background: '#020617', border: '1px solid rgba(148,163,184,.25)', borderRadius: 14, color: '#fff' }} />
-                    <Legend wrapperStyle={{ fontSize: 11, color: '#cbd5e1' }} />
-                  </PieChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="flex h-[240px] items-center justify-center rounded-xl border border-dashed border-slate-700 text-sm font-bold text-slate-500">Sin datos</div>
-              )}
-            </div>
-
-            {/* Reglas / Estado de entregas */}
-            <div className="rounded-2xl border border-slate-700/60 bg-slate-900/70 p-5 shadow-2xl shadow-black/20">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-base font-black text-white">Estado de entregas</h3>
-                  <p className="text-xs font-semibold text-slate-400">Resumen de entregas</p>
-                </div>
-                <span className="rounded-full bg-amber-500/10 px-3 py-1 text-xs font-black text-amber-300">📋</span>
-              </div>
-              <div className="space-y-3">
-                <div className="flex items-center justify-between rounded-xl bg-slate-800/50 p-4">
-                  <span className="font-bold text-slate-300">Total Pedidos</span>
-                  <span className="text-xl font-black text-white">{nf(kpis.orders)}</span>
-                </div>
-                <div className="flex items-center justify-between rounded-xl bg-slate-800/50 p-4 border-l-4 border-emerald-500">
-                  <span className="font-bold text-slate-300">✅ Entregados</span>
-                  <span className="text-xl font-black text-emerald-400">{nf(kpis.delivered)}</span>
-                </div>
-                <div className="flex items-center justify-between rounded-xl bg-slate-800/50 p-4 border-l-4 border-rose-500">
-                  <span className="font-bold text-slate-300">✕ Cancelados</span>
-                  <span className="text-xl font-black text-rose-400">{nf(kpis.canceled)}</span>
-                </div>
-                <div className="flex items-center justify-between rounded-xl bg-slate-800/50 p-4 border-l-4 border-amber-500">
-                  <span className="font-bold text-slate-300">↩️ Devueltos a depósito</span>
-                  <span className="text-xl font-black text-amber-400">{nf(0)}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Top Productos con mini fotos */}
-          <div className="rounded-2xl border border-slate-700/60 bg-slate-900/70 p-5 shadow-2xl shadow-black/20">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div>
-                <h3 className="text-base font-black text-white">🏆 Top Productos</h3>
-                <p className="text-xs font-semibold text-slate-400">Vendido vs Entregado</p>
-              </div>
-              <span className="rounded-full bg-violet-500/10 px-3 py-1 text-xs font-black text-violet-300">🔥</span>
-            </div>
-            {topProducts.length > 0 ? (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {topProducts.map((product, index) => (
-                  <div key={index} className="flex items-center gap-3 rounded-xl bg-slate-800/50 p-3 transition hover:bg-slate-800/80">
-                    <div className="h-12 w-12 flex-shrink-0 overflow-hidden rounded-lg border border-slate-700 bg-slate-900">
-                      {product.image ? (
-                        <img src={product.image} alt={product.name} className="h-full w-full object-cover" />
+        {/* Top Sellers - ADMIN & PROVEEDOR */}
+        {(role === 'ADMIN' || role === 'PROVEEDOR') && topSellers.length > 0 && (
+          <div className="rounded-2xl border border-violet-500/20 bg-gradient-to-br from-violet-500/5 to-fuchsia-500/5 p-5 shadow-xl">
+            <SectionHeader 
+              title="Top Vendedores" 
+              subtitle="Mejor rendimiento por volumen de ventas"
+              icon={<Award className="h-5 w-5 text-violet-400" />}
+              action={<ActionButton variant="secondary" icon={Users}>Ver todos</ActionButton>}
+            />
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
+              {topSellers.map((seller, index) => (
+                <div key={index} className="flex items-center gap-3 rounded-xl bg-white/5 p-3 border border-white/5 hover:bg-white/10 transition-all">
+                  <div className="relative">
+                    <div className="h-11 w-11 rounded-full bg-gradient-to-br from-violet-500 to-fuchsia-500 flex items-center justify-center text-white font-bold text-sm">
+                      {seller.avatar ? (
+                        <img src={seller.avatar} alt={seller.name} className="h-full w-full rounded-full object-cover" />
                       ) : (
-                        <div className="flex h-full w-full items-center justify-center text-2xl">📦</div>
+                        seller.name.charAt(0).toUpperCase()
                       )}
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-bold text-white">{product.name}</p>
-                      <div className="flex gap-4 text-xs">
-                        <span className="font-semibold text-blue-400">Vendido: {nf(product.qty)}</span>
-                        <span className="font-semibold text-emerald-400">Entregado: {nf(product.delivered)}</span>
-                      </div>
+                    <div className="absolute -top-1 -right-1 h-5 w-5 rounded-full bg-violet-500/80 text-[9px] font-black text-white flex items-center justify-center border-2 border-[#020617]">
+                      {index + 1}
                     </div>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div className="flex h-[200px] items-center justify-center rounded-xl border border-dashed border-slate-700 text-sm font-bold text-slate-500">Sin datos</div>
-            )}
-          </div>
-
-          {/* Top Ciudades */}
-          <div className="rounded-2xl border border-slate-700/60 bg-slate-900/70 p-5 shadow-2xl shadow-black/20">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div>
-                <h3 className="text-base font-black text-white">🏙️ Top Ciudades</h3>
-                <p className="text-xs font-semibold text-slate-400">Vendido vs Entregado</p>
-              </div>
-              <span className="rounded-full bg-cyan-500/10 px-3 py-1 text-xs font-black text-cyan-300">📍</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold text-white text-sm">{seller.name}</div>
+                    <div className="text-xs text-slate-400">{seller.email}</div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-sm font-bold text-emerald-400">{nf(seller.revenue)} Gs</div>
+                    <div className="text-xs text-slate-400">{seller.delivered} entregados</div>
+                  </div>
+                </div>
+              ))}
             </div>
-            {mapCities.length > 0 ? (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {mapCities.map((city, index) => (
-                  <div key={index} className="space-y-1 rounded-xl bg-slate-800/50 p-3 transition hover:bg-slate-800/80">
-                    <div className="flex items-center justify-between">
-                      <span className="truncate text-sm font-bold text-white">{city.name}</span>
-                      <span className="text-xs font-black text-slate-400">Total: {nf(city.qty)}</span>
-                    </div>
-                    <div className="flex gap-2 text-xs">
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between">
-                          <span className="text-blue-400">Vendido</span>
-                          <span className="font-bold text-white">{nf(city.qty)}</span>
-                        </div>
-                        <div className="h-1.5 overflow-hidden rounded-full bg-slate-700">
-                          <div className="h-full rounded-full bg-blue-500" style={{ width: `${(city.qty / Math.max(city.qty, city.delivered, 1)) * 100}%` }} />
-                        </div>
-                      </div>
-                      <div className="flex-1">
-                        <div className="flex items-center justify-between">
-                          <span className="text-emerald-400">Entregado</span>
-                          <span className="font-bold text-white">{nf(city.delivered)}</span>
-                        </div>
-                        <div className="h-1.5 overflow-hidden rounded-full bg-slate-700">
-                          <div className="h-full rounded-full bg-emerald-500" style={{ width: `${(city.delivered / Math.max(city.qty, city.delivered, 1)) * 100}%` }} />
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="flex h-[200px] items-center justify-center rounded-xl border border-dashed border-slate-700 text-sm font-bold text-slate-500">Sin datos</div>
-            )}
+          </div>
+        )}
+
+        {/* Comisiones Pendientes - ADMIN & PROVEEDOR */}
+        {(role === 'ADMIN' || role === 'PROVEEDOR') && sellerCommissions.length > 0 && (
+          <div className="rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-500/5 to-teal-500/5 p-5 shadow-xl">
+            <SectionHeader 
+              title="Comisiones Pendientes a Pagar" 
+              subtitle="Pedidos entregados con estado rendido"
+              icon={<DollarSign className="h-5 w-5 text-emerald-400" />}
+              action={
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-emerald-400 bg-emerald-500/20 px-3 py-1 rounded-full">
+                    Total: {nf(sellerCommissions.reduce((sum, s) => sum + s.pending_commission, 0))} Gs
+                  </span>
+                  <ActionButton variant="primary" icon={CheckCircle}>Liquidar todo</ActionButton>
+                </div>
+              }
+            />
+            <CommissionsTable 
+              commissions={sellerCommissions} 
+              onSettle={handleSettleCommission}
+            />
+          </div>
+        )}
+
+        {/* Stock por Delivery - ADMIN & PROVEEDOR */}
+        {(role === 'ADMIN' || role === 'PROVEEDOR') && deliveryStockData.length > 0 && (
+          <div className="rounded-2xl border border-cyan-500/20 bg-gradient-to-br from-cyan-500/5 to-blue-500/5 p-5 shadow-xl">
+            <SectionHeader 
+              title="Stock por Delivery" 
+              subtitle={`${deliveryStockData.length} deliveries con stock asignado`}
+              icon={<Package className="h-5 w-5 text-cyan-400" />}
+              action={
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-cyan-400 bg-cyan-500/20 px-3 py-1 rounded-full">
+                    Total: {nf(deliveryStockData.reduce((sum, d) => sum + d.total_units, 0))} unidades
+                  </span>
+                  <ActionButton variant="primary" icon={UserPlus} onClick={() => setShowStockModal(true)}>
+                    Gestionar
+                  </ActionButton>
+                </div>
+              }
+            />
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+              {deliveryStockData.map((delivery, index) => (
+                <DeliveryStockCard key={index} delivery={delivery} />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Gráficos */}
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          {/* Ventas por día */}
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-xl">
+            <SectionHeader 
+              title="Ventas por día" 
+              subtitle="Total vendido por día"
+              icon={<BarChart3 className="h-5 w-5 text-blue-400" />}
+            />
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={barData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" />
+                  <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                  <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => nf(v)} />
+                  <Tooltip
+                    contentStyle={{ 
+                      background: 'rgba(2,6,23,0.95)', 
+                      border: '1px solid rgba(148,163,184,0.2)', 
+                      borderRadius: 12, 
+                      color: '#fff',
+                      padding: '12px 16px'
+                    }}
+                    formatter={(v: number) => [nf(v) + ' Gs', 'Ventas']}
+                  />
+                  <Bar dataKey="value" fill="url(#barGradient)" radius={[8, 8, 0, 0]} />
+                  <defs>
+                    <linearGradient id="barGradient" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#3b82f6" />
+                      <stop offset="100%" stopColor="#06b6d4" />
+                    </linearGradient>
+                  </defs>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
           </div>
 
-          {/* Información adicional */}
-          <div className="rounded-2xl border border-slate-700/60 bg-slate-900/70 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-4 text-xs text-slate-400">
-              <div className="flex items-center gap-4">
-                <span className="font-bold">📅 Rango: {dateFrom} → {dateTo}</span>
-                <span className="font-bold">📦 Pedidos: {nf(kpis.orders)}</span>
-                <span className="font-bold">💰 Total: {nf(kpis.sold)} Gs</span>
+          {/* Ventas vs Entregas */}
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-xl">
+            <SectionHeader 
+              title="Ventas vs Entregas" 
+              subtitle="Comparativa diaria"
+              icon={<TrendingUp className="h-5 w-5 text-emerald-400" />}
+            />
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={lineData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(148,163,184,0.15)" />
+                  <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                  <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={v => nf(v)} />
+                  <Tooltip
+                    contentStyle={{ 
+                      background: 'rgba(2,6,23,0.95)', 
+                      border: '1px solid rgba(148,163,184,0.2)', 
+                      borderRadius: 12, 
+                      color: '#fff',
+                      padding: '12px 16px'
+                    }}
+                    formatter={(v: number) => [nf(v) + ' Gs', '']}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 11, color: '#94a3b8', paddingTop: 8 }} />
+                  <Line type="monotone" dataKey="sold" stroke="#3b82f6" strokeWidth={3} dot={{ fill: '#3b82f6', r: 4 }} name="Vendido" />
+                  <Line type="monotone" dataKey="delivered" stroke="#10b981" strokeWidth={3} dot={{ fill: '#10b981', r: 4 }} name="Entregado" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+        {/* Distribución de estados y Top Productos */}
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+          {/* Distribución de estados */}
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-xl">
+            <SectionHeader 
+              title="Distribución de estados" 
+              subtitle="Pedidos por estado"
+              icon={<PieChartIcon className="h-5 w-5 text-violet-400" />}
+            />
+            <div className="h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie 
+                    data={pieData} 
+                    dataKey="value" 
+                    nameKey="name" 
+                    cx="50%" 
+                    cy="50%" 
+                    innerRadius={60} 
+                    outerRadius={90} 
+                    paddingAngle={3}
+                    label={({ percent }) => `${(percent * 100).toFixed(0)}%`}
+                    labelLine={{ stroke: 'rgba(148,163,184,0.3)' }}
+                  >
+                    {pieData.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip
+                    contentStyle={{ 
+                      background: 'rgba(2,6,23,0.95)', 
+                      border: '1px solid rgba(148,163,184,0.2)', 
+                      borderRadius: 12, 
+                      color: '#fff',
+                      padding: '12px 16px'
+                    }}
+                  />
+                  <Legend wrapperStyle={{ fontSize: 11, color: '#94a3b8', paddingTop: 8 }} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          {/* Top Productos */}
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-xl">
+            <SectionHeader 
+              title="Top Productos" 
+              subtitle="Vendido vs Entregado"
+              icon={<Package className="h-5 w-5 text-fuchsia-400" />}
+            />
+            <div className="space-y-2 max-h-72 overflow-y-auto pr-2">
+              {topProducts.map((product, index) => (
+                <div key={index} className="flex items-center gap-3 rounded-lg bg-white/5 p-2 hover:bg-white/10 transition-all">
+                  <div className="h-10 w-10 flex-shrink-0 overflow-hidden rounded-lg border border-white/10 bg-slate-900">
+                    {product.image ? (
+                      <img src={product.image} alt={product.name} className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center text-lg">📦</div>
+                    )}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-bold text-white text-sm truncate">{product.name}</div>
+                    <div className="flex gap-4 text-xs">
+                      <span className="font-semibold text-blue-400">Vendido: {nf(product.qty)}</span>
+                      <span className="font-semibold text-emerald-400">Entregado: {nf(product.delivered)}</span>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-xs font-bold text-slate-400">
+                      {product.delivered > 0 ? Math.round((product.delivered / product.qty) * 100) : 0}%
+                    </div>
+                    <div className="w-12 h-1 rounded-full bg-slate-700 mt-1">
+                      <div 
+                        className="h-full rounded-full bg-gradient-to-r from-blue-500 to-emerald-400"
+                        style={{ width: `${Math.min(100, (product.delivered / product.qty) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* Top Ciudades */}
+        <div className="rounded-2xl border border-white/10 bg-white/5 p-5 shadow-xl">
+          <SectionHeader 
+            title="Top Ciudades" 
+            subtitle="Mayor volumen de pedidos"
+            icon={<MapPin className="h-5 w-5 text-cyan-400" />}
+          />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+            {mapCities.map((city, index) => (
+              <div key={index} className="rounded-xl bg-white/5 p-3 border border-white/5 hover:bg-white/10 transition-all">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-white text-sm truncate">{city.name}</span>
+                  <span className="text-xs font-bold text-slate-400">{nf(city.qty)}</span>
+                </div>
+                <div className="mt-2 flex gap-2 text-[10px]">
+                  <div className="flex-1">
+                    <div className="flex justify-between text-slate-400">
+                      <span>Vendido</span>
+                      <span className="font-bold text-white">{nf(city.qty)}</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-slate-700 mt-0.5">
+                      <div className="h-full rounded-full bg-blue-500" style={{ width: `${(city.qty / Math.max(city.qty, city.delivered, 1)) * 100}%` }} />
+                    </div>
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex justify-between text-slate-400">
+                      <span>Entregado</span>
+                      <span className="font-bold text-white">{nf(city.delivered)}</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-slate-700 mt-0.5">
+                      <div className="h-full rounded-full bg-emerald-500" style={{ width: `${(city.delivered / Math.max(city.qty, city.delivered, 1)) * 100}%` }} />
+                    </div>
+                  </div>
+                </div>
               </div>
-              <div className="flex items-center gap-4">
-                <span className="font-bold text-emerald-400">✅ Entregados: {nf(kpis.delivered)}</span>
-                <span className="font-bold text-rose-400">✕ Cancelados: {nf(kpis.canceled)}</span>
-              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
+            <div className="flex items-center gap-4">
+              <span>📅 {dateFrom} → {dateTo}</span>
+              <span>📦 {nf(kpis.orders)} pedidos</span>
+              <span>💰 {nf(kpis.sold)} Gs</span>
+            </div>
+            <div className="flex items-center gap-4">
+              <span className="text-emerald-400">✅ {nf(kpis.delivered)} entregados</span>
+              <span className="text-rose-400">✕ {nf(kpis.canceled)} cancelados</span>
+              <span className="text-slate-400">🔄 Actualizado: {new Date().toLocaleTimeString()}</span>
             </div>
           </div>
         </div>
       </div>
+
+      {/* Modal de Stock por Delivery */}
+      <DeliveryStockModal
+        isOpen={showStockModal}
+        onClose={() => setShowStockModal(false)}
+        deliveries={deliveryStockData}
+        onAssign={(assignments) => {
+          console.log('Asignaciones:', assignments);
+          setShowStockModal(false);
+        }}
+      />
     </div>
   );
 }
