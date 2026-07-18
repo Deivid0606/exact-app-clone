@@ -324,6 +324,84 @@ function Avatar({ name, logo }: { name: string; logo?: string | null }) {
   );
 }
 
+
+const SUPABASE_PAGE_SIZE = 1000;
+
+const fetchAllOrdersPaged = async () => {
+  const rows: OrderRow[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*')
+      .order('created_at', { ascending: true })
+      .range(from, from + SUPABASE_PAGE_SIZE - 1);
+
+    if (error) return { data: rows, error };
+
+    const page = (data || []) as OrderRow[];
+    rows.push(...page);
+
+    if (page.length < SUPABASE_PAGE_SIZE) break;
+    from += SUPABASE_PAGE_SIZE;
+  }
+
+  return { data: rows, error: null as any };
+};
+
+const fetchOrdersByDatePaged = async (
+  column: 'created_at' | 'assigned_at' | 'delivered_at',
+  fromIso: string,
+  toIso: string,
+) => {
+  const rows: OrderRow[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*')
+      .gte(column, fromIso)
+      .lte(column, toIso)
+      .order(column, { ascending: true })
+      .range(from, from + SUPABASE_PAGE_SIZE - 1);
+
+    if (error) return { data: rows, error };
+
+    const page = (data || []) as OrderRow[];
+    rows.push(...page);
+
+    if (page.length < SUPABASE_PAGE_SIZE) break;
+    from += SUPABASE_PAGE_SIZE;
+  }
+
+  return { data: rows, error: null as any };
+};
+
+const fetchCommissionRequestsPaged = async () => {
+  const rows: CommissionRequestRow[] = [];
+  let from = 0;
+
+  while (true) {
+    const { data, error } = await supabase
+      .from('commission_requests')
+      .select('*')
+      .order('requested_at', { ascending: false })
+      .range(from, from + SUPABASE_PAGE_SIZE - 1);
+
+    if (error) return { data: rows, error };
+
+    const page = (data || []) as CommissionRequestRow[];
+    rows.push(...page);
+
+    if (page.length < SUPABASE_PAGE_SIZE) break;
+    from += SUPABASE_PAGE_SIZE;
+  }
+
+  return { data: rows, error: null as any };
+};
+
 export default function Dashboard() {
   const { profile } = useAuth();
   const role = norm(profile?.role).toUpperCase();
@@ -347,10 +425,7 @@ export default function Dashboard() {
   const canSeeGlobalPanels = isAdmin || isProvider;
 
   const loadCommissionRequests = async () => {
-    const { data, error } = await supabase
-      .from('commission_requests')
-      .select('*')
-      .order('requested_at', { ascending: false });
+    const { data, error } = await fetchCommissionRequestsPaged();
 
     if (error) {
       console.error('Error cargando commission_requests:', error);
@@ -358,7 +433,7 @@ export default function Dashboard() {
       return;
     }
 
-    setCommissionRequests((data || []) as CommissionRequestRow[]);
+    setCommissionRequests(data || []);
   };
 
   const loadDashboard = async () => {
@@ -377,11 +452,12 @@ export default function Dashboard() {
       stocksRes,
       ratesRes,
     ] = await Promise.all([
-      supabase.from('orders').select('*').gte('created_at', fromIso).lte('created_at', toIso),
-      supabase.from('orders').select('*').gte('assigned_at', fromIso).lte('assigned_at', toIso),
-      supabase.from('orders').select('*').gte('delivered_at', fromIso).lte('delivered_at', toIso),
-      // Sin filtro de fecha: se usa para comisiones disponibles y pedidos pendientes a rendir.
-      supabase.from('orders').select('*'),
+      fetchOrdersByDatePaged('created_at', fromIso, toIso),
+      fetchOrdersByDatePaged('assigned_at', fromIso, toIso),
+      fetchOrdersByDatePaged('delivered_at', fromIso, toIso),
+      // Sin filtro de fecha y SIN límite de 1.000 filas.
+      // Se usa para comisiones disponibles y pedidos pendientes a rendir.
+      fetchAllOrdersPaged(),
       supabase.from('products').select('*'),
       supabase.from('profiles').select('email, name, logo_url, phone, role'),
       supabase.from('delivery_stock').select('*'),
@@ -1440,7 +1516,7 @@ export default function Dashboard() {
               <div>
                 <h2 className="text-lg font-black">💰 Estado de comisiones por vendedor</h2>
                 <p className="text-xs font-semibold text-slate-400">
-                  CÁLCULO UNIFICADO V2: Disponible = comisiones RENDIDAS no pagadas menos solicitudes PENDIENTES. Pagada = solicitudes APROBADAS. Sin filtro de fechas.
+                  CÁLCULO UNIFICADO V3 PAGINADO: Disponible = comisiones RENDIDAS no pagadas menos solicitudes PENDIENTES. Pagada = solicitudes APROBADAS. Sin filtro de fechas.
                   {isProvider ? ' Solo se muestran las comisiones correspondientes a tus productos.' : ''}
                 </p>
               </div>
