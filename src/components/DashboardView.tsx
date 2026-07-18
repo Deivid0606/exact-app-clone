@@ -449,13 +449,33 @@ export default function Dashboard() {
     return map;
   }, [products]);
 
-  const orderHasProviderProduct = (order: OrderRow, providerEmail: string) => {
-    const target = normalizeEmail(providerEmail);
-    return safeItems(order).some((item) => {
+  const getOrderProviders = (order: OrderRow): string[] => {
+    const providerSet = new Set<string>();
+
+    safeItems(order).forEach((item) => {
       const product = productById.get(itemProductId(item)) || productBySku.get(itemSku(item));
-      return normalizeEmail(product?.provider_email || order.provider_email) === target;
+      const providerEmail = normalizeEmail(product?.provider_email);
+      if (providerEmail) providerSet.add(providerEmail);
     });
+
+    // Misma regla usada en Pago/Solicitud de comisiones:
+    // provider_emails_list solamente se usa cuando no se identificó proveedor por SKU.
+    if (providerSet.size === 0) {
+      parseProviderEmailList(order.provider_emails_list).forEach((providerEmail) => {
+        providerSet.add(providerEmail);
+      });
+    }
+
+    if (providerSet.size === 0) {
+      const directProvider = normalizeEmail(order.provider_email);
+      if (directProvider) providerSet.add(directProvider);
+    }
+
+    return Array.from(providerSet);
   };
+
+  const orderHasProviderProduct = (order: OrderRow, providerEmail: string) =>
+    getOrderProviders(order).includes(normalizeEmail(providerEmail));
 
   const roleFilteredOrders = useMemo(() => {
     return orders.filter((order) => {
@@ -532,49 +552,35 @@ export default function Dashboard() {
     return normalizeEmail(order.provider_email) === target ? 1 : 0;
   };
 
-  const getCommissionProviders = (order: OrderRow): string[] => {
-    const providerSet = new Set<string>();
-
-    safeItems(order).forEach((item) => {
-      const product = productById.get(itemProductId(item)) || productBySku.get(itemSku(item));
-      const providerEmail = normalizeEmail(product?.provider_email);
-      if (providerEmail) providerSet.add(providerEmail);
-    });
-
-    if (providerSet.size === 0) {
-      parseProviderEmailList(order.provider_emails_list).forEach((providerEmail) => {
-        providerSet.add(providerEmail);
-      });
-    }
-
-    if (providerSet.size === 0) {
-      const directProvider = normalizeEmail(order.provider_email);
-      if (directProvider) providerSet.add(directProvider);
-    }
-
-    return Array.from(providerSet);
-  };
-
-  const requestStatusByOrderProvider = useMemo(() => {
-    const map = new Map<string, 'PENDIENTE' | 'APROBADO'>();
+  const pendingRequestsBySellerProvider = useMemo(() => {
+    const map = new Map<string, number>();
 
     commissionRequests.forEach((request) => {
-      const status = String(request.status || '').toUpperCase().trim();
-      if (status !== 'PENDIENTE' && status !== 'APROBADO') return;
+      if (String(request.status || '').toUpperCase().trim() !== 'PENDIENTE') return;
 
       const sellerEmail = normalizeEmail(request.vendor_email);
       const providerEmail = normalizeEmail(request.provider_email);
       if (!sellerEmail || !providerEmail) return;
 
-      parseRequestOrderIds(request).forEach((orderId) => {
-        const key = `${orderId}::${sellerEmail}::${providerEmail}`;
-        const previous = map.get(key);
+      const key = `${sellerEmail}::${providerEmail}`;
+      map.set(key, (map.get(key) || 0) + Number(request.amount_gs || 0));
+    });
 
-        // APROBADO tiene prioridad sobre PENDIENTE.
-        if (status === 'APROBADO' || !previous) {
-          map.set(key, status);
-        }
-      });
+    return map;
+  }, [commissionRequests]);
+
+  const approvedRequestsBySellerProvider = useMemo(() => {
+    const map = new Map<string, number>();
+
+    commissionRequests.forEach((request) => {
+      if (String(request.status || '').toUpperCase().trim() !== 'APROBADO') return;
+
+      const sellerEmail = normalizeEmail(request.vendor_email);
+      const providerEmail = normalizeEmail(request.provider_email);
+      if (!sellerEmail || !providerEmail) return;
+
+      const key = `${sellerEmail}::${providerEmail}`;
+      map.set(key, (map.get(key) || 0) + Number(request.amount_gs || 0));
     });
 
     return map;
@@ -583,46 +589,52 @@ export default function Dashboard() {
   const sellerCommissionRows = useMemo(() => {
     if (!canSeeGlobalPanels && !isSeller) return [];
 
-    const map = new Map<
-      string,
-      {
-        email: string;
-        name: string;
-        logo: string | null;
-        orders: number;
-        units: number;
-        sales: number;
-        generated: number;
-        requested: number;
-        paid: number;
-        available: number;
-        products: Set<string>;
-      }
-    >();
+    type SellerCommissionAccumulator = {
+      email: string;
+      name: string;
+      logo: string | null;
+      orders: number;
+      units: number;
+      sales: number;
+      generated: number;
+      grossAvailable: number;
+      requested: number;
+      paid: number;
+      products: Set<string>;
+      providerGross: Map<string, number>;
+      providerPending: Map<string, number>;
+      providerPaid: Map<string, number>;
+    };
 
-    allSettledDeliveredOrders.forEach((order) => {
+    const map = new Map<string, SellerCommissionAccumulator>();
+
+    // IMPORTANTE:
+    // Se recorren TODOS los pedidos históricos, sin el selector de fechas.
+    // Esto replica la disponibilidad real de Solicitud/Pago de comisiones.
+    allOrders.forEach((order) => {
       const sellerEmail = getSellerEmail(order);
       if (!sellerEmail) return;
       if (isSeller && sellerEmail !== email) return;
 
-      const commissionProviders = getCommissionProviders(order);
-      if (commissionProviders.length === 0) return;
+      const status = norm(order.status || (order as any).estado_1);
+      const status2 = norm(order.status2 || (order as any).estado_2);
 
-      // La pantalla Solicitud de comisiones divide la comisión entre los
-      // proveedores únicos que participan en el pedido.
-      const providerCommission =
-        Number(order.commission_gs || 0) / Math.max(1, commissionProviders.length);
+      const isEligible =
+        (status === 'entregado' || status === 'encomienda entregada') &&
+        status2 === 'rendido';
 
-      let commissionForView = Number(order.commission_gs || 0);
-      let requestProviderKey = '';
+      if (!isEligible) return;
 
-      if (isProvider) {
-        if (!commissionProviders.includes(email)) return;
-        commissionForView = providerCommission;
-        requestProviderKey = email;
-      }
+      const commission = Number(order.commission_gs || 0);
+      if (commission <= 0) return;
 
+      const providers = getOrderProviders(order);
+      if (providers.length === 0) return;
+      if (isProvider && !providers.includes(email)) return;
+
+      const perProvider = commission / providers.length;
       const info = profileMap[sellerEmail];
+
       const current = map.get(sellerEmail) || {
         email: sellerEmail,
         name: info?.name || sellerEmail,
@@ -631,10 +643,13 @@ export default function Dashboard() {
         units: 0,
         sales: 0,
         generated: 0,
+        grossAvailable: 0,
         requested: 0,
         paid: 0,
-        available: 0,
         products: new Set<string>(),
+        providerGross: new Map<string, number>(),
+        providerPending: new Map<string, number>(),
+        providerPaid: new Map<string, number>(),
       };
 
       let relevantUnits = 0;
@@ -642,8 +657,8 @@ export default function Dashboard() {
 
       safeItems(order).forEach((item) => {
         const product = productById.get(itemProductId(item)) || productBySku.get(itemSku(item));
-        const itemProvider = normalizeEmail(product?.provider_email || order.provider_email);
-        const belongs = !isProvider || itemProvider === email;
+        const itemProvider = normalizeEmail(product?.provider_email);
+        const belongs = !isProvider || itemProvider === email || providers.includes(email);
         if (!belongs) return;
 
         relevantUnits += itemQty(item);
@@ -657,56 +672,142 @@ export default function Dashboard() {
         relevantSales > 0
           ? relevantSales
           : isProvider
-            ? Number(order.total_gs || 0) / Math.max(1, commissionProviders.length)
+            ? Number(order.total_gs || 0) / providers.length
             : Number(order.total_gs || 0);
 
-      current.generated += commissionForView;
+      const visibleProviders = isProvider ? [email] : providers;
+      const visibleCommission = isProvider ? perProvider : commission;
+      current.generated += visibleCommission;
 
-      const isPaidByOrder = Boolean(order.commission_paid);
-      let isPaidByRequest = false;
-      let isPendingRequest = false;
+      visibleProviders.forEach((providerEmail) => {
+        const key = `${sellerEmail}::${providerEmail}`;
+        const pendingAmount = pendingRequestsBySellerProvider.get(key) || 0;
+        const approvedAmount = approvedRequestsBySellerProvider.get(key) || 0;
 
-      if (isProvider) {
-        const requestKey = `${order.id}::${sellerEmail}::${requestProviderKey}`;
-        const requestStatus = requestStatusByOrderProvider.get(requestKey);
-        isPaidByRequest = requestStatus === 'APROBADO';
-        isPendingRequest = requestStatus === 'PENDIENTE';
-      } else {
-        commissionProviders.forEach((providerEmail) => {
-          const requestKey = `${order.id}::${sellerEmail}::${providerEmail}`;
-          const requestStatus = requestStatusByOrderProvider.get(requestKey);
-          if (requestStatus === 'APROBADO') isPaidByRequest = true;
-          if (requestStatus === 'PENDIENTE') isPendingRequest = true;
-        });
+        current.providerPending.set(providerEmail, pendingAmount);
+        current.providerPaid.set(providerEmail, approvedAmount);
+
+        // Exactamente igual que Solicitud de comisiones:
+        // solo las órdenes NO pagadas forman el saldo rendido/disponible.
+        if (!order.commission_paid) {
+          current.providerGross.set(
+            providerEmail,
+            (current.providerGross.get(providerEmail) || 0) + perProvider,
+          );
+        }
+      });
+
+      map.set(sellerEmail, current);
+    });
+
+    // También deben aparecer vendedores que tengan solicitudes históricas,
+    // aunque todos sus pedidos ya estén marcados commission_paid.
+    commissionRequests.forEach((request) => {
+      const sellerEmail = normalizeEmail(request.vendor_email);
+      const providerEmail = normalizeEmail(request.provider_email);
+      if (!sellerEmail || !providerEmail) return;
+      if (isSeller && sellerEmail !== email) return;
+      if (isProvider && providerEmail !== email) return;
+
+      const status = String(request.status || '').toUpperCase().trim();
+      if (status !== 'PENDIENTE' && status !== 'APROBADO') return;
+
+      const info = profileMap[sellerEmail];
+      const current = map.get(sellerEmail) || {
+        email: sellerEmail,
+        name: info?.name || sellerEmail,
+        logo: info?.logo_url || null,
+        orders: 0,
+        units: 0,
+        sales: 0,
+        generated: 0,
+        grossAvailable: 0,
+        requested: 0,
+        paid: 0,
+        products: new Set<string>(),
+        providerGross: new Map<string, number>(),
+        providerPending: new Map<string, number>(),
+        providerPaid: new Map<string, number>(),
+      };
+
+      const key = `${sellerEmail}::${providerEmail}`;
+      if (status === 'PENDIENTE') {
+        current.providerPending.set(
+          providerEmail,
+          pendingRequestsBySellerProvider.get(key) || 0,
+        );
       }
 
-      if (isPaidByOrder || isPaidByRequest) {
-        current.paid += commissionForView;
-      } else if (isPendingRequest) {
-        current.requested += commissionForView;
-      } else {
-        current.available += commissionForView;
+      if (status === 'APROBADO') {
+        current.providerPaid.set(
+          providerEmail,
+          approvedRequestsBySellerProvider.get(key) || 0,
+        );
       }
 
       map.set(sellerEmail, current);
     });
 
     return Array.from(map.values())
-      .map((row) => ({
-        ...row,
-        products: Array.from(row.products).sort(),
-      }))
+      .map((row) => {
+        const providerKeys = new Set<string>([
+          ...row.providerGross.keys(),
+          ...row.providerPending.keys(),
+          ...row.providerPaid.keys(),
+        ]);
+
+        let grossAvailable = 0;
+        let requested = 0;
+        let paid = 0;
+        let available = 0;
+
+        providerKeys.forEach((providerEmail) => {
+          const gross = row.providerGross.get(providerEmail) || 0;
+          const pending = row.providerPending.get(providerEmail) || 0;
+          const approved = row.providerPaid.get(providerEmail) || 0;
+
+          grossAvailable += gross;
+          requested += pending;
+          paid += approved;
+          available += Math.max(0, gross - pending);
+        });
+
+        return {
+          email: row.email,
+          name: row.name,
+          logo: row.logo,
+          orders: row.orders,
+          units: row.units,
+          sales: row.sales,
+          // Histórico mostrado de forma consistente:
+          // saldo no pagado + solicitudes aprobadas.
+          generated: grossAvailable + paid,
+          available,
+          requested,
+          paid,
+          products: Array.from(row.products).sort(),
+        };
+      })
+      .filter(
+        (row) =>
+          row.generated > 0 ||
+          row.available > 0 ||
+          row.requested > 0 ||
+          row.paid > 0,
+      )
       .sort((a, b) => b.available - a.available || b.generated - a.generated);
   }, [
     canSeeGlobalPanels,
     isSeller,
-    allSettledDeliveredOrders,
     isProvider,
     email,
+    allOrders,
+    commissionRequests,
     profileMap,
     productById,
     productBySku,
-    requestStatusByOrderProvider,
+    pendingRequestsBySellerProvider,
+    approvedRequestsBySellerProvider,
   ]);
 
   const commissionSummary = useMemo(() => {
@@ -1104,7 +1205,7 @@ export default function Dashboard() {
           <KpiCard title="Comisiones pagadas" value={`${nf(kpis.paidCommission)} Gs`} subtitle="Pagos finalizados" icon="✅" tone="cyan" />
           {canSeeGlobalPanels && (
             <>
-              <KpiCard title="En solicitud" value={`${nf(kpis.requestedCommission)} Gs`} subtitle="Pendiente o aprobada, aún no pagada" icon="⏳" tone="violet" />
+              <KpiCard title="En solicitud" value={`${nf(kpis.requestedCommission)} Gs`} subtitle="Solicitudes con estado PENDIENTE" icon="⏳" tone="violet" />
               <KpiCard title="Pendiente a rendir" value={`${nf(kpis.pendingMoney)} Gs`} subtitle={`${nf(kpis.pendingOrders)} pedidos, delivery descontado`} icon="🧾" tone="amber" />
             </>
           )}
@@ -1339,7 +1440,7 @@ export default function Dashboard() {
               <div>
                 <h2 className="text-lg font-black">💰 Estado de comisiones por vendedor</h2>
                 <p className="text-xs font-semibold text-slate-400">
-                  Histórico completo, sin aplicar el filtro de fechas. Disponible: RENDIDO, sin solicitud y sin pago. En solicitud: PENDIENTE. Pagada: APROBADO o commission_paid = true.
+                  Histórico completo, sin filtro de fechas. Disponible = comisión RENDIDA no pagada menos solicitudes PENDIENTES. Pagada = solicitudes APROBADAS. Usa la misma regla de Solicitud y Pago de comisiones.
                   {isProvider ? ' Solo se muestran las comisiones correspondientes a tus productos.' : ''}
                 </p>
               </div>
