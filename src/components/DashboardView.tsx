@@ -332,6 +332,7 @@ export default function Dashboard() {
   const [dateFrom, setDateFrom] = useState(firstDayOfMonth());
   const [dateTo, setDateTo] = useState(todayPY());
   const [orders, setOrders] = useState<OrderRow[]>([]);
+  const [allOrders, setAllOrders] = useState<OrderRow[]>([]);
   const [products, setProducts] = useState<ProductRow[]>([]);
   const [profiles, setProfiles] = useState<ProfileRow[]>([]);
   const [deliveryStocks, setDeliveryStocks] = useState<DeliveryStockRow[]>([]);
@@ -366,16 +367,26 @@ export default function Dashboard() {
     const fromIso = `${dateFrom}T00:00:00`;
     const toIso = `${dateTo}T23:59:59`;
 
-    const [createdRes, assignedRes, deliveredRes, productsRes, profilesRes, stocksRes, ratesRes] =
-      await Promise.all([
-        supabase.from('orders').select('*').gte('created_at', fromIso).lte('created_at', toIso),
-        supabase.from('orders').select('*').gte('assigned_at', fromIso).lte('assigned_at', toIso),
-        supabase.from('orders').select('*').gte('delivered_at', fromIso).lte('delivered_at', toIso),
-        supabase.from('products').select('*'),
-        supabase.from('profiles').select('email, name, logo_url, phone, role'),
-        supabase.from('delivery_stock').select('*'),
-        supabase.from('delivery_fees').select('*'),
-      ]);
+    const [
+      createdRes,
+      assignedRes,
+      deliveredRes,
+      allOrdersRes,
+      productsRes,
+      profilesRes,
+      stocksRes,
+      ratesRes,
+    ] = await Promise.all([
+      supabase.from('orders').select('*').gte('created_at', fromIso).lte('created_at', toIso),
+      supabase.from('orders').select('*').gte('assigned_at', fromIso).lte('assigned_at', toIso),
+      supabase.from('orders').select('*').gte('delivered_at', fromIso).lte('delivered_at', toIso),
+      // Sin filtro de fecha: se usa para comisiones disponibles y pedidos pendientes a rendir.
+      supabase.from('orders').select('*'),
+      supabase.from('products').select('*'),
+      supabase.from('profiles').select('email, name, logo_url, phone, role'),
+      supabase.from('delivery_stock').select('*'),
+      supabase.from('delivery_fees').select('*'),
+    ]);
 
     const merged = new Map<string, OrderRow>();
     [createdRes.data || [], assignedRes.data || [], deliveredRes.data || []]
@@ -385,6 +396,7 @@ export default function Dashboard() {
       });
 
     setOrders(Array.from(merged.values()));
+    setAllOrders((allOrdersRes.data || []) as OrderRow[]);
     setProducts((productsRes.data || []) as ProductRow[]);
     setProfiles((profilesRes.data || []) as ProfileRow[]);
     setDeliveryStocks((stocksRes.data || []) as DeliveryStockRow[]);
@@ -399,6 +411,7 @@ export default function Dashboard() {
       createdRes.error,
       assignedRes.error,
       deliveredRes.error,
+      allOrdersRes.error,
       productsRes.error,
       profilesRes.error,
       stocksRes.error,
@@ -453,6 +466,15 @@ export default function Dashboard() {
     });
   }, [orders, isSeller, isDeliveryUser, isProvider, email, productById, productBySku]);
 
+  const roleFilteredAllOrders = useMemo(() => {
+    return allOrders.filter((order) => {
+      if (isSeller) return getSellerEmail(order) === email;
+      if (isDeliveryUser) return getDeliveryEmail(order) === email;
+      if (isProvider) return orderHasProviderProduct(order, email);
+      return true;
+    });
+  }, [allOrders, isSeller, isDeliveryUser, isProvider, email, productById, productBySku]);
+
   const createdOrders = useMemo(
     () => roleFilteredOrders.filter((order) => inRange(order.created_at, dateFrom, dateTo)),
     [roleFilteredOrders, dateFrom, dateTo],
@@ -469,6 +491,16 @@ export default function Dashboard() {
   const settledDeliveredOrders = useMemo(
     () => deliveredOrders.filter((order) => isSettled(order)),
     [deliveredOrders],
+  );
+
+  const allDeliveredOrders = useMemo(
+    () => roleFilteredAllOrders.filter((order) => isDelivered(order)),
+    [roleFilteredAllOrders],
+  );
+
+  const allSettledDeliveredOrders = useMemo(
+    () => allDeliveredOrders.filter((order) => isSettled(order)),
+    [allDeliveredOrders],
   );
 
   const getProviderShare = (order: OrderRow, providerEmail: string) => {
@@ -568,7 +600,7 @@ export default function Dashboard() {
       }
     >();
 
-    settledDeliveredOrders.forEach((order) => {
+    allSettledDeliveredOrders.forEach((order) => {
       const sellerEmail = getSellerEmail(order);
       if (!sellerEmail) return;
       if (isSeller && sellerEmail !== email) return;
@@ -668,7 +700,7 @@ export default function Dashboard() {
   }, [
     canSeeGlobalPanels,
     isSeller,
-    settledDeliveredOrders,
+    allSettledDeliveredOrders,
     isProvider,
     email,
     profileMap,
@@ -695,7 +727,7 @@ export default function Dashboard() {
       { email: string; name: string; logo: string | null; orders: number; money: number }
     >();
 
-    orders
+    roleFilteredAllOrders
       .filter((order) => isDelivered(order) && !isSettled(order))
       .forEach((order) => {
         const deliveryEmail = getDeliveryEmail(order);
@@ -721,7 +753,15 @@ export default function Dashboard() {
       });
 
     return Array.from(map.values()).sort((a, b) => b.money - a.money);
-  }, [orders, profileMap, deliveryRates, isProvider, email, productById, productBySku]);
+  }, [
+    roleFilteredAllOrders,
+    profileMap,
+    deliveryRates,
+    isProvider,
+    email,
+    productById,
+    productBySku,
+  ]);
 
   const deliveryStockGroups = useMemo(() => {
     const map = new Map<
@@ -816,6 +856,157 @@ export default function Dashboard() {
       .sort((a, b) => b.delivered - a.delivered || b.revenue - a.revenue)
       .slice(0, 10);
   }, [canSeeGlobalPanels, deliveredOrders, isProvider, email, profileMap, productById, productBySku]);
+
+  const topProducts = useMemo(() => {
+    type ProductTopRow = {
+      key: string;
+      id: string;
+      sku: string;
+      title: string;
+      image: string | null;
+      soldUnits: number;
+      deliveredUnits: number;
+      soldAmount: number;
+      deliveredAmount: number;
+    };
+
+    const map = new Map<string, ProductTopRow>();
+
+    const addOrder = (order: OrderRow, delivered: boolean) => {
+      if (!delivered && isCancelled(order)) return;
+
+      safeItems(order).forEach((item) => {
+        const product = productById.get(itemProductId(item)) || productBySku.get(itemSku(item));
+        const providerEmail = normalizeEmail(product?.provider_email || order.provider_email);
+
+        if (isProvider && providerEmail !== email) return;
+
+        const sku = itemSku(item) || product?.sku || '';
+        const productId = itemProductId(item) || product?.id || '';
+        const key = productId || sku || String(item?.title || 'Producto');
+        const qty = itemQty(item);
+        const amount = itemSaleValue(item, product);
+
+        const current = map.get(key) || {
+          key,
+          id: product?.id || productId,
+          sku: product?.sku || sku,
+          title: product?.title || String(item?.title || sku || 'Producto'),
+          image: product?.image_url || null,
+          soldUnits: 0,
+          deliveredUnits: 0,
+          soldAmount: 0,
+          deliveredAmount: 0,
+        };
+
+        if (delivered) {
+          current.deliveredUnits += qty;
+          current.deliveredAmount += amount;
+        } else {
+          current.soldUnits += qty;
+          current.soldAmount += amount;
+        }
+
+        map.set(key, current);
+      });
+    };
+
+    createdOrders.forEach((order) => addOrder(order, false));
+    deliveredOrders.forEach((order) => addOrder(order, true));
+
+    return Array.from(map.values())
+      .sort(
+        (a, b) =>
+          b.soldUnits - a.soldUnits ||
+          b.deliveredUnits - a.deliveredUnits ||
+          b.soldAmount - a.soldAmount,
+      )
+      .slice(0, 10);
+  }, [createdOrders, deliveredOrders, productById, productBySku, isProvider, email]);
+
+  const topCities = useMemo(() => {
+    type CityTopRow = {
+      city: string;
+      soldOrders: number;
+      deliveredOrders: number;
+      soldUnits: number;
+      deliveredUnits: number;
+      soldAmount: number;
+      deliveredAmount: number;
+    };
+
+    const map = new Map<string, CityTopRow>();
+
+    const relevantItemTotals = (order: OrderRow) => {
+      let units = 0;
+      let amount = 0;
+
+      safeItems(order).forEach((item) => {
+        const product = productById.get(itemProductId(item)) || productBySku.get(itemSku(item));
+        const providerEmail = normalizeEmail(product?.provider_email || order.provider_email);
+        if (isProvider && providerEmail !== email) return;
+
+        units += itemQty(item);
+        amount += itemSaleValue(item, product);
+      });
+
+      if (!isProvider && amount <= 0) amount = Number(order.total_gs || 0);
+      return { units, amount };
+    };
+
+    createdOrders.forEach((order) => {
+      if (isCancelled(order)) return;
+
+      const city = String(order.city || 'Sin ciudad').trim() || 'Sin ciudad';
+      const totals = relevantItemTotals(order);
+      if (isProvider && totals.units <= 0) return;
+
+      const current = map.get(norm(city)) || {
+        city,
+        soldOrders: 0,
+        deliveredOrders: 0,
+        soldUnits: 0,
+        deliveredUnits: 0,
+        soldAmount: 0,
+        deliveredAmount: 0,
+      };
+
+      current.soldOrders += 1;
+      current.soldUnits += totals.units;
+      current.soldAmount += totals.amount;
+      map.set(norm(city), current);
+    });
+
+    deliveredOrders.forEach((order) => {
+      const city = String(order.city || 'Sin ciudad').trim() || 'Sin ciudad';
+      const totals = relevantItemTotals(order);
+      if (isProvider && totals.units <= 0) return;
+
+      const current = map.get(norm(city)) || {
+        city,
+        soldOrders: 0,
+        deliveredOrders: 0,
+        soldUnits: 0,
+        deliveredUnits: 0,
+        soldAmount: 0,
+        deliveredAmount: 0,
+      };
+
+      current.deliveredOrders += 1;
+      current.deliveredUnits += totals.units;
+      current.deliveredAmount += totals.amount;
+      map.set(norm(city), current);
+    });
+
+    return Array.from(map.values())
+      .sort(
+        (a, b) =>
+          b.soldOrders - a.soldOrders ||
+          b.deliveredOrders - a.deliveredOrders ||
+          b.soldAmount - a.soldAmount,
+      )
+      .slice(0, 10);
+  }, [createdOrders, deliveredOrders, productById, productBySku, isProvider, email]);
 
   const kpis = useMemo(() => {
     const sold = createdOrders.reduce((sum, order) => sum + Number(order.total_gs || 0), 0);
@@ -966,13 +1157,143 @@ export default function Dashboard() {
           </section>
         </div>
 
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <section className="rounded-2xl border border-blue-500/20 bg-slate-950/70 p-5">
+            <div className="mb-4">
+              <h2 className="text-lg font-black">📦 Top de productos vendidos y entregados</h2>
+              <p className="text-xs font-semibold text-slate-400">
+                Unidades del rango seleccionado.
+                {isProvider ? ' Solo se consideran tus productos.' : ''}
+              </p>
+            </div>
+
+            {topProducts.length ? (
+              <div className="overflow-x-auto rounded-2xl border border-white/10">
+                <table className="w-full min-w-[720px] text-left">
+                  <thead className="bg-slate-900/90 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                    <tr>
+                      <th className="px-4 py-3">#</th>
+                      <th className="px-4 py-3">Producto</th>
+                      <th className="px-4 py-3 text-center">Vendido</th>
+                      <th className="px-4 py-3 text-center">Entregado</th>
+                      <th className="px-4 py-3 text-right">Monto vendido</th>
+                      <th className="px-4 py-3 text-right">Monto entregado</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/10 bg-slate-950/40">
+                    {topProducts.map((product, index) => (
+                      <tr key={product.key} className="hover:bg-white/[0.03]">
+                        <td className="px-4 py-3 font-black text-blue-300">#{index + 1}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-3">
+                            <div className="h-11 w-11 overflow-hidden rounded-xl border border-white/10 bg-slate-900">
+                              {product.image ? (
+                                <img
+                                  src={product.image}
+                                  alt={product.title}
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center">📦</div>
+                              )}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="max-w-[220px] truncate text-sm font-black text-white">
+                                {product.title}
+                              </div>
+                              <div className="text-xs text-slate-500">
+                                SKU: {product.sku || 'Sin SKU'}
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-center text-lg font-black text-blue-300">
+                          {nf(product.soldUnits)}
+                        </td>
+                        <td className="px-4 py-3 text-center text-lg font-black text-emerald-300">
+                          {nf(product.deliveredUnits)}
+                        </td>
+                        <td className="px-4 py-3 text-right text-xs font-black text-slate-300">
+                          {nf(product.soldAmount)} Gs
+                        </td>
+                        <td className="px-4 py-3 text-right text-xs font-black text-emerald-300">
+                          {nf(product.deliveredAmount)} Gs
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-white/10 py-12 text-center text-slate-500">
+                No hay productos vendidos en este rango.
+              </div>
+            )}
+          </section>
+
+          <section className="rounded-2xl border border-fuchsia-500/20 bg-slate-950/70 p-5">
+            <div className="mb-4">
+              <h2 className="text-lg font-black">🏙️ Top de ciudades vendidas y entregadas</h2>
+              <p className="text-xs font-semibold text-slate-400">
+                Pedidos, unidades y montos del rango seleccionado.
+                {isProvider ? ' Solo se consideran tus productos.' : ''}
+              </p>
+            </div>
+
+            {topCities.length ? (
+              <div className="overflow-x-auto rounded-2xl border border-white/10">
+                <table className="w-full min-w-[760px] text-left">
+                  <thead className="bg-slate-900/90 text-[10px] font-black uppercase tracking-wider text-slate-400">
+                    <tr>
+                      <th className="px-4 py-3">#</th>
+                      <th className="px-4 py-3">Ciudad</th>
+                      <th className="px-4 py-3 text-center">Pedidos vendidos</th>
+                      <th className="px-4 py-3 text-center">Pedidos entregados</th>
+                      <th className="px-4 py-3 text-center">Unidades V/E</th>
+                      <th className="px-4 py-3 text-right">Monto vendido</th>
+                      <th className="px-4 py-3 text-right">Monto entregado</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/10 bg-slate-950/40">
+                    {topCities.map((city, index) => (
+                      <tr key={norm(city.city)} className="hover:bg-white/[0.03]">
+                        <td className="px-4 py-3 font-black text-fuchsia-300">#{index + 1}</td>
+                        <td className="px-4 py-3 font-black text-white">{city.city}</td>
+                        <td className="px-4 py-3 text-center text-lg font-black text-blue-300">
+                          {nf(city.soldOrders)}
+                        </td>
+                        <td className="px-4 py-3 text-center text-lg font-black text-emerald-300">
+                          {nf(city.deliveredOrders)}
+                        </td>
+                        <td className="px-4 py-3 text-center text-sm font-black text-slate-300">
+                          {nf(city.soldUnits)} / {nf(city.deliveredUnits)}
+                        </td>
+                        <td className="px-4 py-3 text-right text-xs font-black text-slate-300">
+                          {nf(city.soldAmount)} Gs
+                        </td>
+                        <td className="px-4 py-3 text-right text-xs font-black text-emerald-300">
+                          {nf(city.deliveredAmount)} Gs
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-dashed border-white/10 py-12 text-center text-slate-500">
+                No hay ciudades con ventas en este rango.
+              </div>
+            )}
+          </section>
+        </div>
+
         {canSeeGlobalPanels && (
           <section className="rounded-2xl border border-amber-500/20 bg-slate-950/70 p-5">
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-black">🚚 Pedidos pendientes a rendir</h2>
                 <p className="text-xs font-semibold text-slate-400">
-                  Entregados o encomiendas entregadas sin estado RENDIDO. El monto ya descuenta el delivery.
+                  Todos los entregados o encomiendas entregadas sin estado RENDIDO, sin aplicar el filtro de fechas. El monto ya descuenta el delivery.
                 </p>
               </div>
               <div className="rounded-xl bg-amber-500/10 px-4 py-2 text-sm font-black text-amber-300">
@@ -1018,7 +1339,7 @@ export default function Dashboard() {
               <div>
                 <h2 className="text-lg font-black">💰 Estado de comisiones por vendedor</h2>
                 <p className="text-xs font-semibold text-slate-400">
-                  Disponible: sin solicitud. En solicitud: PENDIENTE. Pagada: APROBADO o commission_paid = true.
+                  Histórico completo, sin aplicar el filtro de fechas. Disponible: RENDIDO, sin solicitud y sin pago. En solicitud: PENDIENTE. Pagada: APROBADO o commission_paid = true.
                   {isProvider ? ' Solo se muestran las comisiones correspondientes a tus productos.' : ''}
                 </p>
               </div>
@@ -1082,7 +1403,7 @@ export default function Dashboard() {
               </div>
             ) : (
               <div className="rounded-xl border border-dashed border-white/10 py-12 text-center text-slate-500">
-                No hay comisiones rendidas para mostrar en este rango.
+                No hay comisiones disponibles, solicitadas o pagadas para mostrar.
               </div>
             )}
           </section>
