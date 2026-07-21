@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
@@ -308,6 +310,7 @@ export default function ClosuresView() {
   const [filterSupplier, setFilterSupplier] = useState('');
   const [filterType, setFilterType] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [rendicionNote, setRendicionNote] = useState('');
   const [rendicionPagada, setRendicionPagada] = useState<{ id: string; pagado_en: string; nota: string; marcado_por: string } | null>(null);
   const [dateFrom, setDateFrom] = useState(() => {
@@ -905,6 +908,222 @@ export default function ClosuresView() {
     loadClosures();
   };
 
+  // ================================
+  // GUÍAS, WHATSAPP Y EXPORTACIÓN PDF
+  // Disponible para DELIVERY, ADMIN y PROVEEDOR
+  // ================================
+  const getGuideNumber = (order: any): string => {
+    const value =
+      order?.guide_number ??
+      order?.tracking_number ??
+      order?.guide ??
+      order?.guia ??
+      order?.numero_guia ??
+      order?.numero_de_guia ??
+      '';
+
+    return String(value || '').trim();
+  };
+
+  const normalizeWhatsAppPhone = (phoneValue?: string | null): string => {
+    let phone = String(phoneValue || '').replace(/\D/g, '');
+
+    if (!phone) return '';
+
+    // Formato Paraguay: 09XXXXXXXX -> 5959XXXXXXXX
+    if (phone.startsWith('0')) {
+      phone = `595${phone.slice(1)}`;
+    } else if (phone.startsWith('9') && phone.length <= 10) {
+      phone = `595${phone}`;
+    }
+
+    return phone;
+  };
+
+  const buildDeliveryMessage = (order: any): string => {
+    const customerName = String(order?.customer_name || '').trim();
+    const guideNumber = getGuideNumber(order);
+
+    const lines = [
+      `Buenas${customerName ? ` ${customerName}` : ''}, le escribo para coordinar la entrega de su pedido.`,
+      '',
+      '¿Me podría indicar o enviar la ubicación por Google Maps para poder realizar la entrega?',
+    ];
+
+    if (guideNumber) {
+      lines.push('', `Su número de guía es: ${guideNumber}`);
+    }
+
+    return lines.join('\n');
+  };
+
+  const getWhatsAppUrl = (order: any): string => {
+    const phone = normalizeWhatsAppPhone(order?.customer_phone);
+    if (!phone) return '';
+
+    return `https://wa.me/${phone}?text=${encodeURIComponent(buildDeliveryMessage(order))}`;
+  };
+
+  const toggleOrderSelection = (orderId: string) => {
+    setSelectedOrderIds(prev => {
+      const next = new Set(prev);
+      if (next.has(orderId)) next.delete(orderId);
+      else next.add(orderId);
+      return next;
+    });
+  };
+
+  const selectOrClearVisibleOrders = () => {
+    const visibleIds = filteredOrders.map(order => String(order.id));
+    const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedOrderIds.has(id));
+
+    setSelectedOrderIds(prev => {
+      const next = new Set(prev);
+      visibleIds.forEach(id => {
+        if (allVisibleSelected) next.delete(id);
+        else next.add(id);
+      });
+      return next;
+    });
+  };
+
+  const clearOrderSelection = () => {
+    setSelectedOrderIds(new Set());
+  };
+
+  const getSelectedVisibleOrders = () =>
+    filteredOrders.filter(order => selectedOrderIds.has(String(order.id)));
+
+  const copySelectedGuides = async () => {
+    const selected = getSelectedVisibleOrders();
+
+    if (selected.length === 0) {
+      toast.error('Seleccioná al menos un pedido');
+      return;
+    }
+
+    const withGuide = selected.filter(order => getGuideNumber(order));
+    if (withGuide.length === 0) {
+      toast.error('Los pedidos seleccionados no tienen número de guía');
+      return;
+    }
+
+    const guideText = withGuide
+      .map(order => getGuideNumber(order))
+      .join('\n');
+
+    try {
+      await navigator.clipboard.writeText(guideText);
+      const withoutGuide = selected.length - withGuide.length;
+      toast.success(
+        withoutGuide > 0
+          ? `${withGuide.length} guías copiadas; ${withoutGuide} pedido(s) sin guía`
+          : `${withGuide.length} guía(s) copiadas`
+      );
+    } catch (error) {
+      console.error('No se pudo copiar las guías:', error);
+      toast.error('No se pudo copiar al portapapeles');
+    }
+  };
+
+  const downloadSelectedOrdersPdf = () => {
+    const selected = getSelectedVisibleOrders();
+
+    if (selected.length === 0) {
+      toast.error('Seleccioná al menos un pedido para descargar el PDF');
+      return;
+    }
+
+    const doc = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: 'a4',
+    });
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(16);
+    doc.text('Pedidos para entrega', 14, 14);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.text(`Periodo: ${formatDatePY(dateFrom)} al ${formatDatePY(dateTo)}`, 14, 20);
+    doc.text(`Cantidad de pedidos: ${selected.length}`, 14, 25);
+    doc.text('Hacé clic en el teléfono para abrir WhatsApp con el mensaje y la guía.', 14, 30);
+
+    const rows = selected.map(order => {
+      const phone = String(order.customer_phone || '—');
+      const guide = getGuideNumber(order) || '—';
+      return [
+        order.order_number || String(order.id || '').slice(0, 8),
+        order.customer_name || '—',
+        order.city || '—',
+        phone,
+        guide,
+        `${nf(Number(order.total_gs || 0))} Gs`,
+        order.status || 'PENDIENTE',
+      ];
+    });
+
+    autoTable(doc, {
+      startY: 35,
+      head: [[
+        'Pedido',
+        'Cliente',
+        'Ciudad',
+        'Teléfono / WhatsApp',
+        'Guía',
+        'Total',
+        'Estado',
+      ]],
+      body: rows,
+      theme: 'grid',
+      styles: {
+        fontSize: 8,
+        cellPadding: 2.5,
+        overflow: 'linebreak',
+        valign: 'middle',
+      },
+      headStyles: {
+        fontStyle: 'bold',
+      },
+      columnStyles: {
+        0: { cellWidth: 27 },
+        1: { cellWidth: 48 },
+        2: { cellWidth: 32 },
+        3: { cellWidth: 38 },
+        4: { cellWidth: 38 },
+        5: { cellWidth: 28, halign: 'right' },
+        6: { cellWidth: 38 },
+      },
+      didDrawCell: data => {
+        if (data.section !== 'body' || data.column.index !== 3) return;
+
+        const order = selected[data.row.index];
+        const whatsappUrl = getWhatsAppUrl(order);
+        if (!whatsappUrl) return;
+
+        doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, {
+          url: whatsappUrl,
+        });
+      },
+      didParseCell: data => {
+        if (data.section === 'body' && data.column.index === 3) {
+          const order = selected[data.row.index];
+          if (getWhatsAppUrl(order)) {
+            data.cell.styles.textColor = [0, 102, 204];
+            data.cell.styles.fontStyle = 'bold';
+          }
+        }
+      },
+      margin: { left: 14, right: 14 },
+    });
+
+    const safeFrom = dateFrom || 'inicio';
+    const safeTo = dateTo || 'fin';
+    doc.save(`pedidos-${safeFrom}-${safeTo}.pdf`);
+    toast.success(`PDF descargado con ${selected.length} pedido(s)`);
+  };
+
   const desmarcarPagado = async () => {
     if (!rendicionPagada) return;
     if (!confirm('¿Desmarcar esta rendición como pagada?')) return;
@@ -941,6 +1160,9 @@ export default function ClosuresView() {
   const canEditFull = isAdmin || isSupplier;
   const canEditStatus1 = isAdmin || isSupplier || isDelivery || isVendedor;
   const canManageRendicion = isAdmin || isSupplier;
+  const canManageGuides = isDelivery || isAdmin || isSupplier;
+  const selectedVisibleCount = filteredOrders.filter(order => selectedOrderIds.has(String(order.id))).length;
+  const allVisibleOrdersSelected = filteredOrders.length > 0 && filteredOrders.every(order => selectedOrderIds.has(String(order.id)));
   const canViewRendicion = isAdmin || isSupplier || isDelivery;
 
   return (
@@ -1243,16 +1465,77 @@ export default function ClosuresView() {
         )}
       </div>
 
+      {canManageGuides && (
+        <div className="app-card !p-3 mb-4 border border-blue-500/20 bg-blue-500/5">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="nav-btn"
+              onClick={selectOrClearVisibleOrders}
+              disabled={filteredOrders.length === 0}
+            >
+              {allVisibleOrdersSelected ? '☐ Deseleccionar visibles' : '☑ Seleccionar visibles'}
+            </button>
+
+            <button
+              type="button"
+              className="nav-btn"
+              onClick={clearOrderSelection}
+              disabled={selectedVisibleCount === 0}
+            >
+              Limpiar selección
+            </button>
+
+            <button
+              type="button"
+              className="nav-btn active"
+              onClick={copySelectedGuides}
+              disabled={selectedVisibleCount === 0}
+            >
+              📋 Copiar guías ({selectedVisibleCount})
+            </button>
+
+            <button
+              type="button"
+              className="nav-btn active"
+              onClick={downloadSelectedOrdersPdf}
+              disabled={selectedVisibleCount === 0}
+            >
+              📄 Descargar PDF ({selectedVisibleCount})
+            </button>
+
+            <span className="text-xs text-muted-foreground ml-auto">
+              Seleccionados: <strong>{selectedVisibleCount}</strong> de {filteredOrders.length}
+            </span>
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-2">
+            El número de teléfono del PDF abre WhatsApp con el mensaje de coordinación y el número de guía.
+          </p>
+        </div>
+      )}
+
       <div className="overflow-auto">
-        <table className="app-table min-w-[1800px]">
+        <table className="app-table min-w-[1980px]">
           <thead>
             <tr>
+              {canManageGuides && (
+                <th className="text-center">
+                  <input
+                    type="checkbox"
+                    aria-label="Seleccionar todos los pedidos visibles"
+                    checked={allVisibleOrdersSelected}
+                    onChange={selectOrClearVisibleOrders}
+                    disabled={filteredOrders.length === 0}
+                  />
+                </th>
+              )}
               <th>Fecha Asignación</th>
               <th>Fecha Creación</th>
               <th>ID</th>
               <th>Ciudad</th>
               <th>Cliente</th>
-              <th>Teléfono</th>
+              <th>Teléfono / WhatsApp</th>
+              {canManageGuides && <th>Guía</th>}
               <th>Proveedor</th>
               <th>Delivery</th>
               <th className="text-right">Total (Gs)</th>
@@ -1281,6 +1564,16 @@ export default function ClosuresView() {
               
               return (
                 <tr key={o.id} className={isSettled ? 'opacity-60' : ''}>
+                  {canManageGuides && (
+                    <td className="text-center">
+                      <input
+                        type="checkbox"
+                        aria-label={`Seleccionar pedido ${o.order_number || o.id}`}
+                        checked={selectedOrderIds.has(String(o.id))}
+                        onChange={() => toggleOrderSelection(String(o.id))}
+                      />
+                    </td>
+                  )}
                   <td className="text-xs whitespace-nowrap">
                     <div className="flex items-center gap-1">
                       <span>
@@ -1338,7 +1631,30 @@ export default function ClosuresView() {
                     )}
                   </td>
                   <td className="text-xs">{o.customer_name}</td>
-                  <td className="text-xs">{o.customer_phone || '—'}</td>
+                  <td className="text-xs whitespace-nowrap">
+                    {o.customer_phone ? (
+                      getWhatsAppUrl(o) ? (
+                        <a
+                          href={getWhatsAppUrl(o)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-bold text-green-600 hover:underline"
+                          title="Abrir WhatsApp con mensaje y guía"
+                        >
+                          📱 {o.customer_phone}
+                        </a>
+                      ) : (
+                        <span>{o.customer_phone}</span>
+                      )
+                    ) : (
+                      '—'
+                    )}
+                  </td>
+                  {canManageGuides && (
+                    <td className="text-xs font-mono whitespace-nowrap">
+                      {getGuideNumber(o) || '—'}
+                    </td>
+                  )}
                   <td className="text-xs">{o.provider_email || '—'}</td>
                   <td className="text-xs">
                     {canEditFull ? (
@@ -1427,7 +1743,7 @@ export default function ClosuresView() {
             })}
             {filteredOrders.length === 0 && (
               <tr>
-                <td colSpan={canManageRendicion ? 16 : 15} className="text-center text-muted-foreground py-8">
+                <td colSpan={(canManageRendicion ? 16 : 15) + (canManageGuides ? 2 : 0)} className="text-center text-muted-foreground py-8">
                   {searchTerm ? 'No se encontraron resultados para tu búsqueda' : 'Sin resultados en este período'}
                 </td>
               </tr>
