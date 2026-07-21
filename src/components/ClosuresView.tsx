@@ -74,23 +74,16 @@ const buildGuideText = (order: any) => {
 
   return [
     `GUÍA DE ENVÍO — ${order?.order_number || order?.id?.slice(0, 8) || '—'}`,
-    '━━━━━━━━━━━━━━━━━━',
     `Cliente: ${order?.customer_name || ''}`,
     `Teléfono: ${phone}`,
     order?.email ? `Email: ${order.email}` : '',
     `Ciudad: ${order?.city || ''}`,
     address ? `Dirección: ${address}` : '',
-    '━━━━━━━━━━━━━━━━━━',
     'Productos:',
     itemsText,
-    '━━━━━━━━━━━━━━━━━━',
     `Total: Gs ${nf(Number(order?.total_gs || 0))}`,
-    `Delivery cobrado: Gs ${nf(Number(order?.delivery_gs || 0))}`,
     order?.obs ? `Observación: ${order.obs}` : '',
     '━━━━━━━━━━━━━━━━━━',
-    `Vendedor: ${order?.created_by || 'Sin vendedor'}`,
-    `Delivery: ${order?.assigned_delivery || 'Sin asignar'}`,
-    `Proveedor: ${order?.provider_email || 'Sin proveedor'}`,
   ].filter(Boolean).join('\n');
 };
 
@@ -1070,7 +1063,7 @@ export default function ClosuresView() {
       return;
     }
 
-    const printWindow = window.open('', '_blank', 'noopener,noreferrer');
+    const printWindow = window.open('', '_blank');
 
     if (!printWindow) {
       toast.error('El navegador bloqueó la ventana. Permití ventanas emergentes e intentá nuevamente.');
@@ -1141,12 +1134,6 @@ export default function ClosuresView() {
 
           ${order?.obs ? `<div class="observation"><strong>Observación:</strong> ${escapeHtml(order.obs)}</div>` : ''}
 
-          <div class="responsibles">
-            <div><span>Vendedor</span><strong>${escapeHtml(order?.created_by || 'Sin vendedor')}</strong></div>
-            <div><span>Delivery</span><strong>${escapeHtml(order?.assigned_delivery || 'Sin asignar')}</strong></div>
-            <div><span>Proveedor</span><strong>${escapeHtml(order?.provider_email || 'Sin proveedor')}</strong></div>
-          </div>
-
           <div class="click-note">
             Hacé clic en el número de teléfono para abrir WhatsApp con el mensaje y la guía completa.
           </div>
@@ -1177,7 +1164,7 @@ export default function ClosuresView() {
             .date { font-size: 12px; }
             .message { margin: 14px 0; padding: 12px; border: 1px solid #93c5fd; border-radius: 8px; background: #eff6ff; font-size: 13px; line-height: 1.5; }
             .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-            .grid > div, .responsibles > div { padding: 8px; border: 1px solid #e5e7eb; border-radius: 7px; }
+            .grid > div { padding: 8px; border: 1px solid #e5e7eb; border-radius: 7px; }
             span { display: block; margin-bottom: 3px; color: #6b7280; font-size: 10px; text-transform: uppercase; }
             strong, a { font-size: 13px; overflow-wrap: anywhere; }
             a { color: #047857; font-weight: 800; text-decoration: underline; }
@@ -1185,7 +1172,6 @@ export default function ClosuresView() {
             th, td { border: 1px solid #d1d5db; padding: 7px; text-align: left; }
             th { background: #f3f4f6; }
             .observation { margin-top: 12px; padding: 10px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 7px; font-size: 12px; }
-            .responsibles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
             .click-note { margin-top: 12px; text-align: center; color: #4b5563; font-size: 10px; }
             .page-break { break-after: page; page-break-after: always; }
             @page { size: A4; margin: 8mm; }
@@ -1198,10 +1184,15 @@ export default function ClosuresView() {
         </head>
         <body>
           <div class="toolbar">
-            <button class="primary" onclick="window.print()">Descargar / Guardar como PDF</button>
+            <button class="primary" onclick="window.print()">Guardar como PDF</button>
             <button class="secondary" onclick="window.close()">Cerrar</button>
           </div>
           ${orderCards}
+          <script>
+            window.addEventListener('load', function () {
+              setTimeout(function () { window.print(); }, 500);
+            });
+          </script>
         </body>
       </html>
     `);
@@ -1535,7 +1526,7 @@ export default function ClosuresView() {
             </button>
 
             <span className="text-xs text-muted-foreground">
-              El PDF incluye datos, productos y teléfono clicable con WhatsApp.
+              El PDF incluye cliente, dirección, productos, total y teléfono clicable con WhatsApp.
             </span>
           </div>
         </div>
