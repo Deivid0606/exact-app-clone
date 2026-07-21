@@ -889,6 +889,101 @@ export default function OrdersView() {
     return allData;
   };
 
+  // Carga robusta de deliveries.
+  // Fuentes:
+  // 1) profiles.role = DELIVERY
+  // 2) user_roles.role = DELIVERY
+  // 3) deliveries ya asignados en pedidos
+  // 4) emails presentes en delivery_stock
+  // Así el selector no queda vacío si una tabla tiene RLS o IDs inconsistentes.
+  const loadDeliveryProfiles = async (ordersData: any[]) => {
+    const deliveryMap = new Map<string, { email: string; name: string; user_id?: string }>();
+
+    const addDelivery = (emailValue: any, nameValue?: any, userIdValue?: any) => {
+      const email = String(emailValue || '').trim().toLowerCase();
+      if (!email || !email.includes('@')) return;
+
+      const current = deliveryMap.get(email);
+      const name = String(nameValue || '').trim();
+
+      deliveryMap.set(email, {
+        email,
+        name: name || current?.name || email,
+        user_id: String(userIdValue || current?.user_id || '').trim() || undefined,
+      });
+    };
+
+    let profiles: any[] = [];
+
+    // Primero intentamos leer el rol directamente desde profiles.
+    const profilesWithRole = await supabase
+      .from('profiles')
+      .select('email, name, user_id, role');
+
+    if (!profilesWithRole.error) {
+      profiles = profilesWithRole.data || [];
+    } else {
+      console.warn('⚠️ No se pudo leer profiles.role; usando consulta compatible:', profilesWithRole.error);
+      const basicProfiles = await supabase
+        .from('profiles')
+        .select('email, name, user_id');
+
+      if (basicProfiles.error) {
+        console.error('❌ No se pudieron cargar perfiles para deliveries:', basicProfiles.error);
+      } else {
+        profiles = basicProfiles.data || [];
+      }
+    }
+
+    // user_roles puede estar protegido por RLS. Si falla, no interrumpe Pedidos.
+    const rolesRes = await supabase
+      .from('user_roles')
+      .select('user_id, role')
+      .eq('role', 'DELIVERY');
+
+    if (rolesRes.error) {
+      console.warn('⚠️ No se pudo leer user_roles para deliveries:', rolesRes.error);
+    }
+
+    const deliveryUserIds = new Set(
+      (rolesRes.data || [])
+        .map((row: any) => String(row?.user_id || '').trim())
+        .filter(Boolean)
+    );
+
+    for (const profileRow of profiles) {
+      const profileRole = norm(String(profileRow?.role || ''));
+      const profileUserId = String(profileRow?.user_id || '').trim();
+
+      if (profileRole === 'delivery' || deliveryUserIds.has(profileUserId)) {
+        addDelivery(profileRow?.email, profileRow?.name, profileUserId);
+      }
+    }
+
+    // Respaldo: deliveries que ya figuran en pedidos históricos.
+    for (const order of ordersData || []) {
+      const email = getDeliveryEmailFromOrder(order);
+      if (email) addDelivery(email, email);
+    }
+
+    // Respaldo adicional: deliveries con stock asignado.
+    const deliveryStockRes = await supabase
+      .from('delivery_stock')
+      .select('delivery_email');
+
+    if (deliveryStockRes.error) {
+      console.warn('⚠️ No se pudo leer delivery_stock para completar deliveries:', deliveryStockRes.error);
+    } else {
+      for (const row of deliveryStockRes.data || []) {
+        addDelivery(row?.delivery_email, row?.delivery_email);
+      }
+    }
+
+    return Array.from(deliveryMap.values()).sort((a, b) =>
+      (a.name || a.email).localeCompare(b.name || b.email, 'es')
+    );
+  };
+
   const loadOrders = async () => {
     setLoading(true);
 
@@ -904,14 +999,13 @@ export default function OrdersView() {
     }
 
     const [deliveriesRes, providersRes] = await Promise.all([
-      supabase.from('profiles').select('email, name, user_id').then(async (profilesRes) => {
-        const profiles = profilesRes.data || [];
-        const { data: roles } = await supabase.from('user_roles').select('user_id, role').eq('role', 'DELIVERY');
-        const deliveryUserIds = new Set((roles || []).map(r => r.user_id));
-        return profiles.filter(p => deliveryUserIds.has(p.user_id));
-      }),
+      loadDeliveryProfiles(allOrdersData),
       supabase.from('profiles').select('email, name, company_name').eq('role', 'PROVEEDOR')
     ]);
+
+    if (providersRes.error) {
+      console.warn('⚠️ No se pudieron cargar proveedores:', providersRes.error);
+    }
 
     setAllOrders(allOrdersData || []);
 
@@ -1435,7 +1529,7 @@ export default function OrdersView() {
 
   const canEditStatus1 = role !== 'VENDEDOR';
   const canEditStatus2 = role === 'ADMIN' || role === 'DESPACHANTE' || role === 'PROVEEDOR';
-  const canAssign = role === 'ADMIN' || role === 'PROVEEDOR';
+  const canAssign = ['ADMIN', 'DESPACHANTE', 'PROVEEDOR'].includes(role);
   const canEdit = role === 'ADMIN' || role === 'DESPACHANTE' || role === 'PROVEEDOR';
   const canDeletePermanently = ['ADMIN', 'DESPACHANTE', 'PROVEEDOR'].includes(role);
   const canAssignProvider = role === 'ADMIN' || role === 'DESPACHANTE';
