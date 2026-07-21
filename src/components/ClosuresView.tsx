@@ -3,8 +3,6 @@ import { createPortal } from 'react-dom';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { toast } from 'sonner';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
@@ -31,7 +29,7 @@ function StatusChangeModal({
 }: { 
   isOpen: boolean; 
   onClose: () => void; 
-  onConfirm: (message: string, attachmentUrl: string | null) => void; 
+  onConfirm: (message: string, attachment: File | null) => void; 
   newStatus: string;
   uploading: boolean;
 }) {
@@ -62,7 +60,7 @@ function StatusChangeModal({
       toast.error('Debes adjuntar una captura de pantalla');
       return;
     }
-    onConfirm(message, null);
+    onConfirm(message, attachment);
   };
 
   return createPortal(
@@ -1026,6 +1024,14 @@ export default function ClosuresView() {
     }
   };
 
+  const escapeHtml = (value: unknown): string =>
+    String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+
   const downloadSelectedOrdersPdf = () => {
     const selected = getSelectedVisibleOrders();
 
@@ -1034,94 +1040,107 @@ export default function ClosuresView() {
       return;
     }
 
-    const doc = new jsPDF({
-      orientation: 'landscape',
-      unit: 'mm',
-      format: 'a4',
-    });
+    const printWindow = window.open('', '_blank', 'width=1200,height=800');
 
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(16);
-    doc.text('Pedidos para entrega', 14, 14);
+    if (!printWindow) {
+      toast.error('El navegador bloqueó la ventana. Permití ventanas emergentes e intentá otra vez.');
+      return;
+    }
 
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(9);
-    doc.text(`Periodo: ${formatDatePY(dateFrom)} al ${formatDatePY(dateTo)}`, 14, 20);
-    doc.text(`Cantidad de pedidos: ${selected.length}`, 14, 25);
-    doc.text('Hacé clic en el teléfono para abrir WhatsApp con el mensaje y la guía.', 14, 30);
-
-    const rows = selected.map(order => {
+    const rows = selected.map((order, index) => {
+      const whatsappUrl = getWhatsAppUrl(order);
       const phone = String(order.customer_phone || '—');
       const guide = getGuideNumber(order) || '—';
-      return [
-        order.order_number || String(order.id || '').slice(0, 8),
-        order.customer_name || '—',
-        order.city || '—',
-        phone,
-        guide,
-        `${nf(Number(order.total_gs || 0))} Gs`,
-        order.status || 'PENDIENTE',
-      ];
+      const orderNumber = order.order_number || String(order.id || '').slice(0, 8);
+
+      const phoneContent = whatsappUrl
+        ? `<a href="${escapeHtml(whatsappUrl)}" target="_blank">${escapeHtml(phone)}</a>`
+        : escapeHtml(phone);
+
+      return `
+        <tr>
+          <td>${index + 1}</td>
+          <td>${escapeHtml(orderNumber)}</td>
+          <td>${escapeHtml(order.customer_name || '—')}</td>
+          <td>${escapeHtml(order.city || '—')}</td>
+          <td>${phoneContent}</td>
+          <td>${escapeHtml(guide)}</td>
+          <td class="right">${escapeHtml(nf(Number(order.total_gs || 0)))} Gs</td>
+          <td>${escapeHtml(order.status || 'PENDIENTE')}</td>
+        </tr>`;
+    }).join('');
+
+    const html = `<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <title>Pedidos ${escapeHtml(dateFrom)} a ${escapeHtml(dateTo)}</title>
+  <style>
+    @page { size: A4 landscape; margin: 12mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; color: #111; margin: 0; }
+    h1 { font-size: 20px; margin: 0 0 6px; }
+    .meta { font-size: 12px; margin-bottom: 14px; color: #444; }
+    .notice { font-size: 11px; padding: 8px 10px; margin-bottom: 12px; border: 1px solid #bbb; border-radius: 6px; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { border: 1px solid #999; padding: 6px; font-size: 10px; vertical-align: top; overflow-wrap: anywhere; }
+    th { background: #eeeeee; text-align: left; }
+    th:nth-child(1), td:nth-child(1) { width: 4%; }
+    th:nth-child(2), td:nth-child(2) { width: 9%; }
+    th:nth-child(3), td:nth-child(3) { width: 18%; }
+    th:nth-child(4), td:nth-child(4) { width: 12%; }
+    th:nth-child(5), td:nth-child(5) { width: 15%; }
+    th:nth-child(6), td:nth-child(6) { width: 15%; }
+    th:nth-child(7), td:nth-child(7) { width: 12%; }
+    th:nth-child(8), td:nth-child(8) { width: 15%; }
+    a { color: #0563c1; text-decoration: underline; font-weight: 700; }
+    .right { text-align: right; }
+    @media print {
+      .no-print { display: none !important; }
+      thead { display: table-header-group; }
+      tr { break-inside: avoid; }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print" style="margin-bottom:12px;padding:10px;background:#fff3cd;border:1px solid #ffe69c;border-radius:6px;font-size:13px;">
+    En la ventana de impresión elegí <strong>Guardar como PDF</strong>. Los números quedarán clicables en el PDF.
+  </div>
+  <h1>Pedidos para entrega</h1>
+  <div class="meta">
+    Periodo: ${escapeHtml(formatDatePY(dateFrom))} al ${escapeHtml(formatDatePY(dateTo))} ·
+    Cantidad: ${selected.length}
+  </div>
+  <div class="notice">
+    Al hacer clic en el teléfono se abre WhatsApp con el mensaje de coordinación y el número de guía del pedido.
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>#</th>
+        <th>Pedido</th>
+        <th>Cliente</th>
+        <th>Ciudad</th>
+        <th>Teléfono / WhatsApp</th>
+        <th>Guía</th>
+        <th>Total</th>
+        <th>Estado</th>
+      </tr>
+    </thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <script>
+    window.addEventListener('load', function () {
+      setTimeout(function () { window.print(); }, 250);
     });
+  <\/script>
+</body>
+</html>`;
 
-    autoTable(doc, {
-      startY: 35,
-      head: [[
-        'Pedido',
-        'Cliente',
-        'Ciudad',
-        'Teléfono / WhatsApp',
-        'Guía',
-        'Total',
-        'Estado',
-      ]],
-      body: rows,
-      theme: 'grid',
-      styles: {
-        fontSize: 8,
-        cellPadding: 2.5,
-        overflow: 'linebreak',
-        valign: 'middle',
-      },
-      headStyles: {
-        fontStyle: 'bold',
-      },
-      columnStyles: {
-        0: { cellWidth: 27 },
-        1: { cellWidth: 48 },
-        2: { cellWidth: 32 },
-        3: { cellWidth: 38 },
-        4: { cellWidth: 38 },
-        5: { cellWidth: 28, halign: 'right' },
-        6: { cellWidth: 38 },
-      },
-      didDrawCell: data => {
-        if (data.section !== 'body' || data.column.index !== 3) return;
-
-        const order = selected[data.row.index];
-        const whatsappUrl = getWhatsAppUrl(order);
-        if (!whatsappUrl) return;
-
-        doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, {
-          url: whatsappUrl,
-        });
-      },
-      didParseCell: data => {
-        if (data.section === 'body' && data.column.index === 3) {
-          const order = selected[data.row.index];
-          if (getWhatsAppUrl(order)) {
-            data.cell.styles.textColor = [0, 102, 204];
-            data.cell.styles.fontStyle = 'bold';
-          }
-        }
-      },
-      margin: { left: 14, right: 14 },
-    });
-
-    const safeFrom = dateFrom || 'inicio';
-    const safeTo = dateTo || 'fin';
-    doc.save(`pedidos-${safeFrom}-${safeTo}.pdf`);
-    toast.success(`PDF descargado con ${selected.length} pedido(s)`);
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+    toast.success(`Se preparó el PDF con ${selected.length} pedido(s)`);
   };
 
   const desmarcarPagado = async () => {
