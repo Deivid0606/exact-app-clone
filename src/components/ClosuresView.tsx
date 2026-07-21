@@ -19,6 +19,96 @@ const dateInputValue = (dateValue?: string | null) => {
   return dateValue.slice(0, 10);
 };
 
+
+const escapeHtml = (value: unknown) =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+
+const getOrderPhone = (order: any) =>
+  String(order?.customer_phone || order?.phone || '').trim();
+
+const normalizeWhatsAppPhone = (phoneValue: string) => {
+  let phone = String(phoneValue || '').replace(/\D/g, '');
+
+  if (phone.startsWith('595')) return phone;
+  if (phone.startsWith('0')) return `595${phone.slice(1)}`;
+  if (phone.startsWith('9') && phone.length >= 9) return `595${phone}`;
+
+  return phone;
+};
+
+const getOrderItems = (order: any): any[] => {
+  try {
+    const raw = typeof order?.items_json === 'string'
+      ? JSON.parse(order.items_json || '[]')
+      : (order?.items_json || []);
+
+    return Array.isArray(raw) ? raw : [];
+  } catch {
+    return [];
+  }
+};
+
+const buildGuideText = (order: any) => {
+  const items = getOrderItems(order);
+  const itemsText = items.length > 0
+    ? items.map((item: any, index: number) => {
+        const qty = Number(item.qty || item.quantity || item.cantidad || 1);
+        const unitPrice = Number(item.sale_gs || item.price_gs || item.price || 0);
+        const lineTotal = unitPrice * qty;
+        const label = item.title || item.name || item.sku || 'Producto';
+
+        return `${index + 1}. ${label} x${qty}${lineTotal > 0 ? ` — Gs ${nf(lineTotal)}` : ''}`;
+      }).join('\n')
+    : 'Sin detalle de productos';
+
+  const phone = getOrderPhone(order);
+  const address = [
+    order?.street,
+    order?.district ? `- ${order.district}` : '',
+  ].filter(Boolean).join(' ');
+
+  return [
+    `GUÍA DE ENVÍO — ${order?.order_number || order?.id?.slice(0, 8) || '—'}`,
+    '━━━━━━━━━━━━━━━━━━',
+    `Cliente: ${order?.customer_name || ''}`,
+    `Teléfono: ${phone}`,
+    order?.email ? `Email: ${order.email}` : '',
+    `Ciudad: ${order?.city || ''}`,
+    address ? `Dirección: ${address}` : '',
+    '━━━━━━━━━━━━━━━━━━',
+    'Productos:',
+    itemsText,
+    '━━━━━━━━━━━━━━━━━━',
+    `Total: Gs ${nf(Number(order?.total_gs || 0))}`,
+    `Delivery cobrado: Gs ${nf(Number(order?.delivery_gs || 0))}`,
+    order?.obs ? `Observación: ${order.obs}` : '',
+    '━━━━━━━━━━━━━━━━━━',
+    `Vendedor: ${order?.created_by || 'Sin vendedor'}`,
+    `Delivery: ${order?.assigned_delivery || 'Sin asignar'}`,
+    `Proveedor: ${order?.provider_email || 'Sin proveedor'}`,
+  ].filter(Boolean).join('\n');
+};
+
+const buildWhatsAppMessage = (order: any) => [
+  `Buenas ${order?.customer_name || ''}, le escribo para coordinar la entrega de su pedido.`,
+  '',
+  '¿Me podría indicar o enviar la ubicación por Google Maps para poder realizar la entrega?',
+  '',
+  buildGuideText(order),
+].join('\n');
+
+const getWhatsAppUrl = (order: any) => {
+  const phone = normalizeWhatsAppPhone(getOrderPhone(order));
+  return phone
+    ? `https://wa.me/${phone}?text=${encodeURIComponent(buildWhatsAppMessage(order))}`
+    : '';
+};
+
 // Modal para solicitar comentario y captura
 function StatusChangeModal({ 
   isOpen, 
@@ -29,7 +119,7 @@ function StatusChangeModal({
 }: { 
   isOpen: boolean; 
   onClose: () => void; 
-  onConfirm: (message: string, attachment: File | null) => void; 
+  onConfirm: (message: string, attachmentUrl: string | null) => void; 
   newStatus: string;
   uploading: boolean;
 }) {
@@ -60,7 +150,7 @@ function StatusChangeModal({
       toast.error('Debes adjuntar una captura de pantalla');
       return;
     }
-    onConfirm(message, attachment);
+    onConfirm(message, null);
   };
 
   return createPortal(
@@ -308,7 +398,6 @@ export default function ClosuresView() {
   const [filterSupplier, setFilterSupplier] = useState('');
   const [filterType, setFilterType] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedOrderIds, setSelectedOrderIds] = useState<Set<string>>(new Set());
   const [rendicionNote, setRendicionNote] = useState('');
   const [rendicionPagada, setRendicionPagada] = useState<{ id: string; pagado_en: string; nota: string; marcado_por: string } | null>(null);
   const [dateFrom, setDateFrom] = useState(() => {
@@ -320,6 +409,7 @@ export default function ClosuresView() {
   const [totalPedidosAsignados, setTotalPedidosAsignados] = useState(0);
   const [loadingDeliveries, setLoadingDeliveries] = useState(false);
   const [editingDateId, setEditingDateId] = useState<string | null>(null);
+  const [selectedGuideIds, setSelectedGuideIds] = useState<Set<string>>(new Set());
   
   // Estados para el modal de cambio de estado
   const [statusChangeModal, setStatusChangeModal] = useState<{
@@ -906,243 +996,6 @@ export default function ClosuresView() {
     loadClosures();
   };
 
-  // ================================
-  // GUÍAS, WHATSAPP Y EXPORTACIÓN PDF
-  // Disponible para DELIVERY, ADMIN y PROVEEDOR
-  // ================================
-  const getGuideNumber = (order: any): string => {
-    const value =
-      order?.guide_number ??
-      order?.tracking_number ??
-      order?.guide ??
-      order?.guia ??
-      order?.numero_guia ??
-      order?.numero_de_guia ??
-      '';
-
-    return String(value || '').trim();
-  };
-
-  const normalizeWhatsAppPhone = (phoneValue?: string | null): string => {
-    let phone = String(phoneValue || '').replace(/\D/g, '');
-
-    if (!phone) return '';
-
-    // Formato Paraguay: 09XXXXXXXX -> 5959XXXXXXXX
-    if (phone.startsWith('0')) {
-      phone = `595${phone.slice(1)}`;
-    } else if (phone.startsWith('9') && phone.length <= 10) {
-      phone = `595${phone}`;
-    }
-
-    return phone;
-  };
-
-  const buildDeliveryMessage = (order: any): string => {
-    const customerName = String(order?.customer_name || '').trim();
-    const guideNumber = getGuideNumber(order);
-
-    const lines = [
-      `Buenas${customerName ? ` ${customerName}` : ''}, le escribo para coordinar la entrega de su pedido.`,
-      '',
-      '¿Me podría indicar o enviar la ubicación por Google Maps para poder realizar la entrega?',
-    ];
-
-    if (guideNumber) {
-      lines.push('', `Su número de guía es: ${guideNumber}`);
-    }
-
-    return lines.join('\n');
-  };
-
-  const getWhatsAppUrl = (order: any): string => {
-    const phone = normalizeWhatsAppPhone(order?.customer_phone);
-    if (!phone) return '';
-
-    return `https://wa.me/${phone}?text=${encodeURIComponent(buildDeliveryMessage(order))}`;
-  };
-
-  const toggleOrderSelection = (orderId: string) => {
-    setSelectedOrderIds(prev => {
-      const next = new Set(prev);
-      if (next.has(orderId)) next.delete(orderId);
-      else next.add(orderId);
-      return next;
-    });
-  };
-
-  const selectOrClearVisibleOrders = () => {
-    const visibleIds = filteredOrders.map(order => String(order.id));
-    const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedOrderIds.has(id));
-
-    setSelectedOrderIds(prev => {
-      const next = new Set(prev);
-      visibleIds.forEach(id => {
-        if (allVisibleSelected) next.delete(id);
-        else next.add(id);
-      });
-      return next;
-    });
-  };
-
-  const clearOrderSelection = () => {
-    setSelectedOrderIds(new Set());
-  };
-
-  const getSelectedVisibleOrders = () =>
-    filteredOrders.filter(order => selectedOrderIds.has(String(order.id)));
-
-  const copySelectedGuides = async () => {
-    const selected = getSelectedVisibleOrders();
-
-    if (selected.length === 0) {
-      toast.error('Seleccioná al menos un pedido');
-      return;
-    }
-
-    const withGuide = selected.filter(order => getGuideNumber(order));
-    if (withGuide.length === 0) {
-      toast.error('Los pedidos seleccionados no tienen número de guía');
-      return;
-    }
-
-    const guideText = withGuide
-      .map(order => getGuideNumber(order))
-      .join('\n');
-
-    try {
-      await navigator.clipboard.writeText(guideText);
-      const withoutGuide = selected.length - withGuide.length;
-      toast.success(
-        withoutGuide > 0
-          ? `${withGuide.length} guías copiadas; ${withoutGuide} pedido(s) sin guía`
-          : `${withGuide.length} guía(s) copiadas`
-      );
-    } catch (error) {
-      console.error('No se pudo copiar las guías:', error);
-      toast.error('No se pudo copiar al portapapeles');
-    }
-  };
-
-  const escapeHtml = (value: unknown): string =>
-    String(value ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-
-  const downloadSelectedOrdersPdf = () => {
-    const selected = getSelectedVisibleOrders();
-
-    if (selected.length === 0) {
-      toast.error('Seleccioná al menos un pedido para descargar el PDF');
-      return;
-    }
-
-    const printWindow = window.open('', '_blank', 'width=1200,height=800');
-
-    if (!printWindow) {
-      toast.error('El navegador bloqueó la ventana. Permití ventanas emergentes e intentá otra vez.');
-      return;
-    }
-
-    const rows = selected.map((order, index) => {
-      const whatsappUrl = getWhatsAppUrl(order);
-      const phone = String(order.customer_phone || '—');
-      const guide = getGuideNumber(order) || '—';
-      const orderNumber = order.order_number || String(order.id || '').slice(0, 8);
-
-      const phoneContent = whatsappUrl
-        ? `<a href="${escapeHtml(whatsappUrl)}" target="_blank">${escapeHtml(phone)}</a>`
-        : escapeHtml(phone);
-
-      return `
-        <tr>
-          <td>${index + 1}</td>
-          <td>${escapeHtml(orderNumber)}</td>
-          <td>${escapeHtml(order.customer_name || '—')}</td>
-          <td>${escapeHtml(order.city || '—')}</td>
-          <td>${phoneContent}</td>
-          <td>${escapeHtml(guide)}</td>
-          <td class="right">${escapeHtml(nf(Number(order.total_gs || 0)))} Gs</td>
-          <td>${escapeHtml(order.status || 'PENDIENTE')}</td>
-        </tr>`;
-    }).join('');
-
-    const html = `<!doctype html>
-<html lang="es">
-<head>
-  <meta charset="utf-8" />
-  <title>Pedidos ${escapeHtml(dateFrom)} a ${escapeHtml(dateTo)}</title>
-  <style>
-    @page { size: A4 landscape; margin: 12mm; }
-    * { box-sizing: border-box; }
-    body { font-family: Arial, Helvetica, sans-serif; color: #111; margin: 0; }
-    h1 { font-size: 20px; margin: 0 0 6px; }
-    .meta { font-size: 12px; margin-bottom: 14px; color: #444; }
-    .notice { font-size: 11px; padding: 8px 10px; margin-bottom: 12px; border: 1px solid #bbb; border-radius: 6px; }
-    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-    th, td { border: 1px solid #999; padding: 6px; font-size: 10px; vertical-align: top; overflow-wrap: anywhere; }
-    th { background: #eeeeee; text-align: left; }
-    th:nth-child(1), td:nth-child(1) { width: 4%; }
-    th:nth-child(2), td:nth-child(2) { width: 9%; }
-    th:nth-child(3), td:nth-child(3) { width: 18%; }
-    th:nth-child(4), td:nth-child(4) { width: 12%; }
-    th:nth-child(5), td:nth-child(5) { width: 15%; }
-    th:nth-child(6), td:nth-child(6) { width: 15%; }
-    th:nth-child(7), td:nth-child(7) { width: 12%; }
-    th:nth-child(8), td:nth-child(8) { width: 15%; }
-    a { color: #0563c1; text-decoration: underline; font-weight: 700; }
-    .right { text-align: right; }
-    @media print {
-      .no-print { display: none !important; }
-      thead { display: table-header-group; }
-      tr { break-inside: avoid; }
-    }
-  </style>
-</head>
-<body>
-  <div class="no-print" style="margin-bottom:12px;padding:10px;background:#fff3cd;border:1px solid #ffe69c;border-radius:6px;font-size:13px;">
-    En la ventana de impresión elegí <strong>Guardar como PDF</strong>. Los números quedarán clicables en el PDF.
-  </div>
-  <h1>Pedidos para entrega</h1>
-  <div class="meta">
-    Periodo: ${escapeHtml(formatDatePY(dateFrom))} al ${escapeHtml(formatDatePY(dateTo))} ·
-    Cantidad: ${selected.length}
-  </div>
-  <div class="notice">
-    Al hacer clic en el teléfono se abre WhatsApp con el mensaje de coordinación y el número de guía del pedido.
-  </div>
-  <table>
-    <thead>
-      <tr>
-        <th>#</th>
-        <th>Pedido</th>
-        <th>Cliente</th>
-        <th>Ciudad</th>
-        <th>Teléfono / WhatsApp</th>
-        <th>Guía</th>
-        <th>Total</th>
-        <th>Estado</th>
-      </tr>
-    </thead>
-    <tbody>${rows}</tbody>
-  </table>
-  <script>
-    window.addEventListener('load', function () {
-      setTimeout(function () { window.print(); }, 250);
-    });
-  <\/script>
-</body>
-</html>`;
-
-    printWindow.document.open();
-    printWindow.document.write(html);
-    printWindow.document.close();
-    toast.success(`Se preparó el PDF con ${selected.length} pedido(s)`);
-  };
-
   const desmarcarPagado = async () => {
     if (!rendicionPagada) return;
     if (!confirm('¿Desmarcar esta rendición como pagada?')) return;
@@ -1158,6 +1011,202 @@ export default function ClosuresView() {
     await supabase.from('rendiciones_pagadas').delete().eq('id', rendicionPagada.id);
     toast.success('Rendición desmarcada');
     loadClosures();
+  };
+
+  const canUseGuides = isDelivery || isAdmin || isSupplier;
+
+  const selectedGuideOrders = useMemo(
+    () => filteredOrders.filter(order => selectedGuideIds.has(order.id)),
+    [filteredOrders, selectedGuideIds]
+  );
+
+  const toggleGuideSelection = (orderId: string) => {
+    setSelectedGuideIds(previous => {
+      const next = new Set(previous);
+      next.has(orderId) ? next.delete(orderId) : next.add(orderId);
+      return next;
+    });
+  };
+
+  const toggleAllGuideSelections = () => {
+    const visibleIds = filteredOrders.map(order => order.id);
+    const allVisibleSelected =
+      visibleIds.length > 0 && visibleIds.every(id => selectedGuideIds.has(id));
+
+    setSelectedGuideIds(previous => {
+      const next = new Set(previous);
+
+      if (allVisibleSelected) {
+        visibleIds.forEach(id => next.delete(id));
+      } else {
+        visibleIds.forEach(id => next.add(id));
+      }
+
+      return next;
+    });
+  };
+
+  const copySelectedGuides = async () => {
+    if (selectedGuideOrders.length === 0) {
+      toast.error('Seleccioná al menos un pedido');
+      return;
+    }
+
+    try {
+      const guideText = selectedGuideOrders
+        .map(buildGuideText)
+        .join('\n\n════════════════════════════════\n\n');
+
+      await navigator.clipboard.writeText(guideText);
+      toast.success(`${selectedGuideOrders.length} guía${selectedGuideOrders.length === 1 ? '' : 's'} copiada${selectedGuideOrders.length === 1 ? '' : 's'}`);
+    } catch {
+      toast.error('No se pudieron copiar las guías');
+    }
+  };
+
+  const downloadSelectedGuidesPdf = () => {
+    if (selectedGuideOrders.length === 0) {
+      toast.error('Seleccioná al menos un pedido');
+      return;
+    }
+
+    const printWindow = window.open('', '_blank', 'noopener,noreferrer');
+
+    if (!printWindow) {
+      toast.error('El navegador bloqueó la ventana. Permití ventanas emergentes e intentá nuevamente.');
+      return;
+    }
+
+    const orderCards = selectedGuideOrders.map((order, index) => {
+      const phone = getOrderPhone(order);
+      const whatsappUrl = getWhatsAppUrl(order);
+      const items = getOrderItems(order);
+      const address = [order?.street, order?.district].filter(Boolean).join(' - ');
+
+      const itemsHtml = items.length > 0
+        ? items.map((item: any, itemIndex: number) => {
+            const qty = Number(item.qty || item.quantity || item.cantidad || 1);
+            const unitPrice = Number(item.sale_gs || item.price_gs || item.price || 0);
+            const lineTotal = unitPrice * qty;
+            const label = item.title || item.name || item.sku || 'Producto';
+
+            return `
+              <tr>
+                <td>${itemIndex + 1}</td>
+                <td>${escapeHtml(label)}</td>
+                <td>${qty}</td>
+                <td>${lineTotal > 0 ? `Gs ${escapeHtml(nf(lineTotal))}` : '—'}</td>
+              </tr>
+            `;
+          }).join('')
+        : '<tr><td colspan="4">Sin detalle de productos</td></tr>';
+
+      return `
+        <section class="guide ${index < selectedGuideOrders.length - 1 ? 'page-break' : ''}">
+          <div class="guide-header">
+            <div>
+              <h1>GUÍA DE ENVÍO</h1>
+              <div class="order-number">Pedido ${escapeHtml(order?.order_number || order?.id?.slice(0, 8) || '—')}</div>
+            </div>
+            <div class="date">${escapeHtml(formatDatePY(order?.assigned_at || order?.created_at))}</div>
+          </div>
+
+          <div class="message">
+            <strong>Mensaje para el cliente:</strong><br>
+            Buenas ${escapeHtml(order?.customer_name || '')}, le escribo para coordinar la entrega de su pedido.
+            ¿Me podría indicar o enviar la ubicación por Google Maps para poder realizar la entrega?
+          </div>
+
+          <div class="grid">
+            <div><span>Cliente</span><strong>${escapeHtml(order?.customer_name || '—')}</strong></div>
+            <div>
+              <span>Teléfono / WhatsApp</span>
+              ${whatsappUrl
+                ? `<a href="${escapeHtml(whatsappUrl)}">${escapeHtml(phone)}</a>`
+                : `<strong>${escapeHtml(phone || '—')}</strong>`}
+            </div>
+            <div><span>Ciudad</span><strong>${escapeHtml(order?.city || '—')}</strong></div>
+            <div><span>Dirección</span><strong>${escapeHtml(address || '—')}</strong></div>
+            ${order?.email ? `<div><span>Email</span><strong>${escapeHtml(order.email)}</strong></div>` : ''}
+            <div><span>Total</span><strong>Gs ${escapeHtml(nf(Number(order?.total_gs || 0)))}</strong></div>
+          </div>
+
+          <h2>Productos</h2>
+          <table>
+            <thead>
+              <tr><th>#</th><th>Producto</th><th>Cantidad</th><th>Subtotal</th></tr>
+            </thead>
+            <tbody>${itemsHtml}</tbody>
+          </table>
+
+          ${order?.obs ? `<div class="observation"><strong>Observación:</strong> ${escapeHtml(order.obs)}</div>` : ''}
+
+          <div class="responsibles">
+            <div><span>Vendedor</span><strong>${escapeHtml(order?.created_by || 'Sin vendedor')}</strong></div>
+            <div><span>Delivery</span><strong>${escapeHtml(order?.assigned_delivery || 'Sin asignar')}</strong></div>
+            <div><span>Proveedor</span><strong>${escapeHtml(order?.provider_email || 'Sin proveedor')}</strong></div>
+          </div>
+
+          <div class="click-note">
+            Hacé clic en el número de teléfono para abrir WhatsApp con el mensaje y la guía completa.
+          </div>
+        </section>
+      `;
+    }).join('');
+
+    printWindow.document.open();
+    printWindow.document.write(`
+      <!doctype html>
+      <html lang="es">
+        <head>
+          <meta charset="utf-8">
+          <meta name="viewport" content="width=device-width,initial-scale=1">
+          <title>Guías de pedidos</title>
+          <style>
+            * { box-sizing: border-box; }
+            body { margin: 0; font-family: Arial, Helvetica, sans-serif; color: #111827; background: #fff; }
+            .toolbar { position: sticky; top: 0; z-index: 10; display: flex; justify-content: center; gap: 12px; padding: 12px; background: #111827; }
+            .toolbar button { border: 0; border-radius: 8px; padding: 10px 18px; font-weight: 700; cursor: pointer; }
+            .toolbar .primary { background: #2563eb; color: #fff; }
+            .toolbar .secondary { background: #e5e7eb; color: #111827; }
+            .guide { max-width: 190mm; margin: 12mm auto; padding: 10mm; border: 1px solid #d1d5db; border-radius: 12px; }
+            .guide-header { display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 10px; border-bottom: 3px solid #111827; }
+            h1 { margin: 0; font-size: 22px; }
+            h2 { margin: 18px 0 8px; font-size: 15px; }
+            .order-number { margin-top: 5px; font-size: 14px; font-weight: 700; }
+            .date { font-size: 12px; }
+            .message { margin: 14px 0; padding: 12px; border: 1px solid #93c5fd; border-radius: 8px; background: #eff6ff; font-size: 13px; line-height: 1.5; }
+            .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+            .grid > div, .responsibles > div { padding: 8px; border: 1px solid #e5e7eb; border-radius: 7px; }
+            span { display: block; margin-bottom: 3px; color: #6b7280; font-size: 10px; text-transform: uppercase; }
+            strong, a { font-size: 13px; overflow-wrap: anywhere; }
+            a { color: #047857; font-weight: 800; text-decoration: underline; }
+            table { width: 100%; border-collapse: collapse; font-size: 12px; }
+            th, td { border: 1px solid #d1d5db; padding: 7px; text-align: left; }
+            th { background: #f3f4f6; }
+            .observation { margin-top: 12px; padding: 10px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 7px; font-size: 12px; }
+            .responsibles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
+            .click-note { margin-top: 12px; text-align: center; color: #4b5563; font-size: 10px; }
+            .page-break { break-after: page; page-break-after: always; }
+            @page { size: A4; margin: 8mm; }
+            @media print {
+              .toolbar { display: none !important; }
+              .guide { max-width: none; margin: 0; padding: 6mm; border: 0; border-radius: 0; }
+              a { color: #047857 !important; text-decoration: underline !important; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="toolbar">
+            <button class="primary" onclick="window.print()">Descargar / Guardar como PDF</button>
+            <button class="secondary" onclick="window.close()">Cerrar</button>
+          </div>
+          ${orderCards}
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+    printWindow.focus();
   };
 
   const status1Opts = ['PENDIENTE', 'EN RUTA', 'ENTREGADO', 'ENCOMIENDA ENTREGADA', 'CANCELADO', 'DEVUELTO A DEPÓSITO', 'REAGENDADO', 'NO CONTESTA'];
@@ -1179,9 +1228,6 @@ export default function ClosuresView() {
   const canEditFull = isAdmin || isSupplier;
   const canEditStatus1 = isAdmin || isSupplier || isDelivery || isVendedor;
   const canManageRendicion = isAdmin || isSupplier;
-  const canManageGuides = isDelivery || isAdmin || isSupplier;
-  const selectedVisibleCount = filteredOrders.filter(order => selectedOrderIds.has(String(order.id))).length;
-  const allVisibleOrdersSelected = filteredOrders.length > 0 && filteredOrders.every(order => selectedOrderIds.has(String(order.id)));
   const canViewRendicion = isAdmin || isSupplier || isDelivery;
 
   return (
@@ -1456,6 +1502,45 @@ export default function ClosuresView() {
         </div>
       )}
 
+      {canUseGuides && (
+        <div className="app-card !p-3 mb-4 border border-blue-500/30 bg-blue-500/5">
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="nav-btn"
+              onClick={toggleAllGuideSelections}
+              disabled={filteredOrders.length === 0}
+            >
+              {filteredOrders.length > 0 && filteredOrders.every(order => selectedGuideIds.has(order.id))
+                ? '☐ Deseleccionar visibles'
+                : '☑ Seleccionar visibles'}
+            </button>
+
+            <button
+              type="button"
+              className="nav-btn"
+              onClick={copySelectedGuides}
+              disabled={selectedGuideOrders.length === 0}
+            >
+              📋 Copiar {selectedGuideOrders.length || ''} guía{selectedGuideOrders.length === 1 ? '' : 's'}
+            </button>
+
+            <button
+              type="button"
+              className="nav-btn active"
+              onClick={downloadSelectedGuidesPdf}
+              disabled={selectedGuideOrders.length === 0}
+            >
+              📄 Descargar PDF ({selectedGuideOrders.length})
+            </button>
+
+            <span className="text-xs text-muted-foreground">
+              El PDF incluye datos, productos y teléfono clicable con WhatsApp.
+            </span>
+          </div>
+        </div>
+      )}
+
       <div className="mb-4">
         <div className="relative">
           <input
@@ -1484,77 +1569,18 @@ export default function ClosuresView() {
         )}
       </div>
 
-      {canManageGuides && (
-        <div className="app-card !p-3 mb-4 border border-blue-500/20 bg-blue-500/5">
-          <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              className="nav-btn"
-              onClick={selectOrClearVisibleOrders}
-              disabled={filteredOrders.length === 0}
-            >
-              {allVisibleOrdersSelected ? '☐ Deseleccionar visibles' : '☑ Seleccionar visibles'}
-            </button>
-
-            <button
-              type="button"
-              className="nav-btn"
-              onClick={clearOrderSelection}
-              disabled={selectedVisibleCount === 0}
-            >
-              Limpiar selección
-            </button>
-
-            <button
-              type="button"
-              className="nav-btn active"
-              onClick={copySelectedGuides}
-              disabled={selectedVisibleCount === 0}
-            >
-              📋 Copiar guías ({selectedVisibleCount})
-            </button>
-
-            <button
-              type="button"
-              className="nav-btn active"
-              onClick={downloadSelectedOrdersPdf}
-              disabled={selectedVisibleCount === 0}
-            >
-              📄 Descargar PDF ({selectedVisibleCount})
-            </button>
-
-            <span className="text-xs text-muted-foreground ml-auto">
-              Seleccionados: <strong>{selectedVisibleCount}</strong> de {filteredOrders.length}
-            </span>
-          </div>
-          <p className="text-[11px] text-muted-foreground mt-2">
-            El número de teléfono del PDF abre WhatsApp con el mensaje de coordinación y el número de guía.
-          </p>
-        </div>
-      )}
-
       <div className="overflow-auto">
-        <table className="app-table min-w-[1980px]">
+        <table className="app-table min-w-[1800px]">
           <thead>
             <tr>
-              {canManageGuides && (
-                <th className="text-center">
-                  <input
-                    type="checkbox"
-                    aria-label="Seleccionar todos los pedidos visibles"
-                    checked={allVisibleOrdersSelected}
-                    onChange={selectOrClearVisibleOrders}
-                    disabled={filteredOrders.length === 0}
-                  />
-                </th>
-              )}
+              {canUseGuides && <th className="text-center">✓</th>}
               <th>Fecha Asignación</th>
               <th>Fecha Creación</th>
               <th>ID</th>
               <th>Ciudad</th>
               <th>Cliente</th>
-              <th>Teléfono / WhatsApp</th>
-              {canManageGuides && <th>Guía</th>}
+              <th>Teléfono</th>
+              {canUseGuides && <th>Guía</th>}
               <th>Proveedor</th>
               <th>Delivery</th>
               <th className="text-right">Total (Gs)</th>
@@ -1583,13 +1609,13 @@ export default function ClosuresView() {
               
               return (
                 <tr key={o.id} className={isSettled ? 'opacity-60' : ''}>
-                  {canManageGuides && (
+                  {canUseGuides && (
                     <td className="text-center">
                       <input
                         type="checkbox"
-                        aria-label={`Seleccionar pedido ${o.order_number || o.id}`}
-                        checked={selectedOrderIds.has(String(o.id))}
-                        onChange={() => toggleOrderSelection(String(o.id))}
+                        checked={selectedGuideIds.has(o.id)}
+                        onChange={() => toggleGuideSelection(o.id)}
+                        aria-label={`Seleccionar pedido ${o.order_number || o.id.slice(0, 8)}`}
                       />
                     </td>
                   )}
@@ -1650,28 +1676,38 @@ export default function ClosuresView() {
                     )}
                   </td>
                   <td className="text-xs">{o.customer_name}</td>
-                  <td className="text-xs whitespace-nowrap">
-                    {o.customer_phone ? (
-                      getWhatsAppUrl(o) ? (
-                        <a
-                          href={getWhatsAppUrl(o)}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="font-bold text-green-600 hover:underline"
-                          title="Abrir WhatsApp con mensaje y guía"
-                        >
-                          📱 {o.customer_phone}
-                        </a>
-                      ) : (
-                        <span>{o.customer_phone}</span>
-                      )
+                  <td className="text-xs">
+                    {getOrderPhone(o) ? (
+                      <a
+                        href={getWhatsAppUrl(o)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-bold text-green-600 hover:underline"
+                        title="Abrir WhatsApp con mensaje y guía"
+                      >
+                        📱 {getOrderPhone(o)}
+                      </a>
                     ) : (
                       '—'
                     )}
                   </td>
-                  {canManageGuides && (
-                    <td className="text-xs font-mono whitespace-nowrap">
-                      {getGuideNumber(o) || '—'}
+                  {canUseGuides && (
+                    <td>
+                      <button
+                        type="button"
+                        className="nav-btn !py-1 !px-2 text-[11px]"
+                        onClick={async () => {
+                          try {
+                            await navigator.clipboard.writeText(buildGuideText(o));
+                            toast.success('Guía copiada');
+                          } catch {
+                            toast.error('No se pudo copiar la guía');
+                          }
+                        }}
+                        title="Copiar guía completa"
+                      >
+                        📋 Copiar
+                      </button>
                     </td>
                   )}
                   <td className="text-xs">{o.provider_email || '—'}</td>
@@ -1762,7 +1798,7 @@ export default function ClosuresView() {
             })}
             {filteredOrders.length === 0 && (
               <tr>
-                <td colSpan={(canManageRendicion ? 16 : 15) + (canManageGuides ? 2 : 0)} className="text-center text-muted-foreground py-8">
+                <td colSpan={(canManageRendicion ? 16 : 15) + (canUseGuides ? 2 : 0)} className="text-center text-muted-foreground py-8">
                   {searchTerm ? 'No se encontraron resultados para tu búsqueda' : 'Sin resultados en este período'}
                 </td>
               </tr>
