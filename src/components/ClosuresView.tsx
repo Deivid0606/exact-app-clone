@@ -495,40 +495,104 @@ export default function ClosuresView() {
 
   const loadDeliveries = async () => {
     setLoadingDeliveries(true);
+
     try {
-      const { data: profilesData, error: profilesError } = await supabase
-        .from('profiles')
-        .select('email, name')
-        .eq('role', 'delivery');
-      
-      if (profilesError) throw profilesError;
-      
-      if (profilesData && profilesData.length > 0) {
-        setDeliveries(profilesData);
-        return;
-      }
-      
-      const { data: ordersData } = await supabase
-        .from('orders')
-        .select('assigned_delivery')
-        .not('assigned_delivery', 'is', null);
-      
-      if (ordersData && ordersData.length > 0) {
-        const uniqueEmails = [...new Set(ordersData.map(o => o.assigned_delivery))];
-        const { data: fallbackProfiles } = await supabase
+      const [rolesResult, ordersResult] = await Promise.all([
+        supabase
+          .from('user_roles')
+          .select('user_id')
+          .eq('role', 'DELIVERY')
+          .eq('approved', true),
+        supabase
+          .from('orders')
+          .select('assigned_delivery')
+          .not('assigned_delivery', 'is', null),
+      ]);
+
+      if (rolesResult.error) throw rolesResult.error;
+      if (ordersResult.error) throw ordersResult.error;
+
+      const deliveryUserIds: string[] = [
+        ...new Set<string>(
+          (rolesResult.data || [])
+            .map(item => String(item.user_id || '').trim())
+            .filter(Boolean),
+        ),
+      ];
+
+      const assignedEmails: string[] = [
+        ...new Set<string>(
+          (ordersResult.data || [])
+            .map(order => String(order.assigned_delivery || '').trim().toLowerCase())
+            .filter(Boolean),
+        ),
+      ];
+
+      let profilesByRole: any[] = [];
+      if (deliveryUserIds.length > 0) {
+        const { data, error } = await supabase
           .from('profiles')
-          .select('email, name')
-          .in('email', uniqueEmails);
-        
-        if (fallbackProfiles && fallbackProfiles.length > 0) {
-          setDeliveries(fallbackProfiles);
-        } else {
-          setDeliveries(uniqueEmails.map(email => ({ email, name: email })));
-        }
+          .select('user_id, email, name')
+          .in('user_id', deliveryUserIds);
+
+        if (error) throw error;
+        profilesByRole = data || [];
       }
-    } catch (error) {
+
+      let profilesByOrders: any[] = [];
+      if (assignedEmails.length > 0) {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('user_id, email, name')
+          .in('email', assignedEmails);
+
+        if (error) throw error;
+        profilesByOrders = data || [];
+      }
+
+      const deliveryMap = new Map<string, { user_id?: string; email: string; name: string }>();
+
+      const addDelivery = (profile: any) => {
+        const email = String(profile?.email || '').trim();
+        if (!email) return;
+
+        const key = email.toLowerCase();
+        const existing = deliveryMap.get(key);
+
+        deliveryMap.set(key, {
+          user_id: profile?.user_id || existing?.user_id,
+          email: existing?.email || email,
+          name: profile?.name || existing?.name || email,
+        });
+      };
+
+      profilesByRole.forEach(addDelivery);
+      profilesByOrders.forEach(addDelivery);
+
+      assignedEmails.forEach(email => {
+        if (!deliveryMap.has(email)) {
+          deliveryMap.set(email, {
+            email,
+            name: email,
+          });
+        }
+      });
+
+      const finalDeliveries = Array.from(deliveryMap.values()).sort((a, b) =>
+        String(a.name || a.email).localeCompare(
+          String(b.name || b.email),
+          'es',
+          { sensitivity: 'base' },
+        ),
+      );
+
+      setDeliveries(finalDeliveries);
+    } catch (error: any) {
       console.error('Error loading deliveries:', error);
-      toast.error('Error al cargar repartidores');
+      toast.error(
+        `Error al cargar repartidores: ${error?.message || 'Error desconocido'}`,
+      );
+      setDeliveries([]);
     } finally {
       setLoadingDeliveries(false);
     }
