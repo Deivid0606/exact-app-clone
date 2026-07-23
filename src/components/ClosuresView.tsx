@@ -601,64 +601,67 @@ export default function ClosuresView() {
 
   const loadSuppliers = async () => {
     try {
-      const [rolesResult, ordersResult] = await Promise.all([
-        supabase
-          .from('user_roles')
-          .select('user_id')
-          .eq('role', 'PROVEEDOR')
-          .eq('approved', true),
-        supabase
-          .from('orders')
-          .select('provider_email')
-          .not('provider_email', 'is', null),
-      ]);
+      // La fuente principal para el filtro de Cierres son los proveedores
+      // que ya existen en pedidos. Así el selector no depende de permisos RLS
+      // sobre user_roles y funciona tanto para ADMIN como para DELIVERY.
+      const { data: ordersData, error: ordersError } = await supabase
+        .from('orders')
+        .select('provider_email')
+        .not('provider_email', 'is', null);
 
-      if (rolesResult.error) throw rolesResult.error;
-      if (ordersResult.error) throw ordersResult.error;
+      if (ordersError) throw ordersError;
 
-      const supplierUserIds: string[] = [
+      const supplierEmails = [
         ...new Set<string>(
-          (rolesResult.data || [])
-            .map(row => String(row.user_id || '').trim())
-            .filter(Boolean),
-        ),
-      ];
-
-      const historicalSupplierEmails: string[] = [
-        ...new Set<string>(
-          (ordersResult.data || [])
+          (ordersData || [])
             .map(order => String(order.provider_email || '').trim().toLowerCase())
             .filter(Boolean),
         ),
       ];
 
-      let approvedSupplierProfiles: any[] = [];
+      // Intentar agregar también proveedores aprobados aunque todavía no tengan pedidos.
+      // Si user_roles está restringido por RLS, el filtro sigue funcionando con orders.
+      const { data: roleRows, error: rolesError } = await supabase
+        .from('user_roles')
+        .select('user_id')
+        .eq('role', 'PROVEEDOR')
+        .eq('approved', true);
 
-      if (supplierUserIds.length > 0) {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('user_id, email, name, company_name')
-          .in('user_id', supplierUserIds);
+      let approvedProfiles: any[] = [];
 
-        if (error) throw error;
-        approvedSupplierProfiles = data || [];
+      if (!rolesError && roleRows && roleRows.length > 0) {
+        const supplierUserIds = [
+          ...new Set<string>(
+            roleRows
+              .map(row => String(row.user_id || '').trim())
+              .filter(Boolean),
+          ),
+        ];
+
+        if (supplierUserIds.length > 0) {
+          const { data, error } = await supabase
+            .from('profiles')
+            .select('user_id, email, name, company_name')
+            .in('user_id', supplierUserIds);
+
+          if (!error) approvedProfiles = data || [];
+        }
       }
 
-      let historicalSupplierProfiles: any[] = [];
+      let historicalProfiles: any[] = [];
 
-      if (historicalSupplierEmails.length > 0) {
+      if (supplierEmails.length > 0) {
         const { data, error } = await supabase
           .from('profiles')
           .select('user_id, email, name, company_name')
-          .in('email', historicalSupplierEmails);
+          .in('email', supplierEmails);
 
-        if (error) throw error;
-        historicalSupplierProfiles = data || [];
+        if (!error) historicalProfiles = data || [];
       }
 
       const supplierMap = new Map<string, { email: string; name: string }>();
 
-      const addSupplier = (profile: any) => {
+      const addSupplierProfile = (profile: any) => {
         const email = String(profile?.email || '').trim();
         if (!email) return;
 
@@ -675,15 +678,12 @@ export default function ClosuresView() {
         });
       };
 
-      approvedSupplierProfiles.forEach(addSupplier);
-      historicalSupplierProfiles.forEach(addSupplier);
+      approvedProfiles.forEach(addSupplierProfile);
+      historicalProfiles.forEach(addSupplierProfile);
 
-      historicalSupplierEmails.forEach(email => {
+      supplierEmails.forEach(email => {
         if (!supplierMap.has(email)) {
-          supplierMap.set(email, {
-            email,
-            name: email,
-          });
+          supplierMap.set(email, { email, name: email });
         }
       });
 
@@ -1516,9 +1516,12 @@ export default function ClosuresView() {
           </div>
         )}
 
-        {(isAdmin || isDelivery) && suppliers.length > 0 && (
+        {(isAdmin || isDelivery) && (
           <select className="app-input !w-auto min-w-[280px]" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
             <option value="">Todos los proveedores</option>
+            {suppliers.length === 0 && (
+              <option value="" disabled>No se encontraron proveedores</option>
+            )}
             {suppliers.map(s => (
               <option key={s.email} value={s.email}>
                 {s.name || s.email}
