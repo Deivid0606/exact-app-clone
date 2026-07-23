@@ -601,7 +601,8 @@ export default function ClosuresView() {
 
   const loadSuppliers = async () => {
     try {
-      // 1) Proveedores que ya aparecen en pedidos.
+      // 1) Todos los proveedores realmente usados en pedidos.
+      // Algunos registros antiguos contienen varios correos separados por comas.
       const { data: ordersData, error: ordersError } = await supabase
         .from('orders')
         .select('provider_email')
@@ -609,16 +610,20 @@ export default function ClosuresView() {
 
       if (ordersError) throw ordersError;
 
-      const supplierEmails = [
+      const providerEmails = [
         ...new Set<string>(
           (ordersData || [])
-            .map(order => String(order.provider_email || '').trim().toLowerCase())
+            .flatMap(order =>
+              String(order.provider_email || '')
+                .split(',')
+                .map(email => email.trim().toLowerCase()),
+            )
             .filter(Boolean),
         ),
       ];
 
-      // 2) Proveedores aprobados en user_roles.
-      // Puede devolver error o vacío por RLS; por eso no es la única fuente.
+      // 2) Proveedores aprobados, incluso si todavía no tienen pedidos.
+      // Si user_roles está restringido por RLS, la lista de pedidos sigue funcionando.
       const { data: roleRows, error: rolesError } = await supabase
         .from('user_roles')
         .select('user_id')
@@ -639,73 +644,76 @@ export default function ClosuresView() {
         if (supplierUserIds.length > 0) {
           const { data, error } = await supabase
             .from('profiles')
-            .select('user_id, email, name, company_name, role')
+            .select('user_id, email, name')
             .in('user_id', supplierUserIds);
 
-          if (!error) approvedProfiles = data || [];
+          if (error) {
+            console.warn('No se pudieron cargar proveedores aprobados:', error);
+          } else {
+            approvedProfiles = data || [];
+          }
         }
+      } else if (rolesError) {
+        console.warn(
+          'No se pudo leer user_roles; se usarán proveedores de pedidos:',
+          rolesError,
+        );
       }
 
-      // 3) Compatibilidad con perfiles antiguos.
-      // KING TODO tiene user_roles.role = PROVEEDOR, pero profiles.role = seller.
-      // Esta consulta evita que desaparezca cuando user_roles está bloqueado por RLS.
-      const { data: legacyProfiles, error: legacyError } = await supabase
+      const approvedEmails = approvedProfiles
+        .map(profile => String(profile?.email || '').trim().toLowerCase())
+        .filter(Boolean);
+
+      const allSupplierEmails = [
+        ...new Set<string>([...providerEmails, ...approvedEmails]),
+      ];
+
+      if (allSupplierEmails.length === 0) {
+        setSuppliers([]);
+        return;
+      }
+
+      // 3) Obtener nombres desde profiles.
+      // La tabla profiles no tiene la columna company_name.
+      const { data: profilesData, error: profilesError } = await supabase
         .from('profiles')
-        .select('user_id, email, name, company_name, role')
-        .in('role', ['PROVEEDOR', 'seller']);
+        .select('email, name')
+        .in('email', allSupplierEmails);
 
-      if (legacyError) {
-        console.warn('No se pudieron cargar perfiles legacy de proveedores:', legacyError);
+      if (profilesError) {
+        console.warn('No se pudieron cargar nombres de proveedores:', profilesError);
       }
 
-      // 4) Obtener nombres de los proveedores históricos de pedidos.
-      let historicalProfiles: any[] = [];
+      const profileMap = new Map<string, any>();
 
-      if (supplierEmails.length > 0) {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('user_id, email, name, company_name, role')
-          .in('email', supplierEmails);
+      (profilesData || []).forEach(profile => {
+        const email = String(profile?.email || '').trim().toLowerCase();
+        if (email) profileMap.set(email, profile);
+      });
 
-        if (!error) historicalProfiles = data || [];
-      }
-
-      const supplierMap = new Map<string, { email: string; name: string }>();
-
-      const addSupplierProfile = (profile: any) => {
-        const email = String(profile?.email || '').trim();
-        if (!email) return;
-
-        const key = email.toLowerCase();
-        const existing = supplierMap.get(key);
-
-        supplierMap.set(key, {
-          email: existing?.email || email,
-          name:
-            profile?.company_name ||
-            profile?.name ||
-            existing?.name ||
-            email,
-        });
-      };
-
-      approvedProfiles.forEach(addSupplierProfile);
-      (legacyProfiles || []).forEach(addSupplierProfile);
-      historicalProfiles.forEach(addSupplierProfile);
-
-      supplierEmails.forEach(email => {
-        if (!supplierMap.has(email)) {
-          supplierMap.set(email, { email, name: email });
+      approvedProfiles.forEach(profile => {
+        const email = String(profile?.email || '').trim().toLowerCase();
+        if (email && !profileMap.has(email)) {
+          profileMap.set(email, profile);
         }
       });
 
-      const finalSuppliers = Array.from(supplierMap.values()).sort((a, b) =>
-        String(a.name || a.email).localeCompare(
-          String(b.name || b.email),
-          'es',
-          { sensitivity: 'base' },
-        ),
-      );
+      const finalSuppliers = allSupplierEmails
+        .map(email => {
+          const profile = profileMap.get(email);
+
+          return {
+            email,
+            name: String(profile?.name || email).trim(),
+          };
+        })
+        .sort((a, b) =>
+          String(a.name || a.email).localeCompare(
+            String(b.name || b.email),
+            'es',
+            { sensitivity: 'base' },
+          ),
+        );
 
       setSuppliers(finalSuppliers);
     } catch (error: any) {
