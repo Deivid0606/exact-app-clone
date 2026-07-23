@@ -403,6 +403,7 @@ export default function ClosuresView() {
   const [loadingDeliveries, setLoadingDeliveries] = useState(false);
   const [editingDateId, setEditingDateId] = useState<string | null>(null);
   const [selectedGuideIds, setSelectedGuideIds] = useState<Set<string>>(new Set());
+  const [updatingContactedIds, setUpdatingContactedIds] = useState<Set<string>>(new Set());
   
   // Estados para el modal de cambio de estado
   const [statusChangeModal, setStatusChangeModal] = useState<{
@@ -599,26 +600,108 @@ export default function ClosuresView() {
   };
 
   const loadSuppliers = async () => {
-    const { data } = await supabase
-      .from('profiles')
-      .select('email, name, company_name')
-      .eq('role', 'PROVEEDOR');
-    
-    if (data && data.length > 0) {
-      setSuppliers(data.map(s => ({ 
-        email: s.email, 
-        name: s.company_name || s.name || s.email 
-      })));
-    } else {
-      const { data: ordersData } = await supabase
-        .from('orders')
-        .select('provider_email')
-        .not('provider_email', 'is', null);
-      
-      if (ordersData && ordersData.length > 0) {
-        const uniqueSuppliers = [...new Set(ordersData.map(o => o.provider_email))];
-        setSuppliers(uniqueSuppliers.map(email => ({ email, name: email })));
+    try {
+      const [rolesResult, ordersResult] = await Promise.all([
+        supabase
+          .from('user_roles')
+          .select('user_id')
+          .eq('role', 'PROVEEDOR')
+          .eq('approved', true),
+        supabase
+          .from('orders')
+          .select('provider_email')
+          .not('provider_email', 'is', null),
+      ]);
+
+      if (rolesResult.error) throw rolesResult.error;
+      if (ordersResult.error) throw ordersResult.error;
+
+      const supplierUserIds: string[] = [
+        ...new Set<string>(
+          (rolesResult.data || [])
+            .map(row => String(row.user_id || '').trim())
+            .filter(Boolean),
+        ),
+      ];
+
+      const historicalSupplierEmails: string[] = [
+        ...new Set<string>(
+          (ordersResult.data || [])
+            .map(order => String(order.provider_email || '').trim().toLowerCase())
+            .filter(Boolean),
+        ),
+      ];
+
+      let approvedSupplierProfiles: any[] = [];
+
+      if (supplierUserIds.length > 0) {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('user_id, email, name, company_name')
+          .in('user_id', supplierUserIds);
+
+        if (error) throw error;
+        approvedSupplierProfiles = data || [];
       }
+
+      let historicalSupplierProfiles: any[] = [];
+
+      if (historicalSupplierEmails.length > 0) {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('user_id, email, name, company_name')
+          .in('email', historicalSupplierEmails);
+
+        if (error) throw error;
+        historicalSupplierProfiles = data || [];
+      }
+
+      const supplierMap = new Map<string, { email: string; name: string }>();
+
+      const addSupplier = (profile: any) => {
+        const email = String(profile?.email || '').trim();
+        if (!email) return;
+
+        const key = email.toLowerCase();
+        const existing = supplierMap.get(key);
+
+        supplierMap.set(key, {
+          email: existing?.email || email,
+          name:
+            profile?.company_name ||
+            profile?.name ||
+            existing?.name ||
+            email,
+        });
+      };
+
+      approvedSupplierProfiles.forEach(addSupplier);
+      historicalSupplierProfiles.forEach(addSupplier);
+
+      historicalSupplierEmails.forEach(email => {
+        if (!supplierMap.has(email)) {
+          supplierMap.set(email, {
+            email,
+            name: email,
+          });
+        }
+      });
+
+      const finalSuppliers = Array.from(supplierMap.values()).sort((a, b) =>
+        String(a.name || a.email).localeCompare(
+          String(b.name || b.email),
+          'es',
+          { sensitivity: 'base' },
+        ),
+      );
+
+      setSuppliers(finalSuppliers);
+    } catch (error: any) {
+      console.error('Error cargando proveedores en Cierres:', error);
+      toast.error(
+        `Error al cargar proveedores: ${error?.message || 'Error desconocido'}`,
+      );
+      setSuppliers([]);
     }
   };
 
@@ -697,6 +780,62 @@ export default function ClosuresView() {
     } : o));
   };
 
+  const toggleContacted = async (order: any) => {
+    const orderId = String(order?.id || '');
+    if (!orderId || updatingContactedIds.has(orderId)) return;
+
+    const nextContacted = !Boolean(order.contacted);
+    const now = new Date().toISOString();
+
+    setUpdatingContactedIds(previous => {
+      const next = new Set(previous);
+      next.add(orderId);
+      return next;
+    });
+
+    setOrders(previous =>
+      previous.map(item =>
+        item.id === orderId
+          ? {
+              ...item,
+              contacted: nextContacted,
+              contacted_at: nextContacted ? now : null,
+              contacted_by: nextContacted ? myEmail : null,
+            }
+          : item,
+      ),
+    );
+
+    const { error } = await supabase
+      .from('orders')
+      .update({
+        contacted: nextContacted,
+        contacted_at: nextContacted ? now : null,
+        contacted_by: nextContacted ? myEmail : null,
+        updated_at: now,
+      })
+      .eq('id', orderId);
+
+    if (error) {
+      setOrders(previous =>
+        previous.map(item => (item.id === orderId ? order : item)),
+      );
+      toast.error(`No se pudo actualizar Contactado: ${error.message}`);
+    } else {
+      toast.success(
+        nextContacted
+          ? 'Cliente marcado como contactado'
+          : 'Marca de contacto eliminada',
+      );
+    }
+
+    setUpdatingContactedIds(previous => {
+      const next = new Set(previous);
+      next.delete(orderId);
+      return next;
+    });
+  };
+
   const loadClosures = async () => {
     let dateField = filterDateBy;
     
@@ -720,9 +859,6 @@ export default function ClosuresView() {
       query = query.eq('created_by', myEmail);
       if (selectedDeliveryList.length > 0) {
         query = query.in('assigned_delivery', selectedDeliveryList);
-      }
-      if (filterSupplier) {
-        query = query.eq('provider_email', filterSupplier);
       }
     } else if (isDelivery) {
       query = query.eq('assigned_delivery', myEmail);
@@ -1284,6 +1420,7 @@ export default function ClosuresView() {
   const canEditStatus1 = isAdmin || isSupplier || isDelivery || isVendedor;
   const canManageRendicion = isAdmin || isSupplier;
   const canViewRendicion = isAdmin || isSupplier || isDelivery;
+  const canMarkContacted = isAdmin || isDelivery || isSupplier;
 
   return (
     <div className="app-card">
@@ -1306,7 +1443,7 @@ export default function ClosuresView() {
       {isVendedor && (
         <div className="mb-3">
           <span className="badge-status badge-entregado">✏️ VENDEDOR: solo podés ver tus pedidos</span>
-          <p className="text-xs text-muted-foreground mt-1">Podés filtrar por fecha, estado y proveedor. Todos los pedidos que ves son los que vos creaste.</p>
+          <p className="text-xs text-muted-foreground mt-1">Podés filtrar por fecha y estado. Todos los pedidos que ves son los que vos creaste.</p>
         </div>
       )}
 
@@ -1379,7 +1516,7 @@ export default function ClosuresView() {
           </div>
         )}
 
-        {(isVendedor || isDelivery || isAdmin) && suppliers.length > 0 && (
+        {(isAdmin || isDelivery) && suppliers.length > 0 && (
           <select className="app-input !w-auto min-w-[280px]" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
             <option value="">Todos los proveedores</option>
             {suppliers.map(s => (
@@ -1732,19 +1869,45 @@ export default function ClosuresView() {
                   </td>
                   <td className="text-xs">{o.customer_name}</td>
                   <td className="text-xs">
-                    {getOrderPhone(o) ? (
-                      <a
-                        href={getWhatsAppUrl(o)}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="font-bold text-green-600 hover:underline"
-                        title="Abrir WhatsApp con mensaje y guía"
-                      >
-                        📱 {getOrderPhone(o)}
-                      </a>
-                    ) : (
-                      '—'
-                    )}
+                    <div className="flex items-center gap-2 whitespace-nowrap">
+                      {getOrderPhone(o) ? (
+                        <a
+                          href={getWhatsAppUrl(o)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-bold text-green-600 hover:underline"
+                          title="Abrir WhatsApp con mensaje y guía"
+                        >
+                          📱 {getOrderPhone(o)}
+                        </a>
+                      ) : (
+                        <span>—</span>
+                      )}
+
+                      {canMarkContacted && getOrderPhone(o) && (
+                        <button
+                          type="button"
+                          onClick={() => toggleContacted(o)}
+                          disabled={updatingContactedIds.has(o.id)}
+                          className={`inline-flex items-center gap-1 rounded-lg border px-2 py-1 text-[11px] font-bold transition-colors ${
+                            o.contacted
+                              ? 'border-green-600 bg-green-600 text-white hover:bg-green-700'
+                              : 'border-border bg-background text-muted-foreground hover:border-green-500 hover:text-green-600'
+                          } disabled:cursor-not-allowed disabled:opacity-60`}
+                          title={
+                            o.contacted
+                              ? `Contactado${o.contacted_by ? ` por ${o.contacted_by}` : ''}${o.contacted_at ? ` el ${new Date(o.contacted_at).toLocaleString('es-PY')}` : ''}. Clic para desmarcar.`
+                              : 'Marcar que el cliente ya fue contactado'
+                          }
+                        >
+                          {updatingContactedIds.has(o.id)
+                            ? '…'
+                            : o.contacted
+                              ? '✓ Contactado'
+                              : '✓ Contactar'}
+                        </button>
+                      )}
+                    </div>
                   </td>
                   {canUseGuides && (
                     <td>
