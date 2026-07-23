@@ -601,9 +601,7 @@ export default function ClosuresView() {
 
   const loadSuppliers = async () => {
     try {
-      // La fuente principal para el filtro de Cierres son los proveedores
-      // que ya existen en pedidos. Así el selector no depende de permisos RLS
-      // sobre user_roles y funciona tanto para ADMIN como para DELIVERY.
+      // 1) Proveedores que ya aparecen en pedidos.
       const { data: ordersData, error: ordersError } = await supabase
         .from('orders')
         .select('provider_email')
@@ -619,8 +617,8 @@ export default function ClosuresView() {
         ),
       ];
 
-      // Intentar agregar también proveedores aprobados aunque todavía no tengan pedidos.
-      // Si user_roles está restringido por RLS, el filtro sigue funcionando con orders.
+      // 2) Proveedores aprobados en user_roles.
+      // Puede devolver error o vacío por RLS; por eso no es la única fuente.
       const { data: roleRows, error: rolesError } = await supabase
         .from('user_roles')
         .select('user_id')
@@ -641,19 +639,32 @@ export default function ClosuresView() {
         if (supplierUserIds.length > 0) {
           const { data, error } = await supabase
             .from('profiles')
-            .select('user_id, email, name, company_name')
+            .select('user_id, email, name, company_name, role')
             .in('user_id', supplierUserIds);
 
           if (!error) approvedProfiles = data || [];
         }
       }
 
+      // 3) Compatibilidad con perfiles antiguos.
+      // KING TODO tiene user_roles.role = PROVEEDOR, pero profiles.role = seller.
+      // Esta consulta evita que desaparezca cuando user_roles está bloqueado por RLS.
+      const { data: legacyProfiles, error: legacyError } = await supabase
+        .from('profiles')
+        .select('user_id, email, name, company_name, role')
+        .in('role', ['PROVEEDOR', 'seller']);
+
+      if (legacyError) {
+        console.warn('No se pudieron cargar perfiles legacy de proveedores:', legacyError);
+      }
+
+      // 4) Obtener nombres de los proveedores históricos de pedidos.
       let historicalProfiles: any[] = [];
 
       if (supplierEmails.length > 0) {
         const { data, error } = await supabase
           .from('profiles')
-          .select('user_id, email, name, company_name')
+          .select('user_id, email, name, company_name, role')
           .in('email', supplierEmails);
 
         if (!error) historicalProfiles = data || [];
@@ -679,6 +690,7 @@ export default function ClosuresView() {
       };
 
       approvedProfiles.forEach(addSupplierProfile);
+      (legacyProfiles || []).forEach(addSupplierProfile);
       historicalProfiles.forEach(addSupplierProfile);
 
       supplierEmails.forEach(email => {
