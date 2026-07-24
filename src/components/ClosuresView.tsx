@@ -601,18 +601,38 @@ export default function ClosuresView() {
 
   const loadSuppliers = async () => {
     try {
-      // 1) Todos los proveedores realmente usados en pedidos.
-      // Algunos registros antiguos contienen varios correos separados por comas.
-      const { data: ordersData, error: ordersError } = await supabase
-        .from('orders')
-        .select('provider_email')
-        .not('provider_email', 'is', null);
+      /*
+       * Cargar TODOS los provider_email con paginación.
+       * Supabase suele limitar cada consulta a 1.000 filas; sin paginar,
+       * proveedores como KING TODO pueden quedar fuera aunque tengan pedidos.
+       */
+      const pageSize = 1000;
+      let from = 0;
+      let allOrderProviders: any[] = [];
 
-      if (ordersError) throw ordersError;
+      while (true) {
+        const { data, error } = await supabase
+          .from('orders')
+          .select('provider_email')
+          .not('provider_email', 'is', null)
+          .range(from, from + pageSize - 1);
 
+        if (error) throw error;
+
+        const page = data || [];
+        allOrderProviders = [...allOrderProviders, ...page];
+
+        if (page.length < pageSize) break;
+        from += pageSize;
+      }
+
+      /*
+       * Hay registros antiguos con varios correos separados por comas.
+       * Los separamos, limpiamos y eliminamos duplicados.
+       */
       const providerEmails = [
         ...new Set<string>(
-          (ordersData || [])
+          allOrderProviders
             .flatMap(order =>
               String(order.provider_email || '')
                 .split(',')
@@ -622,8 +642,11 @@ export default function ClosuresView() {
         ),
       ];
 
-      // 2) Proveedores aprobados, incluso si todavía no tienen pedidos.
-      // Si user_roles está restringido por RLS, la lista de pedidos sigue funcionando.
+      /*
+       * Incluir proveedores aprobados aunque todavía no tengan pedidos.
+       * Si user_roles está bloqueado por RLS, los proveedores históricos
+       * obtenidos desde orders siguen cargándose.
+       */
       const { data: roleRows, error: rolesError } = await supabase
         .from('user_roles')
         .select('user_id')
@@ -673,8 +696,10 @@ export default function ClosuresView() {
         return;
       }
 
-      // 3) Obtener nombres desde profiles.
-      // La tabla profiles no tiene la columna company_name.
+      /*
+       * Obtener nombres desde profiles.
+       * profiles solo tiene email y name; no existe company_name.
+       */
       const { data: profilesData, error: profilesError } = await supabase
         .from('profiles')
         .select('email, name')
