@@ -602,136 +602,38 @@ export default function ClosuresView() {
   const loadSuppliers = async () => {
     try {
       /*
-       * Cargar TODOS los provider_email con paginación.
-       * Supabase suele limitar cada consulta a 1.000 filas; sin paginar,
-       * proveedores como KING TODO pueden quedar fuera aunque tengan pedidos.
+       * La lista oficial se obtiene mediante una función SECURITY DEFINER
+       * creada en Supabase. De esta forma ADMIN y DELIVERY ven exactamente
+       * los mismos proveedores aprobados, sin depender de las políticas RLS
+       * aplicadas directamente sobre orders, profiles o user_roles.
        */
-      const pageSize = 1000;
-      let from = 0;
-      let allOrderProviders: any[] = [];
+      const { data, error } = await supabase.rpc('get_approved_suppliers');
 
-      while (true) {
-        const { data, error } = await supabase
-          .from('orders')
-          .select('provider_email')
-          .not('provider_email', 'is', null)
-          .range(from, from + pageSize - 1);
+      if (error) throw error;
 
-        if (error) throw error;
+      const supplierMap = new Map<
+        string,
+        { email: string; name: string }
+      >();
 
-        const page = data || [];
-        allOrderProviders = [...allOrderProviders, ...page];
+      (data || []).forEach((supplier: any) => {
+        const email = String(supplier?.email || '')
+          .trim()
+          .toLowerCase();
 
-        if (page.length < pageSize) break;
-        from += pageSize;
-      }
+        if (!email) return;
 
-      /*
-       * Hay registros antiguos con varios correos separados por comas.
-       * Los separamos, limpiamos y eliminamos duplicados.
-       */
-      const providerEmails = [
-        ...new Set<string>(
-          allOrderProviders
-            .flatMap(order =>
-              String(order.provider_email || '')
-                .split(',')
-                .map(email => email.trim().toLowerCase()),
-            )
-            .filter(Boolean),
-        ),
-      ];
-
-      /*
-       * Incluir proveedores aprobados aunque todavía no tengan pedidos.
-       * Si user_roles está bloqueado por RLS, los proveedores históricos
-       * obtenidos desde orders siguen cargándose.
-       */
-      const { data: roleRows, error: rolesError } = await supabase
-        .from('user_roles')
-        .select('user_id')
-        .eq('role', 'PROVEEDOR')
-        .eq('approved', true);
-
-      let approvedProfiles: any[] = [];
-
-      if (!rolesError && roleRows && roleRows.length > 0) {
-        const supplierUserIds = [
-          ...new Set<string>(
-            roleRows
-              .map(row => String(row.user_id || '').trim())
-              .filter(Boolean),
-          ),
-        ];
-
-        if (supplierUserIds.length > 0) {
-          const { data, error } = await supabase
-            .from('profiles')
-            .select('user_id, email, name')
-            .in('user_id', supplierUserIds);
-
-          if (error) {
-            console.warn('No se pudieron cargar proveedores aprobados:', error);
-          } else {
-            approvedProfiles = data || [];
-          }
-        }
-      } else if (rolesError) {
-        console.warn(
-          'No se pudo leer user_roles; se usarán proveedores de pedidos:',
-          rolesError,
-        );
-      }
-
-      const approvedEmails = approvedProfiles
-        .map(profile => String(profile?.email || '').trim().toLowerCase())
-        .filter(Boolean);
-
-      const allSupplierEmails = [
-        ...new Set<string>([...providerEmails, ...approvedEmails]),
-      ];
-
-      if (allSupplierEmails.length === 0) {
-        setSuppliers([]);
-        return;
-      }
-
-      /*
-       * Obtener nombres desde profiles.
-       * profiles solo tiene email y name; no existe company_name.
-       */
-      const { data: profilesData, error: profilesError } = await supabase
-        .from('profiles')
-        .select('email, name')
-        .in('email', allSupplierEmails);
-
-      if (profilesError) {
-        console.warn('No se pudieron cargar nombres de proveedores:', profilesError);
-      }
-
-      const profileMap = new Map<string, any>();
-
-      (profilesData || []).forEach(profile => {
-        const email = String(profile?.email || '').trim().toLowerCase();
-        if (email) profileMap.set(email, profile);
+        supplierMap.set(email, {
+          email,
+          name: String(
+            supplier?.name ||
+            supplier?.email
+          ).trim(),
+        });
       });
 
-      approvedProfiles.forEach(profile => {
-        const email = String(profile?.email || '').trim().toLowerCase();
-        if (email && !profileMap.has(email)) {
-          profileMap.set(email, profile);
-        }
-      });
-
-      const finalSuppliers = allSupplierEmails
-        .map(email => {
-          const profile = profileMap.get(email);
-
-          return {
-            email,
-            name: String(profile?.name || email).trim(),
-          };
-        })
+      const finalSuppliers = Array
+        .from(supplierMap.values())
         .sort((a, b) =>
           String(a.name || a.email).localeCompare(
             String(b.name || b.email),
@@ -742,10 +644,17 @@ export default function ClosuresView() {
 
       setSuppliers(finalSuppliers);
     } catch (error: any) {
-      console.error('Error cargando proveedores en Cierres:', error);
-      toast.error(
-        `Error al cargar proveedores: ${error?.message || 'Error desconocido'}`,
+      console.error(
+        'Error cargando proveedores oficiales en Cierres:',
+        error,
       );
+
+      toast.error(
+        `Error al cargar proveedores: ${
+          error?.message || 'Error desconocido'
+        }`,
+      );
+
       setSuppliers([]);
     }
   };
