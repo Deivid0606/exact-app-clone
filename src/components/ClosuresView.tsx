@@ -1021,14 +1021,26 @@ export default function ClosuresView() {
    *   Solo cobra su tarifa de delivery.
    * - Los demás estados no generan rendición ni pago de delivery.
    */
-  const getOrderAmountToSettle = (order: any) => {
-    if (order.status === 'ENCOMIENDA ENTREGADA') return 0;
+  const getOrderCollectedAmount = (order: any) => {
     if (order.status !== 'ENTREGADO') return 0;
+    return Number(order.total_gs || 0);
+  };
 
-    return Math.max(
-      0,
-      Number(order.total_gs || 0) - getDeliveryFeeForOrder(order),
-    );
+  const getOrderAmountToSettle = (order: any) => {
+    if (
+      order.status !== 'ENTREGADO' &&
+      order.status !== 'ENCOMIENDA ENTREGADA'
+    ) {
+      return 0;
+    }
+
+    /*
+     * Este valor individual se usa solo como referencia.
+     * La rendición real se calcula de forma global para que la tarifa
+     * de ENCOMIENDA ENTREGADA también se descuente del dinero cobrado
+     * en pedidos ENTREGADO.
+     */
+    return getOrderCollectedAmount(order) - getDeliveryPaymentForOrder(order);
   };
 
   const getDeliveryPaymentForOrder = (order: any) => {
@@ -1109,27 +1121,51 @@ export default function ClosuresView() {
       ),
       rendidos: rendidos.length,
       noRendidos: noRendidos.length,
-      montoRendido: rendidos.reduce(
-        (sum, order) => sum + getOrderAmountToSettle(order),
+      montoRendido: Math.max(
         0,
+        rendidos.reduce(
+          (sum, order) => sum + getOrderCollectedAmount(order),
+          0,
+        ) -
+          rendidos.reduce(
+            (sum, order) => sum + getDeliveryPaymentForOrder(order),
+            0,
+          ),
       ),
-      montoPendiente: noRendidos.reduce(
-        (sum, order) => sum + getOrderAmountToSettle(order),
+      montoPendiente: Math.max(
         0,
+        noRendidos.reduce(
+          (sum, order) => sum + getOrderCollectedAmount(order),
+          0,
+        ) -
+          noRendidos.reduce(
+            (sum, order) => sum + getDeliveryPaymentForOrder(order),
+            0,
+          ),
       ),
     };
   }, [filteredOrders, delivered, rendidos, noRendidos, fees]);
 
-  const totalAPagar = useMemo(
-    () =>
-      delivered.reduce(
-        (sum, order) => sum + getOrderAmountToSettle(order),
-        0,
-      ),
-    [delivered, fees],
-  );
+  const settlementSummary = useMemo(() => {
+    const totalCollected = delivered.reduce(
+      (sum, order) => sum + getOrderCollectedAmount(order),
+      0,
+    );
 
-  const netRendir = totalAPagar;
+    const totalDeliveryPayment = delivered.reduce(
+      (sum, order) => sum + getDeliveryPaymentForOrder(order),
+      0,
+    );
+
+    return {
+      totalCollected,
+      totalDeliveryPayment,
+      netToSettle: Math.max(0, totalCollected - totalDeliveryPayment),
+    };
+  }, [delivered, fees]);
+
+  const totalAPagar = settlementSummary.netToSettle;
+  const netRendir = settlementSummary.netToSettle;
 
   const financePanel = useMemo(() => {
     let ventaProductos = 0;
@@ -1327,7 +1363,14 @@ export default function ClosuresView() {
     
     if (!deliveryEmail) { toast.error('Seleccioná un delivery primero'); return; }
     if (delivered.length === 0) { toast.error('No hay pedidos entregados para procesar'); return; }
-    if (!confirm(`¿Marcar rendición de ${deliveryEmail} por Gs ${nf(totalAPagar)} como PAGADA?`)) return;
+    if (
+      !confirm(
+        `¿Marcar rendición de ${deliveryEmail} como PAGADA?\n\n` +
+        `Cobrado en pedidos normales: Gs ${nf(settlementSummary.totalCollected)}\n` +
+        `Pago total al delivery: Gs ${nf(settlementSummary.totalDeliveryPayment)}\n` +
+        `Neto a rendir: Gs ${nf(totalAPagar)}`
+      )
+    ) return;
 
     for (const o of delivered) {
       await supabase.from('orders').update({
@@ -1341,7 +1384,7 @@ export default function ClosuresView() {
       delivery_email: deliveryEmail,
       fecha_rendicion: new Date().toISOString().slice(0, 10),
       monto_total: totalAPagar,
-      nota: rendicionNote || `Rendición ${dateFrom} a ${dateTo} — ${delivered.length} pedidos`,
+      nota: rendicionNote || `Rendición ${dateFrom} a ${dateTo} — ${delivered.length} pedidos — Cobrado Gs ${nf(settlementSummary.totalCollected)} — Delivery Gs ${nf(settlementSummary.totalDeliveryPayment)} — Neto Gs ${nf(totalAPagar)}`,
       marcado_por: myEmail,
       marcado_en: new Date().toISOString(),
       pagado_en: new Date().toISOString(),
@@ -1971,7 +2014,7 @@ export default function ClosuresView() {
             🚚 Pago total al delivery
           </div>
           <div className="text-[22px] font-extrabold">
-            Gs {nf(kpis.deliveryFee)}
+            Gs {nf(settlementSummary.totalDeliveryPayment)}
           </div>
           <div className="text-xs text-muted-foreground">
             Entregados + encomiendas entregadas
@@ -1986,7 +2029,7 @@ export default function ClosuresView() {
             Gs {nf(netRendir)}
           </div>
           <div className="text-xs text-muted-foreground">
-            Las encomiendas aportan Gs 0
+            Pedidos normales cobrados menos todas las tarifas delivery
           </div>
         </div>
 
