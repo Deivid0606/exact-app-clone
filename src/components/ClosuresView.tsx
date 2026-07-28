@@ -392,7 +392,8 @@ export default function ClosuresView() {
   const [filterSuppliers, setFilterSuppliers] = useState<Set<string>>(new Set());
   const [supplierSearch, setSupplierSearch] = useState('');
   const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
-  const [filterType, setFilterType] = useState('');
+  const [filterStatuses, setFilterStatuses] = useState<Set<string>>(new Set());
+  const [showStatusDropdown, setShowStatusDropdown] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
   const [rendicionNote, setRendicionNote] = useState('');
   const [rendicionPagada, setRendicionPagada] = useState<{ id: string; pagado_en: string; nota: string; marcado_por: string } | null>(null);
@@ -720,6 +721,33 @@ export default function ClosuresView() {
     }
   };
 
+  const selectedStatusList = useMemo(
+    () => Array.from(filterStatuses),
+    [filterStatuses],
+  );
+
+  const toggleStatusFilter = (status: string) => {
+    setFilterStatuses(previous => {
+      const next = new Set(previous);
+
+      if (next.has(status)) {
+        next.delete(status);
+      } else {
+        next.add(status);
+      }
+
+      return next;
+    });
+  };
+
+  const selectAllStatusFilters = () => {
+    setFilterStatuses(previous =>
+      previous.size === status1Opts.length
+        ? new Set()
+        : new Set(status1Opts),
+    );
+  };
+
   const filteredDeliveryOptions = useMemo(() => {
     if (!deliverySearch.trim()) return deliveries;
     const q = deliverySearch.toLowerCase().trim();
@@ -878,8 +906,8 @@ export default function ClosuresView() {
       }
     }
 
-    if (filterType && filterType !== '') {
-      query = query.eq('status', filterType);
+    if (selectedStatusList.length > 0) {
+      query = query.in('status', selectedStatusList);
     }
 
     const { data } = await query;
@@ -906,7 +934,7 @@ export default function ClosuresView() {
     }
   };
 
-  useEffect(() => { loadClosures(); }, [filterSuppliers, filterDeliveries, filterType, dateFrom, dateTo, filterDateBy]);
+  useEffect(() => { loadClosures(); }, [filterSuppliers, filterDeliveries, filterStatuses, dateFrom, dateTo, filterDateBy]);
 
   const filteredOrders = useMemo(() => {
     if (!searchTerm.trim()) return orders;
@@ -954,62 +982,144 @@ export default function ClosuresView() {
     return Number(order.delivery_fee_gs) || getFee(order.assigned_delivery || '', order.city || '');
   };
 
-  const delivered = useMemo(() => filteredOrders.filter(o => o.status === 'ENTREGADO' || o.status === 'ENCOMIENDA ENTREGADA'), [filteredOrders]);
-  const rendidos = useMemo(() => delivered.filter(o => o.delivery_settled), [delivered]);
-  const noRendidos = useMemo(() => delivered.filter(o => !o.delivery_settled), [delivered]);
+  const delivered = useMemo(
+    () =>
+      filteredOrders.filter(
+        order =>
+          order.status === 'ENTREGADO' ||
+          order.status === 'ENCOMIENDA ENTREGADA',
+      ),
+    [filteredOrders],
+  );
+
+  const rendidos = useMemo(
+    () => delivered.filter(order => order.delivery_settled),
+    [delivered],
+  );
+
+  const noRendidos = useMemo(
+    () => delivered.filter(order => !order.delivery_settled),
+    [delivered],
+  );
+
+  /*
+   * Reglas financieras:
+   * - ENTREGADO: el delivery rinde total_gs menos su tarifa.
+   * - ENCOMIENDA ENTREGADA: el delivery no rinde el monto del pedido.
+   *   Solo cobra su tarifa de delivery.
+   * - Los demás estados no generan rendición ni pago de delivery.
+   */
+  const getOrderAmountToSettle = (order: any) => {
+    if (order.status === 'ENCOMIENDA ENTREGADA') return 0;
+    if (order.status !== 'ENTREGADO') return 0;
+
+    return Math.max(
+      0,
+      Number(order.total_gs || 0) - getDeliveryFeeForOrder(order),
+    );
+  };
+
+  const getDeliveryPaymentForOrder = (order: any) => {
+    if (
+      order.status !== 'ENTREGADO' &&
+      order.status !== 'ENCOMIENDA ENTREGADA'
+    ) {
+      return 0;
+    }
+
+    return getDeliveryFeeForOrder(order);
+  };
+
+  const statusKpis = useMemo(
+    () =>
+      status1Opts.map(status => ({
+        status,
+        count: filteredOrders.filter(order => order.status === status).length,
+      })),
+    [filteredOrders],
+  );
 
   const kpis = useMemo(() => {
-    const entregados = filteredOrders.filter(o => o.status === 'ENTREGADO');
-    const encomiendas = filteredOrders.filter(o => o.status === 'ENCOMIENDA ENTREGADA');
+    const entregados = filteredOrders.filter(
+      order => order.status === 'ENTREGADO',
+    );
+    const encomiendas = filteredOrders.filter(
+      order => order.status === 'ENCOMIENDA ENTREGADA',
+    );
+
     return {
       entregados: entregados.length,
-      entregadosRev: entregados.reduce((s, o) => s + Number(o.total_gs || 0), 0),
+      entregadosRev: entregados.reduce(
+        (sum, order) => sum + Number(order.total_gs || 0),
+        0,
+      ),
       encomiendas: encomiendas.length,
-      encomiendaRev: encomiendas.reduce((s, o) => s + Number(o.total_gs || 0), 0),
-      deliveryFee: filteredOrders.reduce((s, o) => {
-        const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
-        return s + fee;
-      }, 0),
+
+      // El monto comercial de las encomiendas no entra en los cálculos.
+      encomiendaRev: 0,
+
+      deliveryFee: delivered.reduce(
+        (sum, order) => sum + getDeliveryPaymentForOrder(order),
+        0,
+      ),
       rendidos: rendidos.length,
       noRendidos: noRendidos.length,
-      montoRendido: rendidos.reduce((s, o) => s + Number(o.total_gs || 0), 0),
-      montoPendiente: noRendidos.reduce((s, o) => s + Number(o.total_gs || 0), 0),
+      montoRendido: rendidos.reduce(
+        (sum, order) => sum + getOrderAmountToSettle(order),
+        0,
+      ),
+      montoPendiente: noRendidos.reduce(
+        (sum, order) => sum + getOrderAmountToSettle(order),
+        0,
+      ),
     };
-  }, [filteredOrders, rendidos, noRendidos]);
+  }, [filteredOrders, delivered, rendidos, noRendidos, fees]);
 
-  const netRendir = kpis.entregadosRev + kpis.encomiendaRev - kpis.deliveryFee;
-  const totalAPagar = useMemo(() => {
-    return delivered.reduce((s, o) => {
-      const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
-      return s + (Number(o.total_gs || 0) - fee);
-    }, 0);
-  }, [delivered]);
+  const totalAPagar = useMemo(
+    () =>
+      delivered.reduce(
+        (sum, order) => sum + getOrderAmountToSettle(order),
+        0,
+      ),
+    [delivered, fees],
+  );
+
+  const netRendir = totalAPagar;
 
   const financePanel = useMemo(() => {
-    const baseOrders = delivered;
     let ventaProductos = 0;
     let costoRealProductos = 0;
     let deliveryCobrado = 0;
     let pagoDelivery = 0;
     let comisiones = 0;
 
-    baseOrders.forEach((o: any) => {
-      const total = Number(o.total_gs || 0);
-      const deliveryCharged = Number(o.delivery_gs || 0);
-      const sellerCommission = Number(o.commission_gs || 0);
-      const realProductCost = getOrderRealProductCost(o);
-      const realDeliveryPayment = getDeliveryFeeForOrder(o);
+    delivered.forEach((order: any) => {
+      const deliveryPayment = getDeliveryPaymentForOrder(order);
 
-      ventaProductos += total;
-      costoRealProductos += realProductCost;
-      deliveryCobrado += deliveryCharged;
-      pagoDelivery += realDeliveryPayment;
-      comisiones += sellerCommission;
+      /*
+       * En ENCOMIENDA ENTREGADA:
+       * - total_gs no se suma.
+       * - costo de producto no se suma.
+       * - delivery cobrado no se suma.
+       * - comisión no se suma.
+       * - solamente se suma el pago correspondiente al delivery.
+       */
+      if (order.status === 'ENCOMIENDA ENTREGADA') {
+        pagoDelivery += deliveryPayment;
+        return;
+      }
+
+      ventaProductos += Number(order.total_gs || 0);
+      costoRealProductos += getOrderRealProductCost(order);
+      deliveryCobrado += Number(order.delivery_gs || 0);
+      pagoDelivery += deliveryPayment;
+      comisiones += Number(order.commission_gs || 0);
     });
 
     const gananciaProductos = ventaProductos - costoRealProductos;
     const gananciaDelivery = deliveryCobrado - pagoDelivery;
-    const utilidadFinal = gananciaProductos + gananciaDelivery - comisiones;
+    const utilidadFinal =
+      gananciaProductos + gananciaDelivery - comisiones;
 
     return {
       ventaProductos,
@@ -1023,6 +1133,48 @@ export default function ClosuresView() {
     };
   }, [delivered, productCostMap, fees]);
 
+  /*
+   * Proyección: supone que todos los pedidos todavía viables terminan
+   * como ENTREGADO. Se excluyen CANCELADO, DEVUELTO A DEPÓSITO y las
+   * ENCOMIENDAS ya entregadas, porque estas últimas solo pagan delivery.
+   */
+  const projectedFinance = useMemo(() => {
+    const excludedStatuses = new Set([
+      'CANCELADO',
+      'DEVUELTO A DEPÓSITO',
+      'ENCOMIENDA ENTREGADA',
+    ]);
+
+    const projectableOrders = filteredOrders.filter(
+      order => !excludedStatuses.has(order.status),
+    );
+
+    const projectedProfit = projectableOrders.reduce((sum, order) => {
+      const total = Number(order.total_gs || 0);
+      const productCost = getOrderRealProductCost(order);
+      const deliveryCharged = Number(order.delivery_gs || 0);
+      const deliveryPayment = getDeliveryFeeForOrder(order);
+      const commission = Number(order.commission_gs || 0);
+
+      return (
+        sum +
+        total -
+        productCost +
+        deliveryCharged -
+        deliveryPayment -
+        commission
+      );
+    }, 0);
+
+    return {
+      count: projectableOrders.length,
+      projectedProfit,
+      averageProfit:
+        projectableOrders.length > 0
+          ? projectedProfit / projectableOrders.length
+          : 0,
+    };
+  }, [filteredOrders, productCostMap, fees]);
 
   // Función principal para cambiar estado con validación
   const handleStatusChangeWithValidation = async (orderId: string, newStatus: string) => {
@@ -1170,7 +1322,7 @@ export default function ClosuresView() {
     }
     
     if (!deliveryEmail) { toast.error('Seleccioná un delivery primero'); return; }
-    if (totalAPagar <= 0) { toast.error('No hay monto para rendir'); return; }
+    if (delivered.length === 0) { toast.error('No hay pedidos entregados para procesar'); return; }
     if (!confirm(`¿Marcar rendición de ${deliveryEmail} por Gs ${nf(totalAPagar)} como PAGADA?`)) return;
 
     for (const o of delivered) {
@@ -1630,17 +1782,68 @@ export default function ClosuresView() {
           </div>
         )}
 
-        <select className="app-input !w-auto min-w-[200px]" value={filterType} onChange={e => setFilterType(e.target.value)}>
-          <option value="">Todos los tipos</option>
-          <option value="ENTREGADO">ENTREGADO</option>
-          <option value="ENCOMIENDA ENTREGADA">ENCOMIENDA ENTREGADA</option>
-          <option value="EN RUTA">EN RUTA</option>
-          <option value="PENDIENTE">PENDIENTE</option>
-          <option value="CANCELADO">CANCELADO</option>
-          <option value="DEVUELTO A DEPÓSITO">DEVUELTO A DEPÓSITO</option>
-          <option value="REAGENDADO">REAGENDADO</option>
-          <option value="NO CONTESTA">NO CONTESTA</option>
-        </select>
+        <div className="relative">
+          <button
+            type="button"
+            className="app-input min-w-[230px] flex items-center justify-between gap-3"
+            onClick={() => setShowStatusDropdown(previous => !previous)}
+          >
+            <span className="truncate">
+              {selectedStatusList.length === 0
+                ? 'Todos los estados'
+                : selectedStatusList.length === status1Opts.length
+                  ? 'Todos los estados seleccionados'
+                  : `${selectedStatusList.length} estado${
+                      selectedStatusList.length === 1 ? '' : 's'
+                    } seleccionado${
+                      selectedStatusList.length === 1 ? '' : 's'
+                    }`}
+            </span>
+            <span className="shrink-0 text-xs text-muted-foreground">
+              {selectedStatusList.length}/{status1Opts.length} ▾
+            </span>
+          </button>
+
+          {showStatusDropdown && (
+            <div className="absolute top-full left-0 z-50 mt-1 w-[330px] max-w-[calc(100vw-2rem)] overflow-hidden rounded-xl border border-border bg-card shadow-xl">
+              <div className="flex gap-2 p-2 border-b border-border">
+                <button
+                  type="button"
+                  className="nav-btn !py-1 text-xs"
+                  onClick={selectAllStatusFilters}
+                >
+                  {filterStatuses.size === status1Opts.length
+                    ? 'Deseleccionar todos'
+                    : 'Seleccionar todos'}
+                </button>
+
+                <button
+                  type="button"
+                  className="nav-btn !py-1 text-xs"
+                  onClick={() => setFilterStatuses(new Set())}
+                >
+                  Limpiar filtro
+                </button>
+              </div>
+
+              <div className="max-h-72 overflow-auto">
+                {status1Opts.map(status => (
+                  <label
+                    key={status}
+                    className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm hover:bg-secondary"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={filterStatuses.has(status)}
+                      onChange={() => toggleStatusFilter(status)}
+                    />
+                    <span className="font-bold">{status}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
         
         {!isVendedor && !isSupplier && (
           <select className="app-input !w-auto" value={filterDateBy} onChange={e => setFilterDateBy(e.target.value as any)}>
@@ -1720,7 +1923,7 @@ export default function ClosuresView() {
                   value={rendicionNote} onChange={e => setRendicionNote(e.target.value)} />
                 <button
                   onClick={markRendicionPagada}
-                  disabled={((selectedDeliveryList.length !== 1) && !isDelivery) || totalAPagar <= 0}
+                  disabled={((selectedDeliveryList.length !== 1) && !isDelivery) || delivered.length === 0}
                   className="nav-btn active"
                 >
                   ✅ MARCAR COMO PAGADO
@@ -1731,15 +1934,106 @@ export default function ClosuresView() {
         </div>
       )}
 
-      <p className="chip mb-3 text-[10px]">Los KPIs se calculan <strong>solo</strong> con Estado 1 = ENTREGADO.</p>
+      <p className="chip mb-3 text-[10px]">
+        Los KPIs respetan las fechas, deliveries, proveedores y estados seleccionados.
+        En <strong>ENCOMIENDA ENTREGADA</strong>, el monto del pedido no entra en
+        rendición ni ganancia; solamente se paga la tarifa del delivery.
+      </p>
 
       <div className="grid-kpi mb-4">
-        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">ENTREGADOS</div><div className="text-[22px] font-extrabold">{kpis.entregados}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.entregadosRev)}</div></div>
-        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">ENCOMIENDAS</div><div className="text-[22px] font-extrabold">{kpis.encomiendas}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.encomiendaRev)}</div></div>
-        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Ganancia Delivery</div><div className="text-[22px] font-extrabold">{nf(kpis.deliveryFee)}</div></div>
-        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Neto a Rendir</div><div className="text-[22px] font-extrabold">{nf(netRendir)}</div></div>
-        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Pendientes rendir</div><div className="text-[22px] font-extrabold" style={{ color: '#eab308' }}>{kpis.noRendidos}</div><div className="text-xs text-muted-foreground">Neto (Gs) {nf(noRendidos.reduce((s, o) => s + (Number(o.total_gs || 0) - getDeliveryFeeForOrder(o)), 0))}</div></div>
-        <div className="kpi-card"><div className="text-xs text-muted-foreground mb-1">Ya rendidos</div><div className="text-[22px] font-extrabold" style={{ color: '#4ade80' }}>{kpis.rendidos}</div><div className="text-xs text-muted-foreground">Gs {nf(kpis.montoRendido)}</div></div>
+        {statusKpis.map(item => (
+          <div className="kpi-card" key={item.status}>
+            <div className="text-xs text-muted-foreground mb-1">
+              {item.status}
+            </div>
+            <div className="text-[22px] font-extrabold">
+              {item.count}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              pedido{item.count === 1 ? '' : 's'}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid-kpi mb-4">
+        <div className="kpi-card">
+          <div className="text-xs text-muted-foreground mb-1">
+            🚚 Pago total al delivery
+          </div>
+          <div className="text-[22px] font-extrabold">
+            Gs {nf(kpis.deliveryFee)}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            Entregados + encomiendas entregadas
+          </div>
+        </div>
+
+        <div className="kpi-card">
+          <div className="text-xs text-muted-foreground mb-1">
+            💵 Neto a rendir
+          </div>
+          <div className="text-[22px] font-extrabold">
+            Gs {nf(netRendir)}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            Las encomiendas aportan Gs 0
+          </div>
+        </div>
+
+        <div className="kpi-card">
+          <div className="text-xs text-muted-foreground mb-1">
+            ⏳ Pendientes de rendir
+          </div>
+          <div
+            className="text-[22px] font-extrabold"
+            style={{ color: '#eab308' }}
+          >
+            {kpis.noRendidos}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            Neto Gs {nf(kpis.montoPendiente)}
+          </div>
+        </div>
+
+        <div className="kpi-card">
+          <div className="text-xs text-muted-foreground mb-1">
+            ✅ Ya rendidos
+          </div>
+          <div
+            className="text-[22px] font-extrabold"
+            style={{ color: '#4ade80' }}
+          >
+            {kpis.rendidos}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            Neto Gs {nf(kpis.montoRendido)}
+          </div>
+        </div>
+
+        <div className="kpi-card border border-violet-500/30 bg-violet-500/10">
+          <div className="text-xs text-violet-200 mb-1">
+            📈 Ganancia potencial si todo se entrega
+          </div>
+          <div className="text-[22px] font-extrabold text-violet-300">
+            Gs {nf(projectedFinance.projectedProfit)}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            {projectedFinance.count} pedidos viables
+          </div>
+        </div>
+
+        <div className="kpi-card border border-fuchsia-500/30 bg-fuchsia-500/10">
+          <div className="text-xs text-fuchsia-200 mb-1">
+            📊 Promedio potencial por pedido
+          </div>
+          <div className="text-[22px] font-extrabold text-fuchsia-300">
+            Gs {nf(Math.round(projectedFinance.averageProfit))}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            Si todos los pedidos viables se entregan
+          </div>
+        </div>
       </div>
 
       {(isAdmin || isSupplier) && delivered.length > 0 && (
@@ -1748,7 +2042,7 @@ export default function ClosuresView() {
             <div>
               <h4 className="font-extrabold text-lg">💰 Panel de Ganancia Real</h4>
               <p className="text-xs text-muted-foreground">
-                Calculado con pedidos entregados/encomienda entregada del período. El costo del producto usa products.real_cost_gs.
+                ENTREGADO suma la operación completa. ENCOMIENDA ENTREGADA excluye el monto del pedido y solo suma el pago al delivery. El costo usa products.real_cost_gs.
               </p>
             </div>
             <div className="text-right">
