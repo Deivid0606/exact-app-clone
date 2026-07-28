@@ -6,6 +6,18 @@ import { toast } from 'sonner';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
+const STATUS_1_OPTIONS = [
+  'PENDIENTE',
+  'EN RUTA',
+  'ENTREGADO',
+  'ENCOMIENDA ENTREGADA',
+  'CANCELADO',
+  'DEVUELTO A DEPÓSITO',
+  'REAGENDADO',
+  'NO CONTESTA',
+] as const;
+
+
 const formatDatePY = (dateValue?: string | null) => {
   if (!dateValue) return '—';
   const onlyDate = dateValue.slice(0, 10);
@@ -742,9 +754,9 @@ export default function ClosuresView() {
 
   const selectAllStatusFilters = () => {
     setFilterStatuses(previous =>
-      previous.size === status1Opts.length
+      previous.size === STATUS_1_OPTIONS.length
         ? new Set()
-        : new Set(status1Opts),
+        : new Set(STATUS_1_OPTIONS),
     );
   };
 
@@ -1032,7 +1044,7 @@ export default function ClosuresView() {
 
   const statusKpis = useMemo(
     () =>
-      status1Opts.map(status => ({
+      STATUS_1_OPTIONS.map(status => ({
         status,
         count: filteredOrders.filter(order => order.status === status).length,
       })),
@@ -1560,7 +1572,6 @@ export default function ClosuresView() {
     printWindow.focus();
   };
 
-  const status1Opts = ['PENDIENTE', 'EN RUTA', 'ENTREGADO', 'ENCOMIENDA ENTREGADA', 'CANCELADO', 'DEVUELTO A DEPÓSITO', 'REAGENDADO', 'NO CONTESTA'];
   const state2Opts = ['--', 'GUIA GENERADA', 'FUERA DE COBERTURA', 'CANCELADO', 'REPETIDO', 'RENDIDO'];
   const retiroOpts = ['', 'PENDIENTE', 'REALIZADO', 'CANCELADO'];
   
@@ -1791,7 +1802,7 @@ export default function ClosuresView() {
             <span className="truncate">
               {selectedStatusList.length === 0
                 ? 'Todos los estados'
-                : selectedStatusList.length === status1Opts.length
+                : selectedStatusList.length === STATUS_1_OPTIONS.length
                   ? 'Todos los estados seleccionados'
                   : `${selectedStatusList.length} estado${
                       selectedStatusList.length === 1 ? '' : 's'
@@ -1800,7 +1811,7 @@ export default function ClosuresView() {
                     }`}
             </span>
             <span className="shrink-0 text-xs text-muted-foreground">
-              {selectedStatusList.length}/{status1Opts.length} ▾
+              {selectedStatusList.length}/{STATUS_1_OPTIONS.length} ▾
             </span>
           </button>
 
@@ -1812,7 +1823,7 @@ export default function ClosuresView() {
                   className="nav-btn !py-1 text-xs"
                   onClick={selectAllStatusFilters}
                 >
-                  {filterStatuses.size === status1Opts.length
+                  {filterStatuses.size === STATUS_1_OPTIONS.length
                     ? 'Deseleccionar todos'
                     : 'Seleccionar todos'}
                 </button>
@@ -1827,7 +1838,7 @@ export default function ClosuresView() {
               </div>
 
               <div className="max-h-72 overflow-auto">
-                {status1Opts.map(status => (
+                {STATUS_1_OPTIONS.map(status => (
                   <label
                     key={status}
                     className="flex cursor-pointer items-center gap-2 px-3 py-2 text-sm hover:bg-secondary"
@@ -2360,7 +2371,7 @@ export default function ClosuresView() {
                         onChange={e => updateStatus1(o.id, e.target.value)}
                         disabled={isVendedor}
                       >
-                        {status1Opts.map(s => <option key={s} value={s}>{s}</option>)}
+                        {STATUS_1_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
                       </select>
                     ) : (
                       <span className={`badge-status ${getStatusBadgeClass(o.status)}`}>{o.status}</span>
