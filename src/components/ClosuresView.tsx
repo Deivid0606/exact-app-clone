@@ -388,7 +388,10 @@ export default function ClosuresView() {
   const [filterDeliveries, setFilterDeliveries] = useState<Set<string>>(new Set());
   const [deliverySearch, setDeliverySearch] = useState('');
   const [showDeliveryDropdown, setShowDeliveryDropdown] = useState(false);
-  const [filterSupplier, setFilterSupplier] = useState('');
+  const MAX_SUPPLIERS = 10;
+  const [filterSuppliers, setFilterSuppliers] = useState<Set<string>>(new Set());
+  const [supplierSearch, setSupplierSearch] = useState('');
+  const [showSupplierDropdown, setShowSupplierDropdown] = useState(false);
   const [filterType, setFilterType] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [rendicionNote, setRendicionNote] = useState('');
@@ -670,6 +673,53 @@ export default function ClosuresView() {
 
   const selectedDeliveryList = useMemo(() => Array.from(filterDeliveries), [filterDeliveries]);
 
+  const selectedSupplierList = useMemo(
+    () => Array.from(filterSuppliers),
+    [filterSuppliers],
+  );
+
+  const filteredSupplierOptions = useMemo(() => {
+    const q = supplierSearch.toLowerCase().trim();
+
+    if (!q) return suppliers;
+
+    return suppliers.filter((supplier: any) =>
+      String(supplier.name || '').toLowerCase().includes(q) ||
+      String(supplier.email || '').toLowerCase().includes(q)
+    );
+  }, [suppliers, supplierSearch]);
+
+  const toggleSupplierFilter = (email: string) => {
+    setFilterSuppliers(previous => {
+      const next = new Set(previous);
+
+      if (next.has(email)) {
+        next.delete(email);
+        return next;
+      }
+
+      if (next.size >= MAX_SUPPLIERS) {
+        toast.error(`Solo podés seleccionar hasta ${MAX_SUPPLIERS} proveedores`);
+        return previous;
+      }
+
+      next.add(email);
+      return next;
+    });
+  };
+
+  const selectFirstTenSupplierFilters = () => {
+    const emails = filteredSupplierOptions
+      .slice(0, MAX_SUPPLIERS)
+      .map((supplier: any) => supplier.email);
+
+    setFilterSuppliers(new Set(emails));
+
+    if (filteredSupplierOptions.length > MAX_SUPPLIERS) {
+      toast.info(`Se seleccionaron los primeros ${MAX_SUPPLIERS} proveedores`);
+    }
+  };
+
   const filteredDeliveryOptions = useMemo(() => {
     if (!deliverySearch.trim()) return deliveries;
     const q = deliverySearch.toLowerCase().trim();
@@ -816,12 +866,16 @@ export default function ClosuresView() {
       }
     } else if (isDelivery) {
       query = query.eq('assigned_delivery', myEmail);
-      if (filterSupplier) {
-        query = query.eq('provider_email', filterSupplier);
+      if (selectedSupplierList.length > 0) {
+        query = query.in('provider_email', selectedSupplierList);
       }
     } else if (isAdmin) {
-      if (selectedDeliveryList.length > 0) query = query.in('assigned_delivery', selectedDeliveryList);
-      if (filterSupplier) query = query.eq('provider_email', filterSupplier);
+      if (selectedDeliveryList.length > 0) {
+        query = query.in('assigned_delivery', selectedDeliveryList);
+      }
+      if (selectedSupplierList.length > 0) {
+        query = query.in('provider_email', selectedSupplierList);
+      }
     }
 
     if (filterType && filterType !== '') {
@@ -852,7 +906,7 @@ export default function ClosuresView() {
     }
   };
 
-  useEffect(() => { loadClosures(); }, [filterSupplier, filterDeliveries, filterType, dateFrom, dateTo, filterDateBy]);
+  useEffect(() => { loadClosures(); }, [filterSuppliers, filterDeliveries, filterType, dateFrom, dateTo, filterDateBy]);
 
   const filteredOrders = useMemo(() => {
     if (!searchTerm.trim()) return orders;
@@ -1471,17 +1525,109 @@ export default function ClosuresView() {
         )}
 
         {(isAdmin || isDelivery) && (
-          <select className="app-input !w-auto min-w-[280px]" value={filterSupplier} onChange={e => setFilterSupplier(e.target.value)}>
-            <option value="">Todos los proveedores</option>
-            {suppliers.length === 0 && (
-              <option value="" disabled>No se encontraron proveedores</option>
+          <div className="relative">
+            <button
+              type="button"
+              className="app-input min-w-[280px] flex items-center justify-between gap-3"
+              onClick={() => setShowSupplierDropdown(previous => !previous)}
+            >
+              <span className="truncate">
+                {selectedSupplierList.length === 0
+                  ? 'Todos los proveedores'
+                  : `${selectedSupplierList.length} proveedor${
+                      selectedSupplierList.length === 1 ? '' : 'es'
+                    } seleccionado${
+                      selectedSupplierList.length === 1 ? '' : 's'
+                    }`}
+              </span>
+
+              <span className="shrink-0 text-xs text-muted-foreground">
+                {selectedSupplierList.length}/{MAX_SUPPLIERS} ▾
+              </span>
+            </button>
+
+            {showSupplierDropdown && (
+              <div className="absolute top-full left-0 z-50 mt-1 w-[360px] max-w-[calc(100vw-2rem)] max-h-96 overflow-hidden rounded-xl border border-border bg-card shadow-xl">
+                <div className="p-2 border-b border-border">
+                  <input
+                    className="app-input w-full text-sm"
+                    placeholder="🔎 Buscar proveedor por nombre o correo..."
+                    value={supplierSearch}
+                    onChange={event => setSupplierSearch(event.target.value)}
+                    autoFocus
+                  />
+                </div>
+
+                <div className="flex gap-2 p-2 border-b border-border">
+                  <button
+                    type="button"
+                    className="nav-btn !py-1 text-xs"
+                    onClick={selectFirstTenSupplierFilters}
+                  >
+                    Seleccionar hasta 10
+                  </button>
+
+                  <button
+                    type="button"
+                    className="nav-btn !py-1 text-xs"
+                    onClick={() => setFilterSuppliers(new Set())}
+                  >
+                    Limpiar
+                  </button>
+                </div>
+
+                <div className="px-3 py-2 text-xs text-muted-foreground border-b border-border">
+                  Podés seleccionar hasta {MAX_SUPPLIERS} proveedores.
+                </div>
+
+                <div className="max-h-64 overflow-auto">
+                  {suppliers.length === 0 ? (
+                    <div className="p-3 text-sm text-muted-foreground">
+                      No se encontraron proveedores
+                    </div>
+                  ) : filteredSupplierOptions.length === 0 ? (
+                    <div className="p-3 text-sm text-muted-foreground">
+                      No hay proveedores que coincidan con la búsqueda
+                    </div>
+                  ) : (
+                    filteredSupplierOptions.map((supplier: any) => {
+                      const selected = filterSuppliers.has(supplier.email);
+                      const limitReached =
+                        !selected && filterSuppliers.size >= MAX_SUPPLIERS;
+
+                      return (
+                        <label
+                          key={supplier.email}
+                          className={`flex items-center gap-2 px-3 py-2 text-sm ${
+                            limitReached
+                              ? 'cursor-not-allowed opacity-50'
+                              : 'cursor-pointer hover:bg-secondary'
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            disabled={limitReached}
+                            onChange={() => toggleSupplierFilter(supplier.email)}
+                          />
+
+                          <span className="font-bold">
+                            {supplier.name || supplier.email}
+                          </span>
+
+                          {supplier.name && (
+                            <span className="ml-auto max-w-[150px] truncate text-xs text-muted-foreground">
+                              {supplier.email}
+                            </span>
+                          )}
+                        </label>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
             )}
-            {suppliers.map(s => (
-              <option key={s.email} value={s.email}>
-                {s.name || s.email}
-              </option>
-            ))}
-          </select>
+          </div>
         )}
 
         <select className="app-input !w-auto min-w-[200px]" value={filterType} onChange={e => setFilterType(e.target.value)}>
