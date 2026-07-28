@@ -1044,12 +1044,45 @@ export default function ClosuresView() {
 
   const statusKpis = useMemo(
     () =>
-      STATUS_1_OPTIONS.map(status => ({
-        status,
-        count: filteredOrders.filter(order => order.status === status).length,
-      })),
+      STATUS_1_OPTIONS.map(status => {
+        const statusOrders = filteredOrders.filter(
+          order => order.status === status,
+        );
+
+        return {
+          status,
+          count: statusOrders.length,
+          totalGs: statusOrders.reduce(
+            (sum, order) => sum + Number(order.total_gs || 0),
+            0,
+          ),
+        };
+      }),
     [filteredOrders],
   );
+
+  const enRutaFinance = useMemo(() => {
+    const enRutaOrders = filteredOrders.filter(
+      order => order.status === 'EN RUTA',
+    );
+
+    const totalNeto = enRutaOrders.reduce(
+      (sum, order) => sum + Number(order.total_gs || 0),
+      0,
+    );
+
+    const totalDelivery = enRutaOrders.reduce(
+      (sum, order) => sum + getDeliveryFeeForOrder(order),
+      0,
+    );
+
+    return {
+      count: enRutaOrders.length,
+      totalNeto,
+      totalDelivery,
+      netoMenosDelivery: Math.max(0, totalNeto - totalDelivery),
+    };
+  }, [filteredOrders, fees]);
 
   const kpis = useMemo(() => {
     const entregados = filteredOrders.filter(
@@ -1145,48 +1178,7 @@ export default function ClosuresView() {
     };
   }, [delivered, productCostMap, fees]);
 
-  /*
-   * Proyección: supone que todos los pedidos todavía viables terminan
-   * como ENTREGADO. Se excluyen CANCELADO, DEVUELTO A DEPÓSITO y las
-   * ENCOMIENDAS ya entregadas, porque estas últimas solo pagan delivery.
-   */
-  const projectedFinance = useMemo(() => {
-    const excludedStatuses = new Set([
-      'CANCELADO',
-      'DEVUELTO A DEPÓSITO',
-      'ENCOMIENDA ENTREGADA',
-    ]);
 
-    const projectableOrders = filteredOrders.filter(
-      order => !excludedStatuses.has(order.status),
-    );
-
-    const projectedProfit = projectableOrders.reduce((sum, order) => {
-      const total = Number(order.total_gs || 0);
-      const productCost = getOrderRealProductCost(order);
-      const deliveryCharged = Number(order.delivery_gs || 0);
-      const deliveryPayment = getDeliveryFeeForOrder(order);
-      const commission = Number(order.commission_gs || 0);
-
-      return (
-        sum +
-        total -
-        productCost +
-        deliveryCharged -
-        deliveryPayment -
-        commission
-      );
-    }, 0);
-
-    return {
-      count: projectableOrders.length,
-      projectedProfit,
-      averageProfit:
-        projectableOrders.length > 0
-          ? projectedProfit / projectableOrders.length
-          : 0,
-    };
-  }, [filteredOrders, productCostMap, fees]);
 
   // Función principal para cambiar estado con validación
   const handleStatusChangeWithValidation = async (orderId: string, newStatus: string) => {
@@ -1963,6 +1955,12 @@ export default function ClosuresView() {
             <div className="text-xs text-muted-foreground">
               pedido{item.count === 1 ? '' : 's'}
             </div>
+
+            {(isAdmin || isSupplier) && item.status === 'EN RUTA' && (
+              <div className="mt-2 border-t border-border pt-2 text-xs font-bold">
+                Neto Gs {nf(item.totalGs)}
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -2022,29 +2020,19 @@ export default function ClosuresView() {
           </div>
         </div>
 
-        <div className="kpi-card border border-violet-500/30 bg-violet-500/10">
-          <div className="text-xs text-violet-200 mb-1">
-            📈 Ganancia potencial si todo se entrega
+        {(isAdmin || isSupplier) && (
+          <div className="kpi-card border border-cyan-500/30 bg-cyan-500/10">
+            <div className="text-xs text-cyan-200 mb-1">
+              🚚 Neto EN RUTA menos delivery
+            </div>
+            <div className="text-[22px] font-extrabold text-cyan-300">
+              Gs {nf(enRutaFinance.netoMenosDelivery)}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Neto Gs {nf(enRutaFinance.totalNeto)} - delivery Gs {nf(enRutaFinance.totalDelivery)}
+            </div>
           </div>
-          <div className="text-[22px] font-extrabold text-violet-300">
-            Gs {nf(projectedFinance.projectedProfit)}
-          </div>
-          <div className="text-xs text-muted-foreground">
-            {projectedFinance.count} pedidos viables
-          </div>
-        </div>
-
-        <div className="kpi-card border border-fuchsia-500/30 bg-fuchsia-500/10">
-          <div className="text-xs text-fuchsia-200 mb-1">
-            📊 Promedio potencial por pedido
-          </div>
-          <div className="text-[22px] font-extrabold text-fuchsia-300">
-            Gs {nf(Math.round(projectedFinance.averageProfit))}
-          </div>
-          <div className="text-xs text-muted-foreground">
-            Si todos los pedidos viables se entregan
-          </div>
-        </div>
+        )}
       </div>
 
       {(isAdmin || isSupplier) && delivered.length > 0 && (
