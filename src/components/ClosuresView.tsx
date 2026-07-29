@@ -169,9 +169,9 @@ const buildWhatsAppMessage = (order: any) => {
     .join('\n');
 
   return [
-    `Buenas ${order?.customer_name || ''}, le escribo para coordinar la entrega de su pedido.`,
+    `*Buenas ${order?.customer_name || ''}, le escribo para coordinar la entrega de su pedido.*`,
     '',
-    '¿Me podría indicar o enviar la ubicación por Google Maps para poder realizar la entrega?',
+    '*¿Me podría indicar o enviar la ubicación por Google Maps para poder realizar la entrega?*',
     '',
     guide,
   ].join('\n');
