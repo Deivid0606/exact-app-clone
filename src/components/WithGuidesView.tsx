@@ -39,7 +39,9 @@ export default function WithGuidesView() {
   const myEmail = profile?.email || '';
   const [orders, setOrders] = useState<any[]>([]);
   const [search, setSearch] = useState('');
-  const [providerFilter, setProviderFilter] = useState('');
+  const [selectedProviders, setSelectedProviders] = useState<Set<string>>(new Set());
+  const [providerSearch, setProviderSearch] = useState('');
+  const [showProviderDropdown, setShowProviderDropdown] = useState(false);
   const [guideText, setGuideText] = useState('');
   const [guideId, setGuideId] = useState('');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -215,6 +217,31 @@ export default function WithGuidesView() {
     return [...set].sort();
   }, [orders, role]);
 
+  const filteredProviders = useMemo(() => {
+    if (!providerSearch.trim()) return allProviders;
+    const q = providerSearch.toLowerCase().trim();
+    return allProviders.filter(provider => provider.toLowerCase().includes(q));
+  }, [allProviders, providerSearch]);
+
+  const toggleProvider = (provider: string) => {
+    setSelectedProviders(prev => {
+      const next = new Set(prev);
+      if (next.has(provider)) next.delete(provider);
+      else next.add(provider);
+      return next;
+    });
+  };
+
+  const selectAllProviders = () => {
+    if (allProviders.length === 0) return;
+
+    if (selectedProviders.size === allProviders.length) {
+      setSelectedProviders(new Set());
+    } else {
+      setSelectedProviders(new Set(allProviders));
+    }
+  };
+
   const allCities = useMemo(() => {
     const cities = new Set<string>();
     orders.forEach(o => {
@@ -288,9 +315,19 @@ export default function WithGuidesView() {
         if (!isMine) return false;
       }
       
-      if (role !== 'PROVEEDOR' && providerFilter) {
-        const providerList = (o.provider_emails_list || '') + ',' + (o.provider_email || '');
-        if (!providerList.toLowerCase().includes(providerFilter.toLowerCase())) return false;
+      if (role !== 'PROVEEDOR' && selectedProviders.size > 0) {
+        const orderProviders = [
+          ...(o.provider_emails_list || '').split(','),
+          o.provider_email || '',
+        ]
+          .map((provider: string) => provider.trim().toLowerCase())
+          .filter(Boolean);
+
+        const matchesSelectedProvider = Array.from(selectedProviders).some(provider =>
+          orderProviders.includes(provider.toLowerCase())
+        );
+
+        if (!matchesSelectedProvider) return false;
       }
       
       if (selectedCities.size > 0) {
@@ -312,7 +349,7 @@ export default function WithGuidesView() {
         (o.departamento || '').toLowerCase().includes(q) ||
         (o.id || '').toLowerCase().includes(q);
     });
-  }, [orders, search, providerFilter, role, myEmail, selectedCities, selectedDepartments]);
+  }, [orders, search, selectedProviders, role, myEmail, selectedCities, selectedDepartments]);
 
   const pendingGuides = filtered.filter(o => !o.status2 || o.status2 === '--');
   const withGuides = filtered.filter(o => o.status2 === 'GUIA GENERADA');
@@ -1162,13 +1199,79 @@ export default function WithGuidesView() {
         </select>
         
         {role !== 'PROVEEDOR' && (
-          <>
+          <div className="relative">
             <label className="app-label !mt-0">Proveedor</label>
-            <select className={pillInputCls + " !w-auto min-w-[200px]"} value={providerFilter} onChange={e => setProviderFilter(e.target.value)}>
-              <option value="">Todos los proveedores</option>
-              {allProviders.map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
-          </>
+            <button
+              className="nav-btn min-w-[220px]"
+              type="button"
+              onClick={() => setShowProviderDropdown(!showProviderDropdown)}
+              style={{
+                background: selectedProviders.size > 0 ? '#3b82f6' : undefined,
+                color: selectedProviders.size > 0 ? 'white' : undefined,
+              }}
+            >
+              🏢 Proveedores {selectedProviders.size > 0 ? `(${selectedProviders.size})` : '(Todos)'}
+            </button>
+
+            {showProviderDropdown && (
+              <div className="absolute top-full mt-1 left-0 z-50 bg-card border border-border rounded-xl shadow-xl w-96 max-h-96 overflow-hidden flex flex-col">
+                <div className="p-2 border-b border-border">
+                  <input
+                    type="text"
+                    className={pillInputCls + " w-full text-sm"}
+                    placeholder="🔎 Buscar proveedor..."
+                    value={providerSearch}
+                    onChange={e => setProviderSearch(e.target.value)}
+                  />
+                </div>
+
+                <div className="p-2 border-b border-border flex flex-wrap gap-2">
+                  <button className="text-xs nav-btn !py-1" type="button" onClick={selectAllProviders}>
+                    {selectedProviders.size === allProviders.length && allProviders.length > 0
+                      ? 'Deseleccionar todos'
+                      : 'Seleccionar todos'}
+                  </button>
+                  <button
+                    className="text-xs nav-btn !py-1"
+                    type="button"
+                    onClick={() => setSelectedProviders(new Set())}
+                  >
+                    Limpiar
+                  </button>
+                </div>
+
+                <div className="overflow-auto max-h-64">
+                  {filteredProviders.length === 0 ? (
+                    <div className="px-3 py-4 text-sm text-muted-foreground text-center">
+                      No se encontraron proveedores
+                    </div>
+                  ) : (
+                    filteredProviders.map(provider => (
+                      <label
+                        key={provider}
+                        className="flex items-center gap-2 px-3 py-2 hover:bg-secondary cursor-pointer text-sm"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedProviders.has(provider)}
+                          onChange={() => toggleProvider(provider)}
+                        />
+                        <span className="truncate" title={provider}>{provider}</span>
+                        <span className="text-xs text-muted-foreground ml-auto">
+                          {orders.filter(o => {
+                            const providers = `${o.provider_emails_list || ''},${o.provider_email || ''}`
+                              .split(',')
+                              .map((value: string) => value.trim().toLowerCase());
+                            return providers.includes(provider.toLowerCase());
+                          }).length}
+                        </span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
 
