@@ -356,30 +356,38 @@ export default function WithGuidesView() {
   };
 
   const buildGuideText = (o: any) => {
-    const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
+    const items = typeof o.items_json === 'string'
+      ? JSON.parse(o.items_json || '[]')
+      : (o.items_json || []);
+
     const itemsText = items.map((it: any, i: number) =>
-      `${i + 1}. ${it.title || it.sku || 'Item'} x${it.qty || 1} — Gs ${nf(Number(it.sale_gs || 0) * Number(it.qty || 1))}`
-    ).join('\n');
+      `${i + 1}. ${it.title || it.sku || 'Item'} x${it.qty || it.quantity || 1} —`
+    ).join('
+');
+
+    const separator = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
 
     return [
       `GUÍA DE ENVÍO — ${o.order_number || o.id.slice(0, 8)}`,
-      `━━━━━━━━━━━━━━━━━━`,
+      separator,
       `Cliente: ${o.customer_name || ''}`,
       `Teléfono: ${o.phone || ''}`,
       `Email: ${o.email || ''}`,
       `Departamento: ${o.departamento || ''}`,
       `Ciudad: ${o.city || ''}`,
-      `Dirección: ${o.street || ''} ${o.district ? '- ' + o.district : ''}`,
-      `━━━━━━━━━━━━━━━━━━`,
-      `Productos:`,
+      `Dirección: ${o.street || ''} ${o.district ? '- ' + o.district : ''}`.trimEnd(),
+      '',
+      'Productos:',
+      '',
       itemsText,
-      `━━━━━━━━━━━━━━━━━━`,
+      '',
       `Total: Gs ${nf(Number(o.total_gs || 0))}`,
       o.obs ? `Observación: ${o.obs}` : '',
-      `━━━━━━━━━━━━━━━━━━`,
+      separator,
       `Vendedor: ${o.created_by || ''}`,
       `Proveedor: ${o.provider_emails_list || o.provider_email || '—'}`,
-    ].filter(Boolean).join('\n');
+    ].filter(line => line !== null && line !== undefined).join('
+');
   };
 
   const getWhatsAppUrl = (order: any) => {
@@ -424,7 +432,7 @@ export default function WithGuidesView() {
   const bulkCopyGuides = () => {
     const selected = getSelectedOrders();
     if (selected.length === 0) { toast.error('Seleccioná pedidos primero'); return; }
-    const allText = selected.map(o => buildGuideText(o)).join('\n\n════════════════════\n\n');
+    const allText = selected.map(o => buildGuideText(o)).join('\n\n');
     navigator.clipboard.writeText(allText);
     toast.success(`${selected.length} guías copiadas`);
   };
@@ -497,7 +505,7 @@ export default function WithGuidesView() {
   const downloadTxt = () => {
     const selected = getSelectedOrders();
     if (selected.length === 0) { toast.error('Seleccioná pedidos primero'); return; }
-    const content = selected.map(o => buildGuideText(o)).join('\n\n════════════════════\n\n');
+    const content = selected.map(o => buildGuideText(o)).join('\n\n');
     downloadFile(content, `guias_${new Date().toISOString().slice(0, 10)}.txt`, 'text/plain');
     toast.success(`${selected.length} guías descargadas en TXT`);
   };
@@ -522,7 +530,6 @@ export default function WithGuidesView() {
             <td style="padding: 4px 0;">${i + 1}</td>
             <td style="padding: 4px 0;">${(it.title || it.sku || 'Item').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td>
             <td style="padding: 4px 0; text-align: center;">${it.qty || 1}</td>
-            <td style="padding: 4px 0; text-align: right;">Gs ${nf(Number(it.sale_gs || 0) * Number(it.qty || 1))}</td>
           </tr>
         `;
       }
@@ -561,13 +568,12 @@ export default function WithGuidesView() {
                 <th style="text-align: left; padding: 6px 4px;">#</th>
                 <th style="text-align: left; padding: 6px 4px;">Producto</th>
                 <th style="text-align: center; padding: 6px 4px;">Cant.</th>
-                <th style="text-align: right; padding: 6px 4px;">Subtotal</th>
               </tr>
             </thead>
             <tbody>${itemsHtml}</tbody>
             <tfoot>
               <tr style="border-top: 1px solid #ddd;">
-                <td colspan="3" style="text-align: right; padding: 8px 4px;"><strong>Total:</strong></td>
+                <td colspan="2" style="text-align: right; padding: 8px 4px;"><strong>Total:</strong></td>
                 <td style="text-align: right; padding: 8px 4px;"><strong>Gs ${nf(Number(order.total_gs || 0))}</strong></td>
               </tr>
             </tfoot>
@@ -666,16 +672,12 @@ export default function WithGuidesView() {
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
         const productName = (it.title || it.sku || 'Item').substring(0, 30);
-        const qty = it.qty || 1;
-        const price = Number(it.sale_gs || 0);
-        const subtotal = price * qty;
+        const qty = it.qty || it.quantity || 1;
         
         itemsHtml += `
           <div class="product-row">
             <span class="product-name">${i+1}. ${productName}</span>
             <span class="product-qty">x${qty}</span>
-            <span class="product-price">${nf(price)}</span>
-            <span class="product-subtotal">${nf(subtotal)}</span>
           </div>
         `;
       }
@@ -727,8 +729,6 @@ export default function WithGuidesView() {
             <div class="products-header">
               <span class="col-product">PRODUCTO</span>
               <span class="col-qty">CANT</span>
-              <span class="col-price">P.UNIT</span>
-              <span class="col-subtotal">SUBTOTAL</span>
             </div>
             <div class="products-list">
               ${itemsHtml}
@@ -901,14 +901,6 @@ export default function WithGuidesView() {
           flex: 1;
           text-align: center;
         }
-        .col-price {
-          flex: 1.5;
-          text-align: right;
-        }
-        .col-subtotal {
-          flex: 1.5;
-          text-align: right;
-        }
         
         .products-list {
           margin: 4px 0;
@@ -925,14 +917,6 @@ export default function WithGuidesView() {
         .product-qty {
           flex: 1;
           text-align: center;
-        }
-        .product-price {
-          flex: 1.5;
-          text-align: right;
-        }
-        .product-subtotal {
-          flex: 1.5;
-          text-align: right;
         }
         
         .total-box {
@@ -1393,7 +1377,7 @@ export default function WithGuidesView() {
                 {(() => {
                   const items = typeof currentOrder.items_json === 'string' ? JSON.parse(currentOrder.items_json) : (currentOrder.items_json || []);
                   return items.map((it: any, i: number) => (
-                    <p key={i}>{i + 1}. {it.title || it.sku || 'Item'} x{it.qty || 1} — Gs {nf(Number(it.sale_gs || 0) * Number(it.qty || 1))}</p>
+                    <p key={i}>{i + 1}. {it.title || it.sku || 'Item'} x{it.qty || it.quantity || 1} —</p>
                   ));
                 })()}
               </div>
