@@ -1455,8 +1455,10 @@ export default function OrdersView() {
   const generateGuide = (o: any) => {
     try {
       const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
+      // La guía muestra únicamente producto y cantidad.
+      // No incluir precios parciales/subtotales por producto.
       const itemsText = items.map((it: any, i: number) =>
-        `${i + 1}. ${it.title || it.sku || 'Item'} x${it.qty || 1} — Gs ${nf(Number(it.sale_gs || 0) * Number(it.qty || 1))}`
+        `${i + 1}. ${it.title || it.sku || 'Item'} x${it.qty || it.quantity || 1}`
       ).join('\n');
 
       const text = [
