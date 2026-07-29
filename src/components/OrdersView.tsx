@@ -1454,33 +1454,37 @@ export default function OrdersView() {
 
   const generateGuide = (o: any) => {
     try {
-      const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json) : (o.items_json || []);
-      // La guía muestra únicamente producto y cantidad.
-      // No incluir precios parciales/subtotales por producto.
+      const items = typeof o.items_json === 'string'
+        ? JSON.parse(o.items_json || '[]')
+        : (o.items_json || []);
+
+      // Mostrar únicamente producto y cantidad, sin precios parciales.
       const itemsText = items.map((it: any, i: number) =>
-        `${i + 1}. ${it.title || it.sku || 'Item'} x${it.qty || it.quantity || 1}`
+        `${i + 1}. ${it.title || it.sku || 'Item'} x${it.qty || it.quantity || 1} —`
       ).join('\n');
+
+      const separator = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
 
       const text = [
         `GUÍA DE ENVÍO — ${o.order_number || o.id.slice(0, 8)}`,
-        `━━━━━━━━━━━━━━━━━━`,
+        separator,
         `Cliente: ${o.customer_name || ''}`,
         `Teléfono: ${o.phone || ''}`,
         `Email: ${o.email || ''}`,
+        `Departamento: ${o.department || o.departamento || ''}`,
         `Ciudad: ${o.city || ''}`,
-        `Dirección: ${o.street || ''} ${o.district ? '- ' + o.district : ''}`,
-        `━━━━━━━━━━━━━━━━━━`,
+        `Dirección: ${o.street || ''} ${o.district ? '- ' + o.district : ''}`.trimEnd(),
+        '',
         `Productos:`,
+        '',
         itemsText,
-        `━━━━━━━━━━━━━━━━━━`,
+        '',
         `Total: Gs ${nf(Number(o.total_gs || 0))}`,
-        `Delivery: Gs ${nf(Number(o.delivery_gs || 0))}`,
         o.obs ? `Observación: ${o.obs}` : '',
-        `━━━━━━━━━━━━━━━━━━`,
+        separator,
         `Vendedor: ${o.created_by || ''}`,
-        `Delivery: ${o.assigned_delivery || 'Sin asignar'}`,
         `Proveedor: ${o.provider_email || 'Sin proveedor'}`,
-      ].filter(Boolean).join('\n');
+      ].filter(line => line !== null && line !== undefined).join('\n');
 
       setGuideText(text);
       setGuideOrderId(o.order_number || o.id.slice(0, 8));
@@ -1512,12 +1516,45 @@ export default function OrdersView() {
 
   const bulkGenerateGuides = () => {
     const selected = filtered.filter(o => selectedIds.has(o.id));
-    if (selected.length === 0) { toast.error('Seleccioná pedidos primero'); return; }
+
+    if (selected.length === 0) {
+      toast.error('Seleccioná pedidos primero');
+      return;
+    }
+
+    const separator = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
+
     const allText = selected.map(o => {
-      const items = typeof o.items_json === 'string' ? JSON.parse(o.items_json || '[]') : (o.items_json || []);
-      const itemsText = items.map((it: any, i: number) => `  ${i + 1}. ${it.title || it.sku} x${it.qty}`).join('\n');
-      return `${o.order_number || o.id.slice(0, 8)} — ${o.customer_name} — ${o.city}\nTeléfono: ${o.phone}\nDirección: ${o.street || ''} ${o.district || ''}\n${itemsText}\nTotal: Gs ${nf(Number(o.total_gs || 0))}\nProveedor: ${o.provider_email || 'Sin proveedor'}\n${o.obs ? 'Obs: ' + o.obs : ''}`;
-    }).join('\n\n════════════════════\n\n');
+      const items = typeof o.items_json === 'string'
+        ? JSON.parse(o.items_json || '[]')
+        : (o.items_json || []);
+
+      const itemsText = items.map((it: any, i: number) =>
+        `${i + 1}. ${it.title || it.sku || 'Item'} x${it.qty || it.quantity || 1} —`
+      ).join('\n');
+
+      return [
+        `GUÍA DE ENVÍO — ${o.order_number || o.id.slice(0, 8)}`,
+        separator,
+        `Cliente: ${o.customer_name || ''}`,
+        `Teléfono: ${o.phone || ''}`,
+        `Email: ${o.email || ''}`,
+        `Departamento: ${o.department || o.departamento || ''}`,
+        `Ciudad: ${o.city || ''}`,
+        `Dirección: ${o.street || ''} ${o.district ? '- ' + o.district : ''}`.trimEnd(),
+        '',
+        `Productos:`,
+        '',
+        itemsText,
+        '',
+        `Total: Gs ${nf(Number(o.total_gs || 0))}`,
+        o.obs ? `Observación: ${o.obs}` : '',
+        separator,
+        `Vendedor: ${o.created_by || ''}`,
+        `Proveedor: ${o.provider_email || 'Sin proveedor'}`,
+      ].filter(line => line !== null && line !== undefined).join('\n');
+    }).join('\n\n');
+
     navigator.clipboard.writeText(allText);
     toast.success(`${selected.length} guías copiadas`);
   };
