@@ -362,8 +362,7 @@ export default function WithGuidesView() {
 
     const itemsText = items.map((it: any, i: number) =>
       `${i + 1}. ${it.title || it.sku || 'Item'} x${it.qty || it.quantity || 1} —`
-    ).join('
-');
+    ).join('\n');
 
     const separator = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
 
@@ -386,8 +385,7 @@ export default function WithGuidesView() {
       separator,
       `Vendedor: ${o.created_by || ''}`,
       `Proveedor: ${o.provider_emails_list || o.provider_email || '—'}`,
-    ].filter(line => line !== null && line !== undefined).join('
-');
+    ].filter(line => line !== null && line !== undefined).join('\n');
   };
 
   const getWhatsAppUrl = (order: any) => {
