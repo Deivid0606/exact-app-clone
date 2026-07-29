@@ -67,36 +67,54 @@ const getOrderItems = (order: any): any[] => {
 
 const buildGuideText = (order: any) => {
   const items = getOrderItems(order);
-  const itemsText = items.length > 0
-    ? items.map((item: any, index: number) => {
-        const qty = Number(item.qty || item.quantity || item.cantidad || 1);
-        const unitPrice = Number(item.sale_gs || item.price_gs || item.price || 0);
-        const lineTotal = unitPrice * qty;
-        const label = item.title || item.name || item.sku || 'Producto';
 
-        return `${index + 1}. ${label} x${qty}${lineTotal > 0 ? ` — Gs ${nf(lineTotal)}` : ''}`;
-      }).join('\n')
+  const itemsText = items.length > 0
+    ? items
+        .map((item: any, index: number) => {
+          const qty = Number(
+            item.qty ||
+            item.quantity ||
+            item.cantidad ||
+            1,
+          );
+
+          const label = String(
+            item.title ||
+            item.name ||
+            item.sku ||
+            'Producto',
+          ).trim();
+
+          return `${index + 1}. ${label} x${qty}`;
+        })
+        .join('\n')
     : 'Sin detalle de productos';
 
   const phone = getOrderPhone(order);
+
   const address = [
-    order?.street,
-    order?.district ? `- ${order.district}` : '',
-  ].filter(Boolean).join(' ');
+    String(order?.street || '').trim(),
+    String(order?.district || '').trim(),
+  ]
+    .filter(Boolean)
+    .join(', ');
 
   return [
-    `GUÍA DE ENVÍO — ${order?.order_number || order?.id?.slice(0, 8) || '—'}`,
+    `GUÍA DE ENVÍO — ${
+      order?.order_number ||
+      order?.id?.slice(0, 8) ||
+      '—'
+    }`,
     `Cliente: ${order?.customer_name || ''}`,
     `Teléfono: ${phone}`,
-    order?.email ? `Email: ${order.email}` : '',
     `Ciudad: ${order?.city || ''}`,
     address ? `Dirección: ${address}` : '',
     'Productos:',
     itemsText,
     `Total: Gs ${nf(Number(order?.total_gs || 0))}`,
-    order?.obs ? `Observación: ${order.obs}` : '',
-    '━━━━━━━━━━━━━━━━━━',
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
 };
 
 const buildWhatsAppMessage = (order: any) => [
