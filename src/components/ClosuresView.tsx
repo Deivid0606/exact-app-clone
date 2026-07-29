@@ -117,13 +117,65 @@ const buildGuideText = (order: any) => {
     .join('\n');
 };
 
-const buildWhatsAppMessage = (order: any) => [
-  `Buenas ${order?.customer_name || ''}, le escribo para coordinar la entrega de su pedido.`,
-  '',
-  '¿Me podría indicar o enviar la ubicación por Google Maps para poder realizar la entrega?',
-  '',
-  buildGuideText(order),
-].join('\n');
+const buildWhatsAppMessage = (order: any) => {
+  const items = getOrderItems(order);
+
+  const productsText = items.length > 0
+    ? items
+        .map((item: any, index: number) => {
+          const qty = Number(
+            item.qty ||
+            item.quantity ||
+            item.cantidad ||
+            1,
+          );
+
+          const label = String(
+            item.title ||
+            item.name ||
+            item.sku ||
+            'Producto',
+          ).trim();
+
+          // Importante: no mostrar precio unitario ni subtotal por producto.
+          return `${index + 1}. ${label} x${qty}`;
+        })
+        .join('\n')
+    : 'Sin detalle de productos';
+
+  const address = [
+    String(order?.street || '').trim(),
+    String(order?.district || '').trim(),
+  ]
+    .filter(Boolean)
+    .join(', ');
+
+  const guide = [
+    `GUÍA DE ENVÍO — ${
+      order?.order_number ||
+      order?.id?.slice(0, 8) ||
+      '—'
+    }`,
+    `Cliente: ${order?.customer_name || ''}`,
+    `Teléfono: ${getOrderPhone(order)}`,
+    `Ciudad: ${order?.city || ''}`,
+    address ? `Dirección: ${address}` : '',
+    'Productos:',
+    productsText,
+    // El único importe que se muestra es el total final del pedido.
+    `Total: Gs ${nf(Number(order?.total_gs || 0))}`,
+  ]
+    .filter(Boolean)
+    .join('\n');
+
+  return [
+    `Buenas ${order?.customer_name || ''}, le escribo para coordinar la entrega de su pedido.`,
+    '',
+    '¿Me podría indicar o enviar la ubicación por Google Maps para poder realizar la entrega?',
+    '',
+    guide,
+  ].join('\n');
+};
 
 const getWhatsAppUrl = (order: any) => {
   const phone = normalizeWhatsAppPhone(getOrderPhone(order));
