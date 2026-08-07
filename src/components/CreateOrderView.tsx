@@ -255,53 +255,15 @@ const CreateOrderView = ({
     }
   }, [departamento, clientPrices, city]);
 
+  /**
+   * Si el usuario todavía no inició sesión, conservamos la URL completa.
+   * Una vez autenticado, el prellenado real se aplica dentro de loadData(),
+   * después de cargar catálogo y ciudades. Eso evita que el <select> de
+   * producto/ciudad borre valores antes de tener sus opciones disponibles.
+   */
   useEffect(() => {
     if (!profile?.email) {
       localStorage.setItem("pending_order_url", window.location.href);
-      return;
-    }
-
-    const params = new URLSearchParams(window.location.search);
-
-    const origen = params.get("origen");
-    const nombre = params.get("nombre");
-    const telefono = params.get("telefono");
-    const ciudad = params.get("ciudad");
-    const calle = params.get("calle");
-    const producto = params.get("producto");
-    const cantidad = params.get("cantidad");
-    const total = params.get("total");
-    const pago = params.get("pago");
-
-    if (origen !== "seller-skyline") return;
-
-    if (nombre) setCustomer(nombre);
-    if (telefono) setPhone(telefono);
-    if (ciudad) setCity(ciudad);
-    if (calle) setStreet(calle);
-
-    const totalNumber = Number(String(total || "").replace(/\D/g, "")) || 0;
-    const qtyNumber = Number(cantidad || 1) || 1;
-
-    if (producto || totalNumber || qtyNumber) {
-      setItems([
-        {
-          sku: "",
-          sale_gs: totalNumber,
-          qty: qtyNumber,
-        },
-      ]);
-
-      setObs(
-        [
-          producto ? `Producto: ${producto}` : "",
-          pago ? `Forma de pago: ${pago}` : "",
-        ]
-          .filter(Boolean)
-          .join(" | "),
-      );
-
-      toast.success("Pedido recibido desde Seller Skyline");
     }
   }, [profile?.email]);
 
@@ -446,6 +408,279 @@ const CreateOrderView = ({
         }));
 
         setClientPrices(pricesConDepto);
+
+
+        /**
+         * ============================================================
+         * PRELLENADO DESDE BOT SKY / SELLER SKYLINE
+         * ============================================================
+         *
+         * Se procesa AQUÍ, después de cargar:
+         * - filteredProducts
+         * - pricesConDepto
+         *
+         * De esa forma los <select> de Producto, Departamento y Ciudad
+         * ya tienen sus opciones y pueden seleccionar el valor real.
+         */
+        let sellerParams = new URLSearchParams(window.location.search);
+
+        // Si el login hizo perder los query params, intentamos recuperar
+        // la URL original que guardamos antes de autenticar.
+        if (sellerParams.get("origen") !== "seller-skyline") {
+          const pendingOrderUrl = localStorage.getItem("pending_order_url");
+
+          if (pendingOrderUrl) {
+            try {
+              const pendingUrl = new URL(pendingOrderUrl);
+              const pendingParams = pendingUrl.searchParams;
+
+              if (pendingParams.get("origen") === "seller-skyline") {
+                sellerParams = pendingParams;
+              }
+            } catch (error) {
+              console.warn("No se pudo recuperar pending_order_url:", error);
+            }
+          }
+        }
+
+        if (sellerParams.get("origen") === "seller-skyline") {
+          const getParam = (...keys: string[]) => {
+            for (const key of keys) {
+              const value = sellerParams.get(key)?.trim();
+              if (value) return value;
+            }
+            return "";
+          };
+
+          const nombre = getParam("nombre", "cliente");
+          const telefono = getParam("telefono", "phone");
+          const departamentoRecibido = getParam("departamento", "depto");
+          const ciudadRecibida = getParam("ciudad", "city");
+          const calle = getParam("calle", "street");
+          const barrio = getParam("barrio", "district");
+          const referencia = getParam("referencia", "reference");
+          const emailRecibido = getParam("email");
+
+          const producto = getParam("producto", "product_title");
+          const productoId = getParam("producto_id", "product_id");
+          const skuRecibido = getParam("sku");
+
+          const cantidad = getParam("cantidad", "qty");
+          const total = getParam("total", "total_gs");
+          const pago = getParam("pago", "payment_method");
+          const estadoPago = getParam("estado_pago", "payment_status");
+          const pedidoOrigen = getParam("pedido", "order_number");
+          const comprobante = getParam("comprobante", "receipt_url");
+          const observacionRecibida = getParam("obs", "observacion");
+
+          const totalNumber =
+            Number(String(total || "").replace(/[^\d.-]/g, "")) || 0;
+
+          const qtyNumberRaw = Number(cantidad || 1);
+          const qtyNumber =
+            Number.isFinite(qtyNumberRaw) && qtyNumberRaw > 0
+              ? Math.floor(qtyNumberRaw)
+              : 1;
+
+          if (nombre) setCustomer(nombre);
+          if (telefono) setPhone(telefono);
+          if (calle) setStreet(calle);
+          if (barrio) setDistrict(barrio);
+          if (emailRecibido) setEmail(emailRecibido);
+
+          const normalizeMatchText = (value: any) =>
+            String(value || "")
+              .toLowerCase()
+              .normalize("NFD")
+              .replace(/[\u0300-\u036f]/g, "")
+              .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, " ")
+              .replace(/[^a-z0-9]+/g, " ")
+              .replace(/\s+/g, " ")
+              .trim();
+
+          /**
+           * CIUDAD + DEPARTAMENTO
+           */
+          if (ciudadRecibida) {
+            const cityNorm = normalizeMatchText(ciudadRecibida);
+
+            const exactCity = pricesConDepto.find(
+              (row: any) => normalizeMatchText(row.city) === cityNorm,
+            );
+
+            const partialCity =
+              exactCity ||
+              pricesConDepto.find((row: any) => {
+                const candidate = normalizeMatchText(row.city);
+                return (
+                  candidate &&
+                  cityNorm &&
+                  (candidate.includes(cityNorm) || cityNorm.includes(candidate))
+                );
+              });
+
+            if (partialCity) {
+              setCity(partialCity.city);
+
+              const detectedDepartment =
+                partialCity.departamento ||
+                ciudadDepartamentoMap[partialCity.city] ||
+                departamentoRecibido;
+
+              if (detectedDepartment) {
+                setDepartamento(detectedDepartment);
+              }
+            } else {
+              if (departamentoRecibido) {
+                const incomingDeptNorm = normalizeMatchText(departamentoRecibido);
+
+                const matchingDept = Array.from(
+                  new Set(
+                    pricesConDepto
+                      .map((row: any) => row.departamento)
+                      .filter(Boolean),
+                  ),
+                ).find(
+                  (depto: any) =>
+                    normalizeMatchText(depto) === incomingDeptNorm ||
+                    (incomingDeptNorm === "asuncion" &&
+                      normalizeMatchText(depto) === "capital") ||
+                    (incomingDeptNorm === "capital" &&
+                      normalizeMatchText(depto) === "asuncion"),
+                );
+
+                if (matchingDept) {
+                  setDepartamento(String(matchingDept));
+                }
+              }
+
+              toast.info(
+                `⚠️ La ciudad "${ciudadRecibida}" no coincide con una ciudad cargada. Revisala manualmente.`,
+              );
+            }
+          } else if (departamentoRecibido) {
+            const incomingDeptNorm = normalizeMatchText(departamentoRecibido);
+
+            const matchingDept = Array.from(
+              new Set(
+                pricesConDepto
+                  .map((row: any) => row.departamento)
+                  .filter(Boolean),
+              ),
+            ).find(
+              (depto: any) =>
+                normalizeMatchText(depto) === incomingDeptNorm ||
+                (incomingDeptNorm === "asuncion" &&
+                  normalizeMatchText(depto) === "capital") ||
+                (incomingDeptNorm === "capital" &&
+                  normalizeMatchText(depto) === "asuncion"),
+            );
+
+            if (matchingDept) {
+              setDepartamento(String(matchingDept));
+            }
+          }
+
+          /**
+           * PRODUCTO
+           *
+           * Prioridad:
+           * 1. SKU exacto
+           * 2. ID exacto
+           * 3. Título exacto normalizado
+           * 4. Título parcial normalizado
+           */
+          let productMatch: any = null;
+
+          if (skuRecibido) {
+            const skuNorm = skuRecibido.trim().toLowerCase();
+
+            productMatch = filteredProducts.find(
+              (product: any) =>
+                String(product.sku || "").trim().toLowerCase() === skuNorm,
+            );
+          }
+
+          if (!productMatch && productoId) {
+            productMatch = filteredProducts.find(
+              (product: any) => String(product.id || "") === productoId,
+            );
+          }
+
+          if (!productMatch && producto) {
+            const productTitleNorm = normalizeMatchText(producto);
+
+            productMatch = filteredProducts.find(
+              (product: any) =>
+                normalizeMatchText(product.title) === productTitleNorm,
+            );
+
+            if (!productMatch) {
+              productMatch = filteredProducts.find((product: any) => {
+                const candidate = normalizeMatchText(product.title);
+
+                return (
+                  candidate &&
+                  productTitleNorm &&
+                  (candidate.includes(productTitleNorm) ||
+                    productTitleNorm.includes(candidate))
+                );
+              });
+            }
+          }
+
+          if (productMatch?.sku) {
+            setItems([
+              {
+                sku: productMatch.sku,
+                sale_gs:
+                  totalNumber > 0
+                    ? totalNumber
+                    : Number(productMatch.sale_price_gs || 0),
+                qty: qtyNumber,
+              },
+            ]);
+
+            toast.success(`🎯 Producto detectado: ${productMatch.title}`);
+          } else {
+            setItems([
+              {
+                sku: "",
+                sale_gs: totalNumber,
+                qty: qtyNumber,
+              },
+            ]);
+
+            if (producto || skuRecibido) {
+              toast.info(
+                `⚠️ Producto "${producto || skuRecibido}" no encontrado en tu catálogo disponible. Elegilo manualmente.`,
+              );
+            }
+          }
+
+          /**
+           * OBSERVACIÓN
+           */
+          if (observacionRecibida) {
+            setObs(observacionRecibida);
+          } else {
+            setObs(
+              [
+                producto ? `Producto: ${producto}` : "",
+                pago ? `Forma de pago: ${pago}` : "",
+                estadoPago ? `Estado de pago: ${estadoPago}` : "",
+                referencia ? `Referencia: ${referencia}` : "",
+                pedidoOrigen ? `Pedido BOT SKY: ${pedidoOrigen}` : "",
+                comprobante ? `Comprobante: ${comprobante}` : "",
+              ]
+                .filter(Boolean)
+                .join(" | "),
+            );
+          }
+
+          localStorage.removeItem("pending_order_url");
+          toast.success("Pedido recibido desde BOT SKY");
+        }
 
         if (sheetPrefill) {
           if (sheetPrefill.customer) setCustomer(sheetPrefill.customer);
