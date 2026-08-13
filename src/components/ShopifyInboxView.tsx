@@ -5,6 +5,53 @@ import { toast } from "sonner";
 
 const nf = (n: number) => new Intl.NumberFormat("es-PY").format(n);
 
+const DASHBOARD_TIME_ZONE = "America/Asuncion";
+
+const getDateKeyInTimeZone = (date: Date, timeZone = DASHBOARD_TIME_ZONE): string => {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+
+  const getPart = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((part) => part.type === type)?.value || "";
+
+  return `${getPart("year")}-${getPart("month")}-${getPart("day")}`;
+};
+
+const getTodayDateKey = (): string => getDateKeyInTimeZone(new Date());
+
+const parseSheetDateKey = (value: any): string | null => {
+  if (value === null || value === undefined) return null;
+
+  const raw = String(value).trim();
+  if (!raw) return null;
+
+  // Formato ISO / Shopify: 2026-08-13, 2026-08-13T20:30:00...
+  const isoMatch = raw.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})/);
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+
+  // Formato habitual del Sheet en Paraguay: 13/8/2026, 13-08-2026, con o sin hora.
+  const pyMatch = raw.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);
+  if (pyMatch) {
+    const [, day, month, year] = pyMatch;
+    return `${year}-${month.padStart(2, "0")}-${day.padStart(2, "0")}`;
+  }
+
+  // Fallback para fechas completas que JavaScript sí pueda interpretar.
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    return getDateKeyInTimeZone(parsed);
+  }
+
+  return null;
+};
+
 type SheetOrder = Record<string, string>;
 
 const AUTO_LOAD_KEY = "shopify_auto_load_enabled";
@@ -332,6 +379,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [productSearch, setProductSearch] = useState("");
   const [cityFilter, setCityFilter] = useState("");
   const [coverageFilter, setCoverageFilter] = useState<"all" | "covered" | "uncovered">("covered");
+  const [dashboardDate, setDashboardDate] = useState<string>(() => getTodayDateKey());
   const [search, setSearch] = useState("");
   const [selectedOrder, setSelectedOrder] = useState<{ order: SheetOrder; rowKey: string } | null>(null);
   const [showGuideModal, setShowGuideModal] = useState(false);
@@ -904,18 +952,43 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return { principales, extras };
   };
 
-  // ─── ESTADÍSTICAS PARA DASHBOARD ───
+  // ─── FECHA EXCLUSIVA DEL DASHBOARD SUPERIOR ───
+  // Empieza SIEMPRE en hoy (zona horaria de Paraguay).
+  // Esta fecha afecta únicamente KPIs + gráficos + Top ciudades.
+  // NO afecta la tabla ni el ranking lateral de productos pendientes.
+  const dashboardOrders = useMemo(() => {
+    if (!dashboardDate) return sheetOrders;
+
+    return sheetOrders.filter((order) => {
+      const rawDate = order[colKeys.date];
+      return parseSheetDateKey(rawDate) === dashboardDate;
+    });
+  }, [sheetOrders, colKeys.date, dashboardDate]);
+
+  const dashboardDateLabel = useMemo(() => {
+    if (!dashboardDate) return "Todas las fechas";
+    const [year, month, day] = dashboardDate.split("-").map(Number);
+    if (!year || !month || !day) return dashboardDate;
+    return new Date(year, month - 1, day, 12, 0, 0).toLocaleDateString("es-PY", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+  }, [dashboardDate]);
+
+  // ─── ESTADÍSTICAS PARA DASHBOARD SUPERIOR ───
   const dashboardStats = useMemo(() => {
     let pendientesConCobertura = 0, pendientesSinCobertura = 0, cargados = 0, dropeados = 0, cancelados = 0;
     let totalVenta = 0;
-    
-    sheetOrders.forEach((order, idx) => {
+
+    dashboardOrders.forEach((order) => {
+      const idx = sheetOrders.indexOf(order);
       const rowKey = getRowKey(order, idx);
       const city = order[colKeys.city] || "";
       const covered = hasCoverageForCity(city);
       const status = getRowStatus(rowKey);
       const amount = getAmountFromRow(order, colKeys.amount);
-      
+
       if (status === "CARGAR") {
         if (covered) pendientesConCobertura++; else pendientesSinCobertura++;
       } else if (status === "CARGADO" || status === "CARGADO_MANUAL") {
@@ -927,23 +1000,23 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         cancelados++;
       }
     });
-    
-    const totalPedidos = sheetOrders.length;
+
+    const totalPedidos = dashboardOrders.length;
     const tasaCobertura = totalPedidos > 0 ? Math.round((pendientesConCobertura / totalPedidos) * 100) : 0;
     const tasaCargados = totalPedidos > 0 ? Math.round((cargados / totalPedidos) * 100) : 0;
-    
-    return { 
-      pendientesConCobertura, 
-      pendientesSinCobertura, 
-      cargados, 
-      dropeados, 
-      cancelados, 
+
+    return {
+      pendientesConCobertura,
+      pendientesSinCobertura,
+      cargados,
+      dropeados,
+      cancelados,
       totalPedidos,
       totalVenta,
       tasaCobertura,
       tasaCargados
     };
-  }, [sheetOrders, colKeys, getRowKey, getRowStatus]);
+  }, [dashboardOrders, sheetOrders, colKeys, getRowKey, getRowStatus, hasCoverageForCity]);
 
   const counts = useMemo(() => {
     let cargarConCobertura = 0, cargarSinCobertura = 0, cargados = 0, aDropear = 0, cancelados = 0;
@@ -1479,7 +1552,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
   // ─── DATOS PARA DASHBOARD PRO ───
   const pendingTotal = dashboardStats.pendientesConCobertura + dashboardStats.pendientesSinCobertura;
-  const commissionTotal = sheetOrders.reduce((sum, order, idx) => {
+  const commissionTotal = dashboardOrders.reduce((sum, order) => {
+    const idx = sheetOrders.indexOf(order);
     const rowKey = getRowKey(order, idx);
     const status = getRowStatus(rowKey);
     if (status !== "CARGADO" && status !== "CARGADO_MANUAL") return sum;
@@ -1492,8 +1566,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const avgTicket = dashboardStats.cargados > 0 ? Math.round(dashboardStats.totalVenta / dashboardStats.cargados) : 0;
   const cancelRate = dashboardStats.totalPedidos > 0 ? Math.round((dashboardStats.cancelados / dashboardStats.totalPedidos) * 100) : 0;
 
-  const cityRanking = Object.entries(sheetOrders.reduce((acc: Record<string, number>, order) => {
-    const city = order[colKeys.city] || "Sin ciudad";
+  const cityRanking = Object.entries(dashboardOrders.reduce((acc: Record<string, number>, order) => {
+    const rawCity = order[colKeys.city] || "Sin ciudad";
+    const city = rawCity === "Sin ciudad" ? rawCity : getCityDisplayName(rawCity);
     acc[city] = (acc[city] || 0) + 1;
     return acc;
   }, {})).sort((a, b) => b[1] - a[1]).slice(0, 5);
@@ -1586,7 +1661,23 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <span className="rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-xs font-bold text-slate-300">{sheetOrders.length} pedidos</span>
+              <div className="flex items-center gap-2 rounded-2xl border border-cyan-400/20 bg-cyan-500/8 px-2 py-1.5">
+                <span className="pl-1 text-xs font-black text-cyan-300">📅 Dashboard</span>
+                <input
+                  type="date"
+                  value={dashboardDate}
+                  onChange={(e) => setDashboardDate(e.target.value || getTodayDateKey())}
+                  className="rounded-xl border border-slate-700 bg-slate-950 px-2.5 py-1.5 text-xs font-black text-white outline-none focus:border-cyan-400"
+                />
+                <button
+                  type="button"
+                  onClick={() => setDashboardDate(getTodayDateKey())}
+                  className="rounded-xl bg-cyan-500/15 px-2.5 py-1.5 text-xs font-black text-cyan-200 ring-1 ring-cyan-400/20 transition hover:bg-cyan-500/25"
+                >
+                  Hoy
+                </button>
+              </div>
+              <span className="rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-xs font-bold text-slate-300">{dashboardStats.totalPedidos} pedidos · {dashboardDateLabel}</span>
               {lastSync && <span className="rounded-full border border-slate-700 bg-slate-950/70 px-4 py-2 text-xs font-bold text-slate-400">🔄 {lastSync.toLocaleTimeString("es-PY")}</span>}
               <button className="rounded-2xl bg-gradient-to-r from-blue-600 to-cyan-500 px-4 py-2.5 text-sm font-black text-white shadow-lg shadow-blue-950/40 transition hover:-translate-y-0.5 disabled:opacity-50" onClick={() => readSheet()} disabled={loading}>
                 {loading ? "⏳ Leyendo..." : "📊 Leer Sheet"}
@@ -1606,8 +1697,8 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
         {/* KPIS */}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
-          <MetricCard title="Ventas" value={`${nf(dashboardStats.totalVenta)} Gs`} subtitle="Total de pedidos cargados" icon="💰" tone="emerald" />
-          <MetricCard title="Pedidos" value={dashboardStats.totalPedidos} subtitle={`${filteredOrders.length} visibles`} icon="📊" tone="violet" />
+          <MetricCard title="Ventas" value={`${nf(dashboardStats.totalVenta)} Gs`} subtitle={`Cargados · ${dashboardDateLabel}`} icon="💰" tone="emerald" />
+          <MetricCard title="Pedidos" value={dashboardStats.totalPedidos} subtitle={dashboardDateLabel} icon="📊" tone="violet" />
           <MetricCard title="Pendientes" value={pendingTotal} subtitle={`✅ ${dashboardStats.pendientesConCobertura} · ❌ ${dashboardStats.pendientesSinCobertura}`} icon="⏳" tone="blue" />
           <MetricCard title="Cargados" value={dashboardStats.cargados} subtitle={`Tasa ${dashboardStats.tasaCargados}%`} icon="✅" tone="emerald" />
           <MetricCard title="Comisión" value={`${nf(commissionTotal)} Gs`} subtitle={`Ticket promedio ${nf(avgTicket)} Gs`} icon="🏦" tone="cyan" />
@@ -1620,7 +1711,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             <div className="mb-5 flex items-center justify-between gap-3">
               <div>
                 <h2 className="text-lg font-black text-white">Distribución de estados</h2>
-                <p className="text-sm font-medium text-slate-400">Vista general del flujo.</p>
+                <p className="text-sm font-medium text-slate-400">Estados del {dashboardDateLabel}.</p>
               </div>
               <span className="rounded-full bg-blue-500/10 px-3 py-1 text-xs font-black text-blue-300 ring-1 ring-blue-400/20">Live</span>
             </div>
@@ -1629,7 +1720,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
           <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-4 shadow-xl shadow-black/20 backdrop-blur-xl xl:col-span-1">
             <h2 className="text-lg font-black text-white">Cobertura</h2>
-            <p className="mb-5 text-sm font-medium text-slate-400">Pendientes con y sin cobertura.</p>
+            <p className="mb-5 text-sm font-medium text-slate-400">Pendientes del {dashboardDateLabel}.</p>
             <div className="space-y-5">
               <ProgressBar value={dashboardStats.pendientesConCobertura} total={pendingTotal} label="Con cobertura" color="#10b981" />
               <ProgressBar value={dashboardStats.pendientesSinCobertura} total={pendingTotal} label="Sin cobertura" color="#ef4444" />
@@ -1644,7 +1735,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
           <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-4 shadow-xl shadow-black/20 backdrop-blur-xl xl:col-span-1">
             <h2 className="text-lg font-black text-white">Top ciudades</h2>
-            <p className="mb-5 text-sm font-medium text-slate-400">Mayor volumen de pedidos.</p>
+            <p className="mb-5 text-sm font-medium text-slate-400">Mayor volumen del {dashboardDateLabel}.</p>
             <div className="space-y-3">
               {cityRanking.length === 0 && <div className="text-sm text-slate-500">Sin datos</div>}
               {cityRanking.map(([city, value]) => (
