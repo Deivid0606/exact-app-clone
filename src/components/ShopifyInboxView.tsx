@@ -33,125 +33,202 @@ const normalizeText = (text: string): string => {
     .trim();
 };
 
-const CITY_COVERAGE_MAP: Record<string, number> = {
-  "altos": 55000, "aregua": 45000, "asuncion": 35000, "atyra": 55000,
-  "benjaminaceval": 60000, "caacupe": 55000, "capiata": 45000, "ciudaddeleste": 45000,
-  "coloniyguazu": 50000, "emboscada": 55000, "eusebioayala": 55000, "fernandodelamora": 35000,
-  "guarambare": 50000, "hernandarias": 50000, "interiorpagoanticipado": 35000, "ita": 55000,
-  "itacurubidelacordillera": 55000, "itaugua": 45000,
-  "jaugustosaldivar": 45000, "jaugustosaldívar": 45000, "jagugustosaldivar": 45000,
-  "jagugustosaldívar": 45000, "jagustosaldivar": 45000, "augustosaldivar": 45000, "saldivar": 45000,
-  "juanleonmalloriquin": 60000, "lambare": 35000, "limpio": 40000, "lomagrande": 55000,
-  "luque": 35000, "marianoroquealonso": 40000, "mingaguazu": 50000, "ñemby": 40000, "nemby": 40000,
-  "nuevaitalia": 55000, "paraguari": 55000, "pirayu": 55000, "piribebuy": 55000,
-  "presidentefranco": 50000, "puertopresidentefranco": 50000, "remansito": 60000, "sanalberto": 55000,
-  "santonio": 45000, "sanantonio": 45000, "sanantonioi": 45000, "santoni": 45000,
-  "sanbernardino": 55000, "sanlorenzo": 35000, "santarita": 55000, "tobati": 55000,
-  "villaelsa": 40000, "villaelisa": 40000, "villahayes": 60000, "villarrica": 50000,
-  "villeta": 55000, "villela": 55000, "yaguaron": 55000, "yguazu": 60000,
-  "ypacarai": 55000, "ypane": 45000
+// ─────────────────────────────────────────────────────────────
+// COBERTURA DE CIUDADES
+// Fuente única: ciudad + departamento + precio de delivery.
+// De esta forma el precio y el departamento nunca quedan desincronizados.
+// ─────────────────────────────────────────────────────────────
+type CityCoverage = {
+  name: string;
+  department: string;
+  price: number;
 };
 
-const CITY_DEPARTMENT_MAP: Record<string, string> = {
-  "altos": "Cordillera",
-  "aregua": "Central",
-  "asuncion": "Central",
-  "atyra": "Cordillera",
-  "benjaminaceval": "Presidente Hayes",
-  "caacupe": "Cordillera",
-  "caaguazu": "Caaguazú",
-  "capiata": "Central",
-  "carapegua": "Paraguarí",
-  "ciudaddeleste": "Alto Paraná",
-  "coloniyguazu": "Alto Paraná",
-  "coronelbogado": "Itapúa",
-  "coroneloviedo": "Caaguazú",
-  "emboscada": "Cordillera",
-  "encarnacion": "Itapúa",
-  "escobar": "Paraguarí",
-  "eusebioayala": "Cordillera",
-  "felixperezcardozo": "Caaguazú",
-  "fernandodelamora": "Central",
-  "generalbernardinocaballero": "Paraguarí",
-  "guarambare": "Central",
-  "hernandarias": "Alto Paraná",
-  "interiorpagoanticipado": "Varios",
-  "ita": "Central",
-  "itacurubidelacordillera": "Cordillera",
-  "itaugua": "Central",
-  "jaugustosaldivar": "Central",
-  "jaugustosaldívar": "Central",
-  "jagugustosaldivar": "Central",
-  "juanleonmalloriquin": "Alto Paraná",
-  "karaguatay": "Cordillera",
-  "lambare": "Central",
-  "limpio": "Central",
-  "lomagrande": "Cordillera",
-  "luque": "Central",
-  "marianoroquealonso": "Central",
-  "mauriciojosetroche": "Caaguazú",
-  "mbocayaty": "Guairá",
-  "mingaguazu": "Alto Paraná",
-  "nataliciotalavera": "Caaguazú",
-  "ñemby": "Central",
-  "nemby": "Central",
-  "nuevaitalia": "Cordillera",
-  "paraguari": "Paraguarí",
-  "pedrojuancaballero": "Amambay",
-  "pirayu": "Paraguarí",
-  "piribebuy": "Cordillera",
-  "presidentefranco": "Alto Paraná",
-  "puertopresidentefranco": "Alto Paraná",
-  "remansito": "Presidente Hayes",
-  "repatriacion": "Caaguazú",
-  "sanalberto": "Alto Paraná",
-  "santonio": "Central",
-  "sanantonio": "Central",
-  "sanbernardino": "Cordillera",
-  "sanestanislao": "San Pedro",
-  "sanjosedelosarroyos": "Caaguazú",
-  "sanlorenzo": "Central",
-  "santahelena": "Cordillera",
-  "santarita": "Alto Paraná",
-  "sapucai": "Paraguarí",
-  "tobati": "Cordillera",
-  "villaelsa": "Central",
-  "villaelisa": "Central",
-  "villahayes": "Presidente Hayes",
-  "villarrica": "Guairá",
-  "villeta": "Central",
-  "yaguaron": "Paraguarí",
-  "yataitydelnorte": "Caaguazú",
-  "yguazu": "Alto Paraná",
-  "ypacarai": "Cordillera",
-  "ypane": "Central"
+const CITY_COVERAGE_DATA: CityCoverage[] = [
+  { name: "Altos", department: "Cordillera", price: 55000 },
+  { name: "Aregua", department: "Central", price: 45000 },
+  { name: "Asuncion", department: "Central", price: 35000 },
+  { name: "Atyrá", department: "Cordillera", price: 55000 },
+  { name: "Benjamín Aceval", department: "Presidente Hayes", price: 60000 },
+  { name: "Caacupe", department: "Cordillera", price: 55000 },
+  { name: "Caaguazú", department: "Caaguazú", price: 55000 },
+  { name: "Capiata", department: "Central", price: 45000 },
+  { name: "Carapeguá", department: "Paraguarí", price: 55000 },
+  { name: "Ciudad del Este", department: "Alto Paraná", price: 45000 },
+  { name: "Colonia Yguazu", department: "Alto Paraná", price: 50000 },
+  { name: "Coronel Oviedo", department: "Caaguazú", price: 55000 },
+  { name: "Emboscada", department: "Cordillera", price: 55000 },
+  { name: "Escobar", department: "Paraguarí", price: 55000 },
+  { name: "Eusebio Ayala", department: "Cordillera", price: 55000 },
+  { name: "Félix Pérez Cardozo", department: "Caaguazú", price: 55000 },
+  { name: "Fernando de la Mora", department: "Central", price: 35000 },
+  { name: "General Bernardino Caballero", department: "Paraguarí", price: 55000 },
+  { name: "Guarambare", department: "Central", price: 50000 },
+  { name: "Hernandarias", department: "Alto Paraná", price: 50000 },
+  { name: "INTERIOR PAGO ANTICIPADO", department: "Varios", price: 35000 },
+  { name: "Ita", department: "Central", price: 55000 },
+  { name: "Itacurubí de la Cordillera", department: "Cordillera", price: 55000 },
+  { name: "Itaugua", department: "Central", price: 45000 },
+  { name: "J. Augusto Saldívar", department: "Central", price: 45000 },
+  { name: "Juan leon malloriquin", department: "Alto Paraná", price: 60000 },
+  { name: "Karaguatay", department: "Cordillera", price: 55000 },
+  { name: "Lambare", department: "Central", price: 35000 },
+  { name: "Limpio", department: "Central", price: 40000 },
+  { name: "Loma Grande", department: "Cordillera", price: 55000 },
+  { name: "Luque", department: "Central", price: 35000 },
+  { name: "Mariano Roque Alonso", department: "Central", price: 40000 },
+  { name: "Mauricio José Troche", department: "Caaguazú", price: 55000 },
+  { name: "Mbocayaty", department: "Guairá", price: 55000 },
+  { name: "Minga Guazu", department: "Alto Paraná", price: 50000 },
+  { name: "Natalicio Talavera", department: "Caaguazú", price: 55000 },
+  { name: "Ñemby", department: "Central", price: 40000 },
+  { name: "Nueva Italia", department: "Cordillera", price: 55000 },
+  { name: "Paraguarí", department: "Paraguarí", price: 55000 },
+  { name: "Pedro Juan Caballero", department: "Amambay", price: 50000 },
+  { name: "Pirayú", department: "Paraguarí", price: 55000 },
+  { name: "Piribebuy", department: "Cordillera", price: 55000 },
+  { name: "Presidente franco", department: "Alto Paraná", price: 50000 },
+  { name: "Remansito", department: "Presidente Hayes", price: 60000 },
+  { name: "Repatriación", department: "Caaguazú", price: 55000 },
+  { name: "San Alberto", department: "Alto Paraná", price: 55000 },
+  { name: "San Antonio", department: "Central", price: 45000 },
+  { name: "San Bernardino", department: "Cordillera", price: 55000 },
+  { name: "San José de los Arroyos", department: "Caaguazú", price: 55000 },
+  { name: "San Lorenzo", department: "Central", price: 35000 },
+  { name: "Santa Elena", department: "Cordillera", price: 55000 },
+  { name: "Santa Rita", department: "Alto Paraná", price: 55000 },
+  { name: "Sapucai", department: "Paraguarí", price: 55000 },
+  { name: "Tobatí", department: "Cordillera", price: 55000 },
+  { name: "Villa Elisa", department: "Central", price: 40000 },
+  { name: "Villa Hayes", department: "Presidente Hayes", price: 60000 },
+  { name: "Villarrica", department: "Guairá", price: 50000 },
+  { name: "Villeta", department: "Central", price: 55000 },
+  { name: "Yaguaron", department: "Paraguarí", price: 55000 },
+  { name: "Yataity del Norte", department: "Caaguazú", price: 55000 },
+  { name: "Yguazu", department: "Alto Paraná", price: 60000 },
+  { name: "Ypacarai", department: "Cordillera", price: 50000 },
+  { name: "Ypane", department: "Central", price: 45000 },
+];
+
+const CITY_COVERAGE_MAP: Record<string, number> = Object.fromEntries(
+  CITY_COVERAGE_DATA.map((city) => [normalizeText(city.name), city.price]),
+);
+
+const CITY_DEPARTMENT_MAP: Record<string, string> = Object.fromEntries(
+  CITY_COVERAGE_DATA.map((city) => [normalizeText(city.name), city.department]),
+);
+
+// Variantes habituales para evitar que pequeñas diferencias del Sheet
+// hagan que una ciudad válida aparezca como "sin cobertura".
+const CITY_ALIASES: Record<string, string> = {
+  // Ciudad del Este
+  cdeleste: "ciudaddeleste",
+  cdedeleste: "ciudaddeleste",
+  ciudadeste: "ciudaddeleste",
+
+  // Coronel Oviedo
+  cneloviedo: "coroneloviedo",
+
+  // J. Augusto Saldívar
+  augustosaldivar: "jaugustosaldivar",
+  joseaugustosaldivar: "jaugustosaldivar",
+  saldivar: "jaugustosaldivar",
+  jagustosaldivar: "jaugustosaldivar",
+  jagugustosaldivar: "jaugustosaldivar",
+
+  // Juan León Mallorquín
+  juanleonmallorquin: "juanleonmalloriquin",
+  mallorquin: "juanleonmalloriquin",
+
+  // Mariano Roque Alonso
+  mra: "marianoroquealonso",
+
+  // Mauricio José Troche
+  mauriciotroche: "mauriciojosetroche",
+
+  // Minga Guazú
+  mingaguasu: "mingaguazu",
+
+  // Pedro Juan Caballero
+  pjc: "pedrojuancaballero",
+
+  // Presidente Franco
+  puertopresidentefranco: "presidentefranco",
+  ptofranco: "presidentefranco",
+  pdtefranco: "presidentefranco",
+
+  // San José de los Arroyos
+  sanjosearroyos: "sanjosedelosarroyos",
+
+  // Santa Elena
+  santahelena: "santaelena",
+
+  // Villa Elisa
+  villaelsa: "villaelisa",
+
+  // Errores frecuentes
+  villela: "villeta",
+  sanantonioi: "sanantonio",
+  santoni: "sanantonio",
+
+  // Interior pago anticipado
+  interior: "interiorpagoanticipado",
+  pagoanticipado: "interiorpagoanticipado",
+};
+
+const resolveCityKey = (cityName: string): string => {
+  if (!cityName) return "";
+
+  const normalized = normalizeText(cityName);
+
+  if (Object.prototype.hasOwnProperty.call(CITY_COVERAGE_MAP, normalized)) {
+    return normalized;
+  }
+
+  if (CITY_ALIASES[normalized]) {
+    return CITY_ALIASES[normalized];
+  }
+
+  // Casos donde el campo CIUDAD llega acompañado por texto extra.
+  if (normalized.includes("pagoanticipado") || normalized.includes("interior")) {
+    return "interiorpagoanticipado";
+  }
+
+  if (normalized.includes("ciudaddeleste") || normalized.includes("cdedeleste")) {
+    return "ciudaddeleste";
+  }
+
+  if (normalized.includes("presidentefranco") || normalized.includes("puertopresidentefranco")) {
+    return "presidentefranco";
+  }
+
+  if (normalized.includes("augustosaldivar") || normalized === "saldivar") {
+    return "jaugustosaldivar";
+  }
+
+  if (normalized.includes("villaelisa") || normalized.includes("villaelsa")) {
+    return "villaelisa";
+  }
+
+  return normalized;
 };
 
 const hasCoverage = (cityName: string): boolean => {
   if (!cityName) return false;
-  const normalized = normalizeText(cityName);
-  if (normalized.includes("interior") || normalized.includes("pagoanticipado")) return true;
-  if (normalized.includes("villaelsa") || normalized.includes("villaelisa")) return true;
-  if (normalized.includes("augusto") || (normalized.includes("saldivar") && normalized.length < 20)) return true;
-  return CITY_COVERAGE_MAP.hasOwnProperty(normalized);
+  const cityKey = resolveCityKey(cityName);
+  return Object.prototype.hasOwnProperty.call(CITY_COVERAGE_MAP, cityKey);
 };
 
 const getCityDeliveryPrice = (cityName: string): number | null => {
   if (!cityName) return null;
-  const normalized = normalizeText(cityName);
-  if (normalized.includes("interior") || normalized.includes("pagoanticipado")) return 35000;
-  if (normalized.includes("augusto") || (normalized.includes("saldivar") && normalized.length < 20)) return 45000;
-  return CITY_COVERAGE_MAP[normalized] || null;
+  const cityKey = resolveCityKey(cityName);
+  return CITY_COVERAGE_MAP[cityKey] ?? null;
 };
 
 const getCityDepartment = (cityName: string): string | null => {
   if (!cityName) return null;
-  const normalized = normalizeText(cityName);
-  if (normalized.includes("interior") || normalized.includes("pagoanticipado")) return "Varios";
-  if (normalized.includes("augusto") || (normalized.includes("saldivar") && normalized.length < 20)) return "Central";
-  if (normalized.includes("villaelsa") || normalized.includes("villaelisa")) return "Central";
-  if (normalized.includes("ciudaddeleste") || normalized.includes("cdedeleste")) return "Alto Paraná";
-  return CITY_DEPARTMENT_MAP[normalized] || null;
+  const cityKey = resolveCityKey(cityName);
+  return CITY_DEPARTMENT_MAP[cityKey] ?? null;
 };
 
 function parseQuantity(value: any): number {
