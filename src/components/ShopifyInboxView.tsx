@@ -9,6 +9,8 @@ type SheetOrder = Record<string, string>;
 
 const AUTO_LOAD_KEY = "shopify_auto_load_enabled";
 const ACTIVE_FILTER_KEY = "shopify_active_filter";
+const PRODUCT_ALIAS_STORAGE_PREFIX = "shopify_product_aliases";
+const CITY_ALIAS_STORAGE_PREFIX = "shopify_city_aliases";
 
 type OrderStatus = "CARGAR" | "A DROPEAR" | "CARGADO" | "CARGADO_MANUAL" | "CANCELADO";
 type FilterType = "TODOS" | "CARGAR" | "CARGADO" | "CARGADO_MANUAL" | "A DROPEAR" | "CANCELADO";
@@ -84,7 +86,6 @@ const CITY_COVERAGE_DATA: CityCoverage[] = [
   { name: "Ñemby", department: "Central", price: 40000 },
   { name: "Nueva Italia", department: "Cordillera", price: 55000 },
   { name: "Paraguarí", department: "Paraguarí", price: 55000 },
-  { name: "Pedro Juan Caballero", department: "Amambay", price: 50000 },
   { name: "Pirayú", department: "Paraguarí", price: 55000 },
   { name: "Piribebuy", department: "Cordillera", price: 55000 },
   { name: "Presidente franco", department: "Alto Paraná", price: 50000 },
@@ -148,9 +149,6 @@ const CITY_ALIASES: Record<string, string> = {
 
   // Minga Guazú
   mingaguasu: "mingaguazu",
-
-  // Pedro Juan Caballero
-  pjc: "pedrojuancaballero",
 
   // Presidente Franco
   puertopresidentefranco: "presidentefranco",
@@ -338,8 +336,16 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
   const [selectedOrder, setSelectedOrder] = useState<{ order: SheetOrder; rowKey: string } | null>(null);
   const [showGuideModal, setShowGuideModal] = useState(false);
 
-  const [dateFrom, setDateFrom] = useState<string>("");
-  const [dateTo, setDateTo] = useState<string>("");
+  // Alias editables: permiten corregir/normalizar productos y ciudades sin tocar el Sheet.
+  // Se guardan por usuario en localStorage.
+  const [productAliases, setProductAliases] = useState<Record<string, string>>({});
+  const [cityAliases, setCityAliases] = useState<Record<string, string>>({});
+  const [showProductAliasModal, setShowProductAliasModal] = useState(false);
+  const [showCityAliasModal, setShowCityAliasModal] = useState(false);
+  const [selectedProductNames, setSelectedProductNames] = useState<Set<string>>(new Set());
+  const [selectedCityNames, setSelectedCityNames] = useState<Set<string>>(new Set());
+  const [productAliasTarget, setProductAliasTarget] = useState("");
+  const [cityAliasTarget, setCityAliasTarget] = useState("");
 
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [selectAll, setSelectAll] = useState(false);
@@ -370,6 +376,65 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       date: find("fecha", "date", "FECHA"),
     };
   }, [sheetHeaders]);
+
+  const productAliasStorageKey = `${PRODUCT_ALIAS_STORAGE_PREFIX}:${myEmail || "anon"}`;
+  const cityAliasStorageKey = `${CITY_ALIAS_STORAGE_PREFIX}:${myEmail || "anon"}`;
+
+  useEffect(() => {
+    try {
+      const savedProducts = localStorage.getItem(productAliasStorageKey);
+      const savedCities = localStorage.getItem(cityAliasStorageKey);
+      setProductAliases(savedProducts ? JSON.parse(savedProducts) : {});
+      setCityAliases(savedCities ? JSON.parse(savedCities) : {});
+    } catch (error) {
+      console.error("Error leyendo alias guardados:", error);
+      setProductAliases({});
+      setCityAliases({});
+    }
+  }, [productAliasStorageKey, cityAliasStorageKey]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(productAliasStorageKey, JSON.stringify(productAliases));
+    } catch (error) {
+      console.error("Error guardando alias de productos:", error);
+    }
+  }, [productAliases, productAliasStorageKey]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(cityAliasStorageKey, JSON.stringify(cityAliases));
+    } catch (error) {
+      console.error("Error guardando alias de ciudades:", error);
+    }
+  }, [cityAliases, cityAliasStorageKey]);
+
+  const getProductDisplayName = useCallback((rawName: string): string => {
+    if (!rawName) return "Sin producto";
+    return productAliases[normalizeText(rawName)] || rawName.trim();
+  }, [productAliases]);
+
+  const resolveCityWithUserAlias = useCallback((rawCity: string): string => {
+    if (!rawCity) return "";
+    const custom = cityAliases[normalizeText(rawCity)];
+    return custom || rawCity;
+  }, [cityAliases]);
+
+  const hasCoverageForCity = useCallback((rawCity: string): boolean => {
+    return hasCoverage(resolveCityWithUserAlias(rawCity));
+  }, [resolveCityWithUserAlias]);
+
+  const getCityDeliveryPriceForCity = useCallback((rawCity: string): number | null => {
+    return getCityDeliveryPrice(resolveCityWithUserAlias(rawCity));
+  }, [resolveCityWithUserAlias]);
+
+  const getCityDepartmentForCity = useCallback((rawCity: string): string | null => {
+    return getCityDepartment(resolveCityWithUserAlias(rawCity));
+  }, [resolveCityWithUserAlias]);
+
+  const getCityDisplayName = useCallback((rawCity: string): string => {
+    return resolveCityWithUserAlias(rawCity) || rawCity || "—";
+  }, [resolveCityWithUserAlias]);
 
   const getRowKey = useCallback((order: SheetOrder, idx: number): string => {
     if (order.__row) {
@@ -567,11 +632,24 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
   const matchProduct = useCallback((rawName: string) => {
     if (!rawName) return null;
-    const cleanName = normalizeText(rawName);
-    return products.find(p => normalizeText(p.title || "") === cleanName) ||
-           products.find(p => normalizeText(p.title || "").includes(cleanName) || cleanName.includes(normalizeText(p.title || ""))) ||
+
+    // Si el usuario unificó varios nombres, primero intentamos con el nombre corregido.
+    const correctedName = getProductDisplayName(rawName);
+    const cleanCorrected = normalizeText(correctedName);
+    const cleanRaw = normalizeText(rawName);
+
+    return products.find(p => normalizeText(p.title || "") === cleanCorrected) ||
+           products.find(p => normalizeText(p.title || "") === cleanRaw) ||
+           products.find(p => {
+             const title = normalizeText(p.title || "");
+             return title.includes(cleanCorrected) || cleanCorrected.includes(title);
+           }) ||
+           products.find(p => {
+             const title = normalizeText(p.title || "");
+             return title.includes(cleanRaw) || cleanRaw.includes(title);
+           }) ||
            null;
-  }, [products]);
+  }, [products, getProductDisplayName]);
 
   const loadOrder = useCallback(async (order: SheetOrder, rowKey: string, source: "auto" | "manual" = "auto") => {
     const productName = order[colKeys.product] || "";
@@ -579,10 +657,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     if (!matched) { toast.error(`❌ Producto no detectado: "${productName}"`); return false; }
 
     const city = order[colKeys.city] || "";
-    const deliveryPrice = getCityDeliveryPrice(city);
+    const deliveryPrice = getCityDeliveryPriceForCity(city);
     if (!deliveryPrice) { toast.warning(`⚠️ Ciudad "${city}" sin cobertura`); return false; }
 
-    const departamento = getCityDepartment(city);
+    const departamento = getCityDepartmentForCity(city);
     if (!departamento) toast.warning(`⚠️ No se pudo determinar el departamento para "${city}"`);
 
     const salePrice = getAmountFromRow(order, colKeys.amount);
@@ -646,7 +724,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       const status = getRowStatus(rowKey);
       if (status !== "CARGAR") continue;
       const city = order[colKeys.city] || "";
-      if (!hasCoverage(city)) continue;
+      if (!hasCoverageForCity(city)) continue;
       const success = await loadOrder(order, rowKey, "auto");
       if (success) count++; else errors++;
       if (count % 3 === 0) await new Promise(r => setTimeout(r, 100));
@@ -756,7 +834,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       }
       
       const city = order[colKeys.city] || "";
-      if (!hasCoverage(city)) {
+      if (!hasCoverageForCity(city)) {
         skippedCount++;
         continue;
       }
@@ -834,7 +912,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     sheetOrders.forEach((order, idx) => {
       const rowKey = getRowKey(order, idx);
       const city = order[colKeys.city] || "";
-      const covered = hasCoverage(city);
+      const covered = hasCoverageForCity(city);
       const status = getRowStatus(rowKey);
       const amount = getAmountFromRow(order, colKeys.amount);
       
@@ -873,7 +951,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       const rowKey = getRowKey(order, idx);
       const status = getRowStatus(rowKey);
       const city = order[colKeys.city] || "";
-      const covered = hasCoverage(city);
+      const covered = hasCoverageForCity(city);
       if (status === "CARGAR") {
         if (covered) cargarConCobertura++; else cargarSinCobertura++;
       } else if (status === "CARGADO" || status === "CARGADO_MANUAL") {
@@ -894,7 +972,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
       .filter(({ order, rowKey }) => {
         const status = getRowStatus(rowKey);
         const city = order[colKeys.city] || "";
-        const covered = hasCoverage(city);
+        const covered = hasCoverageForCity(city);
 
         let estadoMatch = true;
         switch (activeFilter) {
@@ -914,28 +992,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         }
         if (!coberturaMatch) return false;
 
-        let dateMatch = true;
-        if (dateFrom || dateTo) {
-          const orderDateStr = order[colKeys.date] || "";
-          if (orderDateStr && orderDateStr !== "—") {
-            try {
-              const orderDate = new Date(orderDateStr);
-              if (!isNaN(orderDate.getTime())) {
-                if (dateFrom) {
-                  const fromDate = new Date(dateFrom);
-                  if (orderDate < fromDate) dateMatch = false;
-                }
-                if (dateTo && dateMatch) {
-                  const toDate = new Date(dateTo);
-                  toDate.setHours(23, 59, 59);
-                  if (orderDate > toDate) dateMatch = false;
-                }
-              }
-            } catch (e) {}
-          }
-        }
-        if (!dateMatch) return false;
-
         if (searchType === "product" && productSearch.trim()) {
           const product = order[colKeys.product] || "";
           return product.toLowerCase().includes(productSearch.toLowerCase());
@@ -950,7 +1006,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
         }
         return true;
       });
-  }, [sheetOrders, activeFilter, search, productSearch, cityFilter, searchType, coverageFilter, dateFrom, dateTo, colKeys, getRowKey, getRowStatus]);
+  }, [sheetOrders, activeFilter, search, productSearch, cityFilter, searchType, coverageFilter, colKeys, getRowKey, getRowStatus, hasCoverageForCity]);
 
   useEffect(() => {
     if (filteredOrders.length === 0) {
@@ -1140,9 +1196,9 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const { order, rowKey } = selectedOrder;
     const status = getRowStatus(rowKey);
     const city = order[colKeys.city] || "";
-    const covered = hasCoverage(city);
-    const deliveryPrice = getCityDeliveryPrice(city);
-    const departamento = getCityDepartment(city);
+    const covered = hasCoverageForCity(city);
+    const deliveryPrice = getCityDeliveryPriceForCity(city);
+    const departamento = getCityDepartmentForCity(city);
     const salePrice = getDisplayAmount(order);
     const productName = order[colKeys.product] || "";
     const matched = matchProduct(productName);
@@ -1256,6 +1312,160 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     );
   };
 
+  const renderProductAliasModal = () => {
+    if (!showProductAliasModal) return null;
+
+    const toggleName = (raw: string) => {
+      setSelectedProductNames(prev => {
+        const next = new Set(prev);
+        if (next.has(raw)) next.delete(raw); else next.add(raw);
+        return next;
+      });
+    };
+
+    const applyAlias = () => {
+      const target = productAliasTarget.trim();
+      if (selectedProductNames.size === 0) { toast.warning("Seleccioná al menos un nombre de producto"); return; }
+      if (!target) { toast.warning("Escribí o seleccioná el nombre final del producto"); return; }
+
+      setProductAliases(prev => {
+        const next = { ...prev };
+        selectedProductNames.forEach(raw => { next[normalizeText(raw)] = target; });
+        return next;
+      });
+      toast.success(`✅ ${selectedProductNames.size} nombre(s) unificados como “${target}”`);
+      setSelectedProductNames(new Set());
+      setProductAliasTarget("");
+    };
+
+    const removeSelectedAliases = () => {
+      if (selectedProductNames.size === 0) { toast.warning("Seleccioná al menos un producto"); return; }
+      setProductAliases(prev => {
+        const next = { ...prev };
+        selectedProductNames.forEach(raw => delete next[normalizeText(raw)]);
+        return next;
+      });
+      toast.success("Alias eliminados para los productos seleccionados");
+      setSelectedProductNames(new Set());
+    };
+
+    return (
+      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-md" onClick={() => setShowProductAliasModal(false)}>
+        <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-700 bg-slate-950 shadow-2xl" onClick={e => e.stopPropagation()}>
+          <div className="flex items-start justify-between border-b border-slate-800 p-5">
+            <div><p className="text-xs font-black uppercase tracking-[0.2em] text-violet-300">Editor múltiple</p><h2 className="text-2xl font-black text-white">Unificar nombres de productos</h2><p className="mt-1 text-sm text-slate-400">Seleccioná varios nombres del Sheet y asignales un solo nombre. El Sheet original no se modifica.</p></div>
+            <button onClick={() => setShowProductAliasModal(false)} className="rounded-xl bg-slate-800 px-3 py-2 font-black text-slate-300">×</button>
+          </div>
+
+          <div className="grid min-h-0 flex-1 gap-4 overflow-hidden p-5 lg:grid-cols-[1fr_320px]">
+            <div className="min-h-0 overflow-y-auto rounded-2xl border border-slate-800">
+              {uniqueProductNames.map(item => {
+                const selected = selectedProductNames.has(item.raw);
+                const changed = normalizeText(item.raw) !== normalizeText(item.display);
+                return (
+                  <label key={normalizeText(item.raw)} className={`flex cursor-pointer items-center gap-3 border-b border-slate-800/70 px-4 py-3 transition ${selected ? "bg-violet-500/10" : "hover:bg-white/5"}`}>
+                    <input type="checkbox" checked={selected} onChange={() => toggleName(item.raw)} className="h-4 w-4" />
+                    <div className="min-w-0 flex-1"><div className="truncate text-sm font-black text-white" title={item.raw}>{item.raw}</div>{changed && <div className="truncate text-xs font-bold text-violet-300">→ {item.display}</div>}</div>
+                    <span className="rounded-full bg-slate-900 px-2 py-1 text-xs font-black text-slate-300">{item.count}</span>
+                  </label>
+                );
+              })}
+            </div>
+
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+                <p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Seleccionados</p><p className="mt-1 text-3xl font-black text-white">{selectedProductNames.size}</p>
+              </div>
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+                <label className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Nombre final</label>
+                <input list="catalog-product-titles" value={productAliasTarget} onChange={e => setProductAliasTarget(e.target.value)} placeholder="Ej: Procesador de Alimentos 3 en 1" className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-3 text-sm font-bold text-white outline-none focus:border-violet-400" />
+                <datalist id="catalog-product-titles">{products.map((p, i) => <option key={p.id || i} value={p.title || ""} />)}</datalist>
+                <p className="mt-2 text-xs text-slate-500">Podés escribir un nombre o elegir uno existente del catálogo.</p>
+              </div>
+              <button onClick={applyAlias} className="w-full rounded-2xl bg-violet-600 px-4 py-3 text-sm font-black text-white">✅ Aplicar a seleccionados</button>
+              <button onClick={removeSelectedAliases} className="w-full rounded-2xl bg-slate-800 px-4 py-3 text-sm font-black text-slate-300 ring-1 ring-slate-700">↩ Quitar alias seleccionados</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderCityAliasModal = () => {
+    if (!showCityAliasModal) return null;
+
+    const toggleName = (raw: string) => {
+      setSelectedCityNames(prev => {
+        const next = new Set(prev);
+        if (next.has(raw)) next.delete(raw); else next.add(raw);
+        return next;
+      });
+    };
+
+    const applyAlias = () => {
+      if (selectedCityNames.size === 0) { toast.warning("Seleccioná al menos una ciudad"); return; }
+      if (!cityAliasTarget) { toast.warning("Seleccioná la ciudad correcta"); return; }
+      setCityAliases(prev => {
+        const next = { ...prev };
+        selectedCityNames.forEach(raw => { next[normalizeText(raw)] = cityAliasTarget; });
+        return next;
+      });
+      toast.success(`✅ ${selectedCityNames.size} nombre(s) asociados a ${cityAliasTarget}`);
+      setSelectedCityNames(new Set());
+      setCityAliasTarget("");
+    };
+
+    const removeSelectedAliases = () => {
+      if (selectedCityNames.size === 0) { toast.warning("Seleccioná al menos una ciudad"); return; }
+      setCityAliases(prev => {
+        const next = { ...prev };
+        selectedCityNames.forEach(raw => delete next[normalizeText(raw)]);
+        return next;
+      });
+      toast.success("Alias eliminados para las ciudades seleccionadas");
+      setSelectedCityNames(new Set());
+    };
+
+    return (
+      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/85 p-4 backdrop-blur-md" onClick={() => setShowCityAliasModal(false)}>
+        <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-3xl border border-slate-700 bg-slate-950 shadow-2xl" onClick={e => e.stopPropagation()}>
+          <div className="flex items-start justify-between border-b border-slate-800 p-5">
+            <div><p className="text-xs font-black uppercase tracking-[0.2em] text-cyan-300">Editor múltiple</p><h2 className="text-2xl font-black text-white">Corregir nombres de ciudades</h2><p className="mt-1 text-sm text-slate-400">Seleccioná una o varias variantes y asignalas a una ciudad válida con su departamento y delivery.</p></div>
+            <button onClick={() => setShowCityAliasModal(false)} className="rounded-xl bg-slate-800 px-3 py-2 font-black text-slate-300">×</button>
+          </div>
+          <div className="grid min-h-0 flex-1 gap-4 overflow-hidden p-5 lg:grid-cols-[1fr_320px]">
+            <div className="min-h-0 overflow-y-auto rounded-2xl border border-slate-800">
+              {uniqueCityNames.map(item => {
+                const selected = selectedCityNames.has(item.raw);
+                const changed = normalizeText(item.raw) !== normalizeText(item.display);
+                return (
+                  <label key={normalizeText(item.raw)} className={`flex cursor-pointer items-center gap-3 border-b border-slate-800/70 px-4 py-3 transition ${selected ? "bg-cyan-500/10" : "hover:bg-white/5"}`}>
+                    <input type="checkbox" checked={selected} onChange={() => toggleName(item.raw)} className="h-4 w-4" />
+                    <div className="min-w-0 flex-1"><div className="truncate text-sm font-black text-white" title={item.raw}>{item.raw}</div>{changed && <div className="truncate text-xs font-bold text-cyan-300">→ {item.display}</div>}</div>
+                    <span className={`rounded-full px-2 py-1 text-xs font-black ${item.covered ? "bg-emerald-500/10 text-emerald-300" : "bg-rose-500/10 text-rose-300"}`}>{item.count}</span>
+                  </label>
+                );
+              })}
+            </div>
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4"><p className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Seleccionadas</p><p className="mt-1 text-3xl font-black text-white">{selectedCityNames.size}</p></div>
+              <div className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4">
+                <label className="text-xs font-black uppercase tracking-[0.16em] text-slate-500">Ciudad correcta</label>
+                <select value={cityAliasTarget} onChange={e => setCityAliasTarget(e.target.value)} className="mt-2 w-full rounded-xl border border-slate-700 bg-slate-950 px-3 py-3 text-sm font-bold text-white outline-none focus:border-cyan-400">
+                  <option value="">Seleccionar...</option>
+                  {CITY_COVERAGE_DATA.map(city => <option key={normalizeText(city.name)} value={city.name}>{city.name} · {city.department} · {nf(city.price)} Gs</option>)}
+                </select>
+              </div>
+              <button onClick={applyAlias} className="w-full rounded-2xl bg-cyan-600 px-4 py-3 text-sm font-black text-white">✅ Aplicar a seleccionadas</button>
+              <button onClick={removeSelectedAliases} className="w-full rounded-2xl bg-slate-800 px-4 py-3 text-sm font-black text-slate-300 ring-1 ring-slate-700">↩ Quitar alias seleccionados</button>
+              <p className="rounded-2xl border border-rose-400/15 bg-rose-500/5 p-3 text-xs font-semibold text-rose-200">Pedro Juan Caballero ya no está en la lista de cobertura. Si aparece en el Sheet quedará como “Sin cobertura”, salvo que vos la asocies manualmente a otra ciudad.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   if (loadingStatuses) {
     return (
       <div className="flex h-64 items-center justify-center bg-slate-950">
@@ -1276,7 +1486,7 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     const productName = order[colKeys.product] || "";
     const matched = matchProduct(productName);
     const salePrice = getAmountFromRow(order, colKeys.amount);
-    const deliveryPrice = getCityDeliveryPrice(order[colKeys.city] || "") || 0;
+    const deliveryPrice = getCityDeliveryPriceForCity(order[colKeys.city] || "") || 0;
     return sum + (salePrice - ((matched?.provider_price_gs || 0) + deliveryPrice));
   }, 0);
   const avgTicket = dashboardStats.cargados > 0 ? Math.round(dashboardStats.totalVenta / dashboardStats.cargados) : 0;
@@ -1288,11 +1498,67 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
     return acc;
   }, {})).sort((a, b) => b[1] - a[1]).slice(0, 5);
 
-  const productRanking = Object.entries(sheetOrders.reduce((acc: Record<string, number>, order) => {
-    const product = order[colKeys.product] || "Sin producto";
-    acc[product] = (acc[product] || 0) + 1;
-    return acc;
-  }, {})).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  // Ranking operativo: SIEMPRE toma solo pedidos pendientes (CARGAR),
+  // no depende de fecha ni del filtro de estado. Solo respeta cobertura.
+  const productRanking = (() => {
+    const grouped: Record<string, number> = {};
+
+    sheetOrders.forEach((order, idx) => {
+      const rowKey = getRowKey(order, idx);
+      if (getRowStatus(rowKey) !== "CARGAR") return;
+
+      const city = order[colKeys.city] || "";
+      const covered = hasCoverageForCity(city);
+
+      if (coverageFilter === "covered" && !covered) return;
+      if (coverageFilter === "uncovered" && covered) return;
+
+      const rawProduct = order[colKeys.product] || "Sin producto";
+      const product = getProductDisplayName(rawProduct);
+      grouped[product] = (grouped[product] || 0) + 1;
+    });
+
+    return Object.entries(grouped)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8);
+  })();
+
+  const pendingForCoverage = (() => {
+    return sheetOrders.filter((order, idx) => {
+      const rowKey = getRowKey(order, idx);
+      if (getRowStatus(rowKey) !== "CARGAR") return false;
+      const covered = hasCoverageForCity(order[colKeys.city] || "");
+      if (coverageFilter === "covered") return covered;
+      if (coverageFilter === "uncovered") return !covered;
+      return true;
+    }).length;
+  })();
+
+  const uniqueProductNames = (() => {
+    const names = new Map<string, { raw: string; count: number; display: string }>();
+    sheetOrders.forEach(order => {
+      const raw = (order[colKeys.product] || "").trim();
+      if (!raw) return;
+      const key = normalizeText(raw);
+      const current = names.get(key);
+      if (current) current.count += 1;
+      else names.set(key, { raw, count: 1, display: getProductDisplayName(raw) });
+    });
+    return Array.from(names.values()).sort((a, b) => b.count - a.count || a.raw.localeCompare(b.raw));
+  })();
+
+  const uniqueCityNames = (() => {
+    const names = new Map<string, { raw: string; count: number; display: string; covered: boolean }>();
+    sheetOrders.forEach(order => {
+      const raw = (order[colKeys.city] || "").trim();
+      if (!raw) return;
+      const key = normalizeText(raw);
+      const current = names.get(key);
+      if (current) current.count += 1;
+      else names.set(key, { raw, count: 1, display: getCityDisplayName(raw), covered: hasCoverageForCity(raw) });
+    });
+    return Array.from(names.values()).sort((a, b) => b.count - a.count || a.raw.localeCompare(b.raw));
+  })();
 
   const maxCityCount = Math.max(1, ...cityRanking.map(([, value]) => value));
   const maxProductCount = Math.max(1, ...productRanking.map(([, value]) => value));
@@ -1428,9 +1694,18 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             />
 
             <div className="flex flex-wrap items-center gap-2">
-              <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="rounded-2xl border border-slate-800 bg-slate-950/70 px-3 py-3 text-sm font-semibold text-slate-200 outline-none focus:border-cyan-400" />
-              <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="rounded-2xl border border-slate-800 bg-slate-950/70 px-3 py-3 text-sm font-semibold text-slate-200 outline-none focus:border-cyan-400" />
-              {(dateFrom || dateTo) && <button className="rounded-2xl bg-slate-800 px-3 py-3 text-sm font-black text-slate-300 ring-1 ring-slate-700" onClick={() => { setDateFrom(""); setDateTo(""); }}>✖</button>}
+              <button
+                onClick={() => { setSelectedProductNames(new Set()); setProductAliasTarget(""); setShowProductAliasModal(true); }}
+                className="rounded-2xl bg-violet-500/15 px-3 py-3 text-sm font-black text-violet-200 ring-1 ring-violet-400/25 transition hover:bg-violet-500/25"
+              >
+                ✏️ Unificar productos
+              </button>
+              <button
+                onClick={() => { setSelectedCityNames(new Set()); setCityAliasTarget(""); setShowCityAliasModal(true); }}
+                className="rounded-2xl bg-cyan-500/15 px-3 py-3 text-sm font-black text-cyan-200 ring-1 ring-cyan-400/25 transition hover:bg-cyan-500/25"
+              >
+                📍 Corregir ciudades
+              </button>
             </div>
           </div>
         </div>
@@ -1472,7 +1747,6 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                 <h2 className="text-lg font-black text-white">Pedidos</h2>
                 <p className="text-sm font-medium text-slate-400">Mostrando {filteredOrders.length} de {sheetOrders.length} filas</p>
               </div>
-              {(dateFrom || dateTo) && <span className="rounded-full bg-amber-500/10 px-3 py-1 text-xs font-black text-amber-300 ring-1 ring-amber-400/25">📅 Filtro por fechas activo</span>}
             </div>
 
             <div className="max-h-[720px] overflow-auto">
@@ -1501,13 +1775,13 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                   {filteredOrders.map(({ order, idx, rowKey }) => {
                     const status = getRowStatus(rowKey);
                     const city = order[colKeys.city] || "";
-                    const deliveryPrice = getCityDeliveryPrice(city);
+                    const deliveryPrice = getCityDeliveryPriceForCity(city);
                     const covered = deliveryPrice !== null;
                     const salePrice = getDisplayAmount(order);
                     const orderDate = getOrderDate(order);
                     const canLoad = status === "CARGAR" && covered && salePrice > 0;
                     const orderNumber = getRowOrderNumber(rowKey);
-                    const departamento = getCityDepartment(city);
+                    const departamento = getCityDepartmentForCity(city);
                     const rowDisplay = order.__row || String(idx + 1);
                     const isSelected = selectedRows.has(rowKey);
 
@@ -1521,10 +1795,10 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
                         <td className="px-3 py-3 font-semibold text-slate-300">{orderDate}</td>
                         <td className="px-3 py-3"><div className="max-w-[170px] truncate font-black text-white" title={order[colKeys.name] || ""}>{order[colKeys.name] || "—"}</div></td>
                         <td className="px-3 py-3 font-semibold text-slate-300">{order[colKeys.phone] || "—"}</td>
-                        <td className="px-3 py-3"><div className={`max-w-[170px] truncate font-black ${covered ? "text-emerald-300" : "text-rose-300"}`} title={city}>{city || "—"}</div></td>
+                        <td className="px-3 py-3"><div className={`max-w-[170px] truncate font-black ${covered ? "text-emerald-300" : "text-rose-300"}`} title={city}>{getCityDisplayName(city)}</div></td>
                         <td className="px-3 py-3"><span className={departamento ? "font-bold text-cyan-300" : "text-slate-500"}>{departamento || "—"}</span></td>
                         <td className="px-3 py-3 text-right">{deliveryPrice ? <span className="font-black text-amber-300">{nf(deliveryPrice)} Gs</span> : <span className="text-slate-500">—</span>}</td>
-                        <td className="px-3 py-3"><div className="max-w-[220px] truncate font-semibold text-slate-300" title={order[colKeys.product] || ""}>{order[colKeys.product] || "—"}</div></td>
+                        <td className="px-3 py-3"><div className="max-w-[220px] truncate font-semibold text-slate-300" title={order[colKeys.product] || ""}>{getProductDisplayName(order[colKeys.product] || "")}</div></td>
                         <td className="px-3 py-3 text-center font-black text-white">{parseQuantity(order[colKeys.qty])}</td>
                         <td className="px-3 py-3 text-right font-black text-emerald-300">{salePrice > 0 ? `${nf(salePrice)} Gs` : "—"}</td>
                         <td className="px-3 py-3 text-center">
@@ -1584,10 +1858,15 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
 
           <aside className="space-y-4">
             <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-4 shadow-xl shadow-black/20 backdrop-blur-xl">
-              <h2 className="text-lg font-black text-white">Top productos</h2>
-              <p className="mb-5 text-sm font-medium text-slate-400">Más repetidos en el sheet.</p>
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-black text-white">Productos pendientes</h2>
+                  <p className="mb-5 text-sm font-medium text-slate-400">Sin fecha · solo pedidos que todavía están en Pendiente.</p>
+                </div>
+                <button onClick={() => { setSelectedProductNames(new Set()); setProductAliasTarget(""); setShowProductAliasModal(true); }} className="rounded-xl bg-violet-500/15 px-2.5 py-1.5 text-xs font-black text-violet-200 ring-1 ring-violet-400/25">✏️ Editar</button>
+              </div>
               <div className="space-y-3">
-                {productRanking.length === 0 && <div className="text-sm text-slate-500">Sin datos</div>}
+                {productRanking.length === 0 && <div className="text-sm text-slate-500">No hay productos pendientes para este filtro.</div>}
                 {productRanking.map(([product, value]) => (
                   <div key={product} className="space-y-2">
                     <div className="flex justify-between gap-3 text-sm"><span className="truncate font-bold text-slate-200" title={product}>{product}</span><span className="font-black text-white">{value}</span></div>
@@ -1600,16 +1879,18 @@ export default function ShopifyInboxView({ onSheetConfirm }: ShopifyInboxProps) 
             <div className="rounded-3xl border border-slate-800/80 bg-slate-900/80 p-4 shadow-xl shadow-black/20 backdrop-blur-xl">
               <h2 className="text-lg font-black text-white">Resumen rápido</h2>
               <div className="mt-4 space-y-3 text-sm">
-                <div className="flex justify-between rounded-2xl bg-slate-950/60 p-3"><span className="font-bold text-slate-400">Visible</span><span className="font-black text-white">{filteredOrders.length}</span></div>
-                <div className="flex justify-between rounded-2xl bg-slate-950/60 p-3"><span className="font-bold text-slate-400">Seleccionados</span><span className="font-black text-blue-300">{selectedRows.size}</span></div>
-                <div className="flex justify-between rounded-2xl bg-slate-950/60 p-3"><span className="font-bold text-slate-400">A dropear</span><span className="font-black text-amber-300">{dashboardStats.dropeados}</span></div>
-                <div className="flex justify-between rounded-2xl bg-slate-950/60 p-3"><span className="font-bold text-slate-400">Sin cobertura</span><span className="font-black text-rose-300">{dashboardStats.pendientesSinCobertura}</span></div>
+                <div className="flex justify-between rounded-2xl bg-slate-950/60 p-3"><span className="font-bold text-slate-400">Pendientes del filtro</span><span className="font-black text-white">{pendingForCoverage}</span></div>
+                <div className="flex justify-between rounded-2xl bg-slate-950/60 p-3"><span className="font-bold text-slate-400">Productos distintos</span><span className="font-black text-violet-300">{productRanking.length}</span></div>
+                <div className="flex justify-between rounded-2xl bg-slate-950/60 p-3"><span className="font-bold text-slate-400">Visible en tabla</span><span className="font-black text-blue-300">{filteredOrders.length}</span></div>
+                <div className="flex justify-between rounded-2xl bg-slate-950/60 p-3"><span className="font-bold text-slate-400">Filtro cobertura</span><span className="font-black text-cyan-300">{coverageFilter === "covered" ? "Con cobertura" : coverageFilter === "uncovered" ? "Sin cobertura" : "Todas"}</span></div>
               </div>
             </div>
           </aside>
         </div>
 
         {renderGuideModal()}
+        {renderProductAliasModal()}
+        {renderCityAliasModal()}
       </div>
     </div>
   );
