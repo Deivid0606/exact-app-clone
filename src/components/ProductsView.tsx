@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import ImageUploadField from "./ImageUploadField";
+import WebPageBuilder from "./WebPageBuilder";
 import { createPortal } from "react-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/useAuth";
@@ -980,6 +981,7 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
   const { profile } = useAuth();
   const role = normalizeRole(profile?.role);
   const myEmail = normalizeEmail(profile?.email);
+  const [mainView, setMainView] = useState<"productos" | "paginas">("productos");
 
   const [products, setProducts] = useState<Product[]>([]);
   const [profiles, setProfiles] = useState<{ email: string; name: string | null; logo_url: string | null; phone: string | null }[]>([]);
@@ -1610,6 +1612,26 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
 
   return (
     <div className="app-card space-y-8">
+      {/* Navegación principal: Productos / Páginas Web */}
+      <div className="flex flex-wrap gap-2 border-b border-border/70 pb-4">
+        <button
+          className={`nav-btn !px-5 !py-2.5 ${mainView === "productos" ? "active" : ""}`}
+          onClick={() => setMainView("productos")}
+        >
+          📦 Productos
+        </button>
+        <button
+          className={`nav-btn !px-5 !py-2.5 ${mainView === "paginas" ? "active" : ""}`}
+          onClick={() => setMainView("paginas")}
+        >
+          🌐 Páginas Web
+        </button>
+      </div>
+
+      {mainView === "paginas" ? (
+        <WebPageBuilder products={products} userEmail={myEmail} />
+      ) : (
+        <>
       {/* Header */}
       <div className="rounded-[28px] border border-border/70 bg-gradient-to-br from-background via-secondary/20 to-background p-5 sm:p-6 shadow-sm flex flex-col lg:flex-row lg:items-start lg:justify-between gap-5">
         <div>
@@ -2271,6 +2293,8 @@ export default function ProductsView({ onLoadProduct }: { onLoadProduct?: (sku: 
           title={viewingImage.title}
           onClose={() => setViewingImage(null)}
         />
+      )}
+    </>
       )}
     </div>
   );
