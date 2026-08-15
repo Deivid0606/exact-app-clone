@@ -11,6 +11,7 @@ const nf = (n: number) =>
 
 type PublicLandingRow = {
   id: string;
+  owner_email: string;
   name: string;
   slug: string;
   status: "draft" | "published";
@@ -76,6 +77,73 @@ const normalizePublicConfig = (raw: any): LandingConfig => {
   return { ...raw, contentBlocks: blocks } as LandingConfig;
 };
 
+
+const getStoreSessionId = () => {
+  const key = "sky_store_session_id";
+  let value = localStorage.getItem(key);
+
+  if (!value) {
+    value =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+    localStorage.setItem(key, value);
+  }
+
+  return value;
+};
+
+const initMetaPixel = (pixelId: string) => {
+  if (!pixelId || typeof window === "undefined") return;
+
+  const w = window as any;
+
+  if (!w.fbq) {
+    const fbq: any = function (...args: any[]) {
+      if (fbq.callMethod) {
+        fbq.callMethod.apply(fbq, args);
+      } else {
+        fbq.queue.push(args);
+      }
+    };
+
+    fbq.push = fbq;
+    fbq.loaded = true;
+    fbq.version = "2.0";
+    fbq.queue = [];
+    w.fbq = fbq;
+
+    const script = document.createElement("script");
+    script.async = true;
+    script.src = "https://connect.facebook.net/en_US/fbevents.js";
+    script.dataset.skyMetaPixel = "true";
+    document.head.appendChild(script);
+  }
+
+  const initializedKey = `sky_meta_pixel_initialized_${pixelId}`;
+
+  if (!sessionStorage.getItem(initializedKey)) {
+    w.fbq("init", pixelId);
+    sessionStorage.setItem(initializedKey, "1");
+  }
+};
+
+const trackMeta = (
+  eventName: string,
+  payload?: Record<string, unknown>,
+  eventId?: string,
+) => {
+  const fbq = (window as any).fbq;
+  if (!fbq) return;
+
+  if (eventId) {
+    fbq("track", eventName, payload || {}, { eventID: eventId });
+  } else {
+    fbq("track", eventName, payload || {});
+  }
+};
+
 export default function PublicLandingPage({
   slug,
   pageId,
@@ -92,6 +160,7 @@ export default function PublicLandingPage({
   const [quantity, setQuantity] = useState(1);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [sending, setSending] = useState(false);
+  const [metaPixelId, setMetaPixelId] = useState("");
   const [form, setForm] = useState({
     full_name: "",
     phone: "",
@@ -106,7 +175,7 @@ export default function PublicLandingPage({
     (async () => {
       let query = supabase
         .from("landing_pages")
-        .select("id,name,slug,status,config");
+        .select("id,owner_email,name,slug,status,config");
 
       if (preview && pageId) {
         // Vista previa: el usuario autenticado puede leer su propio borrador
@@ -145,6 +214,81 @@ export default function PublicLandingPage({
     };
   }, [slug, pageId, preview]);
 
+  useEffect(() => {
+    if (!page || preview) return;
+
+    let cancelled = false;
+
+    (async () => {
+      const { data, error } = await supabase.rpc(
+        "get_public_store_pixel",
+        {
+          p_landing_page_id: page.id,
+        },
+      );
+
+      if (cancelled || error) {
+        if (error) console.error("Error cargando Pixel:", error);
+        return;
+      }
+
+      const pixelId =
+        typeof data === "string"
+          ? data
+          : Array.isArray(data)
+            ? data[0]?.meta_pixel_id || data[0] || ""
+            : data?.meta_pixel_id || "";
+
+      if (!pixelId) return;
+
+      setMetaPixelId(String(pixelId));
+      initMetaPixel(String(pixelId));
+      trackMeta("PageView");
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [page?.id, preview]);
+
+  const trackStoreEvent = async (
+    eventType: string,
+    extra?: {
+      productId?: string;
+      valueGs?: number;
+      department?: string;
+      city?: string;
+      metadata?: Record<string, unknown>;
+    },
+  ) => {
+    if (!page || preview) return;
+
+    try {
+      await supabase.from("landing_page_events").insert({
+        landing_page_id: page.id,
+        session_id: getStoreSessionId(),
+        event_type: eventType,
+        product_id: extra?.productId || null,
+        value_gs: Number(extra?.valueGs || 0) || null,
+        department: extra?.department || null,
+        city: extra?.city || null,
+        metadata: {
+          slug: page.slug,
+          page_name: page.name,
+          ...(extra?.metadata || {}),
+        },
+      });
+    } catch (error) {
+      console.error("Error tracking store event:", error);
+    }
+  };
+
+  useEffect(() => {
+    if (!page || preview) return;
+
+    trackStoreEvent("page_view");
+  }, [page?.id, preview]);
+
   const config = page?.config;
   const products = config?.productSnapshots || [];
   const product =
@@ -154,12 +298,58 @@ export default function PublicLandingPage({
   const firstImage = media.find((m) => m.type === "image")?.url || "";
 
   useEffect(() => {
+    if (!page || !product || preview) return;
+
+    trackStoreEvent("view_content", {
+      productId: product.id,
+      valueGs: Number(product.price || 0),
+      metadata: {
+        product_title: product.title,
+      },
+    });
+
+    if (metaPixelId) {
+      trackMeta("ViewContent", {
+        content_ids: [product.id],
+        content_name: product.title,
+        content_type: "product",
+        currency: "PYG",
+        value: Number(product.price || 0),
+      });
+    }
+  }, [page?.id, product?.id, preview, metaPixelId]);
+
+  useEffect(() => {
     setMediaIndex(0);
     setQuantity(1);
   }, [activeProductId]);
 
   useEffect(() => {
     if (!checkoutOpen) return;
+
+    if (!preview && page && product) {
+      trackStoreEvent("checkout_open", {
+        productId: product.id,
+        valueGs: total,
+        department: form.department || undefined,
+        city: form.city || undefined,
+        metadata: {
+          quantity,
+          product_title: product.title,
+        },
+      });
+
+      if (metaPixelId) {
+        trackMeta("InitiateCheckout", {
+          content_ids: [product.id],
+          content_name: product.title,
+          content_type: "product",
+          currency: "PYG",
+          value: total,
+          num_items: quantity,
+        });
+      }
+    }
 
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -198,32 +388,65 @@ export default function PublicLandingPage({
     }
 
     setSending(true);
-    const { error } = await supabase.from("landing_page_orders").insert({
-      landing_page_id: page.id,
-      product_id: product.id,
-      product_title: product.title,
-      quantity,
-      unit_price_gs: product.price,
-      total_gs: total,
-      customer_name: form.full_name.trim(),
-      phone: form.phone.trim(),
-      department: form.department.trim(),
-      city: form.city.trim(),
-      address: form.address.trim(),
-      reference: form.reference.trim(),
-      source: "landing_page",
-      status: "nuevo",
-      raw_payload: {
-        slug: page.slug,
-        sku: product.sku,
-      },
-    });
+
+    const { data: createdOrder, error } = await supabase
+      .from("landing_page_orders")
+      .insert({
+        landing_page_id: page.id,
+        product_id: product.id,
+        product_title: product.title,
+        quantity,
+        unit_price_gs: product.price,
+        total_gs: total,
+        customer_name: form.full_name.trim(),
+        phone: form.phone.trim(),
+        department: form.department.trim(),
+        city: form.city.trim(),
+        address: form.address.trim(),
+        reference: form.reference.trim(),
+        source: "landing_page",
+        status: "nuevo",
+        raw_payload: {
+          slug: page.slug,
+          sku: product.sku,
+        },
+      })
+      .select("id")
+      .single();
+
     setSending(false);
 
-    if (error) {
+    if (error || !createdOrder?.id) {
       console.error(error);
       alert("No se pudo registrar el pedido. Revisá la configuración de Supabase.");
       return;
+    }
+
+    await trackStoreEvent("purchase", {
+      productId: product.id,
+      valueGs: total,
+      department: form.department.trim(),
+      city: form.city.trim(),
+      metadata: {
+        order_id: createdOrder.id,
+        quantity,
+        product_title: product.title,
+      },
+    });
+
+    if (metaPixelId) {
+      trackMeta(
+        "Purchase",
+        {
+          content_ids: [product.id],
+          content_name: product.title,
+          content_type: "product",
+          currency: "PYG",
+          value: total,
+          num_items: quantity,
+        },
+        `landing-order-${createdOrder.id}`,
+      );
     }
 
     setCheckoutOpen(false);
