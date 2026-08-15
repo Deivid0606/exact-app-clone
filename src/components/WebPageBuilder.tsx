@@ -282,6 +282,8 @@ export default function WebPageBuilder({
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
+  const [insertAtIndex, setInsertAtIndex] = useState<number | null>(null);
+  const [draggedBlockIndex, setDraggedBlockIndex] = useState<number | null>(null);
 
   const selectedProducts = useMemo(
     () => products.filter((p) => config.selectedProductIds.includes(p.id)),
@@ -326,6 +328,8 @@ export default function WebPageBuilder({
     setSlug("");
     setConfig(defaultConfig());
     setPreviewMode("desktop");
+    setInsertAtIndex(null);
+    setDraggedBlockIndex(null);
     setEditorOpen(true);
   };
 
@@ -334,6 +338,8 @@ export default function WebPageBuilder({
     setName(page.name);
     setSlug(page.slug);
     setConfig(normalizeConfig(page.config));
+    setInsertAtIndex(null);
+    setDraggedBlockIndex(null);
     setEditorOpen(true);
   };
 
@@ -382,57 +388,158 @@ export default function WebPageBuilder({
       .replace(/[^a-zA-Z0-9._-]+/g, "-")
       .replace(/-+/g, "-");
 
+  const getFileMimeType = (file: File) => {
+    if (file.type) return file.type;
+
+    const ext = file.name.split(".").pop()?.toLowerCase() || "";
+    const mimeByExtension: Record<string, string> = {
+      jpg: "image/jpeg",
+      jpeg: "image/jpeg",
+      png: "image/png",
+      webp: "image/webp",
+      gif: "image/gif",
+      mp4: "video/mp4",
+      webm: "video/webm",
+      mov: "video/quicktime",
+      m4v: "video/mp4",
+    };
+
+    return mimeByExtension[ext] || "application/octet-stream";
+  };
+
   const uploadFile = async (
     file: File,
     folder: string,
   ): Promise<LandingMediaItem | null> => {
-    const isImage = file.type.startsWith("image/");
-    const isVideo = file.type.startsWith("video/");
-    if (!isImage && !isVideo) {
-      toast.error("Solo se permiten imágenes o videos.");
-      return null;
-    }
+    try {
+      const mimeType = getFileMimeType(file);
+      const isImage = mimeType.startsWith("image/");
+      const isVideo = mimeType.startsWith("video/");
 
-    const max = isVideo ? 80 * 1024 * 1024 : 15 * 1024 * 1024;
-    if (file.size > max) {
+      if (!isImage && !isVideo) {
+        toast.error(`"${file.name}" no es una imagen o video compatible.`);
+        return null;
+      }
+
+      const maxImageBytes = 15 * 1024 * 1024;
+      const maxVideoBytes = 80 * 1024 * 1024;
+      const max = isVideo ? maxVideoBytes : maxImageBytes;
+
+      if (file.size > max) {
+        const sizeMb = (file.size / 1024 / 1024).toFixed(1);
+        toast.error(
+          isVideo
+            ? `El video pesa ${sizeMb} MB. El máximo configurado es 80 MB.`
+            : `La imagen pesa ${sizeMb} MB. El máximo configurado es 15 MB.`,
+          { duration: 8000 },
+        );
+        return null;
+      }
+
+      const {
+        data: { session },
+        error: sessionError,
+      } = await supabase.auth.getSession();
+
+      if (sessionError) {
+        console.error("Error obteniendo sesión:", sessionError);
+        toast.error(`No se pudo validar tu sesión: ${sessionError.message}`, {
+          duration: 8000,
+        });
+        return null;
+      }
+
+      if (!session?.user) {
+        toast.error(
+          "Tu sesión no está activa. Cerrá sesión, volvé a ingresar e intentá nuevamente.",
+          { duration: 8000 },
+        );
+        return null;
+      }
+
+      const owner = session.user.email || userEmail || session.user.id;
+      const safeOwner = owner
+        .toLowerCase()
+        .replace(/[^a-z0-9@._-]/g, "-");
+
+      const safeName =
+        sanitizeFileName(file.name) ||
+        `${isVideo ? "video" : "imagen"}-${Date.now()}`;
+
+      const path = `${safeOwner}/${folder}/${Date.now()}-${uid()}-${safeName}`;
+
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from(MEDIA_BUCKET)
+        .upload(path, file, {
+          cacheControl: "3600",
+          upsert: false,
+          contentType: mimeType,
+        });
+
+      if (uploadError) {
+        console.error("❌ ERROR STORAGE COMPLETO:", uploadError);
+
+        const message = String(uploadError.message || "Error desconocido");
+        const normalized = message.toLowerCase();
+
+        if (normalized.includes("bucket") && normalized.includes("not found")) {
+          toast.error(
+            `No existe el bucket "${MEDIA_BUCKET}". Ejecutá el SQL de landing-media.`,
+            { duration: 10000 },
+          );
+        } else if (
+          normalized.includes("row-level security") ||
+          normalized.includes("policy") ||
+          normalized.includes("unauthorized") ||
+          normalized.includes("permission")
+        ) {
+          toast.error(`Supabase bloqueó la subida por permisos (RLS): ${message}`, {
+            duration: 10000,
+          });
+        } else if (
+          normalized.includes("maximum") ||
+          normalized.includes("too large") ||
+          normalized.includes("payload") ||
+          normalized.includes("size")
+        ) {
+          toast.error(`El archivo supera el límite de Supabase Storage: ${message}`, {
+            duration: 10000,
+          });
+        } else {
+          toast.error(`No se pudo subir "${file.name}": ${message}`, {
+            duration: 10000,
+          });
+        }
+
+        return null;
+      }
+
+      const storedPath = uploadData?.path || path;
+      const { data: publicData } = supabase.storage
+        .from(MEDIA_BUCKET)
+        .getPublicUrl(storedPath);
+
+      if (!publicData?.publicUrl) {
+        toast.error("El archivo se subió, pero no se pudo generar su URL pública.");
+        return null;
+      }
+
+      return {
+        id: uid(),
+        type: isVideo ? "video" : "image",
+        url: publicData.publicUrl,
+        alt: file.name,
+      };
+    } catch (error: any) {
+      console.error("❌ Error inesperado subiendo archivo:", error);
       toast.error(
-        isVideo
-          ? "El video supera 80 MB."
-          : "La imagen supera 15 MB.",
+        `Error inesperado al subir "${file.name}": ${
+          error?.message || "Error desconocido"
+        }`,
+        { duration: 10000 },
       );
       return null;
     }
-
-    const safeEmail = userEmail
-      .toLowerCase()
-      .replace(/[^a-z0-9@._-]/g, "-");
-    const path = `${safeEmail}/${folder}/${Date.now()}-${uid()}-${sanitizeFileName(
-      file.name,
-    )}`;
-
-    const { error } = await supabase.storage
-      .from(MEDIA_BUCKET)
-      .upload(path, file, {
-        cacheControl: "3600",
-        upsert: false,
-        contentType: file.type,
-      });
-
-    if (error) {
-      console.error(error);
-      toast.error(
-        `No se pudo subir "${file.name}". Verificá el bucket landing-media.`,
-      );
-      return null;
-    }
-
-    const { data } = supabase.storage.from(MEDIA_BUCKET).getPublicUrl(path);
-    return {
-      id: uid(),
-      type: isVideo ? "video" : "image",
-      url: data.publicUrl,
-      alt: file.name,
-    };
   };
 
   const uploadProductMedia = async (
@@ -504,10 +611,11 @@ export default function WebPageBuilder({
     }));
   };
 
-  const addBlock = (type: LandingContentBlock["type"]) => {
-    let block: LandingContentBlock;
+  const createBlock = (
+    type: LandingContentBlock["type"],
+  ): LandingContentBlock => {
     if (type === "heading") {
-      block = {
+      return {
         id: uid(),
         type,
         enabled: true,
@@ -515,16 +623,20 @@ export default function WebPageBuilder({
         align: "left",
         size: "lg",
       };
-    } else if (type === "text") {
-      block = {
+    }
+
+    if (type === "text") {
+      return {
         id: uid(),
         type,
         enabled: true,
         text: "Escribí aquí el contenido que querés mostrar en la página.",
         align: "left",
       };
-    } else if (type === "image") {
-      block = {
+    }
+
+    if (type === "image") {
+      return {
         id: uid(),
         type,
         enabled: true,
@@ -533,8 +645,10 @@ export default function WebPageBuilder({
         width: "normal",
         rounded: true,
       };
-    } else if (type === "video") {
-      block = {
+    }
+
+    if (type === "video") {
+      return {
         id: uid(),
         type,
         enabled: true,
@@ -547,8 +661,10 @@ export default function WebPageBuilder({
         width: "normal",
         rounded: true,
       };
-    } else if (type === "image_text") {
-      block = {
+    }
+
+    if (type === "image_text") {
+      return {
         id: uid(),
         type,
         enabled: true,
@@ -557,19 +673,44 @@ export default function WebPageBuilder({
         text: "Agregá una imagen y escribí una descripción.",
         imagePosition: "left",
       };
-    } else {
-      block = {
-        id: uid(),
-        type: "spacer",
-        enabled: true,
-        height: 30,
-      };
     }
 
-    setConfig((prev) => ({
-      ...prev,
-      contentBlocks: [...prev.contentBlocks, block],
-    }));
+    return {
+      id: uid(),
+      type: "spacer",
+      enabled: true,
+      height: 30,
+    };
+  };
+
+  /**
+   * Inserta un bloque exactamente donde el usuario quiera.
+   * index = 0 -> primero
+   * index = contentBlocks.length -> último
+   */
+  const addBlock = (
+    type: LandingContentBlock["type"],
+    requestedIndex?: number,
+  ) => {
+    const block = createBlock(type);
+
+    setConfig((prev) => {
+      const next = [...prev.contentBlocks];
+      const fallbackIndex =
+        insertAtIndex === null ? next.length : insertAtIndex;
+      const rawIndex =
+        requestedIndex === undefined ? fallbackIndex : requestedIndex;
+      const targetIndex = Math.max(0, Math.min(rawIndex, next.length));
+
+      next.splice(targetIndex, 0, block);
+
+      return {
+        ...prev,
+        contentBlocks: next,
+      };
+    });
+
+    setInsertAtIndex(null);
   };
 
   const patchBlock = (
@@ -596,9 +737,82 @@ export default function WebPageBuilder({
       const next = [...prev.contentBlocks];
       const target = index + direction;
       if (target < 0 || target >= next.length) return prev;
+
       [next[index], next[target]] = [next[target], next[index]];
-      return { ...prev, contentBlocks: next };
+
+      return {
+        ...prev,
+        contentBlocks: next,
+      };
     });
+  };
+
+  /**
+   * Mueve directamente un bloque a una posición exacta.
+   * targetPosition es base 1 para que sea natural en el selector.
+   */
+  const moveBlockToPosition = (
+    currentIndex: number,
+    targetPosition: number,
+  ) => {
+    setConfig((prev) => {
+      const next = [...prev.contentBlocks];
+      if (!next.length) return prev;
+
+      const targetIndex = Math.max(
+        0,
+        Math.min(targetPosition - 1, next.length - 1),
+      );
+
+      if (targetIndex === currentIndex) return prev;
+
+      const [block] = next.splice(currentIndex, 1);
+      next.splice(targetIndex, 0, block);
+
+      return {
+        ...prev,
+        contentBlocks: next,
+      };
+    });
+  };
+
+  /**
+   * Drag & drop manual usando HTML5.
+   */
+  const handleBlockDragStart = (index: number) => {
+    setDraggedBlockIndex(index);
+  };
+
+  const handleBlockDrop = (targetIndex: number) => {
+    if (draggedBlockIndex === null) return;
+
+    setConfig((prev) => {
+      const next = [...prev.contentBlocks];
+
+      if (
+        draggedBlockIndex < 0 ||
+        draggedBlockIndex >= next.length ||
+        targetIndex < 0 ||
+        targetIndex >= next.length ||
+        draggedBlockIndex === targetIndex
+      ) {
+        return prev;
+      }
+
+      const [block] = next.splice(draggedBlockIndex, 1);
+      next.splice(targetIndex, 0, block);
+
+      return {
+        ...prev,
+        contentBlocks: next,
+      };
+    });
+
+    setDraggedBlockIndex(null);
+  };
+
+  const cancelBlockDrag = () => {
+    setDraggedBlockIndex(null);
   };
 
   const uploadBlockMedia = async (
@@ -609,28 +823,32 @@ export default function WebPageBuilder({
     if (!file) return;
 
     setUploading(true);
-    const item = await uploadFile(file, `blocks/${block.id}`);
-    setUploading(false);
-    if (!item) return;
 
-    if (block.type === "image") {
-      if (item.type !== "image") {
-        toast.error("Este bloque requiere una imagen.");
-        return;
+    try {
+      const item = await uploadFile(file, `blocks/${block.id}`);
+      if (!item) return;
+
+      if (block.type === "image") {
+        if (item.type !== "image") {
+          toast.error("Este bloque requiere una imagen.");
+          return;
+        }
+        patchBlock(block.id, { url: item.url, alt: item.alt || "" });
+      } else if (block.type === "video") {
+        if (item.type !== "video") {
+          toast.error("Este bloque requiere un video.");
+          return;
+        }
+        patchBlock(block.id, { url: item.url });
+      } else if (block.type === "image_text") {
+        if (item.type !== "image") {
+          toast.error("Este bloque requiere una imagen.");
+          return;
+        }
+        patchBlock(block.id, { imageUrl: item.url });
       }
-      patchBlock(block.id, { url: item.url, alt: item.alt || "" });
-    } else if (block.type === "video") {
-      if (item.type !== "video") {
-        toast.error("Este bloque requiere un video.");
-        return;
-      }
-      patchBlock(block.id, { url: item.url });
-    } else if (block.type === "image_text") {
-      if (item.type !== "image") {
-        toast.error("Este bloque requiere una imagen.");
-        return;
-      }
-      patchBlock(block.id, { imageUrl: item.url });
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -808,6 +1026,9 @@ export default function WebPageBuilder({
           .sky-block-head{display:flex;align-items:center;gap:6px;padding:9px 10px;background:hsl(var(--secondary)/.25);border-bottom:1px solid hsl(var(--border))}
           .sky-block-head b{flex:1;font-size:12px}
           .sky-mini-btn{border:1px solid hsl(var(--border));border-radius:8px;padding:5px 7px;font-size:11px;background:hsl(var(--background));cursor:pointer}
+          .sky-mini-btn:disabled{opacity:.3;cursor:not-allowed}
+          .sky-block-card[draggable="true"]{cursor:default}
+          .sky-block-card[draggable="true"]:hover{border-color:hsl(var(--primary)/.45)}
         `}</style>
 
         <div className="rounded-[28px] border border-border/70 bg-background p-4 sm:p-5 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
@@ -1038,247 +1259,541 @@ export default function WebPageBuilder({
             ))}
 
             <div className="rounded-[24px] border border-border/70 bg-background p-4 space-y-3">
-              <div className="font-black">3. Agregar bloques libres</div>
+              <div className="font-black">3. Agregar y ordenar bloques</div>
+
               <div className="text-xs text-muted-foreground">
-                Esta es la parte para armar la página como en tu ejemplo: título, imagen, otro título, video, otra imagen, etc.
+                Armá la landing manualmente. Podés insertar contenido exactamente
+                entre dos bloques, moverlo a una posición específica o arrastrarlo
+                desde el símbolo ☰.
               </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <button className="nav-btn" onClick={() => addBlock("heading")}>＋ Título</button>
-                <button className="nav-btn" onClick={() => addBlock("text")}>＋ Texto</button>
-                <button className="nav-btn" onClick={() => addBlock("image")}>＋ Imagen</button>
-                <button className="nav-btn" onClick={() => addBlock("video")}>＋ Video</button>
-                <button className="nav-btn" onClick={() => addBlock("image_text")}>＋ Imagen + texto</button>
-                <button className="nav-btn" onClick={() => addBlock("spacer")}>＋ Espacio</button>
-              </div>
-
-              {config.contentBlocks.length === 0 && (
-                <div className="rounded-xl border border-dashed border-border p-5 text-center text-xs text-muted-foreground">
-                  Todavía no agregaste bloques.
+              {insertAtIndex !== null && (
+                <div className="rounded-xl border border-primary/40 bg-primary/10 p-3">
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <div>
+                      <div className="font-black text-sm">
+                        📍 Insertar en posición {insertAtIndex + 1}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">
+                        Elegí qué tipo de bloque querés poner exactamente aquí.
+                      </div>
+                    </div>
+                    <button
+                      className="sky-mini-btn"
+                      onClick={() => setInsertAtIndex(null)}
+                    >
+                      ✕
+                    </button>
+                  </div>
                 </div>
               )}
 
-              <div className="space-y-3">
-                {config.contentBlocks.map((block, index) => (
-                  <div className="sky-block-card" key={block.id}>
-                    <div className="sky-block-head">
-                      <span>☰</span>
-                      <b>
-                        {block.type === "heading" && "TÍTULO"}
-                        {block.type === "text" && "TEXTO"}
-                        {block.type === "image" && "IMAGEN"}
-                        {block.type === "video" && "VIDEO"}
-                        {block.type === "image_text" && "IMAGEN + TEXTO"}
-                        {block.type === "spacer" && "ESPACIO"}
-                      </b>
-                      <button className="sky-mini-btn" onClick={() => moveBlock(index, -1)}>↑</button>
-                      <button className="sky-mini-btn" onClick={() => moveBlock(index, 1)}>↓</button>
-                      <button
-                        className="sky-mini-btn"
-                        onClick={() => patchBlock(block.id, { enabled: !block.enabled })}
-                      >
-                        {block.enabled ? "👁" : "🚫"}
-                      </button>
-                      <button className="sky-mini-btn" onClick={() => deleteBlock(block.id)}>✕</button>
-                    </div>
-
-                    <div className="p-3 space-y-3">
-                      {block.type === "heading" && (
-                        <>
-                          <textarea
-                            className="app-input min-h-[70px]"
-                            value={block.text}
-                            onChange={(e) => patchBlock(block.id, { text: e.target.value })}
-                          />
-                          <div className="grid grid-cols-2 gap-2">
-                            <select
-                              className="app-input"
-                              value={block.size}
-                              onChange={(e) => patchBlock(block.id, { size: e.target.value })}
-                            >
-                              <option value="md">Mediano</option>
-                              <option value="lg">Grande</option>
-                              <option value="xl">Muy grande</option>
-                            </select>
-                            <select
-                              className="app-input"
-                              value={block.align}
-                              onChange={(e) => patchBlock(block.id, { align: e.target.value })}
-                            >
-                              <option value="left">Izquierda</option>
-                              <option value="center">Centrado</option>
-                            </select>
-                          </div>
-                        </>
-                      )}
-
-                      {block.type === "text" && (
-                        <>
-                          <textarea
-                            className="app-input min-h-[100px]"
-                            value={block.text}
-                            onChange={(e) => patchBlock(block.id, { text: e.target.value })}
-                          />
-                          <select
-                            className="app-input"
-                            value={block.align}
-                            onChange={(e) => patchBlock(block.id, { align: e.target.value })}
-                          >
-                            <option value="left">Izquierda</option>
-                            <option value="center">Centrado</option>
-                          </select>
-                        </>
-                      )}
-
-                      {block.type === "image" && (
-                        <>
-                          {block.url && (
-                            <img src={block.url} alt="" className="w-full max-h-44 object-contain rounded-xl bg-black/5" />
-                          )}
-                          <label className="sky-dropzone block">
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={(e) => {
-                                uploadBlockMedia(block, e.target.files);
-                                e.currentTarget.value = "";
-                              }}
-                            />
-                            <b>{block.url ? "Cambiar imagen" : "Subir imagen"}</b>
-                          </label>
-                          <input
-                            className="app-input"
-                            value={block.alt}
-                            onChange={(e) => patchBlock(block.id, { alt: e.target.value })}
-                            placeholder="Texto alternativo"
-                          />
-                          <div className="grid grid-cols-2 gap-2">
-                            <select
-                              className="app-input"
-                              value={block.width}
-                              onChange={(e) => patchBlock(block.id, { width: e.target.value })}
-                            >
-                              <option value="normal">Normal</option>
-                              <option value="wide">Ancha</option>
-                              <option value="full">Ancho completo</option>
-                            </select>
-                            <label className="flex items-center gap-2 rounded-xl border border-border px-3">
-                              <input
-                                type="checkbox"
-                                checked={block.rounded}
-                                onChange={(e) => patchBlock(block.id, { rounded: e.target.checked })}
-                              />
-                              Redondeada
-                            </label>
-                          </div>
-                        </>
-                      )}
-
-                      {block.type === "video" && (
-                        <>
-                          {block.url && (
-                            <video src={block.url} controls className="w-full max-h-52 rounded-xl bg-black" />
-                          )}
-                          <label className="sky-dropzone block">
-                            <input
-                              type="file"
-                              accept="video/*"
-                              className="hidden"
-                              onChange={(e) => {
-                                uploadBlockMedia(block, e.target.files);
-                                e.currentTarget.value = "";
-                              }}
-                            />
-                            <b>{block.url ? "Cambiar video" : "Subir video"}</b>
-                          </label>
-                          <div className="grid grid-cols-2 gap-2 text-xs">
-                            {[
-                              ["autoplay", "Autoplay"],
-                              ["muted", "Sin sonido"],
-                              ["loop", "Repetir"],
-                              ["controls", "Controles"],
-                              ["rounded", "Redondeado"],
-                            ].map(([key, label]) => (
-                              <label key={key} className="flex items-center gap-2 rounded-xl border border-border px-3 py-2">
-                                <input
-                                  type="checkbox"
-                                  checked={Boolean((block as any)[key])}
-                                  onChange={(e) => patchBlock(block.id, { [key]: e.target.checked })}
-                                />
-                                {label}
-                              </label>
-                            ))}
-                          </div>
-                          <select
-                            className="app-input"
-                            value={block.width}
-                            onChange={(e) => patchBlock(block.id, { width: e.target.value })}
-                          >
-                            <option value="normal">Normal</option>
-                            <option value="wide">Ancho</option>
-                            <option value="full">Ancho completo</option>
-                          </select>
-                        </>
-                      )}
-
-                      {block.type === "image_text" && (
-                        <>
-                          {block.imageUrl && (
-                            <img src={block.imageUrl} alt="" className="w-full max-h-44 object-contain rounded-xl bg-black/5" />
-                          )}
-                          <label className="sky-dropzone block">
-                            <input
-                              type="file"
-                              accept="image/*"
-                              className="hidden"
-                              onChange={(e) => {
-                                uploadBlockMedia(block, e.target.files);
-                                e.currentTarget.value = "";
-                              }}
-                            />
-                            <b>{block.imageUrl ? "Cambiar imagen" : "Subir imagen"}</b>
-                          </label>
-                          <input
-                            className="app-input"
-                            value={block.title}
-                            onChange={(e) => patchBlock(block.id, { title: e.target.value })}
-                            placeholder="Título"
-                          />
-                          <textarea
-                            className="app-input min-h-[90px]"
-                            value={block.text}
-                            onChange={(e) => patchBlock(block.id, { text: e.target.value })}
-                          />
-                          <select
-                            className="app-input"
-                            value={block.imagePosition}
-                            onChange={(e) => patchBlock(block.id, { imagePosition: e.target.value })}
-                          >
-                            <option value="left">Imagen izquierda</option>
-                            <option value="right">Imagen derecha</option>
-                          </select>
-                        </>
-                      )}
-
-                      {block.type === "spacer" && (
-                        <div>
-                          <label className="app-label">Altura: {block.height}px</label>
-                          <input
-                            type="range"
-                            min="10"
-                            max="180"
-                            step="5"
-                            className="w-full"
-                            value={block.height}
-                            onChange={(e) => patchBlock(block.id, { height: Number(e.target.value) })}
-                          />
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  className="nav-btn"
+                  onClick={() => addBlock("heading")}
+                >
+                  ＋ Título
+                </button>
+                <button
+                  className="nav-btn"
+                  onClick={() => addBlock("text")}
+                >
+                  ＋ Texto
+                </button>
+                <button
+                  className="nav-btn"
+                  onClick={() => addBlock("image")}
+                >
+                  ＋ Imagen
+                </button>
+                <button
+                  className="nav-btn"
+                  onClick={() => addBlock("video")}
+                >
+                  ＋ Video
+                </button>
+                <button
+                  className="nav-btn"
+                  onClick={() => addBlock("image_text")}
+                >
+                  ＋ Imagen + texto
+                </button>
+                <button
+                  className="nav-btn"
+                  onClick={() => addBlock("spacer")}
+                >
+                  ＋ Espacio
+                </button>
               </div>
+
+              <div className="rounded-xl border border-border bg-secondary/10 p-3 text-[11px] text-muted-foreground">
+                <b className="text-foreground">Cómo ubicar manualmente:</b>{" "}
+                tocá <b>“＋ Agregar aquí”</b> en el lugar exacto y después elegí
+                Título, Texto, Imagen, Video, etc. También podés usar el selector
+                “Posición” o arrastrar con ☰.
+              </div>
+
+              {config.contentBlocks.length === 0 ? (
+                <>
+                  <button
+                    className="w-full rounded-xl border-2 border-dashed border-primary/40 bg-primary/5 hover:bg-primary/10 transition px-3 py-4 text-sm font-black text-primary"
+                    onClick={() => setInsertAtIndex(0)}
+                  >
+                    ＋ Agregar el primer bloque aquí
+                  </button>
+
+                  <div className="rounded-xl border border-dashed border-border p-5 text-center text-xs text-muted-foreground">
+                    Todavía no agregaste bloques.
+                  </div>
+                </>
+              ) : (
+                <div className="space-y-2">
+                  {/* Punto de inserción ANTES del primer bloque */}
+                  <button
+                    className={`w-full rounded-lg border border-dashed px-3 py-2 text-xs font-bold transition ${
+                      insertAtIndex === 0
+                        ? "border-primary bg-primary/15 text-primary"
+                        : "border-border hover:border-primary/50 hover:bg-primary/5 text-muted-foreground"
+                    }`}
+                    onClick={() => setInsertAtIndex(0)}
+                  >
+                    ＋ Agregar aquí · Posición 1
+                  </button>
+
+                  {config.contentBlocks.map((block, index) => (
+                    <div key={block.id} className="space-y-2">
+                      <div
+                        className={`sky-block-card transition ${
+                          draggedBlockIndex === index
+                            ? "opacity-50 ring-2 ring-primary"
+                            : ""
+                        }`}
+                        draggable
+                        onDragStart={() => handleBlockDragStart(index)}
+                        onDragEnd={cancelBlockDrag}
+                        onDragOver={(e) => e.preventDefault()}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          handleBlockDrop(index);
+                        }}
+                      >
+                        <div className="sky-block-head">
+                          <span
+                            title="Arrastrá para mover"
+                            className="cursor-grab active:cursor-grabbing select-none text-base"
+                          >
+                            ☰
+                          </span>
+
+                          <b>
+                            {index + 1}.{" "}
+                            {block.type === "heading" && "TÍTULO"}
+                            {block.type === "text" && "TEXTO"}
+                            {block.type === "image" && "IMAGEN"}
+                            {block.type === "video" && "VIDEO"}
+                            {block.type === "image_text" && "IMAGEN + TEXTO"}
+                            {block.type === "spacer" && "ESPACIO"}
+                          </b>
+
+                          <button
+                            className="sky-mini-btn"
+                            disabled={index === 0}
+                            title="Subir una posición"
+                            onClick={() => moveBlock(index, -1)}
+                          >
+                            ↑
+                          </button>
+
+                          <button
+                            className="sky-mini-btn"
+                            disabled={index === config.contentBlocks.length - 1}
+                            title="Bajar una posición"
+                            onClick={() => moveBlock(index, 1)}
+                          >
+                            ↓
+                          </button>
+
+                          <button
+                            className="sky-mini-btn"
+                            title={block.enabled ? "Ocultar" : "Mostrar"}
+                            onClick={() =>
+                              patchBlock(block.id, {
+                                enabled: !block.enabled,
+                              })
+                            }
+                          >
+                            {block.enabled ? "👁" : "🚫"}
+                          </button>
+
+                          <button
+                            className="sky-mini-btn"
+                            title="Eliminar"
+                            onClick={() => deleteBlock(block.id)}
+                          >
+                            ✕
+                          </button>
+                        </div>
+
+                        <div className="p-3 space-y-3">
+                          {/* Posición exacta */}
+                          <div className="rounded-xl border border-border bg-secondary/10 p-2.5">
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] font-bold whitespace-nowrap">
+                                Mover a posición:
+                              </span>
+                              <select
+                                className="app-input !py-1.5"
+                                value={index + 1}
+                                onChange={(e) =>
+                                  moveBlockToPosition(
+                                    index,
+                                    Number(e.target.value),
+                                  )
+                                }
+                              >
+                                {config.contentBlocks.map((_, positionIndex) => (
+                                  <option
+                                    key={positionIndex}
+                                    value={positionIndex + 1}
+                                  >
+                                    {positionIndex + 1}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          {block.type === "heading" && (
+                            <>
+                              <textarea
+                                className="app-input min-h-[70px]"
+                                value={block.text}
+                                onChange={(e) =>
+                                  patchBlock(block.id, {
+                                    text: e.target.value,
+                                  })
+                                }
+                              />
+                              <div className="grid grid-cols-2 gap-2">
+                                <select
+                                  className="app-input"
+                                  value={block.size}
+                                  onChange={(e) =>
+                                    patchBlock(block.id, {
+                                      size: e.target.value,
+                                    })
+                                  }
+                                >
+                                  <option value="md">Mediano</option>
+                                  <option value="lg">Grande</option>
+                                  <option value="xl">Muy grande</option>
+                                </select>
+
+                                <select
+                                  className="app-input"
+                                  value={block.align}
+                                  onChange={(e) =>
+                                    patchBlock(block.id, {
+                                      align: e.target.value,
+                                    })
+                                  }
+                                >
+                                  <option value="left">Izquierda</option>
+                                  <option value="center">Centrado</option>
+                                </select>
+                              </div>
+                            </>
+                          )}
+
+                          {block.type === "text" && (
+                            <>
+                              <textarea
+                                className="app-input min-h-[100px]"
+                                value={block.text}
+                                onChange={(e) =>
+                                  patchBlock(block.id, {
+                                    text: e.target.value,
+                                  })
+                                }
+                              />
+                              <select
+                                className="app-input"
+                                value={block.align}
+                                onChange={(e) =>
+                                  patchBlock(block.id, {
+                                    align: e.target.value,
+                                  })
+                                }
+                              >
+                                <option value="left">Izquierda</option>
+                                <option value="center">Centrado</option>
+                              </select>
+                            </>
+                          )}
+
+                          {block.type === "image" && (
+                            <>
+                              {block.url && (
+                                <img
+                                  src={block.url}
+                                  alt=""
+                                  className="w-full max-h-44 object-contain rounded-xl bg-black/5"
+                                />
+                              )}
+
+                              <label className="sky-dropzone block">
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={(e) => {
+                                    uploadBlockMedia(
+                                      block,
+                                      e.target.files,
+                                    );
+                                    e.currentTarget.value = "";
+                                  }}
+                                />
+                                <b>
+                                  {block.url
+                                    ? "Cambiar imagen"
+                                    : "Subir imagen"}
+                                </b>
+                              </label>
+
+                              <input
+                                className="app-input"
+                                value={block.alt}
+                                onChange={(e) =>
+                                  patchBlock(block.id, {
+                                    alt: e.target.value,
+                                  })
+                                }
+                                placeholder="Texto alternativo"
+                              />
+
+                              <div className="grid grid-cols-2 gap-2">
+                                <select
+                                  className="app-input"
+                                  value={block.width}
+                                  onChange={(e) =>
+                                    patchBlock(block.id, {
+                                      width: e.target.value,
+                                    })
+                                  }
+                                >
+                                  <option value="normal">Normal</option>
+                                  <option value="wide">Ancha</option>
+                                  <option value="full">
+                                    Ancho completo
+                                  </option>
+                                </select>
+
+                                <label className="flex items-center gap-2 rounded-xl border border-border px-3">
+                                  <input
+                                    type="checkbox"
+                                    checked={block.rounded}
+                                    onChange={(e) =>
+                                      patchBlock(block.id, {
+                                        rounded: e.target.checked,
+                                      })
+                                    }
+                                  />
+                                  Redondeada
+                                </label>
+                              </div>
+                            </>
+                          )}
+
+                          {block.type === "video" && (
+                            <>
+                              {block.url && (
+                                <video
+                                  src={block.url}
+                                  controls
+                                  className="w-full max-h-52 rounded-xl bg-black"
+                                />
+                              )}
+
+                              <label className="sky-dropzone block">
+                                <input
+                                  type="file"
+                                  accept="video/*"
+                                  className="hidden"
+                                  onChange={(e) => {
+                                    uploadBlockMedia(
+                                      block,
+                                      e.target.files,
+                                    );
+                                    e.currentTarget.value = "";
+                                  }}
+                                />
+                                <b>
+                                  {block.url
+                                    ? "Cambiar video"
+                                    : "Subir video"}
+                                </b>
+                              </label>
+
+                              <div className="grid grid-cols-2 gap-2 text-xs">
+                                {[
+                                  ["autoplay", "Autoplay"],
+                                  ["muted", "Sin sonido"],
+                                  ["loop", "Repetir"],
+                                  ["controls", "Controles"],
+                                  ["rounded", "Redondeado"],
+                                ].map(([key, label]) => (
+                                  <label
+                                    key={key}
+                                    className="flex items-center gap-2 rounded-xl border border-border px-3 py-2"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={Boolean(
+                                        (block as any)[key],
+                                      )}
+                                      onChange={(e) =>
+                                        patchBlock(block.id, {
+                                          [key]: e.target.checked,
+                                        })
+                                      }
+                                    />
+                                    {label}
+                                  </label>
+                                ))}
+                              </div>
+
+                              <select
+                                className="app-input"
+                                value={block.width}
+                                onChange={(e) =>
+                                  patchBlock(block.id, {
+                                    width: e.target.value,
+                                  })
+                                }
+                              >
+                                <option value="normal">Normal</option>
+                                <option value="wide">Ancho</option>
+                                <option value="full">
+                                  Ancho completo
+                                </option>
+                              </select>
+                            </>
+                          )}
+
+                          {block.type === "image_text" && (
+                            <>
+                              {block.imageUrl && (
+                                <img
+                                  src={block.imageUrl}
+                                  alt=""
+                                  className="w-full max-h-44 object-contain rounded-xl bg-black/5"
+                                />
+                              )}
+
+                              <label className="sky-dropzone block">
+                                <input
+                                  type="file"
+                                  accept="image/*"
+                                  className="hidden"
+                                  onChange={(e) => {
+                                    uploadBlockMedia(
+                                      block,
+                                      e.target.files,
+                                    );
+                                    e.currentTarget.value = "";
+                                  }}
+                                />
+                                <b>
+                                  {block.imageUrl
+                                    ? "Cambiar imagen"
+                                    : "Subir imagen"}
+                                </b>
+                              </label>
+
+                              <input
+                                className="app-input"
+                                value={block.title}
+                                onChange={(e) =>
+                                  patchBlock(block.id, {
+                                    title: e.target.value,
+                                  })
+                                }
+                                placeholder="Título"
+                              />
+
+                              <textarea
+                                className="app-input min-h-[90px]"
+                                value={block.text}
+                                onChange={(e) =>
+                                  patchBlock(block.id, {
+                                    text: e.target.value,
+                                  })
+                                }
+                              />
+
+                              <select
+                                className="app-input"
+                                value={block.imagePosition}
+                                onChange={(e) =>
+                                  patchBlock(block.id, {
+                                    imagePosition: e.target.value,
+                                  })
+                                }
+                              >
+                                <option value="left">
+                                  Imagen izquierda
+                                </option>
+                                <option value="right">
+                                  Imagen derecha
+                                </option>
+                              </select>
+                            </>
+                          )}
+
+                          {block.type === "spacer" && (
+                            <div>
+                              <label className="app-label">
+                                Altura: {block.height}px
+                              </label>
+                              <input
+                                type="range"
+                                min="10"
+                                max="180"
+                                step="5"
+                                className="w-full"
+                                value={block.height}
+                                onChange={(e) =>
+                                  patchBlock(block.id, {
+                                    height: Number(
+                                      e.target.value,
+                                    ),
+                                  })
+                                }
+                              />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Punto de inserción DESPUÉS de cada bloque */}
+                      <button
+                        className={`w-full rounded-lg border border-dashed px-3 py-2 text-xs font-bold transition ${
+                          insertAtIndex === index + 1
+                            ? "border-primary bg-primary/15 text-primary"
+                            : "border-border hover:border-primary/50 hover:bg-primary/5 text-muted-foreground"
+                        }`}
+                        onClick={() =>
+                          setInsertAtIndex(index + 1)
+                        }
+                      >
+                        ＋ Agregar aquí · Posición {index + 2}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="rounded-[24px] border border-border/70 bg-background p-4 space-y-3">
