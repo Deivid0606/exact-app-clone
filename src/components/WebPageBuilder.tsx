@@ -67,6 +67,31 @@ export type LandingContentBlock =
     }
   | {
       id: string;
+      type: "media_gallery";
+      enabled: boolean;
+      items: LandingMediaItem[];
+      columns: 1 | 2 | 3 | 4;
+      mobileColumns: 1 | 2;
+      gap: number;
+      width: "normal" | "wide" | "full";
+      aspect: "auto" | "portrait" | "square";
+      rounded: boolean;
+      controls: boolean;
+      autoplay: boolean;
+      muted: boolean;
+      loop: boolean;
+    }
+  | {
+      id: string;
+      type: "buy_button";
+      enabled: boolean;
+      text: string;
+      subtext: string;
+      width: "normal" | "wide" | "full";
+      align: "left" | "center" | "right";
+    }
+  | {
+      id: string;
       type: "image_text";
       enabled: boolean;
       imageUrl: string;
@@ -243,7 +268,52 @@ function normalizeConfig(raw?: Partial<LandingConfig> | null): LandingConfig {
     },
     benefits: raw?.benefits || base.benefits,
     faq: raw?.faq || base.faq,
-    contentBlocks: raw?.contentBlocks || [],
+    contentBlocks: (raw?.contentBlocks || []).map((block: any) => {
+      if (block?.type === "media_gallery") {
+        return {
+          id: block.id || uid(),
+          type: "media_gallery" as const,
+          enabled: block.enabled !== false,
+          items: Array.isArray(block.items) ? block.items : [],
+          columns: [1, 2, 3, 4].includes(Number(block.columns))
+            ? Number(block.columns)
+            : 3,
+          mobileColumns: [1, 2].includes(Number(block.mobileColumns))
+            ? Number(block.mobileColumns)
+            : 1,
+          gap: Number.isFinite(Number(block.gap)) ? Number(block.gap) : 14,
+          width: ["normal", "wide", "full"].includes(block.width)
+            ? block.width
+            : "wide",
+          aspect: ["auto", "portrait", "square"].includes(block.aspect)
+            ? block.aspect
+            : "portrait",
+          rounded: block.rounded !== false,
+          controls: block.controls !== false,
+          autoplay: Boolean(block.autoplay),
+          muted: block.muted !== false,
+          loop: Boolean(block.loop),
+        } as LandingContentBlock;
+      }
+
+      if (block?.type === "buy_button") {
+        return {
+          id: block.id || uid(),
+          type: "buy_button" as const,
+          enabled: block.enabled !== false,
+          text: block.text || base.buttonText,
+          subtext: block.subtext || base.buttonSubtext,
+          width: ["normal", "wide", "full"].includes(block.width)
+            ? block.width
+            : "wide",
+          align: ["left", "center", "right"].includes(block.align)
+            ? block.align
+            : "center",
+        } as LandingContentBlock;
+      }
+
+      return block as LandingContentBlock;
+    }),
     productSnapshots: (raw?.productSnapshots || []).map((p: any) => {
       const images = Array.isArray(p.images) ? p.images.filter(Boolean) : [];
       const media =
@@ -663,6 +733,37 @@ export default function WebPageBuilder({
       };
     }
 
+    if (type === "media_gallery") {
+      return {
+        id: uid(),
+        type,
+        enabled: true,
+        items: [],
+        columns: 3,
+        mobileColumns: 1,
+        gap: 14,
+        width: "wide",
+        aspect: "portrait",
+        rounded: false,
+        controls: true,
+        autoplay: false,
+        muted: true,
+        loop: false,
+      };
+    }
+
+    if (type === "buy_button") {
+      return {
+        id: uid(),
+        type,
+        enabled: true,
+        text: config.buttonText,
+        subtext: config.buttonSubtext,
+        width: "wide",
+        align: "center",
+      };
+    }
+
     if (type === "image_text") {
       return {
         id: uid(),
@@ -850,6 +951,91 @@ export default function WebPageBuilder({
     } finally {
       setUploading(false);
     }
+  };
+
+  const uploadGalleryMedia = async (
+    blockId: string,
+    files: FileList | null,
+  ) => {
+    if (!files?.length) return;
+
+    setUploading(true);
+    const uploaded: LandingMediaItem[] = [];
+
+    try {
+      for (const file of Array.from(files)) {
+        const item = await uploadFile(file, `blocks/${blockId}/gallery`);
+        if (item) uploaded.push(item);
+      }
+
+      if (!uploaded.length) return;
+
+      setConfig((prev) => ({
+        ...prev,
+        contentBlocks: prev.contentBlocks.map((block) => {
+          if (block.id !== blockId || block.type !== "media_gallery") {
+            return block;
+          }
+
+          return {
+            ...block,
+            items: [...block.items, ...uploaded],
+          };
+        }),
+      }));
+
+      toast.success(
+        `✅ ${uploaded.length} archivo(s) agregado(s) a la galería.`,
+      );
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const moveGalleryMedia = (
+    blockId: string,
+    mediaIndex: number,
+    direction: -1 | 1,
+  ) => {
+    setConfig((prev) => ({
+      ...prev,
+      contentBlocks: prev.contentBlocks.map((block) => {
+        if (block.id !== blockId || block.type !== "media_gallery") {
+          return block;
+        }
+
+        const items = [...block.items];
+        const target = mediaIndex + direction;
+
+        if (target < 0 || target >= items.length) return block;
+
+        [items[mediaIndex], items[target]] = [
+          items[target],
+          items[mediaIndex],
+        ];
+
+        return { ...block, items };
+      }),
+    }));
+  };
+
+  const removeGalleryMedia = (
+    blockId: string,
+    mediaId: string,
+  ) => {
+    setConfig((prev) => ({
+      ...prev,
+      contentBlocks: prev.contentBlocks.map((block) => {
+        if (block.id !== blockId || block.type !== "media_gallery") {
+          return block;
+        }
+
+        return {
+          ...block,
+          items: block.items.filter((item) => item.id !== mediaId),
+        };
+      }),
+    }));
   };
 
   const addBenefit = () =>
@@ -1315,6 +1501,18 @@ export default function WebPageBuilder({
                 </button>
                 <button
                   className="nav-btn"
+                  onClick={() => addBlock("media_gallery")}
+                >
+                  ＋ Galería multimedia
+                </button>
+                <button
+                  className="nav-btn"
+                  onClick={() => addBlock("buy_button")}
+                >
+                  🛒 Botón Comprar
+                </button>
+                <button
+                  className="nav-btn"
                   onClick={() => addBlock("image_text")}
                 >
                   ＋ Imagen + texto
@@ -1330,7 +1528,7 @@ export default function WebPageBuilder({
               <div className="rounded-xl border border-border bg-secondary/10 p-3 text-[11px] text-muted-foreground">
                 <b className="text-foreground">Cómo ubicar manualmente:</b>{" "}
                 tocá <b>“＋ Agregar aquí”</b> en el lugar exacto y después elegí
-                Título, Texto, Imagen, Video, etc. También podés usar el selector
+                Título, Texto, Imagen, Video, Galería o Botón Comprar. También podés usar el selector
                 “Posición” o arrastrar con ☰.
               </div>
 
@@ -1392,6 +1590,8 @@ export default function WebPageBuilder({
                             {block.type === "text" && "TEXTO"}
                             {block.type === "image" && "IMAGEN"}
                             {block.type === "video" && "VIDEO"}
+                            {block.type === "media_gallery" && "GALERÍA MULTIMEDIA"}
+                            {block.type === "buy_button" && "BOTÓN COMPRAR"}
                             {block.type === "image_text" && "IMAGEN + TEXTO"}
                             {block.type === "spacer" && "ESPACIO"}
                           </b>
@@ -1679,6 +1879,367 @@ export default function WebPageBuilder({
                                   Ancho completo
                                 </option>
                               </select>
+                            </>
+                          )}
+
+                          {block.type === "media_gallery" && (
+                            <>
+                              <div className="rounded-xl border border-primary/30 bg-primary/5 p-3">
+                                <div className="font-black text-sm">
+                                  🎞 Galería de imágenes y videos
+                                </div>
+                                <div className="text-[11px] text-muted-foreground mt-1">
+                                  Para el formato de tu ejemplo usá 3 columnas,
+                                  aspecto vertical y 1 columna en móvil.
+                                </div>
+                              </div>
+
+                              <label className="sky-dropzone block">
+                                <input
+                                  type="file"
+                                  accept="image/*,video/*"
+                                  multiple
+                                  className="hidden"
+                                  onChange={(e) => {
+                                    uploadGalleryMedia(
+                                      block.id,
+                                      e.target.files,
+                                    );
+                                    e.currentTarget.value = "";
+                                  }}
+                                />
+                                <b>＋ Subir imágenes o videos</b>
+                                <div className="text-[11px] text-muted-foreground mt-1">
+                                  Podés seleccionar varios archivos juntos.
+                                </div>
+                              </label>
+
+                              {block.items.length > 0 ? (
+                                <div className="sky-media-row">
+                                  {block.items.map((item, mediaIndex) => (
+                                    <div
+                                      className="sky-media-card"
+                                      key={item.id}
+                                    >
+                                      {item.type === "image" ? (
+                                        <img
+                                          className="sky-media-preview"
+                                          src={item.url}
+                                          alt=""
+                                        />
+                                      ) : (
+                                        <div className="relative">
+                                          <video
+                                            className="sky-media-preview"
+                                            src={item.url}
+                                            muted
+                                            playsInline
+                                          />
+                                          <div className="absolute inset-0 grid place-items-center text-white text-xl pointer-events-none">
+                                            ▶
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      <div className="text-[9px] text-center py-1 font-bold">
+                                        {item.type === "image"
+                                          ? "IMAGEN"
+                                          : "VIDEO"}{" "}
+                                        {mediaIndex + 1}
+                                      </div>
+
+                                      <div className="sky-media-actions">
+                                        <button
+                                          disabled={mediaIndex === 0}
+                                          onClick={() =>
+                                            moveGalleryMedia(
+                                              block.id,
+                                              mediaIndex,
+                                              -1,
+                                            )
+                                          }
+                                        >
+                                          ←
+                                        </button>
+                                        <button
+                                          disabled={
+                                            mediaIndex ===
+                                            block.items.length - 1
+                                          }
+                                          onClick={() =>
+                                            moveGalleryMedia(
+                                              block.id,
+                                              mediaIndex,
+                                              1,
+                                            )
+                                          }
+                                        >
+                                          →
+                                        </button>
+                                        <button
+                                          onClick={() =>
+                                            removeGalleryMedia(
+                                              block.id,
+                                              item.id,
+                                            )
+                                          }
+                                        >
+                                          ✕
+                                        </button>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <div className="rounded-xl border border-dashed border-border p-4 text-center text-xs text-muted-foreground">
+                                  Todavía no cargaste archivos en esta galería.
+                                </div>
+                              )}
+
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <label className="app-label">
+                                    Columnas escritorio
+                                  </label>
+                                  <select
+                                    className="app-input"
+                                    value={block.columns}
+                                    onChange={(e) =>
+                                      patchBlock(block.id, {
+                                        columns: Number(e.target.value),
+                                      })
+                                    }
+                                  >
+                                    <option value={1}>1 columna</option>
+                                    <option value={2}>2 columnas</option>
+                                    <option value={3}>3 columnas</option>
+                                    <option value={4}>4 columnas</option>
+                                  </select>
+                                </div>
+
+                                <div>
+                                  <label className="app-label">
+                                    Columnas móvil
+                                  </label>
+                                  <select
+                                    className="app-input"
+                                    value={block.mobileColumns}
+                                    onChange={(e) =>
+                                      patchBlock(block.id, {
+                                        mobileColumns: Number(
+                                          e.target.value,
+                                        ),
+                                      })
+                                    }
+                                  >
+                                    <option value={1}>1 columna</option>
+                                    <option value={2}>2 columnas</option>
+                                  </select>
+                                </div>
+
+                                <div>
+                                  <label className="app-label">Formato</label>
+                                  <select
+                                    className="app-input"
+                                    value={block.aspect}
+                                    onChange={(e) =>
+                                      patchBlock(block.id, {
+                                        aspect: e.target.value,
+                                      })
+                                    }
+                                  >
+                                    <option value="portrait">
+                                      Vertical 9:16
+                                    </option>
+                                    <option value="square">
+                                      Cuadrado 1:1
+                                    </option>
+                                    <option value="auto">
+                                      Tamaño original
+                                    </option>
+                                  </select>
+                                </div>
+
+                                <div>
+                                  <label className="app-label">
+                                    Ancho del bloque
+                                  </label>
+                                  <select
+                                    className="app-input"
+                                    value={block.width}
+                                    onChange={(e) =>
+                                      patchBlock(block.id, {
+                                        width: e.target.value,
+                                      })
+                                    }
+                                  >
+                                    <option value="normal">Normal</option>
+                                    <option value="wide">Ancho</option>
+                                    <option value="full">
+                                      Ancho completo
+                                    </option>
+                                  </select>
+                                </div>
+                              </div>
+
+                              <div>
+                                <label className="app-label">
+                                  Separación: {block.gap}px
+                                </label>
+                                <input
+                                  type="range"
+                                  min="0"
+                                  max="40"
+                                  step="1"
+                                  className="w-full"
+                                  value={block.gap}
+                                  onChange={(e) =>
+                                    patchBlock(block.id, {
+                                      gap: Number(e.target.value),
+                                    })
+                                  }
+                                />
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-2 text-xs">
+                                {[
+                                  ["controls", "Controles"],
+                                  ["autoplay", "Autoplay"],
+                                  ["muted", "Sin sonido"],
+                                  ["loop", "Repetir"],
+                                  ["rounded", "Redondeado"],
+                                ].map(([key, label]) => (
+                                  <label
+                                    key={key}
+                                    className="flex items-center gap-2 rounded-xl border border-border px-3 py-2"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={Boolean(
+                                        (block as any)[key],
+                                      )}
+                                      onChange={(e) =>
+                                        patchBlock(block.id, {
+                                          [key]: e.target.checked,
+                                        })
+                                      }
+                                    />
+                                    {label}
+                                  </label>
+                                ))}
+                              </div>
+                            </>
+                          )}
+
+                          {block.type === "buy_button" && (
+                            <>
+                              <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 text-xs">
+                                🛒 Este botón abre el checkout lateral sobre la
+                                misma página. No redirige al cliente.
+                              </div>
+
+                              <div>
+                                <label className="app-label">
+                                  Texto principal
+                                </label>
+                                <input
+                                  className="app-input"
+                                  value={block.text}
+                                  onChange={(e) =>
+                                    patchBlock(block.id, {
+                                      text: e.target.value,
+                                    })
+                                  }
+                                />
+                              </div>
+
+                              <div>
+                                <label className="app-label">Subtexto</label>
+                                <input
+                                  className="app-input"
+                                  value={block.subtext}
+                                  onChange={(e) =>
+                                    patchBlock(block.id, {
+                                      subtext: e.target.value,
+                                    })
+                                  }
+                                />
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-2">
+                                <div>
+                                  <label className="app-label">Ancho</label>
+                                  <select
+                                    className="app-input"
+                                    value={block.width}
+                                    onChange={(e) =>
+                                      patchBlock(block.id, {
+                                        width: e.target.value,
+                                      })
+                                    }
+                                  >
+                                    <option value="normal">Normal</option>
+                                    <option value="wide">Ancho</option>
+                                    <option value="full">
+                                      Ancho completo
+                                    </option>
+                                  </select>
+                                </div>
+
+                                <div>
+                                  <label className="app-label">
+                                    Alineación
+                                  </label>
+                                  <select
+                                    className="app-input"
+                                    value={block.align}
+                                    onChange={(e) =>
+                                      patchBlock(block.id, {
+                                        align: e.target.value,
+                                      })
+                                    }
+                                  >
+                                    <option value="left">Izquierda</option>
+                                    <option value="center">Centro</option>
+                                    <option value="right">Derecha</option>
+                                  </select>
+                                </div>
+                              </div>
+
+                              <button
+                                type="button"
+                                style={{
+                                  width:
+                                    block.width === "normal"
+                                      ? "70%"
+                                      : "100%",
+                                  margin:
+                                    block.align === "center"
+                                      ? "0 auto"
+                                      : block.align === "right"
+                                        ? "0 0 0 auto"
+                                        : "0",
+                                  display: "block",
+                                  border: "4px solid #000",
+                                  borderRadius: 999,
+                                  background: config.buttonColor,
+                                  color: "#fff",
+                                  padding: "10px 14px",
+                                  fontWeight: 900,
+                                }}
+                              >
+                                <div>{block.text}</div>
+                                {block.subtext && (
+                                  <div
+                                    style={{
+                                      fontSize: 10,
+                                      marginTop: 2,
+                                    }}
+                                  >
+                                    {block.subtext}
+                                  </div>
+                                )}
+                              </button>
                             </>
                           )}
 
@@ -2481,6 +3042,146 @@ function ShrinePreview({
                 </div>
               );
             }
+            if (block.type === "media_gallery") {
+              if (!block.items.length) return null;
+
+              const galleryWidth =
+                block.width === "full"
+                  ? "100%"
+                  : block.width === "wide"
+                    ? mobile
+                      ? "100%"
+                      : "1040px"
+                    : mobile
+                      ? "100%"
+                      : "760px";
+
+              const galleryAspect =
+                block.aspect === "portrait"
+                  ? "9 / 16"
+                  : block.aspect === "square"
+                    ? "1 / 1"
+                    : "auto";
+
+              return (
+                <div
+                  key={block.id}
+                  style={{
+                    width: galleryWidth,
+                    maxWidth: "100%",
+                    margin: "20px auto",
+                    padding:
+                      block.width === "full" ? 0 : "0 14px",
+                    display: "grid",
+                    gridTemplateColumns: `repeat(${
+                      mobile
+                        ? block.mobileColumns
+                        : block.columns
+                    }, minmax(0, 1fr))`,
+                    gap: block.gap,
+                  }}
+                >
+                  {block.items.map((item) => (
+                    <div
+                      key={item.id}
+                      style={{
+                        overflow: "hidden",
+                        borderRadius: block.rounded ? 12 : 0,
+                        background: "#000",
+                        aspectRatio: galleryAspect,
+                      }}
+                    >
+                      {item.type === "image" ? (
+                        <img
+                          src={item.url}
+                          alt={item.alt || ""}
+                          style={{
+                            width: "100%",
+                            height:
+                              block.aspect === "auto"
+                                ? "auto"
+                                : "100%",
+                            display: "block",
+                            objectFit: "cover",
+                          }}
+                        />
+                      ) : (
+                        <video
+                          src={item.url}
+                          controls={block.controls}
+                          autoPlay={block.autoplay}
+                          muted={block.muted}
+                          loop={block.loop}
+                          playsInline
+                          style={{
+                            width: "100%",
+                            height:
+                              block.aspect === "auto"
+                                ? "auto"
+                                : "100%",
+                            display: "block",
+                            objectFit: "cover",
+                            background: "#000",
+                          }}
+                        />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              );
+            }
+
+            if (block.type === "buy_button") {
+              const btnWidth =
+                block.width === "full"
+                  ? "100%"
+                  : block.width === "wide"
+                    ? mobile
+                      ? "calc(100% - 28px)"
+                      : "760px"
+                    : mobile
+                      ? "calc(100% - 28px)"
+                      : "520px";
+
+              return (
+                <div
+                  key={block.id}
+                  style={{
+                    width: btnWidth,
+                    maxWidth: "100%",
+                    margin:
+                      block.align === "center"
+                        ? "24px auto"
+                        : block.align === "right"
+                          ? "24px 14px 24px auto"
+                          : "24px auto 24px 14px",
+                  }}
+                >
+                  <button
+                    type="button"
+                    style={{
+                      width: "100%",
+                      minHeight: 62,
+                      borderRadius: 999,
+                      border: "5px solid #000",
+                      background: config.buttonColor,
+                      color: "#fff",
+                      fontWeight: 900,
+                      padding: "9px 18px",
+                      boxShadow: "0 4px 10px rgba(0,0,0,.2)",
+                    }}
+                  >
+                    <div>{block.text}</div>
+                    {block.subtext && (
+                      <div style={{ fontSize: 11, marginTop: 3 }}>
+                        {block.subtext}
+                      </div>
+                    )}
+                  </button>
+                </div>
+              );
+            }
+
             if (block.type === "image_text") {
               return (
                 <div
