@@ -1,5 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { HashRouter, Route, Routes, useParams } from "react-router-dom";
+import {
+  HashRouter,
+  Route,
+  Routes,
+  useParams,
+} from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -22,34 +27,27 @@ const queryClient = new QueryClient();
 const normalizeExternalQRUrl = () => {
   const { pathname, search, hash } = window.location;
 
-  // Ejemplo:
-  // https://midominio.com/asignar-pedidos?id=123
-  // ↓
-  // https://midominio.com/#/asignar-pedidos?id=123
-  if (!hash && pathname.includes("/asignar-pedidos") && search.includes("id=")) {
+  if (
+    !hash &&
+    pathname.includes("/asignar-pedidos") &&
+    search.includes("id=")
+  ) {
     window.location.replace(
-      `${window.location.origin}/#/asignar-pedidos${search}`
+      `${window.location.origin}/#/asignar-pedidos${search}`,
     );
     return;
   }
 
-  // Si el QR apunta a /qr?id=123
   if (!hash && pathname.includes("/qr") && search.includes("id=")) {
     window.location.replace(
-      `${window.location.origin}/#/asignar-pedidos${search}`
+      `${window.location.origin}/#/asignar-pedidos${search}`,
     );
-    return;
   }
 };
 
 normalizeExternalQRUrl();
 
-/**
- * Página pública publicada
- * Ejemplo:
- * /#/p/cepillo-9-en-1
- */
-const PublicLandingRoute = () => {
+function PublicLandingRoute() {
   const { slug } = useParams<{ slug: string }>();
 
   if (!slug) {
@@ -57,14 +55,9 @@ const PublicLandingRoute = () => {
   }
 
   return <PublicLandingPage slug={slug} />;
-};
+}
 
-/**
- * Vista previa privada
- * Ejemplo:
- * /#/preview/uuid-de-la-pagina
- */
-const PreviewLandingRoute = () => {
+function PreviewLandingRoute() {
   const { id } = useParams<{ id: string }>();
 
   if (!id) {
@@ -72,7 +65,7 @@ const PreviewLandingRoute = () => {
   }
 
   return <PublicLandingPage pageId={id} preview />;
-};
+}
 
 const App = () => (
   <QueryClientProvider client={queryClient}>
@@ -100,22 +93,17 @@ const App = () => (
               element={<ProductsView />}
             />
 
-            {/* ✅ PÁGINA PÚBLICA */}
             <Route
               path="/p/:slug"
               element={<PublicLandingRoute />}
             />
 
-            {/* ✅ VISTA PREVIA */}
             <Route
               path="/preview/:id"
               element={<PreviewLandingRoute />}
             />
 
-            <Route
-              path="*"
-              element={<NotFound />}
-            />
+            <Route path="*" element={<NotFound />} />
           </Routes>
         </HashRouter>
       </AuthProvider>
