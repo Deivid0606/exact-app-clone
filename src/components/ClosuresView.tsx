@@ -52,6 +52,43 @@ type AdminTeamRow = {
 };
 
 
+type TeamClosureSummary = {
+  owner_user_id: string;
+  owner_email: string;
+  owner_name: string;
+  member_user_id: string;
+  member_email: string;
+  member_name: string;
+  assigned_count: number;
+  delivered_count: number;
+  pending_receipt_count: number;
+  amount_collected: number;
+  delivery_fee_total: number;
+  amount_to_render: number;
+  fee_configured: boolean;
+};
+
+type TeamReceiptHistory = {
+  receipt_id: string;
+  owner_user_id: string;
+  owner_email: string;
+  owner_name: string;
+  member_user_id: string;
+  member_email: string;
+  member_name: string;
+  period_from: string;
+  period_to: string;
+  order_count: number;
+  amount_collected: number;
+  delivery_fee_total: number;
+  amount_received: number;
+  fee_configured: boolean;
+  received_at: string;
+  received_by_email: string;
+  note: string | null;
+};
+
+
 const formatDatePY = (dateValue?: string | null) => {
   if (!dateValue) return '—';
   const onlyDate = dateValue.slice(0, 10);
@@ -526,7 +563,7 @@ export default function ClosuresView() {
   const [editingDateId, setEditingDateId] = useState<string | null>(null);
   const [selectedGuideIds, setSelectedGuideIds] = useState<Set<string>>(new Set());
   const [updatingContactedIds, setUpdatingContactedIds] = useState<Set<string>>(new Set());
-  const [activeSection, setActiveSection] = useState<'orders' | 'team'>('orders');
+  const [activeSection, setActiveSection] = useState<'orders' | 'team' | 'teamClosures'>('orders');
   const [bulkStatus, setBulkStatus] = useState<string>('EN RUTA');
   const [bulkTeamUserId, setBulkTeamUserId] = useState<string>('');
   const [bulkAssignedDate, setBulkAssignedDate] = useState<string>('');
@@ -536,6 +573,9 @@ export default function ClosuresView() {
   const [allTeams, setAllTeams] = useState<AdminTeamRow[]>([]);
   const [teamLoading, setTeamLoading] = useState(false);
   const [teamSearch, setTeamSearch] = useState('');
+  const [teamClosureSummary, setTeamClosureSummary] = useState<TeamClosureSummary[]>([]);
+  const [teamReceiptHistory, setTeamReceiptHistory] = useState<TeamReceiptHistory[]>([]);
+  const [teamClosureLoading, setTeamClosureLoading] = useState(false);
   
   // Estados para el modal de cambio de estado
   const [statusChangeModal, setStatusChangeModal] = useState<{
@@ -705,6 +745,88 @@ export default function ClosuresView() {
       }
     } finally {
       setTeamLoading(false);
+    }
+  };
+
+
+  const loadTeamClosures = async () => {
+    if (!(isDelivery || isAdmin || isSupplier)) return;
+
+    setTeamClosureLoading(true);
+    try {
+      const [summaryResult, historyResult] = await Promise.all([
+        supabase.rpc('get_delivery_team_closure_summary', {
+          p_date_from: dateFrom,
+          p_date_to: dateTo,
+        }),
+        supabase.rpc('get_delivery_team_receipt_history'),
+      ]);
+
+      if (summaryResult.error) throw summaryResult.error;
+      if (historyResult.error) throw historyResult.error;
+
+      setTeamClosureSummary((summaryResult.data || []) as TeamClosureSummary[]);
+      setTeamReceiptHistory((historyResult.data || []) as TeamReceiptHistory[]);
+    } catch (error: any) {
+      console.error('Error cargando cierres de equipo:', error);
+      toast.error(
+        `No se pudieron cargar los cierres de equipo: ${
+          error?.message || 'Error desconocido'
+        }`,
+      );
+      setTeamClosureSummary([]);
+      setTeamReceiptHistory([]);
+    } finally {
+      setTeamClosureLoading(false);
+    }
+  };
+
+  const markTeamReceiptReceived = async (memberUserId: string) => {
+    if (!isDelivery) return;
+
+    const row = teamClosureSummary.find(
+      item => item.member_user_id === memberUserId,
+    );
+
+    if (!row || Number(row.pending_receipt_count || 0) <= 0) {
+      toast.error('Ese delivery no tiene entregas pendientes de rendición');
+      return;
+    }
+
+    if (
+      !confirm(
+        `¿Confirmar que recibiste la rendición de ${row.member_name || row.member_email}?\n\n` +
+        `Pedidos pendientes: ${row.pending_receipt_count}\n` +
+        `Monto a recibir: Gs ${nf(Number(row.amount_to_render || 0))}\n` +
+        `Período: ${formatDatePY(dateFrom)} al ${formatDatePY(dateTo)}\n\n` +
+        'Esta acción quedará guardada en el historial.',
+      )
+    ) return;
+
+    setBulkBusy(true);
+    try {
+      const { data, error } = await supabase.rpc('mark_delivery_team_receipt', {
+        p_member_user_id: memberUserId,
+        p_date_from: dateFrom,
+        p_date_to: dateTo,
+        p_note: null,
+      });
+
+      if (error) throw error;
+
+      const receipt = Array.isArray(data) ? data[0] : data;
+
+      toast.success(
+        `Rendición recibida${receipt?.amount_received != null
+          ? ` — Gs ${nf(Number(receipt.amount_received || 0))}`
+          : ''}`,
+      );
+
+      await loadTeamClosures();
+    } catch (error: any) {
+      toast.error(error?.message || 'No se pudo registrar la rendición recibida');
+    } finally {
+      setBulkBusy(false);
     }
   };
 
@@ -2028,6 +2150,16 @@ export default function ClosuresView() {
           >
             👥 Equipo de Logística
           </button>
+          <button
+            type="button"
+            className={`nav-btn ${activeSection === 'teamClosures' ? 'active' : ''}`}
+            onClick={() => {
+              setActiveSection('teamClosures');
+              loadTeamClosures();
+            }}
+          >
+            📊 Cierres de Equipo
+          </button>
         </div>
       )}
 
@@ -2194,6 +2326,211 @@ export default function ClosuresView() {
                 </div>
               )}
             </div>
+          )}
+        </div>
+      )}
+
+      {activeSection === 'teamClosures' && (isDelivery || isAdmin || isSupplier) && (
+        <div className="space-y-4">
+          <div className="app-card !p-4 border border-violet-500/25 bg-violet-500/5">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h4 className="font-extrabold text-lg">📊 Cierres de Equipo</h4>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {isDelivery
+                    ? 'Control de rendiciones de los deliveries que aceptaron pertenecer a tu equipo.'
+                    : `Vista global de cierres de equipos para ${isAdmin ? 'ADMIN' : 'PROVEEDOR'}.`}
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="date"
+                  className="app-input !w-auto"
+                  value={dateFrom}
+                  onChange={event => setDateFrom(event.target.value)}
+                />
+                <span className="text-xs text-muted-foreground">a</span>
+                <input
+                  type="date"
+                  className="app-input !w-auto"
+                  value={dateTo}
+                  onChange={event => setDateTo(event.target.value)}
+                />
+                <button
+                  type="button"
+                  className="nav-btn active"
+                  onClick={loadTeamClosures}
+                  disabled={teamClosureLoading}
+                >
+                  {teamClosureLoading ? 'Cargando...' : '🔄 Actualizar'}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          {teamClosureLoading ? (
+            <div className="app-card !p-6 text-sm text-muted-foreground">
+              Cargando panorama de cierres...
+            </div>
+          ) : teamClosureSummary.length === 0 ? (
+            <div className="app-card !p-6">
+              <div className="font-bold">Todavía no hay miembros activos con movimientos.</div>
+              <div className="text-xs text-muted-foreground mt-1">
+                Cuando un delivery acepte tu invitación y tenga pedidos asignados, aparecerá acá.
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="grid gap-4">
+                {teamClosureSummary.map(row => (
+                  <div
+                    key={`${row.owner_user_id}-${row.member_user_id}`}
+                    className="app-card !p-4 border border-border"
+                  >
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div className="min-w-[220px]">
+                        {!isDelivery && (
+                          <div className="text-[11px] text-muted-foreground mb-1">
+                            Encargado: <span className="font-bold text-foreground">{row.owner_name || row.owner_email}</span>
+                          </div>
+                        )}
+                        <div className="text-lg font-extrabold">
+                          🚚 {row.member_name || row.member_email}
+                        </div>
+                        <div className="text-xs text-muted-foreground">{row.member_email}</div>
+                      </div>
+
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 flex-1">
+                        <div className="rounded-xl border border-border p-3">
+                          <div className="text-[11px] text-muted-foreground">Pedidos asignados</div>
+                          <div className="text-2xl font-extrabold">{Number(row.assigned_count || 0)}</div>
+                        </div>
+                        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3">
+                          <div className="text-[11px] text-muted-foreground">Entregados</div>
+                          <div className="text-2xl font-extrabold">{Number(row.delivered_count || 0)}</div>
+                        </div>
+                        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+                          <div className="text-[11px] text-muted-foreground">Pendientes de rendir</div>
+                          <div className="text-2xl font-extrabold">{Number(row.pending_receipt_count || 0)}</div>
+                        </div>
+                        <div className="rounded-xl border border-violet-500/30 bg-violet-500/5 p-3">
+                          <div className="text-[11px] text-muted-foreground">Monto a rendir</div>
+                          <div className="text-xl font-extrabold">
+                            Gs {nf(Number(row.amount_to_render || 0))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
+                      <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+                        <span>
+                          Cobrado: <strong className="text-foreground">Gs {nf(Number(row.amount_collected || 0))}</strong>
+                        </span>
+                        {(!isDelivery || row.fee_configured) && (
+                          <span>
+                            Tarifa delivery: <strong className="text-foreground">Gs {nf(Number(row.delivery_fee_total || 0))}</strong>
+                          </span>
+                        )}
+                        <span>
+                          Período: <strong className="text-foreground">{formatDatePY(dateFrom)} - {formatDatePY(dateTo)}</strong>
+                        </span>
+                        {!isDelivery && (
+                          <span className="text-violet-300">
+                            Tarifa calculada con costos por ciudad del titular del equipo
+                          </span>
+                        )}
+                      </div>
+
+                      {isDelivery && (
+                        <button
+                          type="button"
+                          className="nav-btn active"
+                          disabled={bulkBusy || Number(row.pending_receipt_count || 0) === 0}
+                          onClick={() => markTeamReceiptReceived(row.member_user_id)}
+                          title="Solo el delivery encargado puede confirmar que recibió esta rendición"
+                        >
+                          ✅ RECIBIDO — Gs {nf(Number(row.amount_to_render || 0))}
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="app-card !p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                  <div>
+                    <h4 className="font-extrabold text-lg">📜 Historial de recibidos</h4>
+                    <p className="text-xs text-muted-foreground">
+                      Cada confirmación guarda los pedidos incluidos, monto, período, fecha y encargado que recibió.
+                    </p>
+                  </div>
+                  <span className="chip text-[11px]">
+                    {teamReceiptHistory.length} registro{teamReceiptHistory.length === 1 ? '' : 's'}
+                  </span>
+                </div>
+
+                {teamReceiptHistory.length === 0 ? (
+                  <div className="text-sm text-muted-foreground py-4">
+                    Todavía no hay rendiciones recibidas.
+                  </div>
+                ) : (
+                  <div className="overflow-auto">
+                    <table className="app-table min-w-[1100px]">
+                      <thead>
+                        <tr>
+                          <th>Fecha recibido</th>
+                          {!isDelivery && <th>Encargado</th>}
+                          <th>Delivery</th>
+                          <th>Período</th>
+                          <th className="text-right">Pedidos</th>
+                          <th className="text-right">Cobrado</th>
+                          {(!isDelivery || teamReceiptHistory.some(item => item.fee_configured)) && (
+                            <th className="text-right">Tarifa</th>
+                          )}
+                          <th className="text-right">Recibido</th>
+                          <th>Registrado por</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {teamReceiptHistory.map(item => (
+                          <tr key={item.receipt_id}>
+                            <td className="text-xs whitespace-nowrap">
+                              {item.received_at ? new Date(item.received_at).toLocaleString('es-PY') : '—'}
+                            </td>
+                            {!isDelivery && (
+                              <td>
+                                <div className="font-bold text-xs">{item.owner_name || item.owner_email}</div>
+                                <div className="text-[11px] text-muted-foreground">{item.owner_email}</div>
+                              </td>
+                            )}
+                            <td>
+                              <div className="font-bold text-xs">{item.member_name || item.member_email}</div>
+                              <div className="text-[11px] text-muted-foreground">{item.member_email}</div>
+                            </td>
+                            <td className="text-xs whitespace-nowrap">
+                              {formatDatePY(item.period_from)} - {formatDatePY(item.period_to)}
+                            </td>
+                            <td className="text-right text-xs font-bold">{Number(item.order_count || 0)}</td>
+                            <td className="text-right text-xs">Gs {nf(Number(item.amount_collected || 0))}</td>
+                            {(!isDelivery || teamReceiptHistory.some(historyItem => historyItem.fee_configured)) && (
+                              <td className="text-right text-xs">
+                                {isDelivery && !item.fee_configured
+                                  ? '—'
+                                  : `Gs ${nf(Number(item.delivery_fee_total || 0))}`}
+                              </td>
+                            )}
+                            <td className="text-right text-xs font-extrabold">Gs {nf(Number(item.amount_received || 0))}</td>
+                            <td className="text-xs">{item.received_by_email || '—'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </div>
       )}
