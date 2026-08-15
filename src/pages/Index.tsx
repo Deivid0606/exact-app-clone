@@ -25,6 +25,7 @@ import MapView from '@/components/MapView';
 import ShopifyInboxView from '@/components/ShopifyInboxView';
 import ShopifyConnectionView from '@/components/ShopifyConnectionView';
 import QRScannerView from '@/components/QRScannerView';
+import StoreView from '@/components/StoreView';
 
 export interface SheetPrefill {
   customer?: string;
@@ -193,6 +194,9 @@ export default function Index() {
 
       case 'products':
         return <ProductsView onLoadProduct={handleLoadProduct} />;
+
+      case 'store':
+        return <StoreView onLoadOrder={handleSheetConfirm} />;
 
       case 'profile':
         return <ProfileView />;
