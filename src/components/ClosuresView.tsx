@@ -18,6 +18,40 @@ const STATUS_1_OPTIONS = [
 ] as const;
 
 
+type TeamMember = {
+  relation_id: string;
+  owner_user_id: string;
+  member_user_id: string;
+  member_email: string;
+  member_name: string;
+  status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'REMOVED';
+  invited_at: string;
+  accepted_at: string | null;
+};
+
+type TeamInvitation = {
+  relation_id: string;
+  owner_user_id: string;
+  owner_email: string;
+  owner_name: string;
+  status: 'PENDING' | 'ACCEPTED' | 'REJECTED' | 'REMOVED';
+  invited_at: string;
+};
+
+type AdminTeamRow = {
+  relation_id: string;
+  owner_user_id: string;
+  owner_email: string;
+  owner_name: string;
+  member_user_id: string;
+  member_email: string;
+  member_name: string;
+  status: string;
+  invited_at: string;
+  accepted_at: string | null;
+};
+
+
 const formatDatePY = (dateValue?: string | null) => {
   if (!dateValue) return '—';
   const onlyDate = dateValue.slice(0, 10);
@@ -190,13 +224,15 @@ function StatusChangeModal({
   onClose, 
   onConfirm, 
   newStatus,
-  uploading 
+  uploading,
+  orderCount = 1,
 }: { 
   isOpen: boolean; 
   onClose: () => void; 
   onConfirm: (message: string, attachment: File | null) => void; 
   newStatus: string;
   uploading: boolean;
+  orderCount?: number;
 }) {
   const [message, setMessage] = useState('');
   const [attachment, setAttachment] = useState<File | null>(null);
@@ -232,7 +268,7 @@ function StatusChangeModal({
     <div className="fixed inset-0 bg-black/70 z-[10000] flex items-center justify-center p-4" onClick={onClose}>
       <div className="bg-card border border-border rounded-2xl p-6 w-full max-w-md" onClick={e => e.stopPropagation()}>
         <h3 className="text-xl font-bold mb-4">
-          Cambiar a {newStatus}
+          Cambiar {orderCount > 1 ? `${orderCount} pedidos` : 'pedido'} a {newStatus}
         </h3>
         
         <div className="space-y-4">
@@ -490,18 +526,25 @@ export default function ClosuresView() {
   const [editingDateId, setEditingDateId] = useState<string | null>(null);
   const [selectedGuideIds, setSelectedGuideIds] = useState<Set<string>>(new Set());
   const [updatingContactedIds, setUpdatingContactedIds] = useState<Set<string>>(new Set());
+  const [activeSection, setActiveSection] = useState<'orders' | 'team'>('orders');
+  const [bulkStatus, setBulkStatus] = useState<string>('EN RUTA');
+  const [bulkTeamUserId, setBulkTeamUserId] = useState<string>('');
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
+  const [teamInvitations, setTeamInvitations] = useState<TeamInvitation[]>([]);
+  const [allTeams, setAllTeams] = useState<AdminTeamRow[]>([]);
+  const [teamLoading, setTeamLoading] = useState(false);
+  const [teamSearch, setTeamSearch] = useState('');
   
   // Estados para el modal de cambio de estado
   const [statusChangeModal, setStatusChangeModal] = useState<{
     isOpen: boolean;
-    orderId: string;
+    orderIds: string[];
     newStatus: string;
-    oldStatus: string;
   }>({
     isOpen: false,
-    orderId: '',
+    orderIds: [],
     newStatus: '',
-    oldStatus: ''
   });
   const [uploadingFile, setUploadingFile] = useState(false);
   
@@ -685,6 +728,101 @@ export default function ClosuresView() {
     }
   };
 
+
+  const loadTeamData = async () => {
+    if (!(isDelivery || isAdmin || isSupplier)) return;
+
+    setTeamLoading(true);
+    try {
+      if (isDelivery) {
+        const [teamResult, invitationsResult] = await Promise.all([
+          supabase.rpc('get_delivery_team'),
+          supabase.rpc('get_delivery_team_invitations'),
+        ]);
+
+        if (teamResult.error) throw teamResult.error;
+        if (invitationsResult.error) throw invitationsResult.error;
+
+        setTeamMembers((teamResult.data || []) as TeamMember[]);
+        setTeamInvitations((invitationsResult.data || []) as TeamInvitation[]);
+      } else {
+        const { data, error } = await supabase.rpc('get_all_delivery_teams');
+        if (error) throw error;
+        setAllTeams((data || []) as AdminTeamRow[]);
+      }
+    } catch (error: any) {
+      console.error('Error cargando equipo de logística:', error);
+      toast.error(`No se pudo cargar Equipo de Logística: ${error?.message || 'Error desconocido'}`);
+      if (isDelivery) {
+        setTeamMembers([]);
+        setTeamInvitations([]);
+      } else {
+        setAllTeams([]);
+      }
+    } finally {
+      setTeamLoading(false);
+    }
+  };
+
+  const inviteDelivery = async (memberUserId: string) => {
+    if (!isDelivery || !memberUserId) return;
+
+    setBulkBusy(true);
+    try {
+      const { error } = await supabase.rpc('invite_delivery_team_member', {
+        p_member_user_id: memberUserId,
+      });
+      if (error) throw error;
+
+      toast.success('Solicitud enviada al delivery');
+      setTeamSearch('');
+      await loadTeamData();
+    } catch (error: any) {
+      toast.error(error?.message || 'No se pudo enviar la solicitud');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const respondTeamInvitation = async (relationId: string, accept: boolean) => {
+    setBulkBusy(true);
+    try {
+      const { error } = await supabase.rpc('respond_delivery_team_invitation', {
+        p_relation_id: relationId,
+        p_accept: accept,
+      });
+      if (error) throw error;
+
+      toast.success(accept ? 'Solicitud aceptada' : 'Solicitud rechazada');
+      await loadTeamData();
+      await loadClosures();
+    } catch (error: any) {
+      toast.error(error?.message || 'No se pudo responder la solicitud');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const removeTeamMember = async (relationId: string) => {
+    if (!confirm('¿Quitar este delivery del equipo?')) return;
+
+    setBulkBusy(true);
+    try {
+      const { error } = await supabase.rpc('remove_delivery_team_member', {
+        p_relation_id: relationId,
+      });
+      if (error) throw error;
+
+      toast.success('Delivery quitado del equipo');
+      await loadTeamData();
+      await loadClosures();
+    } catch (error: any) {
+      toast.error(error?.message || 'No se pudo quitar al delivery');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   const loadSuppliers = async () => {
     try {
       /*
@@ -748,6 +886,7 @@ export default function ClosuresView() {
   useEffect(() => {
     loadSuppliers();
     loadDeliveries();
+    loadTeamData();
     supabase.from('delivery_fees').select('*').then(({ data }) => setFees(data || []));
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
     supabase.from('products').select('*').then(({ data }) => setProducts(data || []));
@@ -874,7 +1013,9 @@ export default function ClosuresView() {
 
   const updateAssignedDelivery = async (orderId: string, deliveryEmail: string) => {
     const { error } = await supabase.from('orders').update({
+      delivery_owner: deliveryEmail || null,
       assigned_delivery: deliveryEmail || null,
+      assigned_team_member: null,
       assigned_at: deliveryEmail ? new Date().toISOString() : null,
       updated_at: new Date().toISOString()
     }).eq('id', orderId);
@@ -888,7 +1029,9 @@ export default function ClosuresView() {
     toast.success(deliveryEmail ? 'Delivery reasignado' : 'Delivery removido');
     setOrders(prev => prev.map(o => o.id === orderId ? {
       ...o,
+      delivery_owner: deliveryEmail || null,
       assigned_delivery: deliveryEmail || null,
+      assigned_team_member: null,
       assigned_at: deliveryEmail ? new Date().toISOString() : null,
       updated_at: new Date().toISOString()
     } : o));
@@ -975,7 +1118,7 @@ export default function ClosuresView() {
         query = query.in('assigned_delivery', selectedDeliveryList);
       }
     } else if (isDelivery) {
-      query = query.eq('assigned_delivery', myEmail);
+      query = query.or(`delivery_owner.eq.${myEmail},assigned_delivery.eq.${myEmail}`);
       if (selectedSupplierList.length > 0) {
         query = query.in('provider_email', selectedSupplierList);
       }
@@ -1286,77 +1429,121 @@ export default function ClosuresView() {
 
 
 
-  // Función principal para cambiar estado con validación
+  // Cambio de estado individual o masivo con la misma validación
   const handleStatusChangeWithValidation = async (orderId: string, newStatus: string) => {
-    // Verificar si es Delivery y el estado requiere comentario y captura
-    if (isDelivery && (newStatus === 'NO CONTESTA' || newStatus === 'CANCELADO')) {
-      const order = orders.find(o => o.id === orderId);
-      setStatusChangeModal({
-        isOpen: true,
-        orderId,
-        newStatus,
-        oldStatus: order?.status || 'PENDIENTE'
-      });
-      return;
-    }
-    
-    // Si no es Delivery o no requiere validación, proceder normalmente
-    await executeStatusChange(orderId, newStatus, '', null);
-  };
-
-  // Ejecutar el cambio de estado
-  const executeStatusChange = async (
-    orderId: string, 
-    newStatus: string, 
-    message: string = '', 
-    attachmentUrl: string | null = null
-  ) => {
     if (isDelivery && newStatus === 'DEVUELTO A DEPÓSITO') {
       toast.error('Los repartidores no pueden cambiar a DEVUELTO A DEPÓSITO');
       return;
     }
-    
-    const order = orders.find(o => o.id === orderId);
-    const oldStatus = order?.status || 'PENDIENTE';
-    
-    // Guardar en historial
-    await saveToHistory(orderId, oldStatus, newStatus, message, attachmentUrl || undefined);
-    
-    const { error } = await supabase.from('orders').update({ 
-      status: newStatus,
-      updated_at: new Date().toISOString()
-    }).eq('id', orderId);
-    
-    if (error) {
-      toast.error(error.message);
-    } else { 
-      toast.success('Estado actualizado'); 
-      loadClosures();
+
+    if (isDelivery && (newStatus === 'NO CONTESTA' || newStatus === 'CANCELADO')) {
+      setStatusChangeModal({
+        isOpen: true,
+        orderIds: [orderId],
+        newStatus,
+      });
+      return;
     }
+
+    await executeStatusChange([orderId], newStatus, '', null);
   };
 
-  // Procesar el cambio con comentario y captura
+  const executeStatusChange = async (
+    orderIds: string[],
+    newStatus: string,
+    message: string = '',
+    attachmentUrl: string | null = null,
+  ) => {
+    if (orderIds.length === 0) return;
+
+    if (isDelivery && newStatus === 'DEVUELTO A DEPÓSITO') {
+      toast.error('Los repartidores no pueden cambiar a DEVUELTO A DEPÓSITO');
+      return;
+    }
+
+    const { error } = await supabase.rpc('bulk_update_order_status', {
+      p_order_ids: orderIds,
+      p_status: newStatus,
+      p_message: message || null,
+      p_attachment_url: attachmentUrl,
+    });
+
+    if (error) {
+      toast.error(error.message);
+      return;
+    }
+
+    toast.success(
+      orderIds.length === 1
+        ? 'Estado actualizado'
+        : `${orderIds.length} pedidos actualizados a ${newStatus}`,
+    );
+
+    setSelectedGuideIds(new Set());
+    await loadClosures();
+  };
+
   const processStatusChangeWithData = async (message: string, attachment: File | null) => {
     setUploadingFile(true);
-    
-    let attachmentUrl = null;
-    if (attachment) {
-      attachmentUrl = await uploadAttachment(attachment, statusChangeModal.orderId);
+
+    try {
+      let attachmentUrl: string | null = null;
+      if (attachment) {
+        const uploadKey =
+          statusChangeModal.orderIds.length === 1
+            ? statusChangeModal.orderIds[0]
+            : `bulk_${Date.now()}`;
+
+        attachmentUrl = await uploadAttachment(attachment, uploadKey);
+        if (!attachmentUrl) return;
+      }
+
+      await executeStatusChange(
+        statusChangeModal.orderIds,
+        statusChangeModal.newStatus,
+        message,
+        attachmentUrl,
+      );
+
+      setStatusChangeModal({ isOpen: false, orderIds: [], newStatus: '' });
+    } finally {
+      setUploadingFile(false);
     }
-    
-    await executeStatusChange(
-      statusChangeModal.orderId,
-      statusChangeModal.newStatus,
-      message,
-      attachmentUrl
-    );
-    
-    setUploadingFile(false);
-    setStatusChangeModal({ isOpen: false, orderId: '', newStatus: '', oldStatus: '' });
   };
 
   const updateStatus1 = async (orderId: string, status: string) => {
     await handleStatusChangeWithValidation(orderId, status);
+  };
+
+  const applyBulkStatus = async () => {
+    const ids = Array.from(selectedGuideIds);
+    if (ids.length === 0) {
+      toast.error('Seleccioná al menos un pedido');
+      return;
+    }
+
+    if (isDelivery && bulkStatus === 'DEVUELTO A DEPÓSITO') {
+      toast.error('Los repartidores no pueden cambiar a DEVUELTO A DEPÓSITO');
+      return;
+    }
+
+    if (!confirm(`¿Cambiar ${ids.length} pedido(s) a ${bulkStatus}?`)) return;
+
+    if (isDelivery && (bulkStatus === 'NO CONTESTA' || bulkStatus === 'CANCELADO')) {
+      setStatusChangeModal({
+        isOpen: true,
+        orderIds: ids,
+        newStatus: bulkStatus,
+      });
+      return;
+    }
+
+    setBulkBusy(true);
+    try {
+      await executeStatusChange(ids, bulkStatus, '', null);
+    } finally {
+      setBulkBusy(false);
+    }
   };
 
   const updateStatus2 = async (orderId: string, status2: string) => {
@@ -1514,6 +1701,104 @@ export default function ClosuresView() {
 
       return next;
     });
+  };
+
+
+  const selectedOrders = useMemo(
+    () => filteredOrders.filter(order => selectedGuideIds.has(order.id)),
+    [filteredOrders, selectedGuideIds],
+  );
+
+  const selectedDeliveredOrders = useMemo(
+    () =>
+      selectedOrders.filter(
+        order =>
+          (order.status === 'ENTREGADO' || order.status === 'ENCOMIENDA ENTREGADA') &&
+          !order.delivery_settled,
+      ),
+    [selectedOrders],
+  );
+
+  const markSelectedAsPaid = async () => {
+    if (!canManageRendicion) return;
+
+    if (selectedDeliveredOrders.length === 0) {
+      toast.error('Seleccioná pedidos ENTREGADO o ENCOMIENDA ENTREGADA que aún no estén rendidos');
+      return;
+    }
+
+    if (
+      !confirm(
+        `¿Marcar como PAGADOS/RENDIDOS ${selectedDeliveredOrders.length} pedido(s) seleccionado(s)?\n\n` +
+        'Solo se modificarán los pedidos seleccionados. Los demás quedarán sin cambios.',
+      )
+    ) return;
+
+    setBulkBusy(true);
+    try {
+      const { data, error } = await supabase.rpc('mark_selected_orders_paid', {
+        p_order_ids: selectedDeliveredOrders.map(order => order.id),
+        p_note: rendicionNote || null,
+      });
+
+      if (error) throw error;
+
+      const changed = Number(data ?? selectedDeliveredOrders.length);
+      toast.success(`${changed} pedido(s) seleccionado(s) marcado(s) como PAGADOS`);
+      setSelectedGuideIds(new Set());
+      setRendicionNote('');
+      await loadClosures();
+    } catch (error: any) {
+      toast.error(error?.message || 'No se pudieron marcar los pedidos seleccionados');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const assignSelectedToTeam = async () => {
+    if (!isDelivery) return;
+
+    const ids = Array.from(selectedGuideIds);
+    if (ids.length === 0) {
+      toast.error('Seleccioná al menos un pedido');
+      return;
+    }
+
+    if (!bulkTeamUserId) {
+      toast.error('Seleccioná un integrante de tu equipo');
+      return;
+    }
+
+    const target =
+      bulkTeamUserId === 'SELF'
+        ? { name: profile?.name || myEmail }
+        : teamMembers.find(member => member.member_user_id === bulkTeamUserId);
+
+    if (!target) {
+      toast.error('El integrante seleccionado ya no está disponible');
+      return;
+    }
+
+    const targetLabel = (target as any).name || (target as any).member_name || (target as any).member_email || myEmail;
+    if (!confirm(`¿Asignar ${ids.length} pedido(s) a ${targetLabel}?`)) return;
+
+    setBulkBusy(true);
+    try {
+      const { data, error } = await supabase.rpc('assign_orders_to_team_member', {
+        p_order_ids: ids,
+        p_member_user_id: bulkTeamUserId === 'SELF' ? null : bulkTeamUserId,
+      });
+
+      if (error) throw error;
+
+      toast.success(`${Number(data ?? ids.length)} pedido(s) asignado(s) correctamente`);
+      setSelectedGuideIds(new Set());
+      await loadClosures();
+    } catch (error: any) {
+      toast.error(error?.message || 'No se pudieron asignar los pedidos');
+    } finally {
+      setBulkBusy(false);
+    }
   };
 
   const copySelectedGuides = async () => {
@@ -1697,10 +1982,213 @@ export default function ClosuresView() {
   const canManageRendicion = isAdmin || isSupplier;
   const canViewRendicion = isAdmin || isSupplier || isDelivery;
   const canMarkContacted = isAdmin || isDelivery || isSupplier;
+  const canBulkStatus = isAdmin || isSupplier || isDelivery;
+  const acceptedTeamMembers = teamMembers.filter(member => member.status === 'ACCEPTED');
+  const teamCandidates = deliveries.filter((delivery: any) => {
+    const q = teamSearch.trim().toLowerCase();
+    if (!delivery?.user_id || String(delivery.email || '').toLowerCase() === myEmail.toLowerCase()) return false;
+    if (teamMembers.some(member => member.member_user_id === delivery.user_id && member.status !== 'REMOVED' && member.status !== 'REJECTED')) return false;
+    if (!q) return true;
+    return (
+      String(delivery.name || '').toLowerCase().includes(q) ||
+      String(delivery.email || '').toLowerCase().includes(q)
+    );
+  });
 
   return (
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Cierres</h3>
+
+      {(isDelivery || isAdmin || isSupplier) && (
+        <div className="flex flex-wrap gap-2 mb-4 border-b border-border pb-3">
+          <button
+            type="button"
+            className={`nav-btn ${activeSection === 'orders' ? 'active' : ''}`}
+            onClick={() => setActiveSection('orders')}
+          >
+            📦 Pedidos
+          </button>
+          <button
+            type="button"
+            className={`nav-btn ${activeSection === 'team' ? 'active' : ''}`}
+            onClick={() => {
+              setActiveSection('team');
+              loadTeamData();
+            }}
+          >
+            👥 Equipo de Logística
+          </button>
+        </div>
+      )}
+
+      {activeSection === 'team' && (isDelivery || isAdmin || isSupplier) && (
+        <div className="space-y-4">
+          {teamLoading ? (
+            <div className="app-card text-sm text-muted-foreground">Cargando Equipo de Logística...</div>
+          ) : isDelivery ? (
+            <>
+              {teamInvitations.length > 0 && (
+                <div className="app-card !p-4 border border-amber-500/30 bg-amber-500/5">
+                  <h4 className="font-extrabold mb-3">🔔 Solicitudes recibidas</h4>
+                  <div className="space-y-2">
+                    {teamInvitations.map(invitation => (
+                      <div key={invitation.relation_id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border p-3">
+                        <div>
+                          <div className="font-bold">{invitation.owner_name || invitation.owner_email}</div>
+                          <div className="text-xs text-muted-foreground">{invitation.owner_email}</div>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            className="nav-btn"
+                            disabled={bulkBusy}
+                            onClick={() => respondTeamInvitation(invitation.relation_id, false)}
+                          >
+                            Rechazar
+                          </button>
+                          <button
+                            className="nav-btn active"
+                            disabled={bulkBusy}
+                            onClick={() => respondTeamInvitation(invitation.relation_id, true)}
+                          >
+                            Aceptar
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="app-card !p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+                  <div>
+                    <h4 className="font-extrabold text-lg">👥 Mi equipo</h4>
+                    <p className="text-xs text-muted-foreground">
+                      Solo los deliveries que acepten tu solicitud aparecerán al asignar pedidos.
+                    </p>
+                  </div>
+                  <button className="nav-btn" type="button" onClick={loadTeamData}>🔄 Actualizar</button>
+                </div>
+
+                {teamMembers.length === 0 ? (
+                  <div className="text-sm text-muted-foreground py-4">Todavía no agregaste deliveries a tu equipo.</div>
+                ) : (
+                  <div className="space-y-2">
+                    {teamMembers.map(member => (
+                      <div key={member.relation_id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border p-3">
+                        <div>
+                          <div className="font-bold">{member.member_name || member.member_email}</div>
+                          <div className="text-xs text-muted-foreground">{member.member_email}</div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`badge-status ${
+                            member.status === 'ACCEPTED'
+                              ? 'badge-entregado'
+                              : member.status === 'PENDING'
+                                ? 'badge-pendiente'
+                                : 'badge-cancelado'
+                          }`}>
+                            {member.status === 'ACCEPTED' ? 'ACTIVO' : member.status === 'PENDING' ? 'PENDIENTE' : member.status}
+                          </span>
+                          {(member.status === 'ACCEPTED' || member.status === 'PENDING') && (
+                            <button
+                              className="nav-btn !py-1 !px-2 text-xs"
+                              disabled={bulkBusy}
+                              onClick={() => removeTeamMember(member.relation_id)}
+                            >
+                              {member.status === 'PENDING' ? 'Cancelar solicitud' : 'Quitar'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="app-card !p-4">
+                <h4 className="font-extrabold mb-3">➕ Agregar delivery al equipo</h4>
+                <input
+                  className="app-input w-full mb-3"
+                  value={teamSearch}
+                  onChange={event => setTeamSearch(event.target.value)}
+                  placeholder="Buscar delivery por nombre o correo..."
+                />
+                <div className="max-h-80 overflow-auto space-y-2">
+                  {teamCandidates.length === 0 ? (
+                    <div className="text-sm text-muted-foreground py-3">No hay deliveries disponibles para invitar.</div>
+                  ) : (
+                    teamCandidates.map((delivery: any) => (
+                      <div key={delivery.user_id} className="flex items-center justify-between gap-3 rounded-xl border border-border p-3">
+                        <div>
+                          <div className="font-bold">{delivery.name || delivery.email}</div>
+                          <div className="text-xs text-muted-foreground">{delivery.email}</div>
+                        </div>
+                        <button
+                          className="nav-btn active"
+                          disabled={bulkBusy}
+                          onClick={() => inviteDelivery(delivery.user_id)}
+                        >
+                          Enviar solicitud
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="app-card !p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+                <div>
+                  <h4 className="font-extrabold text-lg">👥 Todos los equipos de logística</h4>
+                  <p className="text-xs text-muted-foreground">
+                    Vista global para {isAdmin ? 'ADMIN' : 'PROVEEDOR'}.
+                  </p>
+                </div>
+                <button className="nav-btn" type="button" onClick={loadTeamData}>🔄 Actualizar</button>
+              </div>
+
+              {allTeams.length === 0 ? (
+                <div className="text-sm text-muted-foreground py-4">No hay equipos creados.</div>
+              ) : (
+                <div className="overflow-auto">
+                  <table className="app-table min-w-[900px]">
+                    <thead>
+                      <tr>
+                        <th>Delivery líder</th>
+                        <th>Miembro</th>
+                        <th>Estado</th>
+                        <th>Invitado</th>
+                        <th>Aceptado</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allTeams.map(row => (
+                        <tr key={row.relation_id}>
+                          <td>
+                            <div className="font-bold text-xs">{row.owner_name || row.owner_email}</div>
+                            <div className="text-[11px] text-muted-foreground">{row.owner_email}</div>
+                          </td>
+                          <td>
+                            <div className="font-bold text-xs">{row.member_name || row.member_email}</div>
+                            <div className="text-[11px] text-muted-foreground">{row.member_email}</div>
+                          </td>
+                          <td><span className="badge-status">{row.status}</span></td>
+                          <td className="text-xs">{row.invited_at ? new Date(row.invited_at).toLocaleString('es-PY') : '—'}</td>
+                          <td className="text-xs">{row.accepted_at ? new Date(row.accepted_at).toLocaleString('es-PY') : '—'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      <div className={activeSection === 'orders' ? '' : 'hidden'}>
 
       {isDelivery && (
         <div className="mb-3">
@@ -2235,6 +2723,74 @@ export default function ClosuresView() {
               📄 Descargar PDF ({selectedGuideOrders.length})
             </button>
 
+            {canBulkStatus && (
+              <>
+                <select
+                  className="app-input !w-auto !py-2 text-xs"
+                  value={bulkStatus}
+                  onChange={event => setBulkStatus(event.target.value)}
+                  disabled={bulkBusy || selectedGuideOrders.length === 0}
+                >
+                  {STATUS_1_OPTIONS.map(status => (
+                    <option
+                      key={status}
+                      value={status}
+                      disabled={isDelivery && status === 'DEVUELTO A DEPÓSITO'}
+                    >
+                      {status}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="nav-btn active"
+                  onClick={applyBulkStatus}
+                  disabled={bulkBusy || selectedGuideOrders.length === 0}
+                >
+                  🔄 Cambiar estado ({selectedGuideOrders.length})
+                </button>
+              </>
+            )}
+
+            {isDelivery && (
+              <>
+                <select
+                  className="app-input !w-auto !py-2 text-xs min-w-[210px]"
+                  value={bulkTeamUserId}
+                  onChange={event => setBulkTeamUserId(event.target.value)}
+                  disabled={bulkBusy || selectedGuideOrders.length === 0}
+                >
+                  <option value="">Asignar a mi equipo...</option>
+                  <option value="SELF">Yo — {profile?.name || myEmail}</option>
+                  {acceptedTeamMembers.map(member => (
+                    <option key={member.member_user_id} value={member.member_user_id}>
+                      {member.member_name || member.member_email}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="nav-btn active"
+                  onClick={assignSelectedToTeam}
+                  disabled={bulkBusy || selectedGuideOrders.length === 0 || !bulkTeamUserId}
+                >
+                  👥 Asignar ({selectedGuideOrders.length})
+                </button>
+              </>
+            )}
+
+            {canManageRendicion && (
+              <button
+                type="button"
+                className="nav-btn active"
+                onClick={markSelectedAsPaid}
+                disabled={bulkBusy || selectedDeliveredOrders.length === 0}
+                title="Solo marca como pagados/rendidos los pedidos seleccionados que estén entregados"
+              >
+                💰 Marcar seleccionados PAGADOS ({selectedDeliveredOrders.length})
+              </button>
+            )}
+
             <span className="text-xs text-muted-foreground">
               El PDF incluye cliente, dirección, productos, total y teléfono clicable con WhatsApp.
             </span>
@@ -2453,12 +3009,19 @@ export default function ClosuresView() {
                         ))}
                       </select>
                     ) : (
-                      <span>
-                        {(() => {
-                          const found = deliveries.find((d: any) => d.email === o.assigned_delivery);
-                          return found?.name || o.assigned_delivery || '—';
-                        })()}
-                      </span>
+                      <div>
+                        <div className="font-bold">
+                          {(() => {
+                            const found = deliveries.find((d: any) => d.email === o.assigned_delivery);
+                            return found?.name || o.assigned_delivery || '—';
+                          })()}
+                        </div>
+                        {o.delivery_owner && o.delivery_owner !== o.assigned_delivery && (
+                          <div className="text-[10px] text-muted-foreground mt-1">
+                            Líder: {deliveries.find((d: any) => d.email === o.delivery_owner)?.name || o.delivery_owner}
+                          </div>
+                        )}
+                      </div>
                     )}
                   </td>
                   <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
@@ -2534,13 +3097,16 @@ export default function ClosuresView() {
         </table>
       </div>
 
+      </div>
+
       {/* Modal para solicitar comentario y captura */}
       <StatusChangeModal
         isOpen={statusChangeModal.isOpen}
-        onClose={() => setStatusChangeModal({ isOpen: false, orderId: '', newStatus: '', oldStatus: '' })}
+        onClose={() => setStatusChangeModal({ isOpen: false, orderIds: [], newStatus: '' })}
         onConfirm={processStatusChangeWithData}
         newStatus={statusChangeModal.newStatus}
         uploading={uploadingFile}
+        orderCount={statusChangeModal.orderIds.length}
       />
 
       {/* Modal de historial */}
