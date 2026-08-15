@@ -628,85 +628,27 @@ export default function ClosuresView() {
     setLoadingDeliveries(true);
 
     try {
-      const [rolesResult, ordersResult] = await Promise.all([
-        supabase
-          .from('user_roles')
-          .select('user_id')
-          .eq('role', 'DELIVERY')
-          .eq('approved', true),
-        supabase
-          .from('orders')
-          .select('assigned_delivery')
-          .not('assigned_delivery', 'is', null),
-      ]);
+      // Usar RPC SECURITY DEFINER para que DELIVERY también pueda ver
+      // todos los repartidores aprobados aunque RLS bloquee profiles/user_roles.
+      const { data, error } = await supabase.rpc('get_approved_deliveries');
 
-      if (rolesResult.error) throw rolesResult.error;
-      if (ordersResult.error) throw ordersResult.error;
+      if (error) throw error;
 
-      const deliveryUserIds: string[] = [
-        ...new Set<string>(
-          (rolesResult.data || [])
-            .map(item => String(item.user_id || '').trim())
-            .filter(Boolean),
-        ),
-      ];
+      const deliveryMap = new Map<
+        string,
+        { user_id: string; email: string; name: string }
+      >();
 
-      const assignedEmails: string[] = [
-        ...new Set<string>(
-          (ordersResult.data || [])
-            .map(order => String(order.assigned_delivery || '').trim().toLowerCase())
-            .filter(Boolean),
-        ),
-      ];
+      (data || []).forEach((delivery: any) => {
+        const userId = String(delivery?.user_id || '').trim();
+        const email = String(delivery?.email || '').trim();
+        if (!userId || !email) return;
 
-      let profilesByRole: any[] = [];
-      if (deliveryUserIds.length > 0) {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('user_id, email, name')
-          .in('user_id', deliveryUserIds);
-
-        if (error) throw error;
-        profilesByRole = data || [];
-      }
-
-      let profilesByOrders: any[] = [];
-      if (assignedEmails.length > 0) {
-        const { data, error } = await supabase
-          .from('profiles')
-          .select('user_id, email, name')
-          .in('email', assignedEmails);
-
-        if (error) throw error;
-        profilesByOrders = data || [];
-      }
-
-      const deliveryMap = new Map<string, { user_id?: string; email: string; name: string }>();
-
-      const addDelivery = (profile: any) => {
-        const email = String(profile?.email || '').trim();
-        if (!email) return;
-
-        const key = email.toLowerCase();
-        const existing = deliveryMap.get(key);
-
-        deliveryMap.set(key, {
-          user_id: profile?.user_id || existing?.user_id,
-          email: existing?.email || email,
-          name: profile?.name || existing?.name || email,
+        deliveryMap.set(email.toLowerCase(), {
+          user_id: userId,
+          email,
+          name: String(delivery?.name || email).trim(),
         });
-      };
-
-      profilesByRole.forEach(addDelivery);
-      profilesByOrders.forEach(addDelivery);
-
-      assignedEmails.forEach(email => {
-        if (!deliveryMap.has(email)) {
-          deliveryMap.set(email, {
-            email,
-            name: email,
-          });
-        }
       });
 
       const finalDeliveries = Array.from(deliveryMap.values()).sort((a, b) =>
@@ -721,14 +663,15 @@ export default function ClosuresView() {
     } catch (error: any) {
       console.error('Error loading deliveries:', error);
       toast.error(
-        `Error al cargar repartidores: ${error?.message || 'Error desconocido'}`,
+        `Error al cargar repartidores activos: ${
+          error?.message || 'Error desconocido'
+        }`,
       );
       setDeliveries([]);
     } finally {
       setLoadingDeliveries(false);
     }
   };
-
 
   const loadTeamData = async () => {
     if (!(isDelivery || isAdmin || isSupplier)) return;
