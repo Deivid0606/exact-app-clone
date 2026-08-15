@@ -2148,6 +2148,11 @@ export default function ClosuresView() {
   const canMarkContacted = isAdmin || isDelivery || isSupplier;
   const canBulkStatus = isAdmin || isSupplier || isDelivery;
   const acceptedTeamMembers = teamMembers.filter(member => member.status === 'ACCEPTED');
+
+  // Visibilidad financiera en la pestaña NORMAL de Cierres.
+  // Solo ADMIN, PROVEEDOR o DELIVERY que sea encargado/líder de un equipo activo.
+  const isTeamLeader = isDelivery && acceptedTeamMembers.length > 0;
+  const canViewNormalClosureFinancials = isAdmin || isSupplier || isTeamLeader;
   const teamCandidates = deliveries.filter((delivery: any) => {
     const q = teamSearch.trim().toLowerCase();
     if (!delivery?.user_id || String(delivery.email || '').toLowerCase() === myEmail.toLowerCase()) return false;
@@ -2572,7 +2577,11 @@ export default function ClosuresView() {
       {isDelivery && (
         <div className="mb-3">
           <span className="badge-status badge-entregado">✏️ DELIVERY: solo podés editar Estado 1</span>
-          <p className="text-xs text-muted-foreground mt-1">Podés actualizar estados, seleccionar varios pedidos, generar guías y asignar pedidos a tu Equipo de Logística. No podés marcar rendición ni cambiar fechas.</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Podés actualizar estados, seleccionar varios pedidos, generar guías y asignar pedidos a tu Equipo de Logística.
+            {!isTeamLeader && ' La tarifa y los valores derivados no están visibles para un delivery común.'}
+            {isTeamLeader && ' Como encargado de equipo, podés ver las tarifas y valores de cierre.'}
+          </p>
         </div>
       )}
 
@@ -2851,9 +2860,11 @@ export default function ClosuresView() {
       {canViewRendicion && delivered.length > 0 && (
         <div className="app-card !p-4 mb-4 border-l-4 border-l-[hsl(var(--primary))]">
           <h4 className="font-extrabold mb-3">📋 Control de Rendición</h4>
-          <p className="text-xs text-muted-foreground mb-3">
-            En pedidos de Equipo de Logística, la tarifa y el neto del cierre se calculan con la tarifa por ciudad del titular/líder del equipo.
-          </p>
+          {canViewNormalClosureFinancials && (
+            <p className="text-xs text-muted-foreground mb-3">
+              En pedidos de Equipo de Logística, la tarifa y el neto del cierre se calculan con la tarifa por ciudad del titular/líder del equipo.
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mb-3">
             <div className="flex items-center gap-2">
               <span className="chip text-[11px]">Delivery:</span>
@@ -2863,10 +2874,12 @@ export default function ClosuresView() {
               <span className="chip text-[11px]">Fecha:</span>
               <span className="text-sm">{dateFrom} a {dateTo}</span>
             </div>
-            <div className="flex items-center gap-2">
-              <span className="chip text-[11px]">Total a pagar:</span>
-              <span className="text-lg font-extrabold">{nf(totalAPagar)} Gs</span>
-            </div>
+            {canViewNormalClosureFinancials && (
+              <div className="flex items-center gap-2">
+                <span className="chip text-[11px]">Total a pagar:</span>
+                <span className="text-lg font-extrabold">{nf(totalAPagar)} Gs</span>
+              </div>
+            )}
             <div className="flex items-center gap-2">
               <span className="chip text-[11px]">Estado:</span>
               <span className={`badge-status ${rendicionPagada ? 'badge-entregado' : allRendered ? 'badge-entregado' : 'badge-pendiente'}`}>
@@ -2948,6 +2961,8 @@ export default function ClosuresView() {
         ))}
       </div>
 
+      {canViewNormalClosureFinancials && (
+        <>
       <div className="grid-kpi mb-4">
         <div className="kpi-card">
           <div className="text-xs text-muted-foreground mb-1">
@@ -3017,6 +3032,9 @@ export default function ClosuresView() {
           </div>
         )}
       </div>
+
+        </>
+      )}
 
       {(isAdmin || isSupplier) && delivered.length > 0 && (
         <div className="app-card !p-4 mb-4 border border-emerald-500/30 bg-emerald-500/5">
@@ -3244,8 +3262,12 @@ export default function ClosuresView() {
               <th>Proveedor</th>
               <th>Delivery</th>
               <th className="text-right">Total (Gs)</th>
-              <th className="text-right">Tarifa (Gs)</th>
-              <th className="text-right">Neto (Gs)</th>
+              {canViewNormalClosureFinancials && (
+                <>
+                  <th className="text-right">Tarifa (Gs)</th>
+                  <th className="text-right">Neto (Gs)</th>
+                </>
+              )}
               <th>Estado 1</th>
               <th>Estado de retiro</th>
               <th>Estado 2 (cierre)</th>
@@ -3428,8 +3450,12 @@ export default function ClosuresView() {
                     )}
                   </td>
                   <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
-                  <td className="text-right text-xs">{nf(fee)}</td>
-                  <td className="text-right text-xs">{nf(net)}</td>
+                  {canViewNormalClosureFinancials && (
+                    <>
+                      <td className="text-right text-xs">{nf(fee)}</td>
+                      <td className="text-right text-xs">{nf(net)}</td>
+                    </>
+                  )}
                   <td>
                     {canEditStatus1 ? (
                       <select 
