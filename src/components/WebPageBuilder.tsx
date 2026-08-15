@@ -57,6 +57,9 @@ export type LandingContentBlock =
       blockAlign: "left" | "center" | "right";
       marginTop: number;
       marginBottom: number;
+      imageScale: number;
+      imageOffsetX: number;
+      imageOffsetY: number;
     }
   | {
       id: string;
@@ -125,6 +128,9 @@ export type LandingContentBlock =
       blockAlign: "left" | "center" | "right";
       marginTop: number;
       marginBottom: number;
+      imageScale: number;
+      imageOffsetX: number;
+      imageOffsetY: number;
     }
   | {
       id: string;
@@ -383,6 +389,9 @@ function normalizeConfig(raw?: Partial<LandingConfig> | null): LandingConfig {
             : "center",
           marginTop: Number.isFinite(Number(block.marginTop)) ? Number(block.marginTop) : 12,
           marginBottom: Number.isFinite(Number(block.marginBottom)) ? Number(block.marginBottom) : 12,
+          imageScale: Number.isFinite(Number(block.imageScale)) ? Math.min(200, Math.max(50, Number(block.imageScale))) : 100,
+          imageOffsetX: Number.isFinite(Number(block.imageOffsetX)) ? Math.min(200, Math.max(-200, Number(block.imageOffsetX))) : 0,
+          imageOffsetY: Number.isFinite(Number(block.imageOffsetY)) ? Math.min(200, Math.max(-200, Number(block.imageOffsetY))) : 0,
         } as LandingContentBlock;
       }
 
@@ -399,6 +408,9 @@ function normalizeConfig(raw?: Partial<LandingConfig> | null): LandingConfig {
           blockAlign: ["left", "center", "right"].includes(block.blockAlign) ? block.blockAlign : "center",
           marginTop: Number.isFinite(Number(block.marginTop)) ? Number(block.marginTop) : 12,
           marginBottom: Number.isFinite(Number(block.marginBottom)) ? Number(block.marginBottom) : 12,
+          imageScale: Number.isFinite(Number(block.imageScale)) ? Math.min(200, Math.max(50, Number(block.imageScale))) : 100,
+          imageOffsetX: Number.isFinite(Number(block.imageOffsetX)) ? Math.min(200, Math.max(-200, Number(block.imageOffsetX))) : 0,
+          imageOffsetY: Number.isFinite(Number(block.imageOffsetY)) ? Math.min(200, Math.max(-200, Number(block.imageOffsetY))) : 0,
         } as LandingContentBlock;
       }
 
@@ -810,6 +822,9 @@ export default function WebPageBuilder({
         blockAlign: "center",
         marginTop: 12,
         marginBottom: 12,
+        imageScale: 100,
+        imageOffsetX: 0,
+        imageOffsetY: 0,
       };
     }
 
@@ -893,6 +908,9 @@ export default function WebPageBuilder({
         blockAlign: "center",
         marginTop: 12,
         marginBottom: 12,
+        imageScale: 100,
+        imageOffsetX: 0,
+        imageOffsetY: 0,
       };
     }
 
@@ -2021,7 +2039,17 @@ export default function WebPageBuilder({
                           {block.type === "image" && (
                             <>
                               {block.url && (
-                                <img src={block.url} alt="" className="w-full max-h-52 object-contain rounded-xl bg-black/5" />
+                                <div className="overflow-visible rounded-xl bg-black/5 p-2">
+                                  <img
+                                    src={block.url}
+                                    alt=""
+                                    className="w-full max-h-52 object-contain rounded-xl"
+                                    style={{
+                                      transform: `translate(${block.imageOffsetX}px, ${block.imageOffsetY}px) scale(${block.imageScale / 100})`,
+                                      transformOrigin: "center center",
+                                    }}
+                                  />
+                                </div>
                               )}
                               <label className="sky-dropzone block">
                                 <input type="file" accept="image/*" className="hidden" onChange={(e) => { uploadBlockMedia(block, e.target.files); e.currentTarget.value = ""; }} />
@@ -2058,6 +2086,41 @@ export default function WebPageBuilder({
                               <label className="flex items-center gap-2 rounded-xl border border-border px-3 py-2">
                                 <input type="checkbox" checked={block.rounded} onChange={(e) => patchBlock(block.id, { rounded: e.target.checked })} /> Redondeada
                               </label>
+
+                              <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 space-y-3">
+                                <div className="font-black text-sm">🎚 Ajustar tamaño y posición</div>
+                                <div>
+                                  <label className="app-label">Tamaño / Zoom: {block.imageScale}%</label>
+                                  <input type="range" min="50" max="200" step="5" className="w-full" value={block.imageScale} onChange={(e) => patchBlock(block.id, { imageScale: Number(e.target.value) })} />
+                                </div>
+                                <div>
+                                  <label className="app-label">Mover izquierda / derecha: {block.imageOffsetX}px</label>
+                                  <input type="range" min="-200" max="200" step="5" className="w-full" value={block.imageOffsetX} onChange={(e) => patchBlock(block.id, { imageOffsetX: Number(e.target.value) })} />
+                                </div>
+                                <div>
+                                  <label className="app-label">Mover arriba / abajo: {block.imageOffsetY}px</label>
+                                  <input type="range" min="-200" max="200" step="5" className="w-full" value={block.imageOffsetY} onChange={(e) => patchBlock(block.id, { imageOffsetY: Number(e.target.value) })} />
+                                </div>
+                                <button type="button" className="nav-btn w-full !text-xs" onClick={() => patchBlock(block.id, { imageScale: 100, imageOffsetX: 0, imageOffsetY: 0 })}>↺ Restablecer imagen</button>
+                              </div>
+
+                              <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 space-y-3">
+                                <div className="font-black text-sm">🎚 Ajustar tamaño y posición</div>
+                                <div>
+                                  <label className="app-label">Tamaño / Zoom: {block.imageScale}%</label>
+                                  <input type="range" min="50" max="200" step="5" className="w-full" value={block.imageScale} onChange={(e) => patchBlock(block.id, { imageScale: Number(e.target.value) })} />
+                                </div>
+                                <div>
+                                  <label className="app-label">Mover izquierda / derecha: {block.imageOffsetX}px</label>
+                                  <input type="range" min="-200" max="200" step="5" className="w-full" value={block.imageOffsetX} onChange={(e) => patchBlock(block.id, { imageOffsetX: Number(e.target.value) })} />
+                                </div>
+                                <div>
+                                  <label className="app-label">Mover arriba / abajo: {block.imageOffsetY}px</label>
+                                  <input type="range" min="-200" max="200" step="5" className="w-full" value={block.imageOffsetY} onChange={(e) => patchBlock(block.id, { imageOffsetY: Number(e.target.value) })} />
+                                </div>
+                                <button type="button" className="nav-btn w-full !text-xs" onClick={() => patchBlock(block.id, { imageScale: 100, imageOffsetX: 0, imageOffsetY: 0 })}>↺ Restablecer imagen</button>
+                              </div>
+
                               <label className="app-label">Espacio arriba: {block.marginTop}px</label>
                               <input type="range" min="0" max="120" step="2" className="w-full" value={block.marginTop} onChange={(e) => patchBlock(block.id, { marginTop: Number(e.target.value) })} />
                               <label className="app-label">Espacio abajo: {block.marginBottom}px</label>
@@ -2747,7 +2810,19 @@ export default function WebPageBuilder({
 
                           {block.type === "image_text" && (
                             <>
-                              {block.imageUrl && <img src={block.imageUrl} alt="" className="w-full max-h-52 object-contain rounded-xl bg-black/5" />}
+                              {block.imageUrl && (
+                                <div className="overflow-visible rounded-xl bg-black/5 p-2">
+                                  <img
+                                    src={block.imageUrl}
+                                    alt=""
+                                    className="w-full max-h-52 object-contain rounded-xl"
+                                    style={{
+                                      transform: `translate(${block.imageOffsetX}px, ${block.imageOffsetY}px) scale(${block.imageScale / 100})`,
+                                      transformOrigin: "center center",
+                                    }}
+                                  />
+                                </div>
+                              )}
                               <label className="sky-dropzone block">
                                 <input type="file" accept="image/*" className="hidden" onChange={(e) => { uploadBlockMedia(block, e.target.files); e.currentTarget.value = ""; }} />
                                 <b>{block.imageUrl ? "Cambiar imagen" : "Subir imagen"}</b>
@@ -3544,6 +3619,8 @@ function ShrinePreview({
                       width: "100%",
                       height: "auto",
                       borderRadius: block.rounded ? 12 : 0,
+                      transform: `translate(${block.imageOffsetX}px, ${block.imageOffsetY}px) scale(${block.imageScale / 100})`,
+                      transformOrigin: "center center",
                     }}
                   />
 
@@ -3921,16 +3998,20 @@ function ShrinePreview({
               );
 
               const imageContent = block.imageUrl ? (
-                <img
-                  src={block.imageUrl}
-                  alt=""
-                  style={{
-                    width: "100%",
-                    height: "auto",
-                    display: "block",
-                    borderRadius: 14,
-                  }}
-                />
+                <div style={{ overflow: "visible", width: "100%" }}>
+                  <img
+                    src={block.imageUrl}
+                    alt=""
+                    style={{
+                      width: "100%",
+                      height: "auto",
+                      display: "block",
+                      borderRadius: 14,
+                      transform: `translate(${block.imageOffsetX}px, ${block.imageOffsetY}px) scale(${block.imageScale / 100})`,
+                      transformOrigin: "center center",
+                    }}
+                  />
+                </div>
               ) : null;
 
               if (block.imagePosition === "overlay") {
