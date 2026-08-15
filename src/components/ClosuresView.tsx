@@ -1270,7 +1270,31 @@ export default function ClosuresView() {
   };
 
   const getDeliveryFeeForOrder = (order: any) => {
-    return Number(order.delivery_fee_gs) || getFee(order.assigned_delivery || '', order.city || '');
+    /*
+     * REGLA DE TARIFA EN LA TABLA PRINCIPAL:
+     *
+     * - Pedido normal:
+     *   usa la tarifa del delivery asignado.
+     *
+     * - Pedido delegado a un miembro de Equipo de Logística:
+     *   usa la tarifa por ciudad del TITULAR / LÍDER del equipo
+     *   (orders.delivery_owner), aunque el miembro no tenga tarifa propia.
+     *
+     * Esto mantiene el costo logístico del equipo asociado al titular.
+     */
+    const storedFee = Number(order.delivery_fee_gs || 0);
+
+    if (storedFee > 0) {
+      return storedFee;
+    }
+
+    const feeOwnerEmail = String(
+      order.delivery_owner ||
+      order.assigned_delivery ||
+      '',
+    ).trim();
+
+    return getFee(feeOwnerEmail, order.city || '');
   };
 
   const delivered = useMemo(
