@@ -1,14 +1,17 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { HashRouter, Route, Routes } from "react-router-dom";
+import { HashRouter, Route, Routes, useParams } from "react-router-dom";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider } from "@/hooks/useAuth";
+
 import Index from "./pages/Index.tsx";
 import NotFound from "./pages/NotFound.tsx";
+
 import AssignOrdersView from "./components/AssignOrdersView.tsx";
 import QRScannerView from "./components/QRScannerView.tsx";
-import ProductsView from "./components/ProductsView.tsx"; // ✅ AGREGADO
+import ProductsView from "./components/ProductsView.tsx";
+import PublicLandingPage from "./components/PublicLandingPage.tsx";
 
 const queryClient = new QueryClient();
 
@@ -41,6 +44,36 @@ const normalizeExternalQRUrl = () => {
 
 normalizeExternalQRUrl();
 
+/**
+ * Página pública publicada
+ * Ejemplo:
+ * /#/p/cepillo-9-en-1
+ */
+const PublicLandingRoute = () => {
+  const { slug } = useParams<{ slug: string }>();
+
+  if (!slug) {
+    return <NotFound />;
+  }
+
+  return <PublicLandingPage slug={slug} />;
+};
+
+/**
+ * Vista previa privada
+ * Ejemplo:
+ * /#/preview/uuid-de-la-pagina
+ */
+const PreviewLandingRoute = () => {
+  const { id } = useParams<{ id: string }>();
+
+  if (!id) {
+    return <NotFound />;
+  }
+
+  return <PublicLandingPage pageId={id} preview />;
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -51,13 +84,40 @@ const App = () => (
         <HashRouter>
           <Routes>
             <Route path="/" element={<Index />} />
-            <Route path="/asignar-pedidos" element={<AssignOrdersView />} />
-            <Route path="/qr" element={<QRScannerView />} />
-            <Route path="/products" element={<ProductsView />} /> {/* ✅ AGREGADO */}
-            <Route path="*" element={<NotFound />} />
+
+            <Route
+              path="/asignar-pedidos"
+              element={<AssignOrdersView />}
+            />
+
+            <Route
+              path="/qr"
+              element={<QRScannerView />}
+            />
+
+            <Route
+              path="/products"
+              element={<ProductsView />}
+            />
+
+            {/* ✅ PÁGINA PÚBLICA */}
+            <Route
+              path="/p/:slug"
+              element={<PublicLandingRoute />}
+            />
+
+            {/* ✅ VISTA PREVIA */}
+            <Route
+              path="/preview/:id"
+              element={<PreviewLandingRoute />}
+            />
+
+            <Route
+              path="*"
+              element={<NotFound />}
+            />
           </Routes>
         </HashRouter>
-
       </AuthProvider>
     </TooltipProvider>
   </QueryClientProvider>
