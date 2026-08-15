@@ -268,22 +268,45 @@ export default function PublicLandingPage({
 
     if (block.type === "image") {
       if (!block.url) return null;
+      const width = blockMaxWidth(block.width);
+      const margin = block.blockAlign === "left"
+        ? `${block.marginTop}px auto ${block.marginBottom}px 14px`
+        : block.blockAlign === "right"
+          ? `${block.marginTop}px 14px ${block.marginBottom}px auto`
+          : `${block.marginTop}px auto ${block.marginBottom}px`;
+      const overlay = block.textPosition.startsWith("overlay");
+      const side = block.textPosition === "left" || block.textPosition === "right";
+      const textNode = block.text ? (
+        <div style={{ textAlign: block.textAlign, fontSize: 22, fontWeight: 900, lineHeight: 1.2, whiteSpace: "pre-line" }}>
+          {block.text}
+        </div>
+      ) : null;
+      const imageNode = (
+        <div style={{ position: "relative", minWidth: 0 }}>
+          <img src={block.url} alt={block.alt || ""} loading="lazy" style={{ width: "100%", display: "block", borderRadius: block.rounded ? 14 : 0 }} />
+          {overlay && textNode && (
+            <div style={{ position: "absolute", left: 0, right: 0, top: block.textPosition === "overlay-top" ? 0 : block.textPosition === "overlay-center" ? "50%" : undefined, bottom: block.textPosition === "overlay-bottom" ? 0 : undefined, transform: block.textPosition === "overlay-center" ? "translateY(-50%)" : undefined, color: "#fff", padding: "18px 20px", background: block.textPosition === "overlay-center" ? "rgba(0,0,0,.42)" : "rgba(0,0,0,.52)" }}>
+              {textNode}
+            </div>
+          )}
+        </div>
+      );
+      if (side) {
+        return (
+          <section key={block.id} className="sky-free-image-block side" style={{ maxWidth: width, width: block.width === "full" ? "100%" : "calc(100% - 28px)", margin, display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)", gap: 22, alignItems: "center" }}>
+            {block.textPosition === "left" && textNode}
+            {imageNode}
+            {block.textPosition === "right" && textNode}
+          </section>
+        );
+      }
       return (
-        <section
-          key={block.id}
-          className={`sky-media-block ${block.width === "full" ? "full" : ""}`}
-          style={{ maxWidth: blockMaxWidth(block.width) }}
-        >
-          <img
-            src={block.url}
-            alt={block.alt}
-            style={{
-              width: "100%",
-              display: "block",
-              height: "auto",
-              borderRadius: block.rounded ? 12 : 0,
-            }}
-          />
+        <section key={block.id} className="sky-free-image-block" style={{ maxWidth: width, width: block.width === "full" ? "100%" : "calc(100% - 28px)", margin }}>
+          {block.textPosition === "top" && textNode}
+          {block.textPosition === "top" && textNode && <div style={{height:10}} />}
+          {imageNode}
+          {block.textPosition === "bottom" && textNode && <div style={{height:10}} />}
+          {block.textPosition === "bottom" && textNode}
         </section>
       );
     }
@@ -417,18 +440,41 @@ export default function PublicLandingPage({
     }
 
     if (block.type === "image_text") {
+      const width = blockMaxWidth(block.width);
+      const margin = block.blockAlign === "left"
+        ? `${block.marginTop}px auto ${block.marginBottom}px 14px`
+        : block.blockAlign === "right"
+          ? `${block.marginTop}px 14px ${block.marginBottom}px auto`
+          : `${block.marginTop}px auto ${block.marginBottom}px`;
+      const textContent = (
+        <div style={{ textAlign: block.textAlign, position: "relative", zIndex: 2 }}>
+          {block.title && <h2>{block.title}</h2>}
+          {block.text && <p>{block.text}</p>}
+        </div>
+      );
+      const imageContent = block.imageUrl ? <img src={block.imageUrl} alt="" loading="lazy" /> : null;
+      if (block.imagePosition === "overlay") {
+        return (
+          <section key={block.id} className="sky-image-text" style={{ maxWidth: width, width: block.width === "full" ? "100%" : "calc(100% - 28px)", margin, position: "relative", display: "block", overflow: "hidden" }}>
+            {imageContent}
+            <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", padding: 28, color: "#fff", background: "rgba(0,0,0,.38)" }}>{textContent}</div>
+          </section>
+        );
+      }
+      if (block.imagePosition === "left" || block.imagePosition === "right") {
+        return (
+          <section key={block.id} className="sky-image-text" style={{ maxWidth: width, width: block.width === "full" ? "100%" : "calc(100% - 28px)", margin, gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr)" }}>
+            {block.imagePosition === "left" && imageContent}
+            {textContent}
+            {block.imagePosition === "right" && imageContent}
+          </section>
+        );
+      }
       return (
-        <section key={block.id} className="sky-image-text">
-          {block.imagePosition === "left" && block.imageUrl && (
-            <img src={block.imageUrl} alt="" />
-          )}
-          <div>
-            <h2>{block.title}</h2>
-            <p>{block.text}</p>
-          </div>
-          {block.imagePosition === "right" && block.imageUrl && (
-            <img src={block.imageUrl} alt="" />
-          )}
+        <section key={block.id} className="sky-image-text" style={{ maxWidth: width, width: block.width === "full" ? "100%" : "calc(100% - 28px)", margin, display: "flex", flexDirection: "column", gap: 14 }}>
+          {block.imagePosition === "top" && textContent}
+          {imageContent}
+          {block.imagePosition === "bottom" && textContent}
         </section>
       );
     }
@@ -553,6 +599,7 @@ export default function PublicLandingPage({
           .sky-free-block h2{font-size:30px!important}
           .sky-image-text{grid-template-columns:1fr;margin:26px auto}
           .sky-image-text h2{font-size:30px}
+          .sky-free-image-block.side{grid-template-columns:1fr!important}
           .sky-custom-gallery{grid-template-columns:repeat(var(--gallery-mobile-cols,1),minmax(0,1fr))!important}
           .sky-block-buy-wrap{padding:0 14px!important}
           .sky-section{padding:38px 17px}
