@@ -27,6 +27,55 @@ const legacyMedia = (product: any): LandingMediaItem[] =>
         alt: product?.title || "",
       }));
 
+const normalizePublicConfig = (raw: any): LandingConfig => {
+  const blocks = Array.isArray(raw?.contentBlocks)
+    ? raw.contentBlocks.map((block: any) => {
+        if (!block?.id || !block?.type) return null;
+
+        if (block.type === "video_row") {
+          return {
+            ...block,
+            videos: Array.isArray(block.videos)
+              ? block.videos.filter((video: any) => video?.type === "video" && typeof video?.url === "string" && video.url.trim()).slice(0, 3)
+              : [],
+            desktopColumns: [1,2,3].includes(Number(block.desktopColumns)) ? Number(block.desktopColumns) : 3,
+            mobileColumns: [1,2,3].includes(Number(block.mobileColumns)) ? Number(block.mobileColumns) : 1,
+            gap: Number.isFinite(Number(block.gap)) ? Number(block.gap) : 12,
+            width: ["normal","wide","full"].includes(block.width) ? block.width : "wide",
+            aspect: ["portrait","square","auto"].includes(block.aspect) ? block.aspect : "portrait",
+            rounded: block.rounded !== false,
+            controls: block.controls !== false,
+            autoplay: Boolean(block.autoplay),
+            muted: block.muted !== false,
+            loop: Boolean(block.loop),
+          };
+        }
+
+        if (block.type === "media_gallery") {
+          return {
+            ...block,
+            items: Array.isArray(block.items)
+              ? block.items.filter((item: any) => ["image","video"].includes(item?.type) && typeof item?.url === "string" && item.url.trim())
+              : [],
+          };
+        }
+
+        if (block.type === "image" || block.type === "image_text") {
+          return {
+            ...block,
+            imageScale: Number.isFinite(Number(block.imageScale)) ? Math.min(200, Math.max(50, Number(block.imageScale))) : 100,
+            imageOffsetX: Number.isFinite(Number(block.imageOffsetX)) ? Math.min(200, Math.max(-200, Number(block.imageOffsetX))) : 0,
+            imageOffsetY: Number.isFinite(Number(block.imageOffsetY)) ? Math.min(200, Math.max(-200, Number(block.imageOffsetY))) : 0,
+          };
+        }
+
+        return block;
+      }).filter(Boolean)
+    : [];
+
+  return { ...raw, contentBlocks: blocks } as LandingConfig;
+};
+
 export default function PublicLandingPage({
   slug,
   pageId,
@@ -82,7 +131,10 @@ export default function PublicLandingPage({
         return;
       }
 
-      const row = data as PublicLandingRow | null;
+      const rawRow = data as PublicLandingRow | null;
+      const row = rawRow
+        ? { ...rawRow, config: normalizePublicConfig(rawRow.config) }
+        : null;
       setPage(row);
       const firstId = row?.config?.productSnapshots?.[0]?.id || "";
       setActiveProductId(firstId);
@@ -283,7 +335,18 @@ export default function PublicLandingPage({
       ) : null;
       const imageNode = (
         <div style={{ position: "relative", minWidth: 0 }}>
-          <img src={block.url} alt={block.alt || ""} loading="lazy" style={{ width: "100%", display: "block", borderRadius: block.rounded ? 14 : 0 }} />
+          <img
+            src={block.url}
+            alt={block.alt || ""}
+            loading="lazy"
+            style={{
+              width: "100%",
+              display: "block",
+              borderRadius: block.rounded ? 14 : 0,
+              transform: `translate(${block.imageOffsetX}px, ${block.imageOffsetY}px) scale(${block.imageScale / 100})`,
+              transformOrigin: "center center",
+            }}
+          />
           {overlay && textNode && (
             <div style={{ position: "absolute", left: 0, right: 0, top: block.textPosition === "overlay-top" ? 0 : block.textPosition === "overlay-center" ? "50%" : undefined, bottom: block.textPosition === "overlay-bottom" ? 0 : undefined, transform: block.textPosition === "overlay-center" ? "translateY(-50%)" : undefined, color: "#fff", padding: "18px 20px", background: block.textPosition === "overlay-center" ? "rgba(0,0,0,.42)" : "rgba(0,0,0,.52)" }}>
               {textNode}
@@ -382,14 +445,79 @@ export default function PublicLandingPage({
               ) : (
                 <video
                   src={item.url}
-                  controls={block.controls}
+                  controls={block.controls || !block.autoplay}
                   autoPlay={block.autoplay}
-                  muted={block.muted}
+                  muted={block.autoplay ? true : block.muted}
                   loop={block.loop}
                   playsInline
                   preload="metadata"
+                  onError={(event) => {
+                    console.error("No se pudo cargar video de galería:", item.url, event.currentTarget.error);
+                  }}
                 />
               )}
+            </div>
+          ))}
+        </section>
+      );
+    }
+
+    if (block.type === "video_row") {
+      if (!block.videos.length) return null;
+
+      const width = blockMaxWidth(block.width);
+
+      return (
+        <section
+          key={block.id}
+          className="sky-video-row"
+          style={
+            {
+              maxWidth: width,
+              width:
+                block.width === "full"
+                  ? "100%"
+                  : "calc(100% - 28px)",
+              margin: "22px auto",
+              display: "grid",
+              gridTemplateColumns: `repeat(${Math.min(
+                block.desktopColumns,
+                Math.max(block.videos.length, 1),
+              )}, minmax(0, 1fr))`,
+              gap: `${block.gap}px`,
+              "--video-row-mobile-cols": Math.min(
+                block.mobileColumns,
+                Math.max(block.videos.length, 1),
+              ),
+            } as React.CSSProperties
+          }
+        >
+          {block.videos.map((video) => (
+            <div
+              key={video.id}
+              className={`sky-video-row-item ${
+                block.aspect === "portrait"
+                  ? "portrait"
+                  : block.aspect === "square"
+                    ? "square"
+                    : ""
+              }`}
+              style={{
+                borderRadius: block.rounded ? 12 : 0,
+              }}
+            >
+              <video
+                src={video.url}
+                controls={block.controls || !block.autoplay}
+                autoPlay={block.autoplay}
+                muted={block.autoplay ? true : block.muted}
+                loop={block.loop}
+                playsInline
+                preload="metadata"
+                onError={(event) => {
+                  console.error("No se pudo cargar video publicado:", video.url, event.currentTarget.error);
+                }}
+              />
             </div>
           ))}
         </section>
@@ -452,7 +580,21 @@ export default function PublicLandingPage({
           {block.text && <p>{block.text}</p>}
         </div>
       );
-      const imageContent = block.imageUrl ? <img src={block.imageUrl} alt="" loading="lazy" /> : null;
+      const imageContent = block.imageUrl ? (
+        <div style={{ overflow: "visible", width: "100%" }}>
+          <img
+            src={block.imageUrl}
+            alt=""
+            loading="lazy"
+            style={{
+              width: "100%",
+              display: "block",
+              transform: `translate(${block.imageOffsetX}px, ${block.imageOffsetY}px) scale(${block.imageScale / 100})`,
+              transformOrigin: "center center",
+            }}
+          />
+        </div>
+      ) : null;
       if (block.imagePosition === "overlay") {
         return (
           <section key={block.id} className="sky-image-text" style={{ maxWidth: width, width: block.width === "full" ? "100%" : "calc(100% - 28px)", margin, position: "relative", display: "block", overflow: "hidden" }}>
@@ -471,7 +613,22 @@ export default function PublicLandingPage({
         );
       }
       return (
-        <section key={block.id} className="sky-image-text" style={{ maxWidth: width, width: block.width === "full" ? "100%" : "calc(100% - 28px)", margin, display: "flex", flexDirection: "column", gap: 14 }}>
+        <section
+          key={block.id}
+          className="sky-image-text"
+          style={{
+            maxWidth: width,
+            width:
+              block.width === "full"
+                ? "100%"
+                : "calc(100% - 28px)",
+            margin,
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+            alignItems: "stretch",
+          }}
+        >
           {block.imagePosition === "top" && textContent}
           {imageContent}
           {block.imagePosition === "bottom" && textContent}
@@ -538,6 +695,12 @@ export default function PublicLandingPage({
         .sky-image-text img{width:100%;height:auto;border-radius:14px}
         .sky-image-text h2{font-size:40px;line-height:1.12;margin:0 0 14px;font-weight:900}
         .sky-image-text p{font-size:18px;line-height:1.7;white-space:pre-line}
+        .sky-video-row{display:grid;margin:22px auto}
+        .sky-video-row-item{overflow:hidden;background:#000}
+        .sky-video-row-item video{width:100%;display:block;background:#000}
+        .sky-video-row-item.portrait{aspect-ratio:9/16}
+        .sky-video-row-item.square{aspect-ratio:1/1}
+        .sky-video-row-item.portrait video,.sky-video-row-item.square video{height:100%;object-fit:cover}
         .sky-custom-gallery{display:grid;grid-template-columns:repeat(var(--gallery-cols,3),minmax(0,1fr));gap:var(--gallery-gap,14px);margin:22px auto}
         .sky-custom-gallery-item{overflow:hidden;background:#000}
         .sky-custom-gallery-item img,.sky-custom-gallery-item video{width:100%;display:block;background:#000}
@@ -600,6 +763,7 @@ export default function PublicLandingPage({
           .sky-image-text{grid-template-columns:1fr;margin:26px auto}
           .sky-image-text h2{font-size:30px}
           .sky-free-image-block.side{grid-template-columns:1fr!important}
+          .sky-video-row{grid-template-columns:repeat(var(--video-row-mobile-cols,1),minmax(0,1fr))!important}
           .sky-custom-gallery{grid-template-columns:repeat(var(--gallery-mobile-cols,1),minmax(0,1fr))!important}
           .sky-block-buy-wrap{padding:0 14px!important}
           .sky-section{padding:38px 17px}
