@@ -1271,30 +1271,38 @@ export default function ClosuresView() {
 
   const getDeliveryFeeForOrder = (order: any) => {
     /*
-     * REGLA DE TARIFA EN LA TABLA PRINCIPAL:
+     * TARIFA CANÓNICA PARA TODO EL MÓDULO DE CIERRES
      *
-     * - Pedido normal:
-     *   usa la tarifa del delivery asignado.
+     * Esta función se usa tanto en:
+     * - tabla principal,
+     * - Cierre normal / Control de Rendición,
+     * - KPIs,
+     * - monto pendiente,
+     * - monto rendido,
+     * - pago delivery,
+     * - neto a rendir.
      *
-     * - Pedido delegado a un miembro de Equipo de Logística:
-     *   usa la tarifa por ciudad del TITULAR / LÍDER del equipo
-     *   (orders.delivery_owner), aunque el miembro no tenga tarifa propia.
-     *
-     * Esto mantiene el costo logístico del equipo asociado al titular.
+     * REGLA:
+     * 1) Si el pedido ya tiene delivery_fee_gs > 0, se respeta.
+     * 2) Si pertenece a un Equipo de Logística, usa la tarifa por ciudad
+     *    del TITULAR/LÍDER guardado en delivery_owner.
+     * 3) Si no pertenece a equipo, usa assigned_delivery.
      */
-    const storedFee = Number(order.delivery_fee_gs || 0);
+    const storedFee = Number(order?.delivery_fee_gs || 0);
 
     if (storedFee > 0) {
       return storedFee;
     }
 
-    const feeOwnerEmail = String(
-      order.delivery_owner ||
-      order.assigned_delivery ||
+    const logisticsOwnerEmail = String(
+      order?.delivery_owner ||
+      order?.assigned_delivery ||
       '',
     ).trim();
 
-    return getFee(feeOwnerEmail, order.city || '');
+    if (!logisticsOwnerEmail) return 0;
+
+    return getFee(logisticsOwnerEmail, order?.city || '');
   };
 
   const delivered = useMemo(
@@ -2843,6 +2851,9 @@ export default function ClosuresView() {
       {canViewRendicion && delivered.length > 0 && (
         <div className="app-card !p-4 mb-4 border-l-4 border-l-[hsl(var(--primary))]">
           <h4 className="font-extrabold mb-3">📋 Control de Rendición</h4>
+          <p className="text-xs text-muted-foreground mb-3">
+            En pedidos de Equipo de Logística, la tarifa y el neto del cierre se calculan con la tarifa por ciudad del titular/líder del equipo.
+          </p>
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mb-3">
             <div className="flex items-center gap-2">
               <span className="chip text-[11px]">Delivery:</span>
@@ -3244,7 +3255,7 @@ export default function ClosuresView() {
           </thead>
           <tbody>
             {filteredOrders.map(o => {
-              const fee = Number(o.delivery_fee_gs) || getFee(o.assigned_delivery || '', o.city || '');
+              const fee = getDeliveryFeeForOrder(o);
               const net = Number(o.total_gs || 0) - fee;
               const isSettled = o.delivery_settled;
               
