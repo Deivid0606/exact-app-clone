@@ -529,6 +529,7 @@ export default function ClosuresView() {
   const [activeSection, setActiveSection] = useState<'orders' | 'team'>('orders');
   const [bulkStatus, setBulkStatus] = useState<string>('EN RUTA');
   const [bulkTeamUserId, setBulkTeamUserId] = useState<string>('');
+  const [bulkAssignedDate, setBulkAssignedDate] = useState<string>('');
   const [bulkBusy, setBulkBusy] = useState(false);
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [teamInvitations, setTeamInvitations] = useState<TeamInvitation[]>([]);
@@ -1719,37 +1720,103 @@ export default function ClosuresView() {
     [selectedOrders],
   );
 
-  const markSelectedAsPaid = async () => {
+  // ADMIN / PROVEEDOR: marcar SOLO los pedidos seleccionados como RENDIDO.
+  // No marca la rendición como PAGADA; eso sigue siendo un proceso independiente.
+  const markSelectedAsRendido = async () => {
     if (!canManageRendicion) return;
 
     if (selectedDeliveredOrders.length === 0) {
-      toast.error('Seleccioná pedidos ENTREGADO o ENCOMIENDA ENTREGADA que aún no estén rendidos');
+      toast.error(
+        'Seleccioná pedidos ENTREGADO o ENCOMIENDA ENTREGADA que todavía no estén RENDIDOS',
+      );
       return;
     }
 
     if (
       !confirm(
-        `¿Marcar como PAGADOS/RENDIDOS ${selectedDeliveredOrders.length} pedido(s) seleccionado(s)?\n\n` +
+        `¿Marcar como RENDIDO ${selectedDeliveredOrders.length} pedido(s) seleccionado(s)?\n\n` +
         'Solo se modificarán los pedidos seleccionados. Los demás quedarán sin cambios.',
       )
     ) return;
 
     setBulkBusy(true);
+
     try {
-      const { data, error } = await supabase.rpc('mark_selected_orders_paid', {
-        p_order_ids: selectedDeliveredOrders.map(order => order.id),
-        p_note: rendicionNote || null,
-      });
+      const now = new Date().toISOString();
+      const ids = selectedDeliveredOrders.map(order => order.id);
+
+      const { error } = await supabase
+        .from('orders')
+        .update({
+          delivery_settled: true,
+          status2: 'RENDIDO',
+          updated_at: now,
+        })
+        .in('id', ids);
 
       if (error) throw error;
 
-      const changed = Number(data ?? selectedDeliveredOrders.length);
-      toast.success(`${changed} pedido(s) seleccionado(s) marcado(s) como PAGADOS`);
+      toast.success(
+        `${ids.length} pedido${ids.length === 1 ? '' : 's'} marcado${ids.length === 1 ? '' : 's'} como RENDIDO`,
+      );
+
       setSelectedGuideIds(new Set());
-      setRendicionNote('');
       await loadClosures();
     } catch (error: any) {
-      toast.error(error?.message || 'No se pudieron marcar los pedidos seleccionados');
+      toast.error(error?.message || 'No se pudieron marcar los pedidos como RENDIDO');
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  // ADMIN / PROVEEDOR: cambiar la fecha de asignación SOLO de los pedidos seleccionados.
+  const changeSelectedAssignedDate = async () => {
+    if (!canManageRendicion) return;
+
+    const ids = selectedOrders.map(order => order.id);
+
+    if (ids.length === 0) {
+      toast.error('Seleccioná al menos un pedido');
+      return;
+    }
+
+    if (!bulkAssignedDate) {
+      toast.error('Seleccioná la nueva fecha de asignación');
+      return;
+    }
+
+    if (
+      !confirm(
+        `¿Cambiar la fecha de asignación de ${ids.length} pedido(s) a ${formatDatePY(bulkAssignedDate)}?\n\n` +
+        'Solo se modificarán los pedidos seleccionados.',
+      )
+    ) return;
+
+    setBulkBusy(true);
+
+    try {
+      const newAssignedAt = `${bulkAssignedDate}T12:00:00`;
+      const now = new Date().toISOString();
+
+      const { error } = await supabase
+        .from('orders')
+        .update({
+          assigned_at: newAssignedAt,
+          updated_at: now,
+        })
+        .in('id', ids);
+
+      if (error) throw error;
+
+      toast.success(
+        `Fecha actualizada en ${ids.length} pedido${ids.length === 1 ? '' : 's'}`,
+      );
+
+      setBulkAssignedDate('');
+      setSelectedGuideIds(new Set());
+      await loadClosures();
+    } catch (error: any) {
+      toast.error(error?.message || 'No se pudo cambiar la fecha de los pedidos seleccionados');
     } finally {
       setBulkBusy(false);
     }
@@ -2193,14 +2260,14 @@ export default function ClosuresView() {
       {isDelivery && (
         <div className="mb-3">
           <span className="badge-status badge-entregado">✏️ DELIVERY: solo podés editar Estado 1</span>
-          <p className="text-xs text-muted-foreground mt-1">Podés actualizar el estado de tus pedidos. No podés cambiar a DEVUELTO A DEPÓSITO.</p>
+          <p className="text-xs text-muted-foreground mt-1">Podés actualizar estados, seleccionar varios pedidos, generar guías y asignar pedidos a tu Equipo de Logística. No podés marcar rendición ni cambiar fechas.</p>
         </div>
       )}
 
       {(isSupplier || isAdmin) && (
         <div className="mb-3">
           <span className="badge-status badge-entregado">✏️ PROVEEDOR/ADMIN: edición completa</span>
-          <p className="text-xs text-muted-foreground mt-1">Podés actualizar estados, fechas, ciudades y gestionar rendiciones.</p>
+          <p className="text-xs text-muted-foreground mt-1">Podés actualizar estados, fechas, ciudades, marcar pedidos seleccionados como RENDIDO y gestionar rendiciones.</p>
         </div>
       )}
 
@@ -2780,15 +2847,36 @@ export default function ClosuresView() {
             )}
 
             {canManageRendicion && (
-              <button
-                type="button"
-                className="nav-btn active"
-                onClick={markSelectedAsPaid}
-                disabled={bulkBusy || selectedDeliveredOrders.length === 0}
-                title="Solo marca como pagados/rendidos los pedidos seleccionados que estén entregados"
-              >
-                💰 Marcar seleccionados PAGADOS ({selectedDeliveredOrders.length})
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="nav-btn active"
+                  onClick={markSelectedAsRendido}
+                  disabled={bulkBusy || selectedDeliveredOrders.length === 0}
+                  title="Solo marca como RENDIDO los pedidos ENTREGADO / ENCOMIENDA ENTREGADA seleccionados"
+                >
+                  ✅ Marcar como RENDIDO ({selectedDeliveredOrders.length})
+                </button>
+
+                <input
+                  type="date"
+                  className="app-input !w-auto !py-2 text-xs"
+                  value={bulkAssignedDate}
+                  onChange={event => setBulkAssignedDate(event.target.value)}
+                  disabled={bulkBusy || selectedOrders.length === 0}
+                  title="Nueva fecha de asignación para los pedidos seleccionados"
+                />
+
+                <button
+                  type="button"
+                  className="nav-btn active"
+                  onClick={changeSelectedAssignedDate}
+                  disabled={bulkBusy || selectedOrders.length === 0 || !bulkAssignedDate}
+                  title="Cambiar la fecha de asignación de todos los pedidos seleccionados"
+                >
+                  📅 Cambiar fecha ({selectedOrders.length})
+                </button>
+              </>
             )}
 
             <span className="text-xs text-muted-foreground">
