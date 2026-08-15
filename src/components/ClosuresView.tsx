@@ -2150,9 +2150,34 @@ export default function ClosuresView() {
   const acceptedTeamMembers = teamMembers.filter(member => member.status === 'ACCEPTED');
 
   // Visibilidad financiera en la pestaña NORMAL de Cierres.
-  // Solo ADMIN, PROVEEDOR o DELIVERY que sea encargado/líder de un equipo activo.
+  //
+  // ADMIN / PROVEEDOR:
+  //   siempre ven tarifa y valores financieros.
+  //
+  // DELIVERY encargado/líder:
+  //   siempre los ve porque administra un Equipo de Logística.
+  //
+  // DELIVERY común:
+  //   solo los ve cuando SU propio usuario ya tiene al menos una tarifa
+  //   configurada en delivery_fees. Si todavía no tiene ninguna, se ocultan.
   const isTeamLeader = isDelivery && acceptedTeamMembers.length > 0;
-  const canViewNormalClosureFinancials = isAdmin || isSupplier || isTeamLeader;
+
+  const deliveryHasOwnTariff = useMemo(() => {
+    if (!isDelivery || !myEmail) return false;
+
+    const normalizedEmail = myEmail.trim().toLowerCase();
+
+    return fees.some(
+      (fee: any) =>
+        String(fee?.delivery_email || '').trim().toLowerCase() === normalizedEmail,
+    );
+  }, [fees, isDelivery, myEmail]);
+
+  const canViewNormalClosureFinancials =
+    isAdmin ||
+    isSupplier ||
+    isTeamLeader ||
+    (isDelivery && deliveryHasOwnTariff);
   const teamCandidates = deliveries.filter((delivery: any) => {
     const q = teamSearch.trim().toLowerCase();
     if (!delivery?.user_id || String(delivery.email || '').toLowerCase() === myEmail.toLowerCase()) return false;
@@ -2579,8 +2604,12 @@ export default function ClosuresView() {
           <span className="badge-status badge-entregado">✏️ DELIVERY: solo podés editar Estado 1</span>
           <p className="text-xs text-muted-foreground mt-1">
             Podés actualizar estados, seleccionar varios pedidos, generar guías y asignar pedidos a tu Equipo de Logística.
-            {!isTeamLeader && ' La tarifa y los valores derivados no están visibles para un delivery común.'}
-            {isTeamLeader && ' Como encargado de equipo, podés ver las tarifas y valores de cierre.'}
+            {!isTeamLeader && !deliveryHasOwnTariff &&
+              ' Todavía no tenés una tarifa configurada, por eso Tarifa, Neto y valores derivados no están visibles.'}
+            {!isTeamLeader && deliveryHasOwnTariff &&
+              ' Ya tenés tarifa configurada, por eso podés ver Tarifa, Neto y los valores normales de tu cierre.'}
+            {isTeamLeader &&
+              ' Como encargado de equipo, podés ver las tarifas y valores de cierre.'}
           </p>
         </div>
       )}
