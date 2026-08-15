@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import AppHeader from '@/components/AppHeader';
-import AppNav, { type ViewName } from '@/components/AppNav';
+import { AppNav, type ViewName } from '@/components/AppNav';
 import AuthView from '@/components/AuthView';
 import DashboardView from '@/components/DashboardView';
 import OrdersView from '@/components/OrdersView';
