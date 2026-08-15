@@ -1,0 +1,1525 @@
+import { useState, useEffect, useMemo, useRef } from 'react';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/hooks/useAuth';
+import { toast } from 'sonner';
+
+declare global {
+  interface Window {
+    QRCode: any;
+  }
+}
+
+const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
+
+const todayISO = () => new Date().toISOString().slice(0, 10);
+
+const normalizeClientName = (value: any): string => {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+const displayClientName = (value: any): string => {
+  return String(value || '').replace(/\s+/g, ' ').trim() || 'SIN NOMBRE';
+};
+
+const panelCls = "rounded-3xl border border-slate-700/70 bg-[#0b1020]/95 shadow-[0_24px_80px_rgba(0,0,0,.35)] p-4 md:p-6 text-white";
+const cardCls = "rounded-2xl border border-slate-700/70 bg-[#101827]/90 shadow-xl";
+const kpiBaseCls = "relative overflow-hidden rounded-2xl border p-4 min-h-[96px] shadow-lg";
+const pillInputCls = "bg-[#070b18] border border-slate-700/80 rounded-xl px-3 py-2 text-sm text-white outline-none focus:border-blue-400 focus:ring-2 focus:ring-blue-500/20";
+const proBtnCls = "rounded-xl px-4 py-2 text-sm font-black text-white transition hover:scale-[1.02] active:scale-[.98] shadow-lg";
+
+
+export default function WithGuidesView() {
+  const { profile } = useAuth();
+  const role = profile?.role || '';
+  const myEmail = profile?.email || '';
+  const [orders, setOrders] = useState<any[]>([]);
+  const [search, setSearch] = useState('');
+  const [selectedProviders, setSelectedProviders] = useState<Set<string>>(new Set());
+  const [providerSearch, setProviderSearch] = useState('');
+  const [showProviderDropdown, setShowProviderDropdown] = useState(false);
+  const [guideText, setGuideText] = useState('');
+  const [guideId, setGuideId] = useState('');
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(false);
+  const [guidesTodayCount, setGuidesTodayCount] = useState(0);
+  const [deliveredTodayCount, setDeliveredTodayCount] = useState(0);
+  
+  // FILTROS EXISTENTES
+  const [status2Filter, setStatus2Filter] = useState<string>('PENDIENTES');
+  const [selectedCities, setSelectedCities] = useState<Set<string>>(new Set());
+  const [citySearch, setCitySearch] = useState('');
+  const [showCityDropdown, setShowCityDropdown] = useState(false);
+
+  // FILTRO POR DEPARTAMENTOS
+  const [selectedDepartments, setSelectedDepartments] = useState<Set<string>>(new Set());
+  const [deptSearch, setDeptSearch] = useState('');
+  const [showDeptDropdown, setShowDeptDropdown] = useState(false);
+
+  // Estado para el modal de guía con QR
+  const [showGuideModal, setShowGuideModal] = useState(false);
+  const [currentOrder, setCurrentOrder] = useState<any>(null);
+  const [qrLoaded, setQrLoaded] = useState(false);
+  const qrWaRef = useRef<HTMLDivElement>(null);
+  const qrDeliveryRef = useRef<HTMLDivElement>(null);
+
+  // Mensajes aleatorios para WhatsApp
+  const whatsappMessages = [
+    "Buenas le escribo del área del delivery para entregarle su pedido, ¿me podría enviar su ubicación exacta por favor? Desde ya gracias.",
+    "Hola, soy su repartidor. Para completar la entrega, necesito su ubicación exacta. Muchas gracias.",
+    "¡Buen día! Su pedido está en camino. ¿Podría compartirme su ubicación exacta? Gracias.",
+    "Atención: su delivery necesita su ubicación precisa para la entrega. ¿Me la envía por favor? Gracias.",
+    "Hola, soy del servicio de delivery. Para entregarle su pedido correctamente, necesito su ubicación exacta. ¡Gracias!"
+  ];
+
+  // Cargar librería QR desde CDN
+  useEffect(() => {
+    if (typeof window !== 'undefined' && !window.QRCode) {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js';
+      script.async = true;
+      script.onload = () => {
+        setQrLoaded(true);
+      };
+      document.body.appendChild(script);
+    } else if (window.QRCode) {
+      setQrLoaded(true);
+    }
+  }, []);
+
+  // Generar QR en el modal cuando se abre - MODIFICADO: usa order_number en lugar de id
+  useEffect(() => {
+    if (showGuideModal && currentOrder && qrLoaded) {
+      if (qrWaRef.current) qrWaRef.current.innerHTML = '';
+      if (qrDeliveryRef.current) qrDeliveryRef.current.innerHTML = '';
+      
+      const whatsappUrl = getWhatsAppUrl(currentOrder);
+      if (whatsappUrl && whatsappUrl !== '#') {
+        new window.QRCode(qrWaRef.current, {
+          text: whatsappUrl,
+          width: 120,
+          height: 120,
+          colorDark: '#000000',
+          colorLight: '#ffffff',
+          correctLevel: window.QRCode.CorrectLevel.L
+        });
+      }
+      
+      // CAMBIO 1: Modal QR - usar order_number en lugar de id
+      const orderNumber = currentOrder.order_number;
+      
+      if (orderNumber) {
+        const cleanOrderNumber = String(orderNumber).trim();
+        const deliveryUrl = window.location.origin + '/#/asignar-pedidos?id=' + encodeURIComponent(cleanOrderNumber);
+        new window.QRCode(qrDeliveryRef.current, {
+          text: deliveryUrl,
+          width: 120,
+          height: 120,
+          colorDark: '#000000',
+          colorLight: '#ffffff',
+          correctLevel: window.QRCode.CorrectLevel.L
+        });
+      } else {
+        toast.error('Este pedido no tiene número de orden');
+      }
+    }
+  }, [showGuideModal, currentOrder, qrLoaded]);
+
+  const load = async () => {
+    setLoading(true);
+    
+    let query = supabase
+      .from('orders')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .range(0, 9999);
+
+    if (search && search.trim()) {
+      const searchTerm = search.trim();
+      query = query.ilike('order_number', `%${searchTerm}%`);
+    }
+
+    if (status2Filter === 'PENDIENTES') {
+      query = query.or('status2.is.null,status2.eq.--');
+    } else if (status2Filter === 'CON_GUIA') {
+      query = query.eq('status2', 'GUIA GENERADA');
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      toast.error(error.message);
+      setLoading(false);
+      return;
+    }
+
+    setOrders(data || []);
+
+    const today = todayISO();
+    const [guidesTodayRes, deliveredTodayRes] = await Promise.all([
+      supabase
+        .from('orders')
+        .select('*')
+        .eq('status2', 'GUIA GENERADA')
+        .gte('updated_at', today + 'T00:00:00')
+        .lte('updated_at', today + 'T23:59:59'),
+      supabase
+        .from('orders')
+        .select('*')
+        .in('status', ['ENTREGADO', 'ENCOMIENDA ENTREGADA'])
+        .gte('delivered_at', today + 'T00:00:00')
+        .lte('delivered_at', today + 'T23:59:59'),
+    ]);
+
+    const roleFilter = (o: any) => {
+      if (role === 'PROVEEDOR') {
+        const providerList = o.provider_emails_list || '';
+        return providerList.toLowerCase().includes(myEmail.toLowerCase());
+      }
+      if (role === 'DELIVERY') return (o.assigned_delivery || '').toLowerCase() === myEmail.toLowerCase();
+      if (role === 'VENDEDOR') return (o.created_by || '').toLowerCase() === myEmail.toLowerCase();
+      return true;
+    };
+
+    setGuidesTodayCount((guidesTodayRes.data || []).filter(roleFilter).length);
+    setDeliveredTodayCount((deliveredTodayRes.data || []).filter(roleFilter).length);
+    setLoading(false);
+  };
+
+  useEffect(() => { 
+    load(); 
+  }, [status2Filter]);
+
+  useEffect(() => {
+    if (search && search.trim()) {
+      load();
+    }
+  }, [search]);
+
+  const allProviders = useMemo(() => {
+    if (role === 'PROVEEDOR') return [];
+    const set = new Set<string>();
+    orders.forEach(o => {
+      if (o.provider_email && o.provider_email.trim()) {
+        set.add(o.provider_email.trim());
+      }
+      if (o.provider_emails_list) {
+        (o.provider_emails_list || '').split(',').forEach((e: string) => {
+          const t = e.trim();
+          if (t) set.add(t);
+        });
+      }
+    });
+    return [...set].sort();
+  }, [orders, role]);
+
+  const filteredProviders = useMemo(() => {
+    if (!providerSearch.trim()) return allProviders;
+    const q = providerSearch.toLowerCase().trim();
+    return allProviders.filter(provider => provider.toLowerCase().includes(q));
+  }, [allProviders, providerSearch]);
+
+  const toggleProvider = (provider: string) => {
+    setSelectedProviders(prev => {
+      const next = new Set(prev);
+      if (next.has(provider)) next.delete(provider);
+      else next.add(provider);
+      return next;
+    });
+  };
+
+  const selectAllProviders = () => {
+    if (allProviders.length === 0) return;
+
+    if (selectedProviders.size === allProviders.length) {
+      setSelectedProviders(new Set());
+    } else {
+      setSelectedProviders(new Set(allProviders));
+    }
+  };
+
+  const allCities = useMemo(() => {
+    const cities = new Set<string>();
+    orders.forEach(o => {
+      if (o.city && o.city.trim()) {
+        cities.add(o.city.trim());
+      }
+    });
+    return Array.from(cities).sort();
+  }, [orders]);
+
+  const allDepartments = useMemo(() => {
+    const depts = new Set<string>();
+    orders.forEach(o => {
+      if (o.departamento && o.departamento.trim()) {
+        depts.add(o.departamento.trim());
+      }
+    });
+    return Array.from(depts).sort();
+  }, [orders]);
+
+  const filteredCities = useMemo(() => {
+    if (!citySearch) return allCities;
+    return allCities.filter(c => c.toLowerCase().includes(citySearch.toLowerCase()));
+  }, [allCities, citySearch]);
+
+  const filteredDepartments = useMemo(() => {
+    if (!deptSearch) return allDepartments;
+    return allDepartments.filter(d => d.toLowerCase().includes(deptSearch.toLowerCase()));
+  }, [allDepartments, deptSearch]);
+
+  const toggleCity = (city: string) => {
+    setSelectedCities(prev => {
+      const next = new Set(prev);
+      if (next.has(city)) next.delete(city);
+      else next.add(city);
+      return next;
+    });
+  };
+
+  const toggleDepartment = (dept: string) => {
+    setSelectedDepartments(prev => {
+      const next = new Set(prev);
+      if (next.has(dept)) next.delete(dept);
+      else next.add(dept);
+      return next;
+    });
+  };
+
+  const selectAllCities = () => {
+    if (selectedCities.size === allCities.length) {
+      setSelectedCities(new Set());
+    } else {
+      setSelectedCities(new Set(allCities));
+    }
+  };
+
+  const selectAllDepartments = () => {
+    if (selectedDepartments.size === allDepartments.length) {
+      setSelectedDepartments(new Set());
+    } else {
+      setSelectedDepartments(new Set(allDepartments));
+    }
+  };
+
+  const filtered = useMemo(() => {
+    return orders.filter(o => {
+      if (role === 'PROVEEDOR') {
+        const providerList = o.provider_emails_list || '';
+        const myEmailLower = myEmail.toLowerCase();
+        const isMine = providerList.toLowerCase().includes(myEmailLower);
+        if (!isMine) return false;
+      }
+      
+      if (role !== 'PROVEEDOR' && selectedProviders.size > 0) {
+        const orderProviders = [
+          ...(o.provider_emails_list || '').split(','),
+          o.provider_email || '',
+        ]
+          .map((provider: string) => provider.trim().toLowerCase())
+          .filter(Boolean);
+
+        const matchesSelectedProvider = Array.from(selectedProviders).some(provider =>
+          orderProviders.includes(provider.toLowerCase())
+        );
+
+        if (!matchesSelectedProvider) return false;
+      }
+      
+      if (selectedCities.size > 0) {
+        if (!o.city || !selectedCities.has(o.city)) return false;
+      }
+      
+      if (selectedDepartments.size > 0) {
+        if (!o.departamento || !selectedDepartments.has(o.departamento)) return false;
+      }
+      
+      if (search && search.trim()) return true;
+      
+      if (!search) return true;
+      const q = search.toLowerCase();
+      return (o.customer_name || '').toLowerCase().includes(q) ||
+        (o.order_number || '').toLowerCase().includes(q) ||
+        (o.phone || '').includes(q) || 
+        (o.city || '').toLowerCase().includes(q) ||
+        (o.departamento || '').toLowerCase().includes(q) ||
+        (o.id || '').toLowerCase().includes(q);
+    });
+  }, [orders, search, selectedProviders, role, myEmail, selectedCities, selectedDepartments]);
+
+  const pendingGuides = filtered.filter(o => !o.status2 || o.status2 === '--');
+  const withGuides = filtered.filter(o => o.status2 === 'GUIA GENERADA');
+  const visibleOrders = filtered;
+
+  const repeatedClients = useMemo(() => {
+    const map: Record<string, { name: string; count: number; guides: string[]; phones: string[] }> = {};
+    visibleOrders.forEach(o => {
+      const key = normalizeClientName(o.customer_name);
+      if (!key) return;
+      if (!map[key]) map[key] = { name: displayClientName(o.customer_name), count: 0, guides: [], phones: [] };
+      map[key].count += 1;
+      map[key].guides.push(o.order_number || o.id?.slice(0, 8) || 'SIN ID');
+      if (o.phone && !map[key].phones.includes(o.phone)) map[key].phones.push(o.phone);
+    });
+    return Object.values(map)
+      .filter(item => item.count > 1)
+      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+  }, [visibleOrders]);
+
+  const repeatedClientsCount = repeatedClients.length;
+  const repeatedGuidesCount = repeatedClients.reduce((sum, item) => sum + item.count, 0);
+
+  const state2Opts = ['--', 'GUIA GENERADA', 'FUERA DE COBERTURA', 'CANCELADO', 'REPETIDO', 'RENDIDO'];
+
+  const updateStatus2 = async (orderId: string, status2: string) => {
+    const val = status2 === '--' ? null : status2;
+    const { error } = await supabase.from('orders').update({ status2: val, updated_at: new Date().toISOString() }).eq('id', orderId);
+    if (error) toast.error(error.message);
+    else {
+      toast.success('Estado 2 actualizado');
+      setOrders(prev => prev.map(o => o.id === orderId ? { ...o, status2: val } : o));
+      if (val === 'GUIA GENERADA') {
+        setSelectedIds(prev => {
+          const next = new Set(prev);
+          next.delete(orderId);
+          return next;
+        });
+      }
+    }
+  };
+
+  const buildGuideText = (o: any) => {
+    const items = typeof o.items_json === 'string'
+      ? JSON.parse(o.items_json || '[]')
+      : (o.items_json || []);
+
+    const itemsText = items.map((it: any, i: number) =>
+      `${i + 1}. ${it.title || it.sku || 'Item'} x${it.qty || it.quantity || 1} —`
+    ).join('\n');
+
+    const separator = '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━';
+
+    return [
+      `GUÍA DE ENVÍO — ${o.order_number || o.id.slice(0, 8)}`,
+      separator,
+      `Cliente: ${o.customer_name || ''}`,
+      `Teléfono: ${o.phone || ''}`,
+      `Email: ${o.email || ''}`,
+      `Departamento: ${o.departamento || ''}`,
+      `Ciudad: ${o.city || ''}`,
+      `Dirección: ${o.street || ''} ${o.district ? '- ' + o.district : ''}`.trimEnd(),
+      '',
+      'Productos:',
+      '',
+      itemsText,
+      '',
+      `Total: Gs ${nf(Number(o.total_gs || 0))}`,
+      o.obs ? `Observación: ${o.obs}` : '',
+      separator,
+      `Vendedor: ${o.created_by || ''}`,
+      `Proveedor: ${o.provider_emails_list || o.provider_email || '—'}`,
+    ].filter(line => line !== null && line !== undefined).join('\n');
+  };
+
+  const getWhatsAppUrl = (order: any) => {
+    if (!order.phone) return '#';
+    const randomMessage = whatsappMessages[Math.floor(Math.random() * whatsappMessages.length)];
+    let phoneNumber = order.phone.replace(/\D/g, '');
+    if (phoneNumber.startsWith('595')) {
+      phoneNumber = phoneNumber;
+    } else if (phoneNumber.startsWith('0')) {
+      phoneNumber = '595' + phoneNumber.substring(1);
+    } else if (phoneNumber.length === 9) {
+      phoneNumber = '595' + phoneNumber;
+    } else {
+      phoneNumber = '595' + phoneNumber;
+    }
+    return 'https://wa.me/' + phoneNumber + '?text=' + encodeURIComponent(randomMessage);
+  };
+
+  const openGuideModal = (order: any) => {
+    setCurrentOrder(order);
+    setShowGuideModal(true);
+  };
+
+  const copyGuide = () => {
+    if (currentOrder) {
+      const text = buildGuideText(currentOrder);
+      navigator.clipboard.writeText(text);
+      toast.success('Guía copiada al portapapeles');
+    }
+  };
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const getSelectedOrders = () => visibleOrders.filter(o => selectedIds.has(o.id));
+
+  const bulkCopyGuides = () => {
+    const selected = getSelectedOrders();
+    if (selected.length === 0) { toast.error('Seleccioná pedidos primero'); return; }
+    const allText = selected.map(o => buildGuideText(o)).join('\n\n');
+    navigator.clipboard.writeText(allText);
+    toast.success(`${selected.length} guías copiadas`);
+  };
+
+  const bulkMarkAsGuiaGenerada = async () => {
+    const selected = getSelectedOrders();
+    
+    if (selected.length === 0) {
+      toast.error('Seleccioná pedidos primero');
+      return;
+    }
+
+    const toastId = toast.loading(`Actualizando ${selected.length} pedido${selected.length > 1 ? 's' : ''}...`);
+    
+    try {
+      const updates = selected.map(order => 
+        supabase.from('orders').update({ 
+          status2: 'GUIA GENERADA', 
+          updated_at: new Date().toISOString() 
+        }).eq('id', order.id)
+      );
+      
+      const results = await Promise.all(updates);
+      const errors = results.filter(r => r.error);
+      
+      if (errors.length > 0) {
+        toast.error(`${errors.length} error${errors.length > 1 ? 'es' : ''} al actualizar`, { id: toastId });
+      } else {
+        toast.success(`${selected.length} pedido${selected.length > 1 ? 's' : ''} marcado${selected.length > 1 ? 's' : ''} como GUIA GENERADA`, { id: toastId });
+        
+        setOrders(prev => prev.map(o => 
+          selectedIds.has(o.id) ? { ...o, status2: 'GUIA GENERADA' } : o
+        ));
+        
+        setSelectedIds(new Set());
+      }
+    } catch (error) {
+      toast.error('Error al actualizar los pedidos', { id: toastId });
+    }
+  };
+
+  const selectAllPending = () => {
+    const allPendingIds = pendingGuides.map(o => o.id);
+    if (allPendingIds.length === 0) {
+      toast.error('No hay pedidos pendientes');
+      return;
+    }
+    setSelectedIds(new Set(allPendingIds));
+    toast.success(`${allPendingIds.length} pedido${allPendingIds.length > 1 ? 's' : ''} pendiente${allPendingIds.length > 1 ? 's' : ''} seleccionado${allPendingIds.length > 1 ? 's' : ''}`);
+  };
+
+  const clearSelection = () => {
+    if (selectedIds.size === 0) return;
+    setSelectedIds(new Set());
+    toast.success('Selección limpiada');
+  };
+
+  const downloadFile = (content: string, filename: string, mime: string) => {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const downloadTxt = () => {
+    const selected = getSelectedOrders();
+    if (selected.length === 0) { toast.error('Seleccioná pedidos primero'); return; }
+    const content = selected.map(o => buildGuideText(o)).join('\n\n');
+    downloadFile(content, `guias_${new Date().toISOString().slice(0, 10)}.txt`, 'text/plain');
+    toast.success(`${selected.length} guías descargadas en TXT`);
+  };
+
+  // IMPRESIÓN PDF NORMAL - CAMBIO 2: PDF con QR usa order_number
+  const printWithQR = () => {
+    const selected = getSelectedOrders();
+    if (selected.length === 0) { 
+      toast.error('Seleccioná pedidos primero'); 
+      return; 
+    }
+
+    let allGuidesHtml = '';
+    
+    for (const order of selected) {
+      const items = typeof order.items_json === 'string' ? JSON.parse(order.items_json) : (order.items_json || []);
+      let itemsHtml = '';
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        itemsHtml += `
+          <tr>
+            <td style="padding: 4px 0;">${i + 1}</td>
+            <td style="padding: 4px 0;">${(it.title || it.sku || 'Item').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</td>
+            <td style="padding: 4px 0; text-align: center;">${it.qty || 1}</td>
+          </tr>
+        `;
+      }
+
+      const whatsappUrl = getWhatsAppUrl(order);
+      // CAMBIO 2: usar order_number en lugar de id
+      const orderNumber = order.order_number
+        ? String(order.order_number).trim()
+        : '';
+
+      const deliveryUrl = orderNumber
+        ? window.location.origin + '/#/asignar-pedidos?id=' + encodeURIComponent(orderNumber)
+        : '#';
+
+      const waQrId = `qr-wa-${order.id.replace(/-/g, '')}`;
+      const deliveryQrId = `qr-delivery-${order.id.replace(/-/g, '')}`;
+
+      allGuidesHtml += `
+        <div class="guide-page" style="page-break-after: always;">
+          <h3 style="color: #7c5cff; margin: 0 0 10px 0;">GUÍA DE ENVÍO — ${order.order_number || order.id.slice(0, 8)}</h3>
+          
+          <table style="width: 100%; font-size: 12px; margin-bottom: 12px;">
+            <tbody className="divide-y divide-slate-800/80">
+              <tr><td style="width: 100px; padding: 2px 0; color: #666;">Cliente:</td><td style="font-weight: bold;">${(order.customer_name || '').replace(/</g, '&lt;')}</td></tr>
+              <tr><td style="padding: 2px 0; color: #666;">Teléfono:</td><td style="font-weight: bold;">${order.phone || ''}</td></tr>
+              <tr><td style="padding: 2px 0; color: #666;">Email:</td><td style="font-weight: bold;">${(order.email || '').replace(/</g, '&lt;')}</td></tr>
+              <tr><td style="padding: 2px 0; color: #666;">Departamento:</td><td style="font-weight: bold;">${order.departamento || ''}</td></tr>
+              <tr><td style="padding: 2px 0; color: #666;">Ciudad:</td><td style="font-weight: bold;">${order.city || ''}</td></tr>
+              <tr><td style="padding: 2px 0; color: #666;">Dirección:</td><td style="font-weight: bold;">${(order.street || '').replace(/</g, '&lt;')} ${order.district ? '- ' + order.district : ''}</td></tr>
+            </tbody>
+          </table>
+          
+          <table style="width: 100%; border-collapse: collapse; font-size: 11px;">
+            <thead>
+              <tr style="background: #f0f0f0; border-bottom: 1px solid #ddd;">
+                <th style="text-align: left; padding: 6px 4px;">#</th>
+                <th style="text-align: left; padding: 6px 4px;">Producto</th>
+                <th style="text-align: center; padding: 6px 4px;">Cant.</th>
+              </tr>
+            </thead>
+            <tbody>${itemsHtml}</tbody>
+            <tfoot>
+              <tr style="border-top: 1px solid #ddd;">
+                <td colspan="2" style="text-align: right; padding: 8px 4px;"><strong>Total:</strong></td>
+                <td style="text-align: right; padding: 8px 4px;"><strong>Gs ${nf(Number(order.total_gs || 0))}</strong></td>
+              </tr>
+            </tfoot>
+          </table>
+          
+          ${order.obs ? `<div style="margin-top: 8px; font-size: 11px; color: #666;">Observación: ${order.obs.replace(/</g, '&lt;')}</div>` : ''}
+          
+          <div style="margin-top: 8px; font-size: 10px; color: #666; border-top: 1px solid #eee; padding-top: 8px;">
+            Vendedor: ${order.created_by || ''} | Proveedor: ${order.provider_emails_list || order.provider_email || '—'}
+          </div>
+          
+          <div style="display: flex; justify-content: center; gap: 40px; margin-top: 20px; padding-top: 15px; border-top: 2px dashed #ccc;">
+            <div style="text-align: center;">
+              <div style="font-size: 11px; font-weight: bold; color: #25D366; margin-bottom: 8px;">📱 QR CLIENTE - Enviar Ubicación</div>
+              <div id="${waQrId}" data-url="${whatsappUrl}" style="width: 120px; height: 120px; margin: 0 auto;"></div>
+              <div style="font-size: 9px; color: #666; margin-top: 6px;">WhatsApp con ubicación exacta</div>
+            </div>
+            <div style="text-align: center;">
+              <div style="font-size: 11px; font-weight: bold; color: #F97316; margin-bottom: 8px;">🚚 QR DELIVERY - Asignar Pedido</div>
+              <div id="${deliveryQrId}" data-url="${deliveryUrl}" style="width: 120px; height: 120px; margin: 0 auto;"></div>
+              <div style="font-size: 9px; color: #666; margin-top: 6px;">Escanea para asignar</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    const html = `<!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Guías de Envío con QR</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        @media print { body { margin: 0; padding: 0; } .guide-page { page-break-after: always; page-break-inside: avoid; } }
+        @media screen { body { margin: 0; padding: 20px; background: #f5f5f5; font-family: Arial, sans-serif; } .guide-page { background: white; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); } }
+        .guide-page { padding: 20px; font-family: Arial, sans-serif; border: 1px solid #ddd; max-width: 800px; margin: 0 auto 20px auto; }
+        table { border-collapse: collapse; width: 100%; }
+      </style>
+      <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    </head>
+    <body>
+      ${allGuidesHtml}
+      <script>
+        (function() {
+          function generateAllQRCodes() {
+            if (typeof QRCode === 'undefined') { setTimeout(generateAllQRCodes, 500); return; }
+            document.querySelectorAll('[id^="qr-wa-"]').forEach(function(el) {
+              if (el.children.length === 0) {
+                var url = el.getAttribute('data-url');
+                if (url && url !== '#' && url !== '') {
+                  try { new QRCode(el, { text: url, width: 120, height: 120, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.L }); } catch(e) { console.log('QR error:', e); el.innerHTML = '<div style="color: red; font-size: 10px;">Error QR</div>'; }
+                } else {
+                  el.innerHTML = '<div style="color: orange; font-size: 10px;">Sin teléfono</div>';
+                }
+              }
+            });
+            document.querySelectorAll('[id^="qr-delivery-"]').forEach(function(el) {
+              if (el.children.length === 0) {
+                var url = el.getAttribute('data-url');
+                if (url && url !== '#') {
+                  try { new QRCode(el, { text: url, width: 120, height: 120, colorDark: '#000000', colorLight: '#ffffff', correctLevel: QRCode.CorrectLevel.L }); } catch(e) { el.innerHTML = '<div style="color: red; font-size: 10px;">Error QR</div>'; }
+                } else if (url === '#') { el.innerHTML = '<div style="color: orange; font-size: 10px;">Sin número de orden</div>'; }
+              }
+            });
+          }
+          if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', function() { setTimeout(generateAllQRCodes, 200); }); } else { setTimeout(generateAllQRCodes, 200); }
+        })();
+      </script>
+    </body>
+    </html>`;
+
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(html);
+      printWindow.document.close();
+      setTimeout(() => { printWindow.print(); }, 1500);
+    }
+    toast.success(`${selected.length} guías con QR listas para imprimir`);
+  };
+
+  // IMPRESIÓN PARA IMPRESORA TÉRMICA - CAMBIO 3: QR con order_number
+  const printThermal = () => {
+    const selected = getSelectedOrders();
+    if (selected.length === 0) {
+      toast.error('Seleccioná pedidos primero');
+      return;
+    }
+
+    let allTicketsHtml = '';
+
+    for (const order of selected) {
+      const items = typeof order.items_json === 'string' ? JSON.parse(order.items_json) : (order.items_json || []);
+      let itemsHtml = '';
+      
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        const productName = (it.title || it.sku || 'Item').substring(0, 30);
+        const qty = it.qty || it.quantity || 1;
+        
+        itemsHtml += `
+          <div class="product-row">
+            <span class="product-name">${i+1}. ${productName}</span>
+            <span class="product-qty">x${qty}</span>
+          </div>
+        `;
+      }
+
+      const total = Number(order.total_gs || 0);
+      const whatsappUrl = getWhatsAppUrl(order);
+      // CAMBIO 3: usar order_number en lugar de id
+      const orderNumber = order.order_number
+        ? String(order.order_number).trim()
+        : '';
+
+      const deliveryUrl = orderNumber
+        ? window.location.origin + '/#/asignar-pedidos?id=' + encodeURIComponent(orderNumber)
+        : '#';
+
+      const timestamp = Date.now();
+      const waQrId = `qr-wa-thermal-${timestamp}-${order.id.slice(0, 8)}`;
+      const deliveryQrId = `qr-delivery-thermal-${timestamp}-${order.id.slice(0, 8)}`;
+
+      allTicketsHtml += `
+        <div class="thermal-ticket">
+          <div class="header">
+            <div class="title">GUÍA DE ENVÍO</div>
+            <div class="order-number">#${order.order_number || order.id.slice(0, 8)}</div>
+            <div class="date">${new Date(order.created_at).toLocaleDateString('es-PY')} - ${new Date(order.created_at).toLocaleTimeString('es-PY')}</div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="section">
+            <div class="section-label">CLIENTE</div>
+            <div class="customer-name">${(order.customer_name || '').toUpperCase()}</div>
+            <div class="customer-phone">📞 ${order.phone || 'Sin teléfono'}</div>
+            ${order.email ? `<div class="customer-email">✉️ ${order.email}</div>` : ''}
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="section">
+            <div class="section-label">ENTREGA</div>
+            <div class="address-line">${order.departamento || ''} - ${order.city || ''}</div>
+            <div class="address-line">${order.street || ''} ${order.district ? '- ' + order.district : ''}</div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="section">
+            <div class="section-label">PRODUCTOS</div>
+            <div class="products-header">
+              <span class="col-product">PRODUCTO</span>
+              <span class="col-qty">CANT</span>
+            </div>
+            <div class="products-list">
+              ${itemsHtml}
+            </div>
+          </div>
+
+          <div class="total-box">
+            <span class="total-label">TOTAL</span>
+            <span class="total-amount">Gs ${nf(total)}</span>
+          </div>
+
+          ${order.obs ? `
+            <div class="obs-box">
+              📝 OBSERVACIÓN: ${order.obs}
+            </div>
+          ` : ''}
+
+          <div class="divider"></div>
+
+          <!-- QR SECTION - QR GRANDES (120x120) BIEN SEPARADOS -->
+          <div class="qr-section">
+            <div class="qr-item">
+              <div class="qr-label">📱 QR CLIENTE</div>
+              <div id="${waQrId}" data-url="${whatsappUrl}" class="qr-code"></div>
+              <div class="qr-hint">Escanea para enviar ubicación exacta</div>
+            </div>
+            <div class="qr-item">
+              <div class="qr-label">🚚 QR DELIVERY</div>
+              <div id="${deliveryQrId}" data-url="${deliveryUrl}" class="qr-code"></div>
+              <div class="qr-hint">Escanea para asignar este pedido</div>
+            </div>
+          </div>
+
+          <div class="divider"></div>
+
+          <div class="footer">
+            <div>VENDEDOR: ${order.created_by || ''}</div>
+            <div>PROVEEDOR: ${order.provider_emails_list ? order.provider_emails_list.substring(0, 35) : order.provider_email || '—'}</div>
+          </div>
+
+          <div class="cut-line">- - - - - - - - - - - - - - - - - - - - - - - - - - - - - -</div>
+        </div>
+      `;
+    }
+
+    const thermalHtml = `<!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <title>Guías Térmicas</title>
+      <style>
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
+        }
+        
+        @page {
+          size: 80mm auto;
+          margin: 0mm;
+        }
+        
+        @media print {
+          html, body {
+            margin: 0;
+            padding: 0;
+            width: 80mm;
+            background: white;
+          }
+          .thermal-ticket {
+            page-break-after: always;
+            width: 100%;
+            padding: 3mm;
+            font-family: 'Courier New', 'Courier', monospace;
+            font-size: 12px;
+          }
+        }
+        
+        @media screen {
+          body {
+            background: #e0e0e0;
+            padding: 10px;
+          }
+          .thermal-ticket {
+            background: white;
+            width: 80mm;
+            margin: 0 auto 10px auto;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+          }
+        }
+        
+        .thermal-ticket {
+          padding: 3mm;
+          font-family: 'Courier New', 'Courier', monospace;
+          font-size: 12px;
+          line-height: 1.5;
+          background: white;
+        }
+        
+        /* TODO EN NEGRITA */
+        .thermal-ticket, .thermal-ticket * {
+          font-weight: bold;
+        }
+        
+        .header {
+          text-align: center;
+          margin-bottom: 8px;
+        }
+        .title {
+          font-size: 16px;
+          font-weight: bold;
+          letter-spacing: 2px;
+        }
+        .order-number {
+          font-size: 13px;
+          font-weight: bold;
+          margin-top: 4px;
+        }
+        .date {
+          font-size: 10px;
+          font-weight: bold;
+          margin-top: 3px;
+        }
+        
+        .divider {
+          border-top: 1px dashed #000;
+          margin: 8px 0;
+        }
+        
+        .section {
+          margin: 8px 0;
+        }
+        .section-label {
+          font-size: 11px;
+          font-weight: bold;
+          background: #f0f0f0;
+          display: inline-block;
+          padding: 2px 6px;
+          margin-bottom: 6px;
+          letter-spacing: 1px;
+        }
+        .customer-name {
+          font-size: 14px;
+          font-weight: bold;
+          margin: 4px 0;
+        }
+        .customer-phone, .customer-email {
+          font-size: 11px;
+          font-weight: bold;
+          margin: 2px 0;
+        }
+        .address-line {
+          font-size: 11px;
+          font-weight: bold;
+          margin: 3px 0;
+        }
+        
+        .products-header {
+          display: flex;
+          font-weight: bold;
+          font-size: 10px;
+          border-bottom: 1px solid #000;
+          padding-bottom: 4px;
+          margin: 8px 0 4px 0;
+        }
+        .col-product {
+          flex: 3;
+        }
+        .col-qty {
+          flex: 1;
+          text-align: center;
+        }
+        
+        .products-list {
+          margin: 4px 0;
+        }
+        .product-row {
+          display: flex;
+          font-size: 11px;
+          font-weight: bold;
+          margin: 4px 0;
+        }
+        .product-name {
+          flex: 3;
+        }
+        .product-qty {
+          flex: 1;
+          text-align: center;
+        }
+        
+        .total-box {
+          display: flex;
+          justify-content: space-between;
+          font-weight: bold;
+          font-size: 15px;
+          margin: 10px 0;
+          padding-top: 6px;
+          border-top: 2px solid #000;
+        }
+        .total-label {
+          font-weight: bold;
+        }
+        .total-amount {
+          font-weight: bold;
+          font-size: 16px;
+        }
+        
+        .obs-box {
+          font-size: 10px;
+          font-weight: bold;
+          margin: 8px 0;
+          padding: 5px;
+          background: #f5f5f5;
+          border-left: 3px solid #ff9800;
+        }
+        
+        /* QR SECTION - QR GRANDES (120x120) BIEN SEPARADOS */
+        .qr-section {
+          display: flex;
+          justify-content: space-between;
+          gap: 20px;
+          margin: 15px 0;
+        }
+        .qr-item {
+          text-align: center;
+          width: 50%;
+        }
+        .qr-label {
+          font-size: 11px;
+          font-weight: bold;
+          margin-bottom: 8px;
+          background: #f0f0f0;
+          padding: 4px 8px;
+          display: inline-block;
+          border-radius: 4px;
+        }
+        .qr-code {
+          width: 120px;
+          height: 120px;
+          margin: 0 auto;
+        }
+        .qr-hint {
+          font-size: 8px;
+          font-weight: bold;
+          margin-top: 6px;
+          color: #555;
+        }
+        
+        .footer {
+          font-size: 9px;
+          font-weight: bold;
+          text-align: center;
+          margin: 8px 0;
+        }
+        
+        .cut-line {
+          text-align: center;
+          font-size: 10px;
+          font-weight: bold;
+          letter-spacing: 3px;
+          margin: 10px 0 3px 0;
+        }
+      </style>
+      <script src="https://cdn.jsdelivr.net/npm/qrcodejs@1.0.0/qrcode.min.js"></script>
+    </head>
+    <body>
+      ${allTicketsHtml}
+      <script>
+        (function() {
+          function waitForQRCode() {
+            if (typeof QRCode === 'undefined') {
+              setTimeout(waitForQRCode, 300);
+              return;
+            }
+            
+            document.querySelectorAll('[id^="qr-wa-thermal-"]').forEach(function(el) {
+              if (el.children.length === 0) {
+                var url = el.getAttribute('data-url');
+                if (url && url !== '#' && url !== '') {
+                  try {
+                    new QRCode(el, { text: url, width: 120, height: 120 });
+                  } catch(e) {
+                    console.log('QR WA error:', e);
+                    el.innerHTML = '<div style="font-size:8px;color:red;">Error QR</div>';
+                  }
+                } else {
+                  el.innerHTML = '<div style="font-size:8px;color:orange;">Sin teléfono</div>';
+                }
+              }
+            });
+            
+            document.querySelectorAll('[id^="qr-delivery-thermal-"]').forEach(function(el) {
+              if (el.children.length === 0) {
+                var url = el.getAttribute('data-url');
+                if (url && url !== '#') {
+                  try {
+                    new QRCode(el, { text: url, width: 120, height: 120 });
+                  } catch(e) {
+                    console.log('QR Delivery error:', e);
+                    el.innerHTML = '<div style="font-size:8px;color:red;">Error QR</div>';
+                  }
+                } else if (url === '#') {
+                  el.innerHTML = '<div style="font-size:8px;color:orange;">Sin número de orden</div>';
+                }
+              }
+            });
+          }
+          
+          if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', function() {
+              setTimeout(waitForQRCode, 200);
+            });
+          } else {
+            setTimeout(waitForQRCode, 200);
+          }
+        })();
+      </script>
+    </body>
+    </html>`;
+
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(thermalHtml);
+      printWindow.document.close();
+      setTimeout(() => {
+        printWindow.print();
+      }, 1500);
+    }
+    toast.success(`${selected.length} ticket(s) listos para imprimir en térmica`);
+  };
+
+  return (
+    <div className={panelCls}>
+      <div className="rounded-3xl border border-slate-700/80 bg-[#101827] px-4 md:px-6 py-4 mb-4 flex flex-col xl:flex-row xl:items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center text-2xl shadow-lg shadow-cyan-500/20">📦</div>
+          <div>
+            <h3 className="text-2xl md:text-3xl font-black text-white leading-tight">Pedidos con guías</h3>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-end gap-2 justify-end">
+          <button
+            onClick={() => window.open('#/asignar-pedidos', '_blank')}
+            className={proBtnCls + " bg-gradient-to-r from-violet-600 to-purple-500"}
+          >
+            📷 Abrir Lector QR
+          </button>
+        </div>
+      </div>
+
+      {/* KPIs */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-9 gap-3 mb-4">
+        <div className={kpiBaseCls + " border-blue-500/40 bg-gradient-to-br from-blue-500/20 to-[#101827]"}>
+          <div className="text-xs text-blue-200 mb-1">Guías pendientes</div>
+          <div className="text-[24px] font-black text-white">{pendingGuides.length}</div>
+        </div>
+        <div className={kpiBaseCls + " border-emerald-500/40 bg-gradient-to-br from-emerald-500/20 to-[#101827]"}>
+          <div className="text-xs text-emerald-200 mb-1">Con guía generada</div>
+          <div className="text-[24px] font-black text-white">{withGuides.length}</div>
+        </div>
+        <div className={kpiBaseCls + " border-cyan-500/40 bg-gradient-to-br from-cyan-500/20 to-[#101827]"}>
+          <div className="text-xs text-cyan-200 mb-1">Guías generadas hoy</div>
+          <div className="text-[24px] font-black text-white">{guidesTodayCount}</div>
+        </div>
+        <div className={kpiBaseCls + " border-violet-500/40 bg-gradient-to-br from-violet-500/20 to-[#101827]"}>
+          <div className="text-xs text-violet-200 mb-1">Entregados hoy</div>
+          <div className="text-[24px] font-black text-white">{deliveredTodayCount}</div>
+        </div>
+        <div className={kpiBaseCls + " border-slate-500/40 bg-gradient-to-br from-slate-500/20 to-[#101827]"}>
+          <div className="text-xs text-slate-300 mb-1">Total</div>
+          <div className="text-[24px] font-black text-white">{filtered.length}</div>
+        </div>
+        <div className={kpiBaseCls + " border-amber-500/40 bg-gradient-to-br from-amber-500/20 to-[#101827]"}>
+          <div className="text-xs text-amber-200 mb-1">Clientes repetidos</div>
+          <div className="text-[24px] font-black text-white">{repeatedClientsCount}</div>
+          <div className="text-[10px] text-amber-300">{repeatedGuidesCount} guías involucradas</div>
+        </div>
+        <div className={kpiBaseCls + " border-slate-700/70 bg-[#101827]"}>
+          <div className="text-xs text-muted-foreground mb-1">Departamentos</div>
+          <div className="text-[22px] font-extrabold">{selectedDepartments.size || 'Todos'}</div>
+        </div>
+        <div className={kpiBaseCls + " border-slate-700/70 bg-[#101827]"}>
+          <div className="text-xs text-muted-foreground mb-1">Ciudades</div>
+          <div className="text-[22px] font-extrabold">{selectedCities.size || 'Todas'}</div>
+        </div>
+        <div className={kpiBaseCls + " border-slate-700/70 bg-[#101827]"}>
+          <div className="text-xs text-muted-foreground mb-1">Seleccionados</div>
+          <div className="text-[22px] font-extrabold">{selectedIds.size}</div>
+        </div>
+      </div>
+
+      {repeatedClients.length > 0 && (
+        <div className="mb-4 rounded-2xl border border-amber-500/40 bg-gradient-to-br from-amber-500/15 to-[#101827] p-4 shadow-xl">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <div>
+              <div className="text-sm font-black text-amber-200">⚠️ Clientes repetidos detectados</div>
+              <div className="text-xs text-slate-300">Se comparan nombres exactos normalizados dentro de los filtros visibles.</div>
+            </div>
+            <button
+              className="nav-btn"
+              style={{ background: '#f59e0b', color: 'white' }}
+              onClick={() => {
+                const text = repeatedClients.map(c => `${c.name} — ${c.count} guías: ${c.guides.join(', ')}${c.phones.length ? ' — Tel: ' + c.phones.join(', ') : ''}`).join('\n');
+                navigator.clipboard.writeText(text);
+                toast.success('Listado de repetidos copiado');
+              }}
+            >
+              📋 Copiar repetidos
+            </button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+            {repeatedClients.slice(0, 9).map((client, i) => (
+              <div key={i} className="rounded-xl border border-amber-500/20 bg-black/20 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-black text-white truncate">{client.name}</div>
+                  <span className="text-xs font-black text-amber-200 bg-amber-500/20 px-2 py-1 rounded-full">{client.count}x</span>
+                </div>
+                {client.phones.length > 0 && <div className="text-[11px] text-slate-400 mt-1">Tel: {client.phones.join(', ')}</div>}
+                <div className="text-[11px] text-slate-300 mt-1">Guías: {client.guides.join(', ')}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Filtros */}
+      <div className={cardCls + " flex flex-wrap items-end gap-2 mb-3 p-3"}>
+        <label className="app-label !mt-0">Estado</label>
+        <select className={pillInputCls + " !w-auto min-w-[150px]"} value={status2Filter} onChange={e => setStatus2Filter(e.target.value)}>
+          <option value="PENDIENTES">📋 Pendientes</option>
+          <option value="CON_GUIA">✅ Con guía generada</option>
+          <option value="TODOS">📦 Todos</option>
+        </select>
+        
+        {role !== 'PROVEEDOR' && (
+          <div className="relative">
+            <label className="app-label !mt-0">Proveedor</label>
+            <button
+              className="nav-btn min-w-[220px]"
+              type="button"
+              onClick={() => setShowProviderDropdown(!showProviderDropdown)}
+              style={{
+                background: selectedProviders.size > 0 ? '#3b82f6' : undefined,
+                color: selectedProviders.size > 0 ? 'white' : undefined,
+              }}
+            >
+              🏢 Proveedores {selectedProviders.size > 0 ? `(${selectedProviders.size})` : '(Todos)'}
+            </button>
+
+            {showProviderDropdown && (
+              <div className="absolute top-full mt-1 left-0 z-50 bg-card border border-border rounded-xl shadow-xl w-96 max-h-96 overflow-hidden flex flex-col">
+                <div className="p-2 border-b border-border">
+                  <input
+                    type="text"
+                    className={pillInputCls + " w-full text-sm"}
+                    placeholder="🔎 Buscar proveedor..."
+                    value={providerSearch}
+                    onChange={e => setProviderSearch(e.target.value)}
+                  />
+                </div>
+
+                <div className="p-2 border-b border-border flex flex-wrap gap-2">
+                  <button className="text-xs nav-btn !py-1" type="button" onClick={selectAllProviders}>
+                    {selectedProviders.size === allProviders.length && allProviders.length > 0
+                      ? 'Deseleccionar todos'
+                      : 'Seleccionar todos'}
+                  </button>
+                  <button
+                    className="text-xs nav-btn !py-1"
+                    type="button"
+                    onClick={() => setSelectedProviders(new Set())}
+                  >
+                    Limpiar
+                  </button>
+                </div>
+
+                <div className="overflow-auto max-h-64">
+                  {filteredProviders.length === 0 ? (
+                    <div className="px-3 py-4 text-sm text-muted-foreground text-center">
+                      No se encontraron proveedores
+                    </div>
+                  ) : (
+                    filteredProviders.map(provider => (
+                      <label
+                        key={provider}
+                        className="flex items-center gap-2 px-3 py-2 hover:bg-secondary cursor-pointer text-sm"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={selectedProviders.has(provider)}
+                          onChange={() => toggleProvider(provider)}
+                        />
+                        <span className="truncate" title={provider}>{provider}</span>
+                        <span className="text-xs text-muted-foreground ml-auto">
+                          {orders.filter(o => {
+                            const providers = `${o.provider_emails_list || ''},${o.provider_email || ''}`
+                              .split(',')
+                              .map((value: string) => value.trim().toLowerCase());
+                            return providers.includes(provider.toLowerCase());
+                          }).length}
+                        </span>
+                      </label>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Filtros segunda línea */}
+      <div className={cardCls + " flex flex-wrap gap-2 mb-3 p-3"}>
+        <input className={pillInputCls + " flex-1 min-w-[240px]"} placeholder="🔎 Buscar por order_number..."
+          value={search} onChange={e => setSearch(e.target.value)} />
+        
+        <div className="relative">
+          <button className="nav-btn" type="button" onClick={() => setShowDeptDropdown(!showDeptDropdown)}
+            style={{ background: selectedDepartments.size > 0 ? '#3b82f6' : undefined, color: selectedDepartments.size > 0 ? 'white' : undefined }}>
+            🗺️ Departamentos {selectedDepartments.size > 0 ? `(${selectedDepartments.size})` : ''}
+          </button>
+          {showDeptDropdown && (
+            <div className="absolute top-full mt-1 left-0 z-50 bg-card border border-border rounded-xl shadow-xl w-80 max-h-96 overflow-hidden flex flex-col">
+              <div className="p-2 border-b border-border">
+                <input type="text" className={pillInputCls + " w-full text-sm"} placeholder="🔎 Buscar departamento..."
+                  value={deptSearch} onChange={e => setDeptSearch(e.target.value)} />
+              </div>
+              <div className="p-2 border-b border-border flex gap-2">
+                <button className="text-xs nav-btn !py-1" onClick={selectAllDepartments}>
+                  {selectedDepartments.size === allDepartments.length ? 'Deseleccionar todos' : 'Seleccionar todos'}
+                </button>
+                <button className="text-xs nav-btn !py-1" onClick={() => setSelectedDepartments(new Set())}>Limpiar</button>
+              </div>
+              <div className="overflow-auto max-h-64">
+                {filteredDepartments.map(dept => (
+                  <label key={dept} className="flex items-center gap-2 px-3 py-2 hover:bg-secondary cursor-pointer text-sm">
+                    <input type="checkbox" checked={selectedDepartments.has(dept)} onChange={() => toggleDepartment(dept)} />
+                    <span>{dept}</span>
+                    <span className="text-xs text-muted-foreground ml-auto">{orders.filter(o => o.departamento === dept).length}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        
+        <div className="relative">
+          <button className="nav-btn" type="button" onClick={() => setShowCityDropdown(!showCityDropdown)}
+            style={{ background: selectedCities.size > 0 ? '#3b82f6' : undefined, color: selectedCities.size > 0 ? 'white' : undefined }}>
+            🏙️ Ciudades {selectedCities.size > 0 ? `(${selectedCities.size})` : ''}
+          </button>
+          {showCityDropdown && (
+            <div className="absolute top-full mt-1 left-0 z-50 bg-card border border-border rounded-xl shadow-xl w-80 max-h-96 overflow-hidden flex flex-col">
+              <div className="p-2 border-b border-border">
+                <input type="text" className={pillInputCls + " w-full text-sm"} placeholder="🔎 Buscar ciudad..."
+                  value={citySearch} onChange={e => setCitySearch(e.target.value)} />
+              </div>
+              <div className="p-2 border-b border-border flex gap-2">
+                <button className="text-xs nav-btn !py-1" onClick={selectAllCities}>
+                  {selectedCities.size === allCities.length ? 'Deseleccionar todas' : 'Seleccionar todas'}
+                </button>
+                <button className="text-xs nav-btn !py-1" onClick={() => setSelectedCities(new Set())}>Limpiar</button>
+              </div>
+              <div className="overflow-auto max-h-64">
+                {filteredCities.map(city => (
+                  <label key={city} className="flex items-center gap-2 px-3 py-2 hover:bg-secondary cursor-pointer text-sm">
+                    <input type="checkbox" checked={selectedCities.has(city)} onChange={() => toggleCity(city)} />
+                    <span>{city}</span>
+                    <span className="text-xs text-muted-foreground ml-auto">{orders.filter(o => o.city === city).length}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+        
+        <button className="nav-btn active" onClick={load} disabled={loading}>
+          {loading ? 'Cargando...' : 'Filtrar'}
+        </button>
+      </div>
+
+      {/* Acciones masivas */}
+      {selectedIds.size > 0 && (
+        <div className="flex flex-wrap gap-2 mb-3 p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl shadow-xl">
+          <div className="text-sm font-bold text-green-400 mr-2 self-center">
+            ✅ {selectedIds.size} seleccionado{selectedIds.size > 1 ? 's' : ''}:
+          </div>
+          <button className="nav-btn" style={{ background: '#10b981', color: 'white' }} onClick={bulkMarkAsGuiaGenerada}>
+            🚀 Marcar como GUIA GENERADA
+          </button>
+          <button className="nav-btn" onClick={bulkCopyGuides}>📋 Copiar guías</button>
+          <button className="nav-btn active" onClick={downloadTxt}>📥 Descargar TXT</button>
+          <button className="nav-btn active" onClick={printWithQR} style={{ background: '#8b5cf6', color: 'white' }}>
+            🖨️ Imprimir PDF con QR
+          </button>
+          <button className="nav-btn" onClick={printThermal} style={{ background: '#1a1a1a', color: 'white', border: '1px solid #333' }}>
+            🧾 Imprimir Ticket Térmico (80mm)
+          </button>
+          <button className="nav-btn" onClick={clearSelection} style={{ background: '#ef4444', color: 'white' }}>
+            ✖️ Limpiar selección
+          </button>
+        </div>
+      )}
+
+      <div className={cardCls + " flex flex-wrap gap-2 mb-3 p-3"}>
+        <button className="nav-btn" onClick={selectAllPending} style={{ background: '#3b82f6', color: 'white' }}>
+          ☑️ Seleccionar todos pendientes ({pendingGuides.length})
+        </button>
+        {pendingGuides.length > 0 && (
+          <button 
+            className="nav-btn" 
+            onClick={() => {
+              setSelectedIds(new Set(pendingGuides.map(o => o.id)));
+              setTimeout(() => printThermal(), 100);
+            }} 
+            style={{ background: '#1a1a1a', color: 'white' }}
+          >
+            🧾 Imprimir todos pendientes (Térmica)
+          </button>
+        )}
+      </div>
+
+      {/* Tabla */}
+      <div className="overflow-auto rounded-2xl border border-slate-700/80 bg-[#101827] shadow-2xl">
+        <table className="w-full min-w-[1320px] text-sm [&_th]:px-4 [&_th]:py-3 [&_td]:px-4 [&_td]:py-3">
+          <thead className="bg-[#070b18] sticky top-0 z-10">
+            <tr className="text-left text-[11px] uppercase tracking-widest text-slate-400 border-b border-slate-700/80">
+              <th className="w-[40px] text-center">
+                <input type="checkbox" checked={selectedIds.size === visibleOrders.length && visibleOrders.length > 0}
+                  onChange={() => selectedIds.size === visibleOrders.length ? setSelectedIds(new Set()) : setSelectedIds(new Set(visibleOrders.map(o => o.id)))} />
+              </th>
+              <th>Fecha</th>
+              <th>ID</th>
+              <th>Departamento</th>
+              <th>Ciudad</th>
+              <th>Cliente</th>
+              <th>Repetido</th>
+              <th>Teléfono</th>
+              <th>Vendedor</th>
+              <th>Proveedor</th>
+              <th>Estado 2</th>
+              <th>Guía</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-800/80">
+            {visibleOrders.map(o => (
+              <tr key={o.id} className="hover:bg-slate-800/45 transition-colors">
+                <td className="text-center">
+                  <input type="checkbox" checked={selectedIds.has(o.id)} onChange={() => toggleSelect(o.id)} />
+                 </td>
+                <td className="text-xs whitespace-nowrap">{new Date(o.created_at).toLocaleDateString('es-PY')}</td>
+                <td className="text-xs font-bold">{o.order_number || o.id.slice(0, 8)}</td>
+                <td className="text-xs">{o.departamento || '—'}</td>
+                <td className="text-xs">{o.city || '—'}</td>
+                <td className="text-xs font-bold">{o.customer_name}</td>
+                <td className="text-xs">
+                  {repeatedClients.some(c => normalizeClientName(c.name) === normalizeClientName(o.customer_name)) ? (
+                    <span className="px-2 py-1 rounded-full bg-amber-500/20 text-amber-300 font-black">Repetido</span>
+                  ) : (
+                    <span className="text-slate-500">—</span>
+                  )}
+                </td>
+                <td className="text-xs">{o.phone}</td>
+                <td className="text-xs">{o.created_by}</td>
+                <td className="text-xs">{o.provider_emails_list || o.provider_email || '—'}</td>
+                <td className="text-xs">
+                  <select className="bg-[#070b18] border border-slate-700 rounded-lg px-2 py-1 text-xs text-white outline-none focus:border-blue-400" value={o.status2 || '--'}
+                    onChange={e => updateStatus2(o.id, e.target.value)}>
+                    {state2Opts.map(s => <option key={s} value={s}>{s}</option>)}
+                  </select>
+                 </td>
+                <td className="text-xs">
+                  <div className="flex gap-1">
+                    <button className="nav-btn px-2 py-1 text-[10px]" onClick={() => openGuideModal(o)} title="Ver guía con QR">📄</button>
+                    <button className="nav-btn px-2 py-1 text-[10px]" onClick={() => {
+                      const text = buildGuideText(o);
+                      navigator.clipboard.writeText(text);
+                      toast.success('Copiada');
+                    }} title="Copiar guía">📋</button>
+                  </div>
+                 </td>
+              </tr>
+            ))}
+            {visibleOrders.length === 0 && (
+              <tr>
+                <td colSpan={12} className="text-center text-muted-foreground py-8">Sin pedidos para mostrar</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* MODAL DE GUÍA CON QR */}
+      {showGuideModal && currentOrder && (
+        <div className="fixed inset-0 bg-black/60 z-[9999] flex items-center justify-center p-4" onClick={() => setShowGuideModal(false)}>
+          <div className="bg-[#101827] border border-slate-700 rounded-3xl p-6 w-full max-w-3xl max-h-[90vh] overflow-auto shadow-2xl text-white" onClick={e => e.stopPropagation()}>
+            <h4 className="text-lg font-extrabold mb-3">📦 Guía de Envío</h4>
+            
+            <div className="space-y-2 text-sm">
+              <p><strong>Pedido:</strong> {currentOrder.order_number || currentOrder.id.slice(0, 8)}</p>
+              <p><strong>Cliente:</strong> {currentOrder.customer_name || ''}</p>
+              <p><strong>Teléfono:</strong> {currentOrder.phone || ''}</p>
+              <p><strong>Email:</strong> {currentOrder.email || ''}</p>
+              <p><strong>Departamento:</strong> {currentOrder.departamento || ''}</p>
+              <p><strong>Ciudad:</strong> {currentOrder.city || ''}</p>
+              <p><strong>Dirección:</strong> {currentOrder.street || ''} {currentOrder.district ? '- ' + currentOrder.district : ''}</p>
+              
+              <div className="border-t border-border my-3"></div>
+              
+              <p><strong>Productos:</strong></p>
+              <div className="pl-4">
+                {(() => {
+                  const items = typeof currentOrder.items_json === 'string' ? JSON.parse(currentOrder.items_json) : (currentOrder.items_json || []);
+                  return items.map((it: any, i: number) => (
+                    <p key={i}>{i + 1}. {it.title || it.sku || 'Item'} x{it.qty || it.quantity || 1} —</p>
+                  ));
+                })()}
+              </div>
+              
+              <p><strong>Total:</strong> Gs {nf(Number(currentOrder.total_gs || 0))}</p>
+              
+              {currentOrder.obs && <p><strong>Observación:</strong> {currentOrder.obs}</p>}
+              
+              <div className="border-t border-border my-3"></div>
+              
+              <p><strong>Vendedor:</strong> {currentOrder.created_by || ''}</p>
+              <p><strong>Proveedor:</strong> {currentOrder.provider_emails_list || currentOrder.provider_email || '—'}</p>
+            </div>
+            
+            <div className="border-t border-border my-4 pt-4">
+              <p className="font-bold text-center mb-3">Códigos QR</p>
+              <div className="flex justify-center gap-8">
+                <div className="text-center">
+                  <div className="text-sm font-semibold text-green-600 mb-2">📱 QR Cliente</div>
+                  <div ref={qrWaRef} style={{ width: 120, height: 120, margin: '0 auto' }}></div>
+                  <div className="text-xs text-gray-500 mt-2">WhatsApp - Enviar ubicación exacta</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-sm font-semibold text-orange-600 mb-2">🚚 QR Delivery</div>
+                  <div ref={qrDeliveryRef} style={{ width: 120, height: 120, margin: '0 auto' }}></div>
+                  <div className="text-xs text-gray-500 mt-2">Escanea para asignar pedido</div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex gap-2 justify-end mt-4">
+              <button className="nav-btn" onClick={() => setShowGuideModal(false)}>Cerrar</button>
+              <button className="nav-btn active" onClick={copyGuide}>📋 Copiar texto</button>
+              <button className="nav-btn active" onClick={() => {
+                const text = buildGuideText(currentOrder);
+                downloadFile(text, `guia_${currentOrder.order_number || currentOrder.id.slice(0, 8)}.txt`, 'text/plain');
+              }}>📥 TXT</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
