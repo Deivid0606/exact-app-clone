@@ -186,8 +186,29 @@ export type QuantityOffer = {
   id: string;
   quantity: number;
   priceGs: number;
+  compareAtPriceGs: number;
+  title: string;
+  description: string;
   label: string;
   badge: string;
+  imageUrl: string;
+  highlight: boolean;
+};
+
+export type CheckoutCustomSection = {
+  id: string;
+  title: string;
+  text: string;
+  icon: string;
+  placement:
+    | "before_offers"
+    | "after_offers"
+    | "before_shipping"
+    | "before_form"
+    | "after_form";
+  backgroundColor: string;
+  textColor: string;
+  borderColor: string;
 };
 
 export type LandingConfig = {
@@ -200,7 +221,16 @@ export type LandingConfig = {
   buttonColor: string;
   buttonText: string;
   buttonSubtext: string;
+  mainButtonTextColor: string;
+  mainButtonBorderColor: string;
+  mainButtonBorderWidth: number;
+  mainButtonBorderRadius: number;
+  mainButtonFontSize: number;
+  mainButtonPaddingY: number;
+  mainButtonEffect: "none" | "shake" | "pulse" | "bounce" | "shine";
+  mainButtonEffectEverySeconds: number;
   quantityOffers: QuantityOffer[];
+  checkoutSections: CheckoutCustomSection[];
   coverageMode: "all" | "custom" | "platform";
   hiddenDepartments: string[];
   hiddenCities: string[];
@@ -251,7 +281,16 @@ const defaultConfig = (): LandingConfig => ({
   buttonColor: "#ff1717",
   buttonText: "👉 CLICK AQUI Y PAGA EN CASA 👈",
   buttonSubtext: "PAGAS EN TU CASA AL RECIBIR !!!",
+  mainButtonTextColor: "#ffffff",
+  mainButtonBorderColor: "#000000",
+  mainButtonBorderWidth: 5,
+  mainButtonBorderRadius: 40,
+  mainButtonFontSize: 14,
+  mainButtonPaddingY: 10,
+  mainButtonEffect: "shake",
+  mainButtonEffectEverySeconds: 5,
   quantityOffers: [],
+  checkoutSections: [],
   coverageMode: "all",
   hiddenDepartments: [],
   hiddenCities: [],
@@ -335,13 +374,54 @@ function normalizeConfig(raw?: Partial<LandingConfig> | null): LandingConfig {
     },
     benefits: raw?.benefits || base.benefits,
     faq: raw?.faq || base.faq,
+    mainButtonTextColor: raw?.mainButtonTextColor || "#ffffff",
+    mainButtonBorderColor: raw?.mainButtonBorderColor || "#000000",
+    mainButtonBorderWidth: Number.isFinite(Number(raw?.mainButtonBorderWidth))
+      ? Number(raw?.mainButtonBorderWidth)
+      : 5,
+    mainButtonBorderRadius: Number.isFinite(Number(raw?.mainButtonBorderRadius))
+      ? Number(raw?.mainButtonBorderRadius)
+      : 40,
+    mainButtonFontSize: Number.isFinite(Number(raw?.mainButtonFontSize))
+      ? Number(raw?.mainButtonFontSize)
+      : 14,
+    mainButtonPaddingY: Number.isFinite(Number(raw?.mainButtonPaddingY))
+      ? Number(raw?.mainButtonPaddingY)
+      : 10,
+    mainButtonEffect: ["none","shake","pulse","bounce","shine"].includes(
+      String(raw?.mainButtonEffect),
+    )
+      ? (raw?.mainButtonEffect as "none" | "shake" | "pulse" | "bounce" | "shine")
+      : "shake",
+    mainButtonEffectEverySeconds: Number.isFinite(Number(raw?.mainButtonEffectEverySeconds))
+      ? Math.max(2, Number(raw?.mainButtonEffectEverySeconds))
+      : 5,
     quantityOffers: Array.isArray(raw?.quantityOffers)
       ? raw!.quantityOffers!.map((offer: any) => ({
           id: offer.id || uid(),
           quantity: Math.max(1, Number(offer.quantity || 1)),
           priceGs: Math.max(0, Number(offer.priceGs || 0)),
+          compareAtPriceGs: Math.max(0, Number(offer.compareAtPriceGs || offer.compareAtPrice || 0)),
+          title: offer.title || offer.label || "",
+          description: offer.description || "",
           label: offer.label || "",
           badge: offer.badge || "",
+          imageUrl: offer.imageUrl || "",
+          highlight: Boolean(offer.highlight),
+        }))
+      : [],
+    checkoutSections: Array.isArray(raw?.checkoutSections)
+      ? raw!.checkoutSections!.map((section: any) => ({
+          id: section.id || uid(),
+          title: section.title || "",
+          text: section.text || "",
+          icon: section.icon || "⭐",
+          placement: ["before_offers","after_offers","before_shipping","before_form","after_form"].includes(section.placement)
+            ? section.placement
+            : "before_form",
+          backgroundColor: section.backgroundColor || "#fff8e8",
+          textColor: section.textColor || "#111111",
+          borderColor: section.borderColor || "#e5c76b",
         }))
       : [],
     coverageMode: ["all","custom","platform"].includes(String(raw?.coverageMode))
@@ -3106,6 +3186,34 @@ export default function WebPageBuilder({
                   }
                 />
               </div>
+              <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 space-y-3">
+                <div className="font-black text-sm">🛒 Botón principal de compra</div>
+                <div className="grid grid-cols-3 gap-2">
+                  <label className="text-[10px]">Fondo<input type="color" className="w-full h-10" value={config.buttonColor} onChange={(e)=>setConfig((p)=>({...p,buttonColor:e.target.value}))}/></label>
+                  <label className="text-[10px]">Texto<input type="color" className="w-full h-10" value={config.mainButtonTextColor} onChange={(e)=>setConfig((p)=>({...p,mainButtonTextColor:e.target.value}))}/></label>
+                  <label className="text-[10px]">Borde<input type="color" className="w-full h-10" value={config.mainButtonBorderColor} onChange={(e)=>setConfig((p)=>({...p,mainButtonBorderColor:e.target.value}))}/></label>
+                </div>
+                <label className="app-label">Tamaño texto: {config.mainButtonFontSize}px</label>
+                <input type="range" min="11" max="28" className="w-full" value={config.mainButtonFontSize} onChange={(e)=>setConfig((p)=>({...p,mainButtonFontSize:Number(e.target.value)}))}/>
+                <label className="app-label">Altura: {config.mainButtonPaddingY}px</label>
+                <input type="range" min="5" max="28" className="w-full" value={config.mainButtonPaddingY} onChange={(e)=>setConfig((p)=>({...p,mainButtonPaddingY:Number(e.target.value)}))}/>
+                <label className="app-label">Redondeado: {config.mainButtonBorderRadius}px</label>
+                <input type="range" min="0" max="80" step="2" className="w-full" value={config.mainButtonBorderRadius} onChange={(e)=>setConfig((p)=>({...p,mainButtonBorderRadius:Number(e.target.value)}))}/>
+                <label className="app-label">Grosor borde: {config.mainButtonBorderWidth}px</label>
+                <input type="range" min="0" max="8" className="w-full" value={config.mainButtonBorderWidth} onChange={(e)=>setConfig((p)=>({...p,mainButtonBorderWidth:Number(e.target.value)}))}/>
+                <div className="grid grid-cols-2 gap-2">
+                  <select className="app-input" value={config.mainButtonEffect} onChange={(e)=>setConfig((p)=>({...p,mainButtonEffect:e.target.value as LandingConfig["mainButtonEffect"]}))}>
+                    <option value="none">Sin efecto</option><option value="shake">🔥 Agitar</option><option value="pulse">💓 Pulso</option><option value="bounce">⬆ Rebote</option><option value="shine">✨ Brillo</option>
+                  </select>
+                  <select className="app-input" value={config.mainButtonEffectEverySeconds} onChange={(e)=>setConfig((p)=>({...p,mainButtonEffectEverySeconds:Number(e.target.value)}))}>
+                    <option value={2}>Cada 2s</option><option value={3}>Cada 3s</option><option value={5}>Cada 5s</option><option value={8}>Cada 8s</option><option value={12}>Cada 12s</option>
+                  </select>
+                </div>
+                <button type="button" className={`w-full font-black sky-builder-main-${config.mainButtonEffect}`} style={{background:config.buttonColor,color:config.mainButtonTextColor,border:`${config.mainButtonBorderWidth}px solid ${config.mainButtonBorderColor}`,borderRadius:config.mainButtonBorderRadius,padding:`${config.mainButtonPaddingY}px 16px`,fontSize:config.mainButtonFontSize,animationDuration:`${config.mainButtonEffectEverySeconds}s`}}>
+                  <div>{config.buttonText}</div><div style={{fontSize:11,marginTop:3}}>{config.buttonSubtext}</div>
+                </button>
+              </div>
+
               <div>
                 <label className="app-label">Texto reviews</label>
                 <input
@@ -3118,26 +3226,59 @@ export default function WebPageBuilder({
               </div>
             </div>
 
-            <div className="rounded-[24px] border border-border/70 bg-background p-4 space-y-3">
-              <div className="font-black">5. 💰 Ofertas por cantidad</div>
-              {config.quantityOffers.map((offer)=>(
-                <div key={offer.id} className="rounded-xl border border-border p-3 space-y-2">
+            <div className="rounded-[24px] border border-border/70 bg-background p-4 space-y-4">
+              <div>
+                <div className="font-black">5. 💰 Ofertas por cantidad</div>
+                <div className="text-xs text-muted-foreground mt-1">Tarjetas editables como tu ejemplo: imagen, título, descripción, precio anterior, precio actual y badge.</div>
+              </div>
+              {config.quantityOffers.map((offer,index)=>(
+                <div key={offer.id} className={`rounded-xl border p-3 space-y-3 ${offer.highlight?"border-primary bg-primary/5":"border-border"}`}>
+                  <div className="flex justify-between gap-2"><b>Oferta {index+1}</b><label className="text-xs flex gap-2"><input type="checkbox" checked={offer.highlight} onChange={(e)=>setConfig((p)=>({...p,quantityOffers:p.quantityOffers.map((o)=>o.id===offer.id?{...o,highlight:e.target.checked}:o)}))}/> Destacada</label></div>
                   <div className="grid grid-cols-2 gap-2">
-                    <input type="number" min="1" className="app-input" value={offer.quantity} onChange={(e)=>setConfig((p)=>({...p,quantityOffers:p.quantityOffers.map((o)=>o.id===offer.id?{...o,quantity:Number(e.target.value||1)}:o)}))}/>
-                    <input type="number" min="0" className="app-input" value={offer.priceGs} onChange={(e)=>setConfig((p)=>({...p,quantityOffers:p.quantityOffers.map((o)=>o.id===offer.id?{...o,priceGs:Number(e.target.value||0)}:o)}))}/>
+                    <div><label className="app-label">Cantidad</label><input type="number" min="1" className="app-input" value={offer.quantity} onChange={(e)=>setConfig((p)=>({...p,quantityOffers:p.quantityOffers.map((o)=>o.id===offer.id?{...o,quantity:Math.max(1,Number(e.target.value||1))}:o)}))}/></div>
+                    <div><label className="app-label">Precio actual total</label><input type="number" min="0" className="app-input" value={offer.priceGs} onChange={(e)=>setConfig((p)=>({...p,quantityOffers:p.quantityOffers.map((o)=>o.id===offer.id?{...o,priceGs:Math.max(0,Number(e.target.value||0))}:o)}))}/></div>
                   </div>
+                  <div><label className="app-label">Precio anterior tachado</label><input type="number" min="0" className="app-input" value={offer.compareAtPriceGs} onChange={(e)=>setConfig((p)=>({...p,quantityOffers:p.quantityOffers.map((o)=>o.id===offer.id?{...o,compareAtPriceGs:Math.max(0,Number(e.target.value||0))}:o)}))}/></div>
+                  <input className="app-input" placeholder="Título: PROMO 2X1..." value={offer.title} onChange={(e)=>setConfig((p)=>({...p,quantityOffers:p.quantityOffers.map((o)=>o.id===offer.id?{...o,title:e.target.value}:o)}))}/>
+                  <textarea className="app-input min-h-[70px]" placeholder="Descripción de la oferta" value={offer.description} onChange={(e)=>setConfig((p)=>({...p,quantityOffers:p.quantityOffers.map((o)=>o.id===offer.id?{...o,description:e.target.value}:o)}))}/>
                   <div className="grid grid-cols-2 gap-2">
-                    <input className="app-input" placeholder="Ej: Pack ahorro" value={offer.label} onChange={(e)=>setConfig((p)=>({...p,quantityOffers:p.quantityOffers.map((o)=>o.id===offer.id?{...o,label:e.target.value}:o)}))}/>
-                    <input className="app-input" placeholder="Ej: MÁS VENDIDO" value={offer.badge} onChange={(e)=>setConfig((p)=>({...p,quantityOffers:p.quantityOffers.map((o)=>o.id===offer.id?{...o,badge:e.target.value}:o)}))}/>
+                    <input className="app-input" placeholder="Texto corto" value={offer.label} onChange={(e)=>setConfig((p)=>({...p,quantityOffers:p.quantityOffers.map((o)=>o.id===offer.id?{...o,label:e.target.value}:o)}))}/>
+                    <input className="app-input" placeholder="Badge: OFERTA MEJORADA 🔥" value={offer.badge} onChange={(e)=>setConfig((p)=>({...p,quantityOffers:p.quantityOffers.map((o)=>o.id===offer.id?{...o,badge:e.target.value}:o)}))}/>
                   </div>
-                  <button className="nav-btn !text-xs" onClick={()=>setConfig((p)=>({...p,quantityOffers:p.quantityOffers.filter((o)=>o.id!==offer.id)}))}>✕ Eliminar</button>
+                  <div>
+                    <label className="app-label">Imagen</label>
+                    <div className="grid grid-cols-[1fr_auto] gap-2">
+                      <input className="app-input" placeholder="URL imagen" value={offer.imageUrl} onChange={(e)=>setConfig((p)=>({...p,quantityOffers:p.quantityOffers.map((o)=>o.id===offer.id?{...o,imageUrl:e.target.value}:o)}))}/>
+                      <label className="nav-btn cursor-pointer">📷 Subir<input type="file" accept="image/*" className="hidden" onChange={async(e)=>{const file=e.target.files?.[0];e.currentTarget.value="";if(!file)return;const uploaded=await uploadFile(file,`offers/${offer.id}`);if(!uploaded||uploaded.type!=="image")return;setConfig((p)=>({...p,quantityOffers:p.quantityOffers.map((o)=>o.id===offer.id?{...o,imageUrl:uploaded.url}:o)}));}}/></label>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-border p-3 bg-background flex gap-3">
+                    {offer.imageUrl&&<img src={offer.imageUrl} alt="" className="h-14 w-14 rounded-lg object-cover"/>}
+                    <div className="flex-1 min-w-0"><b className="text-sm">{offer.title||`${offer.quantity} unidad(es)`}</b>{offer.description&&<div className="text-xs mt-1">{offer.description}</div>}{offer.badge&&<span className="inline-flex mt-1 rounded bg-primary px-2 py-0.5 text-[9px] font-black text-primary-foreground">{offer.badge}</span>}</div>
+                    <div className="text-right">{offer.compareAtPriceGs>offer.priceGs&&<div className="line-through text-[10px] text-muted-foreground">Gs. {nf(offer.compareAtPriceGs)}</div>}<b>Gs. {nf(offer.priceGs)}</b></div>
+                  </div>
+                  <button className="nav-btn !text-xs" onClick={()=>setConfig((p)=>({...p,quantityOffers:p.quantityOffers.filter((o)=>o.id!==offer.id)}))}>✕ Eliminar oferta</button>
                 </div>
               ))}
-              <button className="nav-btn active w-full" onClick={()=>setConfig((p)=>({...p,quantityOffers:[...p.quantityOffers,{id:uid(),quantity:p.quantityOffers.length+1,priceGs:(p.productSnapshots[0]?.price||0)*(p.quantityOffers.length+1),label:"",badge:p.quantityOffers.length===1?"MÁS VENDIDO":""}]}))}>＋ Agregar oferta</button>
+              <button className="nav-btn active w-full" onClick={()=>{const quantity=config.quantityOffers.length+1;const unit=config.productSnapshots[0]?.price||0;setConfig((p)=>({...p,quantityOffers:[...p.quantityOffers,{id:uid(),quantity,priceGs:unit*quantity,compareAtPriceGs:unit*quantity,title:`PROMO ${quantity} UNIDAD${quantity>1?"ES":""}`,description:"",label:"",badge:p.quantityOffers.length===1?"MÁS VENDIDO 🔥":"",imageUrl:p.productSnapshots[0]?.media?.find((item)=>item.type==="image")?.url||"",highlight:p.quantityOffers.length===0}]}));}}>＋ Agregar otra oferta</button>
+            </div>
+
+            <div className="rounded-[24px] border border-border/70 bg-background p-4 space-y-4">
+              <div><div className="font-black">6. 🧩 Secciones extra del checkout</div><div className="text-xs text-muted-foreground mt-1">Agregá avisos, beneficios, garantías o instrucciones dentro del panel de compra.</div></div>
+              {config.checkoutSections.map((section,index)=>(
+                <div key={section.id} className="rounded-xl border border-border p-3 space-y-2">
+                  <div className="flex justify-between"><b>Sección {index+1}</b><button className="nav-btn !text-xs" onClick={()=>setConfig((p)=>({...p,checkoutSections:p.checkoutSections.filter((s)=>s.id!==section.id)}))}>✕</button></div>
+                  <div className="grid grid-cols-[80px_1fr] gap-2"><input className="app-input text-center" value={section.icon} onChange={(e)=>setConfig((p)=>({...p,checkoutSections:p.checkoutSections.map((s)=>s.id===section.id?{...s,icon:e.target.value}:s)}))}/><input className="app-input" placeholder="Título" value={section.title} onChange={(e)=>setConfig((p)=>({...p,checkoutSections:p.checkoutSections.map((s)=>s.id===section.id?{...s,title:e.target.value}:s)}))}/></div>
+                  <textarea className="app-input min-h-[70px]" value={section.text} onChange={(e)=>setConfig((p)=>({...p,checkoutSections:p.checkoutSections.map((s)=>s.id===section.id?{...s,text:e.target.value}:s)}))}/>
+                  <select className="app-input" value={section.placement} onChange={(e)=>setConfig((p)=>({...p,checkoutSections:p.checkoutSections.map((s)=>s.id===section.id?{...s,placement:e.target.value as CheckoutCustomSection["placement"]}:s)}))}><option value="before_offers">Antes de ofertas</option><option value="after_offers">Después de ofertas</option><option value="before_shipping">Antes de envío</option><option value="before_form">Antes de datos</option><option value="after_form">Después de datos</option></select>
+                  <div className="grid grid-cols-3 gap-2"><label className="text-[10px]">Fondo<input type="color" className="w-full h-9" value={section.backgroundColor} onChange={(e)=>setConfig((p)=>({...p,checkoutSections:p.checkoutSections.map((s)=>s.id===section.id?{...s,backgroundColor:e.target.value}:s)}))}/></label><label className="text-[10px]">Texto<input type="color" className="w-full h-9" value={section.textColor} onChange={(e)=>setConfig((p)=>({...p,checkoutSections:p.checkoutSections.map((s)=>s.id===section.id?{...s,textColor:e.target.value}:s)}))}/></label><label className="text-[10px]">Borde<input type="color" className="w-full h-9" value={section.borderColor} onChange={(e)=>setConfig((p)=>({...p,checkoutSections:p.checkoutSections.map((s)=>s.id===section.id?{...s,borderColor:e.target.value}:s)}))}/></label></div>
+                </div>
+              ))}
+              <button className="nav-btn active w-full" onClick={()=>setConfig((p)=>({...p,checkoutSections:[...p.checkoutSections,{id:uid(),title:"ATENCIÓN",text:"Agregá aquí información importante para el cliente.",icon:"⭐",placement:"before_form",backgroundColor:"#fff8e8",textColor:"#111111",borderColor:"#e5c76b"}]}))}>＋ Agregar sección al checkout</button>
             </div>
 
             <div className="rounded-[24px] border border-border/70 bg-background p-4 space-y-3">
-              <div className="font-black">6. 🇵🇾 Cobertura</div>
+              <div className="font-black">7. 🇵🇾 Cobertura</div>
               <div className="grid gap-2">
                 <button className={`nav-btn ${config.coverageMode==="all"?"active":""}`} onClick={()=>setConfig((p)=>({...p,coverageMode:"all"}))}>🇵🇾 Todo Paraguay</button>
                 <button className={`nav-btn ${config.coverageMode==="platform"?"active":""}`} onClick={()=>setConfig((p)=>({...p,coverageMode:"platform"}))}>✅ Cobertura de la plataforma</button>
@@ -3168,7 +3309,7 @@ export default function WebPageBuilder({
             </div>
 
             <div className="rounded-[24px] border border-border/70 bg-background p-4 space-y-3">
-              <div className="font-black">7. Secciones automáticas</div>
+              <div className="font-black">8. Secciones automáticas</div>
               <div>
                 <label className="app-label">Titular grande</label>
                 <textarea
@@ -3665,17 +3806,20 @@ function ShrinePreview({
               </div>
 
               <button
+                className={`sky-builder-main-${config.mainButtonEffect}`}
                 style={{
                   width: "100%",
                   marginTop: 16,
                   minHeight: 66,
-                  borderRadius: 38,
-                  border: "5px solid #000",
+                  borderRadius: config.mainButtonBorderRadius,
+                  border: `${config.mainButtonBorderWidth}px solid ${config.mainButtonBorderColor}`,
                   background: config.buttonColor,
-                  color: "#fff",
+                  color: config.mainButtonTextColor,
+                  fontSize: config.mainButtonFontSize,
                   fontWeight: 900,
                   boxShadow: "0 4px 10px rgba(0,0,0,.22)",
-                  padding: "8px 18px",
+                  padding: `${config.mainButtonPaddingY}px 18px`,
+                  animationDuration: `${config.mainButtonEffectEverySeconds}s`,
                 }}
               >
                 <div>{config.buttonText}</div>
