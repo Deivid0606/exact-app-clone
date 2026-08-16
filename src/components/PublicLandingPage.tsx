@@ -171,9 +171,14 @@ const getStoreSessionId = () => {
 };
 
 const initMetaPixel = (pixelId: string) => {
-  if (!pixelId || typeof window === "undefined") return;
+  if (!pixelId || typeof window === "undefined") return false;
 
   const w = window as any;
+
+  // Si ya existe un script de Meta cargándose/cargado, no agregamos otro.
+  const existingScript = document.querySelector(
+    'script[src*="connect.facebook.net"][src*="fbevents.js"]',
+  );
 
   if (!w.fbq) {
     const fbq: any = function (...args: any[]) {
@@ -190,34 +195,65 @@ const initMetaPixel = (pixelId: string) => {
     fbq.queue = [];
     w.fbq = fbq;
 
-    const script = document.createElement("script");
-    script.async = true;
-    script.src = "https://connect.facebook.net/en_US/fbevents.js";
-    script.dataset.skyMetaPixel = "true";
-    document.head.appendChild(script);
+    if (!existingScript) {
+      const script = document.createElement("script");
+      script.async = true;
+      script.src = "https://connect.facebook.net/en_US/fbevents.js";
+      script.dataset.skyMetaPixel = "true";
+      document.head.appendChild(script);
+    }
   }
 
-  const initializedKey = `sky_meta_pixel_initialized_${pixelId}`;
+  // IMPORTANTE:
+  // No usamos sessionStorage. sessionStorage sobrevive a un reload,
+  // pero window.fbq NO. Eso podía dejar el Pixel sin "init" al recargar.
+  if (!w.__skyInitializedMetaPixels) {
+    w.__skyInitializedMetaPixels = new Set<string>();
+  }
 
-  if (!sessionStorage.getItem(initializedKey)) {
+  if (!w.__skyInitializedMetaPixels.has(pixelId)) {
     w.fbq("init", pixelId);
-    sessionStorage.setItem(initializedKey, "1");
+    w.__skyInitializedMetaPixels.add(pixelId);
+
+    console.info(`[META] Pixel inicializado: ${pixelId}`);
   }
+
+  return true;
 };
 
 const trackMeta = (
+  pixelId: string,
   eventName: string,
   payload?: Record<string, unknown>,
   eventId?: string,
 ) => {
-  const fbq = (window as any).fbq;
-  if (!fbq) return;
+  if (!pixelId || typeof window === "undefined") return;
 
-  if (eventId) {
-    fbq("track", eventName, payload || {}, { eventID: eventId });
-  } else {
-    fbq("track", eventName, payload || {});
+  const fbq = (window as any).fbq;
+
+  if (!fbq) {
+    console.warn(`[META] fbq no disponible para ${eventName}`);
+    return;
   }
+
+  // trackSingle evita que, si existen otros Pixels en el dominio,
+  // este evento se mande accidentalmente a todos ellos.
+  if (eventId) {
+    fbq(
+      "trackSingle",
+      pixelId,
+      eventName,
+      payload || {},
+      { eventID: eventId },
+    );
+  } else {
+    fbq("trackSingle", pixelId, eventName, payload || {});
+  }
+
+  console.info(
+    `[META] ${eventName} enviado al Pixel ${pixelId}`,
+    eventId ? { eventId } : "",
+  );
 };
 
 const getBrowserCookie = (name: string) => {
@@ -335,9 +371,15 @@ export default function PublicLandingPage({
 
       if (!pixelId) return;
 
-      setMetaPixelId(String(pixelId));
-      initMetaPixel(String(pixelId));
-      trackMeta("PageView");
+      const resolvedPixelId = String(pixelId);
+
+      setMetaPixelId(resolvedPixelId);
+
+      const initialized = initMetaPixel(resolvedPixelId);
+
+      if (initialized) {
+        trackMeta(resolvedPixelId, "PageView");
+      }
     })();
 
     return () => {
@@ -444,7 +486,7 @@ export default function PublicLandingPage({
     });
 
     if (metaPixelId) {
-      trackMeta("ViewContent", {
+      trackMeta(metaPixelId, "ViewContent", {
         content_ids: [product.id],
         content_name: product.title,
         content_type: "product",
@@ -475,7 +517,7 @@ export default function PublicLandingPage({
       });
 
       if (metaPixelId) {
-        trackMeta("InitiateCheckout", {
+        trackMeta(metaPixelId, "InitiateCheckout", {
           content_ids: [product.id],
           content_name: product.title,
           content_type: "product",
@@ -639,6 +681,7 @@ export default function PublicLandingPage({
 
     if (metaPixelId) {
       trackMeta(
+        metaPixelId,
         "Purchase",
         {
           content_ids: [product.id],
