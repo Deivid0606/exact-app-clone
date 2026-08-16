@@ -530,9 +530,15 @@ export default function PublicLandingPage({
 
     setSending(true);
 
-    const { data: createdOrder, error } = await supabase
+    const orderId =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+    const { error } = await supabase
       .from("landing_page_orders")
       .insert({
+        id: orderId,
         landing_page_id: page.id,
         product_id: product.id,
         product_title: product.title,
@@ -553,15 +559,25 @@ export default function PublicLandingPage({
           quantity_offer_id: selectedOffer?.id || null,
           quantity_offer_label: selectedOffer?.label || null,
         },
-      })
-      .select("id")
-      .single();
+      });
 
     setSending(false);
 
-    if (error || !createdOrder?.id) {
-      console.error(error);
-      alert("No se pudo registrar el pedido. Revisá la configuración de Supabase.");
+    if (error) {
+      console.error("Error creando landing_page_order:", error);
+
+      const details = [
+        error.message,
+        error.details,
+        error.hint,
+        error.code ? `Código: ${error.code}` : "",
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      alert(
+        `No se pudo registrar el pedido.\n\n${details || "Error desconocido de Supabase."}`,
+      );
       return;
     }
 
@@ -571,7 +587,7 @@ export default function PublicLandingPage({
       department: form.department.trim(),
       city: form.city.trim(),
       metadata: {
-        order_id: createdOrder.id,
+        order_id: orderId,
         quantity,
         product_title: product.title,
       },
@@ -588,7 +604,7 @@ export default function PublicLandingPage({
           value: total,
           num_items: quantity,
         },
-        `landing-order-${createdOrder.id}`,
+        `landing-order-${orderId}`,
       );
     }
 
