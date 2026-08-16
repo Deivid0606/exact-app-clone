@@ -152,6 +152,13 @@ export type LandingContentBlock =
     }
   | {
       id: string;
+      type: "custom_html";
+      enabled: boolean;
+      html: string;
+      width: "normal" | "wide" | "full";
+    }
+  | {
+      id: string;
       type: "spacer";
       enabled: boolean;
       height: number;
@@ -261,6 +268,41 @@ const uid = () =>
   typeof crypto !== "undefined" && "randomUUID" in crypto
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+
+const sanitizeCustomHtml = (html: string) => {
+  if (!html || typeof window === "undefined") return "";
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+
+  doc
+    .querySelectorAll(
+      "script, iframe, object, embed, link, meta, base, form, input, textarea, select",
+    )
+    .forEach((node) => node.remove());
+
+  doc.querySelectorAll("*").forEach((element) => {
+    [...element.attributes].forEach((attribute) => {
+      const name = attribute.name.toLowerCase();
+      const value = attribute.value.trim().toLowerCase();
+
+      if (name.startsWith("on")) {
+        element.removeAttribute(attribute.name);
+        return;
+      }
+
+      if (
+        ["src", "href", "xlink:href", "formaction"].includes(name) &&
+        (value.startsWith("javascript:") || value.startsWith("data:text/html"))
+      ) {
+        element.removeAttribute(attribute.name);
+      }
+    });
+  });
+
+  return doc.body.innerHTML;
+};
 
 const slugify = (value: string) =>
   value
@@ -522,6 +564,18 @@ function normalizeConfig(raw?: Partial<LandingConfig> | null): LandingConfig {
         } as LandingContentBlock;
       }
 
+      if (block?.type === "custom_html") {
+        return {
+          id: block.id || uid(),
+          type: "custom_html" as const,
+          enabled: block.enabled !== false,
+          html: typeof block.html === "string" ? block.html : "",
+          width: ["normal", "wide", "full"].includes(block.width)
+            ? block.width
+            : "wide",
+        } as LandingContentBlock;
+      }
+
       if (block?.type === "image") {
         return {
           ...block,
@@ -604,6 +658,19 @@ export default function WebPageBuilder({
   const [previewMode, setPreviewMode] = useState<"desktop" | "mobile">("desktop");
   const [insertAtIndex, setInsertAtIndex] = useState<number | null>(null);
   const [draggedBlockIndex, setDraggedBlockIndex] = useState<number | null>(null);
+  const [productSearch, setProductSearch] = useState("");
+
+  const filteredProducts = useMemo(() => {
+    const query = productSearch.trim().toLowerCase();
+
+    if (!query) return products;
+
+    return products.filter((product) =>
+      [product.title, product.sku]
+        .filter(Boolean)
+        .some((value) => String(value).toLowerCase().includes(query)),
+    );
+  }, [products, productSearch]);
 
   const selectedProducts = useMemo(
     () => products.filter((p) => config.selectedProductIds.includes(p.id)),
@@ -650,6 +717,7 @@ export default function WebPageBuilder({
     setPreviewMode("desktop");
     setInsertAtIndex(null);
     setDraggedBlockIndex(null);
+    setProductSearch("");
     setEditorOpen(true);
   };
 
@@ -660,6 +728,7 @@ export default function WebPageBuilder({
     setConfig(normalizeConfig(page.config));
     setInsertAtIndex(null);
     setDraggedBlockIndex(null);
+    setProductSearch("");
     setEditorOpen(true);
   };
 
@@ -1079,6 +1148,19 @@ export default function WebPageBuilder({
         imageScale: 100,
         imageOffsetX: 0,
         imageOffsetY: 0,
+      };
+    }
+
+    if (type === "custom_html") {
+      return {
+        id: uid(),
+        type,
+        enabled: true,
+        html: `<section style="max-width:1080px;margin:0 auto;padding:24px;border-radius:18px;background:#ffffff;color:#111111;">
+  <h2 style="margin:0 0 12px;font-size:32px;line-height:1.1;">Tu nueva sección HTML</h2>
+  <p style="margin:0;font-size:17px;line-height:1.6;">Pegá acá tu HTML y vas a ver la vista previa automáticamente.</p>
+</section>`,
+        width: "full",
       };
     }
 
@@ -1771,8 +1853,35 @@ export default function WebPageBuilder({
 
             <div className="rounded-[24px] border border-border/70 bg-background p-4 space-y-3">
               <div className="font-black">2. Seleccionar productos</div>
+
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-base">
+                  🔎
+                </span>
+                <input
+                  className="app-input !pl-10"
+                  value={productSearch}
+                  onChange={(event) => setProductSearch(event.target.value)}
+                  placeholder="Buscar producto por nombre o SKU..."
+                />
+                {productSearch && (
+                  <button
+                    type="button"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-black text-muted-foreground hover:text-foreground"
+                    onClick={() => setProductSearch("")}
+                    title="Limpiar búsqueda"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+
+              <div className="text-[11px] text-muted-foreground">
+                {filteredProducts.length} producto(s) encontrados
+              </div>
+
               <div className="max-h-[300px] overflow-y-auto space-y-2 pr-1">
-                {products.map((p) => {
+                {filteredProducts.map((p) => {
                   const active = config.selectedProductIds.includes(p.id);
                   const image = p.image_url;
                   return (
@@ -1808,6 +1917,12 @@ export default function WebPageBuilder({
                     </button>
                   );
                 })}
+
+                {filteredProducts.length === 0 && (
+                  <div className="rounded-xl border border-dashed border-border p-5 text-center text-xs text-muted-foreground">
+                    No encontré productos con “{productSearch}”.
+                  </div>
+                )}
               </div>
             </div>
 
@@ -1990,26 +2105,36 @@ export default function WebPageBuilder({
                 </button>
                 <button
                   className="nav-btn"
+                  onClick={() => addBlock("custom_html")}
+                >
+                  💻 Agregar HTML
+                </button>
+                <button
+                  className="nav-btn"
                   onClick={() => addBlock("spacer")}
                 >
                   ＋ Espacio
                 </button>
               </div>
 
-              <div className="rounded-xl border border-border bg-secondary/10 p-3 text-[11px] text-muted-foreground">
-                <b className="text-foreground">Cómo ubicar manualmente:</b>{" "}
-                tocá <b>“＋ Agregar aquí”</b> en el lugar exacto y después elegí
-                Título, Texto, Imagen, Video, Galería o Botón Comprar. También podés usar el selector
-                “Posición” o arrastrar con ☰.
+              <div className="rounded-2xl border-2 border-primary/40 bg-primary/10 p-4 text-xs">
+                <div className="font-black text-primary text-sm">
+                  ➕ ¿Dónde querés agregar la nueva sección?
+                </div>
+                <div className="mt-1 text-muted-foreground">
+                  Tocá uno de los botones grandes <b className="text-foreground">“AGREGAR SECCIÓN AQUÍ”</b>.
+                  La franja queda marcada y después elegís Título, Texto, Imagen, Imagen + texto,
+                  Video, Galería, Ofertas, Botón o <b className="text-foreground">HTML personalizado</b>.
+                </div>
               </div>
 
               {config.contentBlocks.length === 0 ? (
                 <>
                   <button
-                    className="w-full rounded-xl border-2 border-dashed border-primary/40 bg-primary/5 hover:bg-primary/10 transition px-3 py-4 text-sm font-black text-primary"
+                    className="w-full rounded-2xl border-2 border-primary bg-primary/20 hover:bg-primary/30 transition px-4 py-5 text-sm font-black text-primary shadow-sm"
                     onClick={() => setInsertAtIndex(0)}
                   >
-                    ＋ Agregar el primer bloque aquí
+                    ➕ AGREGAR LA PRIMERA SECCIÓN AQUÍ
                   </button>
 
                   <div className="rounded-xl border border-dashed border-border p-5 text-center text-xs text-muted-foreground">
@@ -2020,14 +2145,14 @@ export default function WebPageBuilder({
                 <div className="space-y-2">
                   {/* Punto de inserción ANTES del primer bloque */}
                   <button
-                    className={`w-full rounded-lg border border-dashed px-3 py-2 text-xs font-bold transition ${
+                    className={`w-full rounded-2xl border-2 px-4 py-3 text-xs font-black transition shadow-sm ${
                       insertAtIndex === 0
-                        ? "border-primary bg-primary/15 text-primary"
-                        : "border-border hover:border-primary/50 hover:bg-primary/5 text-muted-foreground"
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-primary/60 bg-primary/10 hover:bg-primary/20 text-primary"
                     }`}
                     onClick={() => setInsertAtIndex(0)}
                   >
-                    ＋ Agregar aquí · Posición 1
+                    ➕ AGREGAR SECCIÓN AQUÍ · POSICIÓN 1
                   </button>
 
                   {config.contentBlocks.map((block, index) => (
@@ -2066,6 +2191,7 @@ export default function WebPageBuilder({
                             {block.type === "buy_button" && "BOTÓN COMPRAR"}
                             {block.type === "quantity_offers" && "OFERTAS POR CANTIDAD"}
                             {block.type === "image_text" && "IMAGEN + TEXTO"}
+                            {block.type === "custom_html" && "💻 HTML PERSONALIZADO"}
                             {block.type === "spacer" && "ESPACIO"}
                           </b>
 
@@ -3075,6 +3201,73 @@ export default function WebPageBuilder({
                             </>
                           )}
 
+                          {block.type === "custom_html" && (
+                            <div className="space-y-3">
+                              <div className="rounded-xl border border-primary/30 bg-primary/10 p-3 text-xs">
+                                <b className="text-primary">💻 HTML personalizado</b>
+                                <div className="mt-1 text-muted-foreground">
+                                  Pegá HTML con estilos inline. La vista previa aparece automáticamente.
+                                  Por seguridad se eliminan scripts, iframes y atributos JavaScript.
+                                </div>
+                              </div>
+
+                              <div>
+                                <label className="app-label">Ancho de la sección</label>
+                                <select
+                                  className="app-input"
+                                  value={block.width}
+                                  onChange={(e) =>
+                                    patchBlock(block.id, {
+                                      width: e.target.value,
+                                    })
+                                  }
+                                >
+                                  <option value="normal">Normal</option>
+                                  <option value="wide">Ancho</option>
+                                  <option value="full">Todo el ancho</option>
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="app-label">Código HTML</label>
+                                <textarea
+                                  className="app-input min-h-[260px] font-mono text-xs leading-5"
+                                  value={block.html}
+                                  onChange={(e) =>
+                                    patchBlock(block.id, {
+                                      html: e.target.value,
+                                    })
+                                  }
+                                  spellCheck={false}
+                                  placeholder={`<section style="padding:24px;background:#173a74;color:white;border-radius:18px;">
+  <h2>Mi sección</h2>
+  <p>Contenido...</p>
+</section>`}
+                                />
+                              </div>
+
+                              <div>
+                                <div className="app-label">Vista previa automática</div>
+                                <div
+                                  className="rounded-xl border border-border bg-white overflow-hidden"
+                                  style={{ minHeight: 80 }}
+                                >
+                                  {block.html.trim() ? (
+                                    <div
+                                      dangerouslySetInnerHTML={{
+                                        __html: sanitizeCustomHtml(block.html),
+                                      }}
+                                    />
+                                  ) : (
+                                    <div className="p-5 text-center text-xs text-gray-500">
+                                      Pegá HTML arriba para ver la vista previa.
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
                           {block.type === "spacer" && (
                             <div>
                               <label className="app-label">
@@ -3102,16 +3295,16 @@ export default function WebPageBuilder({
 
                       {/* Punto de inserción DESPUÉS de cada bloque */}
                       <button
-                        className={`w-full rounded-lg border border-dashed px-3 py-2 text-xs font-bold transition ${
+                        className={`w-full rounded-2xl border-2 px-4 py-3 text-xs font-black transition shadow-sm ${
                           insertAtIndex === index + 1
-                            ? "border-primary bg-primary/15 text-primary"
-                            : "border-border hover:border-primary/50 hover:bg-primary/5 text-muted-foreground"
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-primary/60 bg-primary/10 hover:bg-primary/20 text-primary"
                         }`}
                         onClick={() =>
                           setInsertAtIndex(index + 1)
                         }
                       >
-                        ＋ Agregar aquí · Posición {index + 2}
+                        ➕ AGREGAR SECCIÓN AQUÍ · POSICIÓN {index + 2}
                       </button>
                     </div>
                   ))}
@@ -4295,6 +4488,34 @@ function ShrinePreview({
                   {config.quantityOffers.map((o)=><div key={o.id} style={{border:"2px solid #111",borderRadius:14,padding:12}}><b>{o.quantity} unidad(es)</b><div>Gs. {nf(o.priceGs)}</div></div>)}
                 </div>
               </div>;
+            }
+
+            if (block.type === "custom_html") {
+              const width =
+                block.width === "full"
+                  ? "100%"
+                  : block.width === "wide"
+                    ? mobile
+                      ? "calc(100% - 28px)"
+                      : "1040px"
+                    : mobile
+                      ? "calc(100% - 28px)"
+                      : "760px";
+
+              return (
+                <div
+                  key={block.id}
+                  style={{
+                    width,
+                    maxWidth: "100%",
+                    margin: "20px auto",
+                    overflow: "hidden",
+                  }}
+                  dangerouslySetInnerHTML={{
+                    __html: sanitizeCustomHtml(block.html),
+                  }}
+                />
+              );
             }
 
             if (block.type === "image_text") {
