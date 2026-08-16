@@ -493,6 +493,21 @@ export default function PublicLandingPage({
     [product?.price, quantity, selectedOfferId, selectedOffer?.priceGs],
   );
 
+  useEffect(() => {
+    if (!checkoutOpen) return;
+    if (selectedOfferId) return;
+    if (!config?.quantityOffers?.length) return;
+
+    const first =
+      config.quantityOffers.find((offer: any) => offer.highlight) ||
+      config.quantityOffers[0];
+
+    if (!first) return;
+
+    setSelectedOfferId(first.id);
+    setQuantity(Math.max(1, Number(first.quantity || 1)));
+  }, [checkoutOpen, selectedOfferId, config?.quantityOffers]);
+
   const chooseOffer = (offer: any, open = true) => {
     setSelectedOfferId(offer.id);
     setQuantity(Math.max(1, Number(offer.quantity || 1)));
@@ -957,61 +972,152 @@ export default function PublicLandingPage({
       if (!config.quantityOffers?.length) return null;
 
       return (
-        <section key={block.id} className="sky-offer-block">
-          <h3>{block.title}</h3>
+        <section
+          key={block.id}
+          style={{
+            width: "calc(100% - 28px)",
+            maxWidth:
+              block.width === "full"
+                ? "100%"
+                : block.width === "wide"
+                  ? 760
+                  : 560,
+            margin:
+              block.align === "right"
+                ? "22px 14px 22px auto"
+                : block.align === "left"
+                  ? "22px auto 22px 14px"
+                  : "22px auto",
+          }}
+        >
+          <div
+            style={{
+              textAlign: "center",
+              fontSize: 22,
+              lineHeight: 1.2,
+              fontWeight: 950,
+              marginBottom: 10,
+            }}
+          >
+            {block.title}
+          </div>
 
-          <div className="sky-offer-grid">
-            {config.quantityOffers.map((offer: any) => (
-              <button
-                type="button"
-                key={offer.id}
-                className={`sky-offer-card ${
-                  offer.highlight ? "highlight" : ""
-                }`}
-                onClick={() => chooseOffer(offer, true)}
-              >
-                {offer.badge && (
-                  <span className="sky-offer-badge">{offer.badge}</span>
-                )}
+          <div style={{ display: "grid", gap: 8 }}>
+            {config.quantityOffers.map((offer: any) => {
+              const compare =
+                Number(offer.compareAtPriceGs || 0) >
+                Number(offer.priceGs || 0);
 
-                {offer.imageUrl && (
-                  <img
-                    src={offer.imageUrl}
-                    alt=""
-                    className="sky-offer-image"
-                  />
-                )}
-
-                <div className="sky-offer-body">
-                  <div className="sky-offer-qty">
-                    {offer.title || `${offer.quantity} unidad(es)`}
-                  </div>
-
-                  {offer.description && (
-                    <div className="sky-offer-description">
-                      {offer.description}
-                    </div>
+              return (
+                <button
+                  type="button"
+                  key={offer.id}
+                  onClick={() => chooseOffer(offer, true)}
+                  style={{
+                    width: "100%",
+                    display: "grid",
+                    gridTemplateColumns: offer.imageUrl
+                      ? "62px minmax(0,1fr) auto"
+                      : "minmax(0,1fr) auto",
+                    gap: 10,
+                    alignItems: "center",
+                    background: offer.highlight ? "#e8f4fd" : "#fff",
+                    border: offer.highlight
+                      ? "2px solid #0b82db"
+                      : "1px solid #d2d2d2",
+                    borderRadius: 8,
+                    padding: 9,
+                    color: "#111",
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                >
+                  {offer.imageUrl && (
+                    <img
+                      src={offer.imageUrl}
+                      alt=""
+                      style={{
+                        width: 62,
+                        height: 56,
+                        minWidth: 62,
+                        maxWidth: 62,
+                        maxHeight: 56,
+                        objectFit: "cover",
+                        borderRadius: 5,
+                        margin: 0,
+                      }}
+                    />
                   )}
 
-                  {offer.label && (
-                    <div className="sky-offer-label">{offer.label}</div>
-                  )}
-                </div>
+                  <span
+                    style={{
+                      minWidth: 0,
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "flex-start",
+                    }}
+                  >
+                    <strong style={{ fontSize: 12, lineHeight: 1.15 }}>
+                      {offer.title ||
+                        `${offer.quantity} unidad(es)`}
+                    </strong>
 
-                <div className="sky-offer-money">
-                  {Number(offer.compareAtPriceGs || 0) >
-                    Number(offer.priceGs || 0) && (
-                    <div className="sky-offer-compare">
-                      Gs. {nf(offer.compareAtPriceGs)}
-                    </div>
-                  )}
+                    {offer.description && (
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          lineHeight: 1.2,
+                          marginTop: 3,
+                        }}
+                      >
+                        {offer.description}
+                      </span>
+                    )}
 
-                  <div className="sky-offer-price">
-                    Gs. {nf(offer.priceGs)}
-                  </div>
-                </div>
-              </button>
-            ))}
+                    {offer.badge && (
+                      <span
+                        style={{
+                          marginTop: 5,
+                          background: "#1479f5",
+                          color: "#fff",
+                          borderRadius: 2,
+                          padding: "3px 6px",
+                          fontSize: 8,
+                          fontWeight: 950,
+                        }}
+                      >
+                        {offer.badge}
+                      </span>
+                    )}
+                  </span>
+
+                  <span
+                    style={{
+                      textAlign: "right",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {compare && (
+                      <span
+                        style={{
+                          display: "block",
+                          fontSize: 9,
+                          color: "#666",
+                          textDecoration: "line-through",
+                        }}
+                      >
+                        Gs. {nf(offer.compareAtPriceGs)}
+                      </span>
+                    )}
+
+                    <strong style={{ fontSize: 12 }}>
+                      Gs. {nf(offer.priceGs)}
+                    </strong>
+                  </span>
+                </button>
+              );
+            })}
           </div>
         </section>
       );
@@ -1470,59 +1576,163 @@ export default function PublicLandingPage({
             {renderCheckoutSections("before_offers")}
 
             {config.quantityOffers?.length > 0 && (
-              <div className="sky-offer-checkout">
-                <div className="sky-offer-checkout-heading">
-                  🔥 ELEGÍ TU OFERTA
-                </div>
+              <div
+                style={{
+                  display: "grid",
+                  gap: 8,
+                  margin: "8px 0 10px",
+                }}
+              >
+                {config.quantityOffers.map((offer: any) => {
+                  const active = selectedOfferId === offer.id;
+                  const compare =
+                    Number(offer.compareAtPriceGs || 0) >
+                    Number(offer.priceGs || 0);
 
-                <div className="sky-offer-checkout-grid">
-                  {config.quantityOffers.map((offer: any) => (
+                  return (
                     <button
                       type="button"
                       key={offer.id}
-                      className={`sky-offer-choice ${
-                        selectedOfferId === offer.id ? "active" : ""
-                      } ${offer.highlight ? "highlight" : ""}`}
                       onClick={() => chooseOffer(offer, false)}
+                      style={{
+                        width: "100%",
+                        position: "relative",
+                        display: "grid",
+                        gridTemplateColumns: offer.imageUrl
+                          ? "56px minmax(0,1fr) auto"
+                          : "minmax(0,1fr) auto",
+                        gap: 8,
+                        alignItems: "center",
+                        padding: "8px 9px",
+                        borderRadius: 5,
+                        border: active
+                          ? "2px solid #0b82db"
+                          : "1px solid #d2d2d2",
+                        background: active ? "#e8f4fd" : "#ffffff",
+                        color: "#111111",
+                        cursor: "pointer",
+                        textAlign: "left",
+                        boxSizing: "border-box",
+                        minHeight: 66,
+                      }}
                     >
-                      <span className="sky-offer-radio">
-                        {selectedOfferId === offer.id ? "●" : "○"}
-                      </span>
-
                       {offer.imageUrl && (
                         <img
                           src={offer.imageUrl}
                           alt=""
-                          className="sky-offer-choice-image"
+                          style={{
+                            display: "block",
+                            width: 56,
+                            height: 50,
+                            minWidth: 56,
+                            maxWidth: 56,
+                            maxHeight: 50,
+                            objectFit: "cover",
+                            borderRadius: 4,
+                            border: "1px solid #e2e2e2",
+                            margin: 0,
+                            padding: 0,
+                          }}
                         />
                       )}
 
-                      <span className="sky-offer-choice-content">
-                        <strong>
+                      <span
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "flex-start",
+                          minWidth: 0,
+                          lineHeight: 1.15,
+                        }}
+                      >
+                        <strong
+                          style={{
+                            display: "block",
+                            fontSize: 11,
+                            fontWeight: 950,
+                            lineHeight: 1.15,
+                            whiteSpace: "normal",
+                          }}
+                        >
                           {offer.title ||
                             `${offer.quantity} unidad(es)`}
                         </strong>
 
                         {offer.description && (
-                          <small>{offer.description}</small>
+                          <span
+                            style={{
+                              display: "block",
+                              fontSize: 10,
+                              fontWeight: 700,
+                              lineHeight: 1.15,
+                              marginTop: 3,
+                              whiteSpace: "normal",
+                            }}
+                          >
+                            {offer.description}
+                          </span>
                         )}
 
-                        {offer.badge && <em>{offer.badge}</em>}
+                        {offer.badge && (
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              marginTop: 5,
+                              background: "#1479f5",
+                              color: "#ffffff",
+                              borderRadius: 2,
+                              padding: "3px 6px",
+                              fontSize: 8,
+                              lineHeight: 1,
+                              fontWeight: 950,
+                              whiteSpace: "nowrap",
+                              maxWidth: "100%",
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                            }}
+                          >
+                            {offer.badge}
+                          </span>
+                        )}
                       </span>
 
-                      <span className="sky-offer-choice-price">
-                        {Number(offer.compareAtPriceGs || 0) >
-                          Number(offer.priceGs || 0) && (
-                          <small>
+                      <span
+                        style={{
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "flex-end",
+                          justifyContent: "center",
+                          whiteSpace: "nowrap",
+                          paddingLeft: 3,
+                        }}
+                      >
+                        {compare && (
+                          <span
+                            style={{
+                              fontSize: 9,
+                              color: "#666666",
+                              lineHeight: 1.1,
+                              textDecoration: "line-through",
+                            }}
+                          >
                             Gs. {nf(offer.compareAtPriceGs)}
-                          </small>
+                          </span>
                         )}
 
-                        <strong>Gs. {nf(offer.priceGs)}</strong>
+                        <strong
+                          style={{
+                            fontSize: 11,
+                            lineHeight: 1.15,
+                            fontWeight: 950,
+                            marginTop: compare ? 2 : 0,
+                          }}
+                        >
+                          Gs. {nf(offer.priceGs)}
+                        </strong>
                       </span>
                     </button>
-                  ))}
-                </div>
+                  );
+                })}
               </div>
             )}
 
