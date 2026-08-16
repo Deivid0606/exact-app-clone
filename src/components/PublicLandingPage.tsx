@@ -101,10 +101,54 @@ const normalizePublicConfig = (raw: any): LandingConfig => {
 
   return {
     ...raw,
-    quantityOffers: Array.isArray(raw?.quantityOffers) ? raw.quantityOffers : [],
-    coverageMode: ["all","custom","platform"].includes(raw?.coverageMode) ? raw.coverageMode : "all",
-    hiddenDepartments: Array.isArray(raw?.hiddenDepartments) ? raw.hiddenDepartments : [],
-    hiddenCities: Array.isArray(raw?.hiddenCities) ? raw.hiddenCities : [],
+    mainButtonTextColor: raw?.mainButtonTextColor || "#ffffff",
+    mainButtonBorderColor: raw?.mainButtonBorderColor || "#000000",
+    mainButtonBorderWidth: Number.isFinite(Number(raw?.mainButtonBorderWidth))
+      ? Number(raw.mainButtonBorderWidth)
+      : 5,
+    mainButtonBorderRadius: Number.isFinite(Number(raw?.mainButtonBorderRadius))
+      ? Number(raw.mainButtonBorderRadius)
+      : 40,
+    mainButtonFontSize: Number.isFinite(Number(raw?.mainButtonFontSize))
+      ? Number(raw.mainButtonFontSize)
+      : 14,
+    mainButtonPaddingY: Number.isFinite(Number(raw?.mainButtonPaddingY))
+      ? Number(raw.mainButtonPaddingY)
+      : 10,
+    mainButtonEffect: ["none","shake","pulse","bounce","shine"].includes(
+      raw?.mainButtonEffect,
+    )
+      ? raw.mainButtonEffect
+      : "shake",
+    mainButtonEffectEverySeconds: Number.isFinite(
+      Number(raw?.mainButtonEffectEverySeconds),
+    )
+      ? Math.max(2, Number(raw.mainButtonEffectEverySeconds))
+      : 5,
+    quantityOffers: Array.isArray(raw?.quantityOffers)
+      ? raw.quantityOffers.map((offer: any) => ({
+          ...offer,
+          compareAtPriceGs: Number(
+            offer.compareAtPriceGs || offer.compareAtPrice || 0,
+          ),
+          title: offer.title || offer.label || "",
+          description: offer.description || "",
+          imageUrl: offer.imageUrl || "",
+          highlight: Boolean(offer.highlight),
+        }))
+      : [],
+    checkoutSections: Array.isArray(raw?.checkoutSections)
+      ? raw.checkoutSections
+      : [],
+    coverageMode: ["all","custom","platform"].includes(raw?.coverageMode)
+      ? raw.coverageMode
+      : "all",
+    hiddenDepartments: Array.isArray(raw?.hiddenDepartments)
+      ? raw.hiddenDepartments
+      : [],
+    hiddenCities: Array.isArray(raw?.hiddenCities)
+      ? raw.hiddenCities
+      : [],
     contentBlocks: blocks,
   } as LandingConfig;
 };
@@ -587,6 +631,29 @@ export default function PublicLandingPage({
     return "760px";
   };
 
+  const renderCheckoutSections = (placement: string) =>
+    (config?.checkoutSections || [])
+      .filter((section: any) => section.placement === placement)
+      .map((section: any) => (
+        <div
+          key={section.id}
+          className="sky-checkout-custom"
+          style={{
+            background: section.backgroundColor || "#fff8e8",
+            color: section.textColor || "#111",
+            borderColor: section.borderColor || "#e5c76b",
+          }}
+        >
+          <div className="sky-checkout-custom-title">
+            <span>{section.icon || "⭐"}</span>
+            <b>{section.title}</b>
+          </div>
+          {section.text && (
+            <div className="sky-checkout-custom-text">{section.text}</div>
+          )}
+        </div>
+      ));
+
   const renderBlock = (block: LandingContentBlock) => {
     if (block.type === "heading") {
       const sizes = { md: "32px", lg: "42px", xl: "52px" };
@@ -888,16 +955,61 @@ export default function PublicLandingPage({
 
     if (block.type === "quantity_offers") {
       if (!config.quantityOffers?.length) return null;
+
       return (
         <section key={block.id} className="sky-offer-block">
           <h3>{block.title}</h3>
+
           <div className="sky-offer-grid">
             {config.quantityOffers.map((offer: any) => (
-              <button type="button" key={offer.id} className="sky-offer-card" onClick={() => chooseOffer(offer, true)}>
-                {offer.badge && <span className="sky-offer-badge">{offer.badge}</span>}
-                <div className="sky-offer-qty">{offer.quantity} unidad(es)</div>
-                {offer.label && <div className="sky-offer-label">{offer.label}</div>}
-                <div className="sky-offer-price">Gs. {nf(offer.priceGs)}</div>
+              <button
+                type="button"
+                key={offer.id}
+                className={`sky-offer-card ${
+                  offer.highlight ? "highlight" : ""
+                }`}
+                onClick={() => chooseOffer(offer, true)}
+              >
+                {offer.badge && (
+                  <span className="sky-offer-badge">{offer.badge}</span>
+                )}
+
+                {offer.imageUrl && (
+                  <img
+                    src={offer.imageUrl}
+                    alt=""
+                    className="sky-offer-image"
+                  />
+                )}
+
+                <div className="sky-offer-body">
+                  <div className="sky-offer-qty">
+                    {offer.title || `${offer.quantity} unidad(es)`}
+                  </div>
+
+                  {offer.description && (
+                    <div className="sky-offer-description">
+                      {offer.description}
+                    </div>
+                  )}
+
+                  {offer.label && (
+                    <div className="sky-offer-label">{offer.label}</div>
+                  )}
+                </div>
+
+                <div className="sky-offer-money">
+                  {Number(offer.compareAtPriceGs || 0) >
+                    Number(offer.priceGs || 0) && (
+                    <div className="sky-offer-compare">
+                      Gs. {nf(offer.compareAtPriceGs)}
+                    </div>
+                  )}
+
+                  <div className="sky-offer-price">
+                    Gs. {nf(offer.priceGs)}
+                  </div>
+                </div>
               </button>
             ))}
           </div>
@@ -1015,7 +1127,7 @@ export default function PublicLandingPage({
         .sky-qty-label{font-size:14px;font-weight:800;margin-bottom:5px}
         .sky-qty{display:grid;grid-template-columns:47px 47px 47px;height:47px;border:1px solid #ddd;border-radius:10px;overflow:hidden;background:#faf8fb;width:max-content}
         .sky-qty button,.sky-qty span{border:0;background:transparent;display:grid;place-items:center;cursor:pointer}
-        .sky-buy{margin-top:16px;width:100%;min-height:68px;border-radius:40px;border:5px solid #000;background:var(--buy);color:#fff;box-shadow:0 3px 8px rgba(0,0,0,.28);font-weight:900;cursor:pointer;padding:8px 20px}
+        .sky-buy{margin-top:16px;width:100%;min-height:68px;border-style:solid;background:var(--buy);box-shadow:0 3px 8px rgba(0,0,0,.28);font-weight:900;cursor:pointer;padding-left:20px;padding-right:20px;transform-origin:center}
         .sky-buy-main{font-size:14px;letter-spacing:.45px}
         .sky-buy-sub{font-size:11px;margin-top:4px}
         .sky-timeline{margin:26px 5px 25px;display:grid;grid-template-columns:1fr 1fr 1fr;position:relative;text-align:center}
@@ -1047,12 +1159,21 @@ export default function PublicLandingPage({
         .sky-buy-effect-pulse{animation:skyBuyPulse var(--sky-effect-duration,5s) infinite}
         .sky-buy-effect-bounce{animation:skyBuyBounce var(--sky-effect-duration,5s) infinite}
         .sky-buy-effect-shine{animation:skyBuyShine var(--sky-effect-duration,5s) infinite}
-        .sky-offer-block{max-width:820px;margin:24px auto;padding:0 14px}
+        .sky-offer-block{max-width:920px;margin:24px auto;padding:0 14px}
         .sky-offer-block h3{text-align:center;font-size:24px;font-weight:950;margin:0 0 12px}
-        .sky-offer-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
-        .sky-offer-card{position:relative;background:#fff;border:2px solid #111;border-radius:16px;padding:16px 12px;text-align:left;cursor:pointer;box-shadow:0 4px 0 #111}
-        .sky-offer-badge{position:absolute;right:8px;top:8px;background:#ff1717;color:#fff;font-size:9px;font-weight:900;border-radius:999px;padding:4px 7px}
-        .sky-offer-qty{font-size:17px;font-weight:950}.sky-offer-label{font-size:11px;opacity:.65;margin-top:3px}.sky-offer-price{font-size:21px;font-weight:950;color:var(--primary);margin-top:8px}
+        .sky-offer-grid{display:grid;gap:10px}
+        .sky-offer-card{position:relative;display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;width:100%;background:#fff;border:2px solid #d4d4d4;border-radius:10px;padding:10px;text-align:left;cursor:pointer}
+        .sky-offer-card.highlight{border-color:#0879d9;background:#e9f5ff}
+        .sky-offer-card:hover{border-color:#111}
+        .sky-offer-badge{position:absolute;left:66px;bottom:7px;background:#1677ff;color:#fff;font-size:8px;font-weight:900;border-radius:3px;padding:3px 6px}
+        .sky-offer-image{width:58px;height:58px;border-radius:7px;object-fit:cover}
+        .sky-offer-body{min-width:0}
+        .sky-offer-qty{font-size:13px;font-weight:950}
+        .sky-offer-description{font-size:11px;font-weight:700;margin-top:2px;white-space:pre-line}
+        .sky-offer-label{font-size:10px;opacity:.65;margin-top:3px}
+        .sky-offer-money{text-align:right;white-space:nowrap}
+        .sky-offer-compare{font-size:10px;text-decoration:line-through;color:#777}
+        .sky-offer-price{font-size:14px;font-weight:950;color:#111;margin-top:2px}
         .sky-custom-gallery{display:grid;grid-template-columns:repeat(var(--gallery-cols,3),minmax(0,1fr));gap:var(--gallery-gap,14px);margin:22px auto}
         .sky-custom-gallery-item{overflow:hidden;background:#000}
         .sky-custom-gallery-item img,.sky-custom-gallery-item video{width:100%;display:block;background:#000}
@@ -1061,7 +1182,7 @@ export default function PublicLandingPage({
         .sky-custom-gallery-item.portrait img,.sky-custom-gallery-item.portrait video,.sky-custom-gallery-item.square img,.sky-custom-gallery-item.square video{height:100%;object-fit:cover}
         .sky-block-buy-wrap{margin:24px auto;padding:0 14px}
         .sky-block-buy{width:100%;min-height:66px;border-radius:999px;border:5px solid #000;background:var(--buy);color:#fff;font-weight:900;cursor:pointer;padding:9px 18px;box-shadow:0 4px 11px rgba(0,0,0,.25)}
-        .sky-block-buy:hover,.sky-buy:hover{filter:brightness(.97);transform:translateY(-1px)}
+        .sky-block-buy:hover,.sky-buy:hover{filter:brightness(.97)}
         .sky-section{max-width:1020px;margin:0 auto;padding:56px 20px}
         .sky-section h2{font-size:38px;line-height:1.15;text-align:center;font-weight:900;margin:0 0 18px}
         .sky-section p{font-size:17px;line-height:1.7;color:#333}
@@ -1201,7 +1322,25 @@ export default function PublicLandingPage({
             <button onClick={() => setQuantity((q) => q + 1)}>＋</button>
           </div>
 
-          <button type="button" className="sky-buy" onClick={() => setCheckoutOpen(true)}>
+          <button
+            type="button"
+            className={`sky-buy sky-buy-effect-${config.mainButtonEffect}`}
+            style={{
+              background: config.buttonColor,
+              color: config.mainButtonTextColor,
+              borderColor: config.mainButtonBorderColor,
+              borderWidth: config.mainButtonBorderWidth,
+              borderRadius: config.mainButtonBorderRadius,
+              fontSize: config.mainButtonFontSize,
+              paddingTop: config.mainButtonPaddingY,
+              paddingBottom: config.mainButtonPaddingY,
+              ["--sky-effect-duration" as any]: `${Math.max(
+                2,
+                config.mainButtonEffectEverySeconds || 5,
+              )}s`,
+            }}
+            onClick={() => setCheckoutOpen(true)}
+          >
             <div className="sky-buy-main">{config.buttonText}</div>
             <div className="sky-buy-sub">{config.buttonSubtext}</div>
           </button>
@@ -1328,23 +1467,73 @@ export default function PublicLandingPage({
               <div style={{ borderTop: "1px solid #ddd", paddingTop: 7 }}><b>Total</b><b>Gs. {nf(total)}</b></div>
             </div>
 
+            {renderCheckoutSections("before_offers")}
+
             {config.quantityOffers?.length > 0 && (
               <div className="sky-offer-checkout">
-                <b>🔥 Elegí tu oferta</b>
+                <div className="sky-offer-checkout-heading">
+                  🔥 ELEGÍ TU OFERTA
+                </div>
+
                 <div className="sky-offer-checkout-grid">
                   {config.quantityOffers.map((offer: any) => (
-                    <button type="button" key={offer.id} className={`sky-offer-choice ${selectedOfferId === offer.id ? "active" : ""}`} onClick={() => chooseOffer(offer, false)}>
-                      <span>{offer.quantity} unidad(es)</span><b>Gs. {nf(offer.priceGs)}</b>
-                      {offer.badge && <small>{offer.badge}</small>}
+                    <button
+                      type="button"
+                      key={offer.id}
+                      className={`sky-offer-choice ${
+                        selectedOfferId === offer.id ? "active" : ""
+                      } ${offer.highlight ? "highlight" : ""}`}
+                      onClick={() => chooseOffer(offer, false)}
+                    >
+                      <span className="sky-offer-radio">
+                        {selectedOfferId === offer.id ? "●" : "○"}
+                      </span>
+
+                      {offer.imageUrl && (
+                        <img
+                          src={offer.imageUrl}
+                          alt=""
+                          className="sky-offer-choice-image"
+                        />
+                      )}
+
+                      <span className="sky-offer-choice-content">
+                        <strong>
+                          {offer.title ||
+                            `${offer.quantity} unidad(es)`}
+                        </strong>
+
+                        {offer.description && (
+                          <small>{offer.description}</small>
+                        )}
+
+                        {offer.badge && <em>{offer.badge}</em>}
+                      </span>
+
+                      <span className="sky-offer-choice-price">
+                        {Number(offer.compareAtPriceGs || 0) >
+                          Number(offer.priceGs || 0) && (
+                          <small>
+                            Gs. {nf(offer.compareAtPriceGs)}
+                          </small>
+                        )}
+
+                        <strong>Gs. {nf(offer.priceGs)}</strong>
+                      </span>
                     </button>
                   ))}
                 </div>
               </div>
             )}
 
+            {renderCheckoutSections("after_offers")}
+            {renderCheckoutSections("before_shipping")}
+
             <div className="sky-delivery">
               <b>◉ {config.shippingText}</b><br /><br />☆ {config.expressText}
             </div>
+
+            {renderCheckoutSections("before_form")}
 
             <div className="sky-form">
               <h3>Ingrese su dirección de envío</h3>
@@ -1379,6 +1568,8 @@ export default function PublicLandingPage({
                 <label>Referencia</label>
                 <input value={form.reference} onChange={(e) => setForm((p) => ({ ...p, reference: e.target.value }))} placeholder="Alguna referencia o característica" />
               </div>
+
+              {renderCheckoutSections("after_form")}
 
               <button className="sky-submit" disabled={sending} onClick={submitOrder}>
                 {sending ? "REGISTRANDO PEDIDO..." : "🛒 COMPLETAR PEDIDO Y FINALIZAR ✅"}
