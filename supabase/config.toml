@@ -1,1 +1,3 @@
 project_id = "elicjpdkpqrtjmunxlns"
+[functions.meta-purchase]
+verify_jwt = false
