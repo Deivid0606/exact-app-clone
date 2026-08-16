@@ -3253,7 +3253,22 @@ export default function WebPageBuilder({
                     </div>
                   </div>
                   <div className="rounded-xl border border-border p-3 bg-background flex gap-3">
-                    {offer.imageUrl&&<img src={offer.imageUrl} alt="" className="h-14 w-14 rounded-lg object-cover"/>}
+                    {offer.imageUrl&&(
+                      <img
+                        src={offer.imageUrl}
+                        alt=""
+                        style={{
+                          width: 56,
+                          height: 50,
+                          minWidth: 56,
+                          maxWidth: 56,
+                          maxHeight: 50,
+                          objectFit: "cover",
+                          borderRadius: 5,
+                          display: "block",
+                        }}
+                      />
+                    )}
                     <div className="flex-1 min-w-0"><b className="text-sm">{offer.title||`${offer.quantity} unidad(es)`}</b>{offer.description&&<div className="text-xs mt-1">{offer.description}</div>}{offer.badge&&<span className="inline-flex mt-1 rounded bg-primary px-2 py-0.5 text-[9px] font-black text-primary-foreground">{offer.badge}</span>}</div>
                     <div className="text-right">{offer.compareAtPriceGs>offer.priceGs&&<div className="line-through text-[10px] text-muted-foreground">Gs. {nf(offer.compareAtPriceGs)}</div>}<b>Gs. {nf(offer.priceGs)}</b></div>
                   </div>
