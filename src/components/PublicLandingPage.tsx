@@ -220,6 +220,22 @@ const trackMeta = (
   }
 };
 
+const getBrowserCookie = (name: string) => {
+  if (typeof document === "undefined") return "";
+
+  const prefix = `${name}=`;
+
+  const match = document.cookie
+    .split(";")
+    .map((item) => item.trim())
+    .find((item) => item.startsWith(prefix));
+
+  if (!match) return "";
+
+  return decodeURIComponent(match.slice(prefix.length));
+};
+
+
 export default function PublicLandingPage({
   slug,
   pageId,
@@ -581,6 +597,33 @@ export default function PublicLandingPage({
       return;
     }
 
+    const metaEventId = `landing-order-${orderId}`;
+
+    try {
+      const { data: capiResult, error: capiError } =
+        await supabase.functions.invoke("meta-purchase", {
+          body: {
+            order_id: orderId,
+            event_source_url: window.location.href,
+            fbp: getBrowserCookie("_fbp") || null,
+            fbc: getBrowserCookie("_fbc") || null,
+          },
+        });
+
+      if (capiError) {
+        console.error("Meta CAPI invoke error:", capiError);
+      } else if (capiResult?.ok === false) {
+        console.error("Meta CAPI rejected event:", capiResult);
+      } else {
+        console.info("Meta CAPI Purchase enviado:", capiResult);
+      }
+    } catch (capiUnexpectedError) {
+      console.error(
+        "Meta CAPI unexpected error:",
+        capiUnexpectedError,
+      );
+    }
+
     await trackStoreEvent("purchase", {
       productId: product.id,
       valueGs: total,
@@ -588,6 +631,7 @@ export default function PublicLandingPage({
       city: form.city.trim(),
       metadata: {
         order_id: orderId,
+        event_id: metaEventId,
         quantity,
         product_title: product.title,
       },
@@ -604,7 +648,7 @@ export default function PublicLandingPage({
           value: total,
           num_items: quantity,
         },
-        `landing-order-${orderId}`,
+        metaEventId,
       );
     }
 
