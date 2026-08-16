@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { PARAGUAY_LOCATIONS, locationKey } from "@/lib/paraguayLocations";
 import type {
   LandingConfig,
   LandingContentBlock,
@@ -52,6 +53,30 @@ const normalizePublicConfig = (raw: any): LandingConfig => {
           };
         }
 
+        if (block.type === "buy_button") {
+          return {
+            ...block,
+            backgroundColor: block.backgroundColor || raw?.buttonColor || "#ff1717",
+            textColor: block.textColor || "#ffffff",
+            borderColor: block.borderColor || "#000000",
+            borderWidth: Number.isFinite(Number(block.borderWidth)) ? Number(block.borderWidth) : 4,
+            borderRadius: Number.isFinite(Number(block.borderRadius)) ? Number(block.borderRadius) : 999,
+            fontSize: Number.isFinite(Number(block.fontSize)) ? Number(block.fontSize) : 18,
+            paddingY: Number.isFinite(Number(block.paddingY)) ? Number(block.paddingY) : 12,
+            effect: ["none","shake","pulse","bounce","shine"].includes(block.effect) ? block.effect : "none",
+            effectEverySeconds: Number.isFinite(Number(block.effectEverySeconds)) ? Math.max(2, Number(block.effectEverySeconds)) : 5,
+          };
+        }
+
+        if (block.type === "quantity_offers") {
+          return {
+            ...block,
+            title: block.title || "🔥 OFERTAS ESPECIALES",
+            width: ["normal","wide","full"].includes(block.width) ? block.width : "wide",
+            align: ["left","center","right"].includes(block.align) ? block.align : "center",
+          };
+        }
+
         if (block.type === "media_gallery") {
           return {
             ...block,
@@ -74,7 +99,14 @@ const normalizePublicConfig = (raw: any): LandingConfig => {
       }).filter(Boolean)
     : [];
 
-  return { ...raw, contentBlocks: blocks } as LandingConfig;
+  return {
+    ...raw,
+    quantityOffers: Array.isArray(raw?.quantityOffers) ? raw.quantityOffers : [],
+    coverageMode: ["all","custom","platform"].includes(raw?.coverageMode) ? raw.coverageMode : "all",
+    hiddenDepartments: Array.isArray(raw?.hiddenDepartments) ? raw.hiddenDepartments : [],
+    hiddenCities: Array.isArray(raw?.hiddenCities) ? raw.hiddenCities : [],
+    contentBlocks: blocks,
+  } as LandingConfig;
 };
 
 
@@ -161,6 +193,8 @@ export default function PublicLandingPage({
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [metaPixelId, setMetaPixelId] = useState("");
+  const [platformCoverage, setPlatformCoverage] = useState<string[]>([]);
+  const [selectedOfferId, setSelectedOfferId] = useState("");
   const [form, setForm] = useState({
     full_name: "",
     phone: "",
@@ -290,12 +324,53 @@ export default function PublicLandingPage({
   }, [page?.id, preview]);
 
   const config = page?.config;
+
+  useEffect(() => {
+    if (!config || config.coverageMode !== "platform") {
+      setPlatformCoverage([]);
+      return;
+    }
+    (async () => {
+      const { data, error } = await supabase
+        .from("platform_delivery_coverage")
+        .select("department,city")
+        .eq("is_active", true);
+      if (error) {
+        console.error("Error cobertura plataforma:", error);
+        return;
+      }
+      setPlatformCoverage((data || []).map((row: any) => locationKey(row.department, row.city)));
+    })();
+  }, [config?.coverageMode]);
   const products = config?.productSnapshots || [];
   const product =
     products.find((p) => p.id === activeProductId) || products[0] || null;
   const media = legacyMedia(product);
   const activeMedia = media[mediaIndex] || media[0];
   const firstImage = media.find((m) => m.type === "image")?.url || "";
+
+  const availableLocations = useMemo(() => {
+    if (!config) return PARAGUAY_LOCATIONS;
+    if (config.coverageMode === "platform") {
+      return PARAGUAY_LOCATIONS.map((dep) => ({
+        ...dep,
+        cities: dep.cities.filter((city) => platformCoverage.includes(locationKey(dep.department, city))),
+      })).filter((dep) => dep.cities.length > 0);
+    }
+    if (config.coverageMode === "custom") {
+      return PARAGUAY_LOCATIONS
+        .filter((dep) => !config.hiddenDepartments?.includes(dep.department))
+        .map((dep) => ({
+          ...dep,
+          cities: dep.cities.filter((city) => !config.hiddenCities?.includes(locationKey(dep.department, city))),
+        }))
+        .filter((dep) => dep.cities.length > 0);
+    }
+    return PARAGUAY_LOCATIONS;
+  }, [config?.coverageMode, JSON.stringify(config?.hiddenDepartments || []), JSON.stringify(config?.hiddenCities || []), platformCoverage.join("|")]);
+
+  const availableCities =
+    availableLocations.find((dep) => dep.department === form.department)?.cities || [];
 
   useEffect(() => {
     if (!page || !product || preview) return;
@@ -368,14 +443,21 @@ export default function PublicLandingPage({
     };
   }, [checkoutOpen]);
 
+  const selectedOffer = config?.quantityOffers?.find((offer: any) => offer.id === selectedOfferId);
   const total = useMemo(
-    () => Number(product?.price || 0) * quantity,
-    [product?.price, quantity],
+    () => selectedOffer ? Number(selectedOffer.priceGs || 0) : Number(product?.price || 0) * quantity,
+    [product?.price, quantity, selectedOfferId, selectedOffer?.priceGs],
   );
+
+  const chooseOffer = (offer: any, open = true) => {
+    setSelectedOfferId(offer.id);
+    setQuantity(Math.max(1, Number(offer.quantity || 1)));
+    if (open) setCheckoutOpen(true);
+  };
 
   const submitOrder = async () => {
     if (!page || !product) return;
-    if (!form.full_name.trim() || !form.phone.trim() || !form.city.trim()) {
+    if (!form.full_name.trim() || !form.phone.trim() || !form.department.trim() || !form.city.trim()) {
       alert("Completá nombre, teléfono y ciudad.");
       return;
     }
@@ -409,6 +491,8 @@ export default function PublicLandingPage({
         raw_payload: {
           slug: page.slug,
           sku: product.sku,
+          quantity_offer_id: selectedOffer?.id || null,
+          quantity_offer_label: selectedOffer?.label || null,
         },
       })
       .select("id")
@@ -774,7 +858,19 @@ export default function PublicLandingPage({
         >
           <button
             type="button"
-            className="sky-block-buy"
+            className={`sky-block-buy sky-buy-effect-${block.effect}`}
+            style={{
+              background: block.backgroundColor,
+              color: block.textColor,
+              borderColor: block.borderColor,
+              borderWidth: block.borderWidth,
+              borderStyle: "solid",
+              borderRadius: block.borderRadius,
+              fontSize: block.fontSize,
+              paddingTop: block.paddingY,
+              paddingBottom: block.paddingY,
+              ["--sky-effect-duration" as any]: `${Math.max(2, block.effectEverySeconds || 5)}s`,
+            }}
             onClick={() => setCheckoutOpen(true)}
           >
             <div className="sky-buy-main">
@@ -786,6 +882,25 @@ export default function PublicLandingPage({
               </div>
             )}
           </button>
+        </section>
+      );
+    }
+
+    if (block.type === "quantity_offers") {
+      if (!config.quantityOffers?.length) return null;
+      return (
+        <section key={block.id} className="sky-offer-block">
+          <h3>{block.title}</h3>
+          <div className="sky-offer-grid">
+            {config.quantityOffers.map((offer: any) => (
+              <button type="button" key={offer.id} className="sky-offer-card" onClick={() => chooseOffer(offer, true)}>
+                {offer.badge && <span className="sky-offer-badge">{offer.badge}</span>}
+                <div className="sky-offer-qty">{offer.quantity} unidad(es)</div>
+                {offer.label && <div className="sky-offer-label">{offer.label}</div>}
+                <div className="sky-offer-price">Gs. {nf(offer.priceGs)}</div>
+              </button>
+            ))}
+          </div>
         </section>
       );
     }
@@ -924,6 +1039,20 @@ export default function PublicLandingPage({
         .sky-video-row-item.portrait{aspect-ratio:9/16}
         .sky-video-row-item.square{aspect-ratio:1/1}
         .sky-video-row-item.portrait video,.sky-video-row-item.square video{height:100%;object-fit:cover}
+        @keyframes skyBuyShake{0%,88%,100%{transform:translateX(0)}90%{transform:translateX(-6px)}92%{transform:translateX(6px)}94%{transform:translateX(-5px)}96%{transform:translateX(5px)}98%{transform:translateX(0)}}
+        @keyframes skyBuyPulse{0%,80%,100%{transform:scale(1)}90%{transform:scale(1.045)}}
+        @keyframes skyBuyBounce{0%,82%,100%{transform:translateY(0)}88%{transform:translateY(-8px)}94%{transform:translateY(0)}}
+        @keyframes skyBuyShine{0%,78%,100%{filter:brightness(1)}88%{filter:brightness(1.35);box-shadow:0 0 26px rgba(255,255,255,.55)}}
+        .sky-buy-effect-shake{animation:skyBuyShake var(--sky-effect-duration,5s) infinite}
+        .sky-buy-effect-pulse{animation:skyBuyPulse var(--sky-effect-duration,5s) infinite}
+        .sky-buy-effect-bounce{animation:skyBuyBounce var(--sky-effect-duration,5s) infinite}
+        .sky-buy-effect-shine{animation:skyBuyShine var(--sky-effect-duration,5s) infinite}
+        .sky-offer-block{max-width:820px;margin:24px auto;padding:0 14px}
+        .sky-offer-block h3{text-align:center;font-size:24px;font-weight:950;margin:0 0 12px}
+        .sky-offer-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px}
+        .sky-offer-card{position:relative;background:#fff;border:2px solid #111;border-radius:16px;padding:16px 12px;text-align:left;cursor:pointer;box-shadow:0 4px 0 #111}
+        .sky-offer-badge{position:absolute;right:8px;top:8px;background:#ff1717;color:#fff;font-size:9px;font-weight:900;border-radius:999px;padding:4px 7px}
+        .sky-offer-qty{font-size:17px;font-weight:950}.sky-offer-label{font-size:11px;opacity:.65;margin-top:3px}.sky-offer-price{font-size:21px;font-weight:950;color:var(--primary);margin-top:8px}
         .sky-custom-gallery{display:grid;grid-template-columns:repeat(var(--gallery-cols,3),minmax(0,1fr));gap:var(--gallery-gap,14px);margin:22px auto}
         .sky-custom-gallery-item{overflow:hidden;background:#000}
         .sky-custom-gallery-item img,.sky-custom-gallery-item video{width:100%;display:block;background:#000}
@@ -1199,6 +1328,20 @@ export default function PublicLandingPage({
               <div style={{ borderTop: "1px solid #ddd", paddingTop: 7 }}><b>Total</b><b>Gs. {nf(total)}</b></div>
             </div>
 
+            {config.quantityOffers?.length > 0 && (
+              <div className="sky-offer-checkout">
+                <b>🔥 Elegí tu oferta</b>
+                <div className="sky-offer-checkout-grid">
+                  {config.quantityOffers.map((offer: any) => (
+                    <button type="button" key={offer.id} className={`sky-offer-choice ${selectedOfferId === offer.id ? "active" : ""}`} onClick={() => chooseOffer(offer, false)}>
+                      <span>{offer.quantity} unidad(es)</span><b>Gs. {nf(offer.priceGs)}</b>
+                      {offer.badge && <small>{offer.badge}</small>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="sky-delivery">
               <b>◉ {config.shippingText}</b><br /><br />☆ {config.expressText}
             </div>
@@ -1215,12 +1358,18 @@ export default function PublicLandingPage({
                 <input value={form.phone} onChange={(e) => setForm((p) => ({ ...p, phone: e.target.value }))} placeholder="0981..." />
               </div>
               <div className="sky-field">
-                <label>Departamento</label>
-                <input value={form.department} onChange={(e) => setForm((p) => ({ ...p, department: e.target.value }))} placeholder="Departamento" />
+                <label>Departamento *</label>
+                <select value={form.department} onChange={(e) => setForm((p) => ({ ...p, department: e.target.value, city: "" }))}>
+                  <option value="">Seleccioná departamento</option>
+                  {availableLocations.map((item) => <option key={item.department} value={item.department}>{item.department}</option>)}
+                </select>
               </div>
               <div className="sky-field">
                 <label>Ciudad *</label>
-                <input value={form.city} onChange={(e) => setForm((p) => ({ ...p, city: e.target.value }))} placeholder="Ciudad" />
+                <select value={form.city} disabled={!form.department} onChange={(e) => setForm((p) => ({ ...p, city: e.target.value }))}>
+                  <option value="">{form.department ? "Seleccioná ciudad" : "Primero elegí departamento"}</option>
+                  {availableCities.map((city) => <option key={city} value={city}>{city}</option>)}
+                </select>
               </div>
               <div className="sky-field">
                 <label>Calle principal</label>
