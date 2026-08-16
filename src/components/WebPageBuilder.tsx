@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
+import { PARAGUAY_LOCATIONS, locationKey } from "@/lib/paraguayLocations";
 
 export type BuilderProduct = {
   id: string;
@@ -114,6 +115,23 @@ export type LandingContentBlock =
       subtext: string;
       width: "normal" | "wide" | "full";
       align: "left" | "center" | "right";
+      backgroundColor: string;
+      textColor: string;
+      borderColor: string;
+      borderWidth: number;
+      borderRadius: number;
+      fontSize: number;
+      paddingY: number;
+      effect: "none" | "shake" | "pulse" | "bounce" | "shine";
+      effectEverySeconds: number;
+    }
+  | {
+      id: string;
+      type: "quantity_offers";
+      enabled: boolean;
+      title: string;
+      width: "normal" | "wide" | "full";
+      align: "left" | "center" | "right";
     }
   | {
       id: string;
@@ -164,6 +182,14 @@ export type LandingProductSnapshot = {
   warehouseCity: string;
 };
 
+export type QuantityOffer = {
+  id: string;
+  quantity: number;
+  priceGs: number;
+  label: string;
+  badge: string;
+};
+
 export type LandingConfig = {
   version: 2;
   selectedProductIds: string[];
@@ -174,6 +200,10 @@ export type LandingConfig = {
   buttonColor: string;
   buttonText: string;
   buttonSubtext: string;
+  quantityOffers: QuantityOffer[];
+  coverageMode: "all" | "custom" | "platform";
+  hiddenDepartments: string[];
+  hiddenCities: string[];
   reviewsText: string;
   rating: number;
   heroHeadline: string;
@@ -221,6 +251,10 @@ const defaultConfig = (): LandingConfig => ({
   buttonColor: "#ff1717",
   buttonText: "👉 CLICK AQUI Y PAGA EN CASA 👈",
   buttonSubtext: "PAGAS EN TU CASA AL RECIBIR !!!",
+  quantityOffers: [],
+  coverageMode: "all",
+  hiddenDepartments: [],
+  hiddenCities: [],
   reviewsText: "(xxxx Reviews)",
   rating: 4.8,
   heroHeadline: "⚡ Una sola herramienta para hacer tu día más fácil.",
@@ -301,6 +335,20 @@ function normalizeConfig(raw?: Partial<LandingConfig> | null): LandingConfig {
     },
     benefits: raw?.benefits || base.benefits,
     faq: raw?.faq || base.faq,
+    quantityOffers: Array.isArray(raw?.quantityOffers)
+      ? raw!.quantityOffers!.map((offer: any) => ({
+          id: offer.id || uid(),
+          quantity: Math.max(1, Number(offer.quantity || 1)),
+          priceGs: Math.max(0, Number(offer.priceGs || 0)),
+          label: offer.label || "",
+          badge: offer.badge || "",
+        }))
+      : [],
+    coverageMode: ["all","custom","platform"].includes(String(raw?.coverageMode))
+      ? (raw?.coverageMode as "all" | "custom" | "platform")
+      : "all",
+    hiddenDepartments: Array.isArray(raw?.hiddenDepartments) ? raw!.hiddenDepartments! : [],
+    hiddenCities: Array.isArray(raw?.hiddenCities) ? raw!.hiddenCities! : [],
     contentBlocks: (raw?.contentBlocks || []).map((block: any) => {
       if (block?.type === "media_gallery") {
         return {
@@ -371,6 +419,26 @@ function normalizeConfig(raw?: Partial<LandingConfig> | null): LandingConfig {
           align: ["left", "center", "right"].includes(block.align)
             ? block.align
             : "center",
+          backgroundColor: block.backgroundColor || base.buttonColor,
+          textColor: block.textColor || "#ffffff",
+          borderColor: block.borderColor || "#000000",
+          borderWidth: Number.isFinite(Number(block.borderWidth)) ? Number(block.borderWidth) : 4,
+          borderRadius: Number.isFinite(Number(block.borderRadius)) ? Number(block.borderRadius) : 999,
+          fontSize: Number.isFinite(Number(block.fontSize)) ? Number(block.fontSize) : 18,
+          paddingY: Number.isFinite(Number(block.paddingY)) ? Number(block.paddingY) : 12,
+          effect: ["none","shake","pulse","bounce","shine"].includes(block.effect) ? block.effect : "none",
+          effectEverySeconds: Number.isFinite(Number(block.effectEverySeconds)) ? Math.max(2, Number(block.effectEverySeconds)) : 5,
+        } as LandingContentBlock;
+      }
+
+      if (block?.type === "quantity_offers") {
+        return {
+          id: block.id || uid(),
+          type: "quantity_offers" as const,
+          enabled: block.enabled !== false,
+          title: block.title || "🔥 OFERTAS ESPECIALES",
+          width: ["normal","wide","full"].includes(block.width) ? block.width : "wide",
+          align: ["left","center","right"].includes(block.align) ? block.align : "center",
         } as LandingContentBlock;
       }
 
@@ -889,6 +957,26 @@ export default function WebPageBuilder({
         enabled: true,
         text: config.buttonText,
         subtext: config.buttonSubtext,
+        width: "wide",
+        align: "center",
+        backgroundColor: config.buttonColor,
+        textColor: "#ffffff",
+        borderColor: "#000000",
+        borderWidth: 4,
+        borderRadius: 999,
+        fontSize: 18,
+        paddingY: 12,
+        effect: "none",
+        effectEverySeconds: 5,
+      };
+    }
+
+    if (type === "quantity_offers") {
+      return {
+        id: uid(),
+        type,
+        enabled: true,
+        title: "🔥 OFERTAS ESPECIALES",
         width: "wide",
         align: "center",
       };
@@ -1808,11 +1896,11 @@ export default function WebPageBuilder({
                 >
                   🎬 Hasta 3 videos
                 </button>
-                <button
-                  className="nav-btn"
-                  onClick={() => addBlock("buy_button")}
-                >
+                <button className="nav-btn" onClick={() => addBlock("buy_button")}>
                   🛒 Botón Comprar
+                </button>
+                <button className="nav-btn" onClick={() => addBlock("quantity_offers")}>
+                  💰 Ofertas por cantidad
                 </button>
                 <button
                   className="nav-btn"
@@ -1896,6 +1984,7 @@ export default function WebPageBuilder({
                             {block.type === "media_gallery" && "GALERÍA MULTIMEDIA"}
                             {block.type === "video_row" && "HASTA 3 VIDEOS"}
                             {block.type === "buy_button" && "BOTÓN COMPRAR"}
+                            {block.type === "quantity_offers" && "OFERTAS POR CANTIDAD"}
                             {block.type === "image_text" && "IMAGEN + TEXTO"}
                             {block.type === "spacer" && "ESPACIO"}
                           </b>
@@ -2771,6 +2860,35 @@ export default function WebPageBuilder({
                                 </div>
                               </div>
 
+                              <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 space-y-3">
+                                <div className="font-black text-sm">🎨 Diseño + efecto</div>
+                                <div className="grid grid-cols-3 gap-2">
+                                  <label className="text-[10px]">Fondo<input type="color" className="w-full h-10" value={block.backgroundColor} onChange={(e) => patchBlock(block.id,{backgroundColor:e.target.value})}/></label>
+                                  <label className="text-[10px]">Texto<input type="color" className="w-full h-10" value={block.textColor} onChange={(e) => patchBlock(block.id,{textColor:e.target.value})}/></label>
+                                  <label className="text-[10px]">Borde<input type="color" className="w-full h-10" value={block.borderColor} onChange={(e) => patchBlock(block.id,{borderColor:e.target.value})}/></label>
+                                </div>
+                                <label className="app-label">Texto: {block.fontSize}px</label>
+                                <input type="range" min="12" max="36" value={block.fontSize} className="w-full" onChange={(e)=>patchBlock(block.id,{fontSize:Number(e.target.value)})}/>
+                                <label className="app-label">Altura: {block.paddingY}px</label>
+                                <input type="range" min="6" max="32" value={block.paddingY} className="w-full" onChange={(e)=>patchBlock(block.id,{paddingY:Number(e.target.value)})}/>
+                                <label className="app-label">Redondeado: {block.borderRadius}px</label>
+                                <input type="range" min="0" max="999" step="5" value={block.borderRadius} className="w-full" onChange={(e)=>patchBlock(block.id,{borderRadius:Number(e.target.value)})}/>
+                                <label className="app-label">Borde: {block.borderWidth}px</label>
+                                <input type="range" min="0" max="8" value={block.borderWidth} className="w-full" onChange={(e)=>patchBlock(block.id,{borderWidth:Number(e.target.value)})}/>
+                                <div className="grid grid-cols-2 gap-2">
+                                  <select className="app-input" value={block.effect} onChange={(e)=>patchBlock(block.id,{effect:e.target.value})}>
+                                    <option value="none">Sin efecto</option>
+                                    <option value="shake">🔥 Agitar</option>
+                                    <option value="pulse">💓 Pulso</option>
+                                    <option value="bounce">⬆ Rebote</option>
+                                    <option value="shine">✨ Brillo</option>
+                                  </select>
+                                  <select className="app-input" value={block.effectEverySeconds} onChange={(e)=>patchBlock(block.id,{effectEverySeconds:Number(e.target.value)})}>
+                                    <option value={2}>Cada 2s</option><option value={3}>Cada 3s</option><option value={5}>Cada 5s</option><option value={8}>Cada 8s</option>
+                                  </select>
+                                </div>
+                              </div>
+
                               <button
                                 type="button"
                                 style={{
@@ -2785,11 +2903,12 @@ export default function WebPageBuilder({
                                         ? "0 0 0 auto"
                                         : "0",
                                   display: "block",
-                                  border: "4px solid #000",
-                                  borderRadius: 999,
-                                  background: config.buttonColor,
-                                  color: "#fff",
-                                  padding: "10px 14px",
+                                  border: `${block.borderWidth}px solid ${block.borderColor}`,
+                                  borderRadius: block.borderRadius,
+                                  background: block.backgroundColor,
+                                  color: block.textColor,
+                                  padding: `${block.paddingY}px 14px`,
+                                  fontSize: block.fontSize,
                                   fontWeight: 900,
                                 }}
                               >
@@ -2805,6 +2924,22 @@ export default function WebPageBuilder({
                                   </div>
                                 )}
                               </button>
+                            </>
+                          )}
+
+                          {block.type === "quantity_offers" && (
+                            <>
+                              <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 text-xs">
+                                💰 Usa las ofertas configuradas abajo. Este bloque lo podés mover a cualquier posición.
+                              </div>
+                              <input className="app-input" value={block.title} onChange={(e)=>patchBlock(block.id,{title:e.target.value})}/>
+                              <div className="grid grid-cols-2 gap-2">
+                                <select className="app-input" value={block.width} onChange={(e)=>patchBlock(block.id,{width:e.target.value})}><option value="normal">Normal</option><option value="wide">Ancho</option><option value="full">Completo</option></select>
+                                <select className="app-input" value={block.align} onChange={(e)=>patchBlock(block.id,{align:e.target.value})}><option value="left">Izquierda</option><option value="center">Centro</option><option value="right">Derecha</option></select>
+                              </div>
+                              {config.quantityOffers.map((offer)=>(
+                                <div key={offer.id} className="rounded-xl border border-border p-2 text-xs flex justify-between"><b>{offer.quantity} unidad(es)</b><b>Gs. {nf(offer.priceGs)}</b></div>
+                              ))}
                             </>
                           )}
 
@@ -2984,7 +3119,56 @@ export default function WebPageBuilder({
             </div>
 
             <div className="rounded-[24px] border border-border/70 bg-background p-4 space-y-3">
-              <div className="font-black">5. Secciones automáticas</div>
+              <div className="font-black">5. 💰 Ofertas por cantidad</div>
+              {config.quantityOffers.map((offer)=>(
+                <div key={offer.id} className="rounded-xl border border-border p-3 space-y-2">
+                  <div className="grid grid-cols-2 gap-2">
+                    <input type="number" min="1" className="app-input" value={offer.quantity} onChange={(e)=>setConfig((p)=>({...p,quantityOffers:p.quantityOffers.map((o)=>o.id===offer.id?{...o,quantity:Number(e.target.value||1)}:o)}))}/>
+                    <input type="number" min="0" className="app-input" value={offer.priceGs} onChange={(e)=>setConfig((p)=>({...p,quantityOffers:p.quantityOffers.map((o)=>o.id===offer.id?{...o,priceGs:Number(e.target.value||0)}:o)}))}/>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input className="app-input" placeholder="Ej: Pack ahorro" value={offer.label} onChange={(e)=>setConfig((p)=>({...p,quantityOffers:p.quantityOffers.map((o)=>o.id===offer.id?{...o,label:e.target.value}:o)}))}/>
+                    <input className="app-input" placeholder="Ej: MÁS VENDIDO" value={offer.badge} onChange={(e)=>setConfig((p)=>({...p,quantityOffers:p.quantityOffers.map((o)=>o.id===offer.id?{...o,badge:e.target.value}:o)}))}/>
+                  </div>
+                  <button className="nav-btn !text-xs" onClick={()=>setConfig((p)=>({...p,quantityOffers:p.quantityOffers.filter((o)=>o.id!==offer.id)}))}>✕ Eliminar</button>
+                </div>
+              ))}
+              <button className="nav-btn active w-full" onClick={()=>setConfig((p)=>({...p,quantityOffers:[...p.quantityOffers,{id:uid(),quantity:p.quantityOffers.length+1,priceGs:(p.productSnapshots[0]?.price||0)*(p.quantityOffers.length+1),label:"",badge:p.quantityOffers.length===1?"MÁS VENDIDO":""}]}))}>＋ Agregar oferta</button>
+            </div>
+
+            <div className="rounded-[24px] border border-border/70 bg-background p-4 space-y-3">
+              <div className="font-black">6. 🇵🇾 Cobertura</div>
+              <div className="grid gap-2">
+                <button className={`nav-btn ${config.coverageMode==="all"?"active":""}`} onClick={()=>setConfig((p)=>({...p,coverageMode:"all"}))}>🇵🇾 Todo Paraguay</button>
+                <button className={`nav-btn ${config.coverageMode==="platform"?"active":""}`} onClick={()=>setConfig((p)=>({...p,coverageMode:"platform"}))}>✅ Cobertura de la plataforma</button>
+                <button className={`nav-btn ${config.coverageMode==="custom"?"active":""}`} onClick={()=>setConfig((p)=>({...p,coverageMode:"custom"}))}>🎯 Elegir / ocultar manualmente</button>
+              </div>
+              {config.coverageMode==="platform" && <div className="rounded-xl bg-primary/5 border border-primary/30 p-3 text-xs">Usará únicamente las ciudades activas de <b>platform_delivery_coverage</b>.</div>}
+              {config.coverageMode==="custom" && (
+                <div className="space-y-2 max-h-[520px] overflow-auto">
+                  <div className="flex gap-2 sticky top-0 bg-background py-2 z-10">
+                    <button className="nav-btn !text-xs" onClick={()=>setConfig((p)=>({...p,hiddenDepartments:[],hiddenCities:[]}))}>✓ Mostrar todas</button>
+                    <button className="nav-btn !text-xs" onClick={()=>setConfig((p)=>({...p,hiddenDepartments:PARAGUAY_LOCATIONS.map((d)=>d.department),hiddenCities:[]}))}>✕ Ocultar todas</button>
+                  </div>
+                  {PARAGUAY_LOCATIONS.map((dep)=>{
+                    const off=config.hiddenDepartments.includes(dep.department);
+                    return <details key={dep.department} className="rounded-xl border border-border p-3">
+                      <summary className="font-black cursor-pointer flex gap-2 items-center">
+                        <input type="checkbox" checked={!off} onClick={(e)=>e.stopPropagation()} onChange={(e)=>setConfig((p)=>({...p,hiddenDepartments:e.target.checked?p.hiddenDepartments.filter((d)=>d!==dep.department):Array.from(new Set([...p.hiddenDepartments,dep.department]))}))}/>
+                        {dep.department}<span className="ml-auto text-[10px] text-muted-foreground">{dep.cities.length}</span>
+                      </summary>
+                      {!off && <div className="grid sm:grid-cols-2 gap-1.5 mt-2">{dep.cities.map((city)=>{
+                        const key=locationKey(dep.department,city); const hidden=config.hiddenCities.includes(key);
+                        return <label key={key} className="text-xs border rounded-lg p-2 flex gap-2"><input type="checkbox" checked={!hidden} onChange={(e)=>setConfig((p)=>({...p,hiddenCities:e.target.checked?p.hiddenCities.filter((x)=>x!==key):Array.from(new Set([...p.hiddenCities,key]))}))}/>{city}</label>
+                      })}</div>}
+                    </details>
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-[24px] border border-border/70 bg-background p-4 space-y-3">
+              <div className="font-black">7. Secciones automáticas</div>
               <div>
                 <label className="app-label">Titular grande</label>
                 <textarea
@@ -3942,6 +4126,16 @@ function ShrinePreview({
                   </button>
                 </div>
               );
+            }
+
+            if (block.type === "quantity_offers") {
+              if (!config.quantityOffers.length) return null;
+              return <div key={block.id} style={{maxWidth:block.width==="wide"?760:520,margin:"24px auto",padding:14}}>
+                <div style={{fontWeight:950,fontSize:22,textAlign:"center",marginBottom:10}}>{block.title}</div>
+                <div style={{display:"grid",gridTemplateColumns:mobile?"1fr":`repeat(${Math.min(config.quantityOffers.length,3)},1fr)`,gap:8}}>
+                  {config.quantityOffers.map((o)=><div key={o.id} style={{border:"2px solid #111",borderRadius:14,padding:12}}><b>{o.quantity} unidad(es)</b><div>Gs. {nf(o.priceGs)}</div></div>)}
+                </div>
+              </div>;
             }
 
             if (block.type === "image_text") {
