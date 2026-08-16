@@ -642,26 +642,25 @@ export default function PublicLandingPage({
     const metaEventId = `landing-order-${orderId}`;
 
     try {
-      const { data: capiResult, error: capiError } =
-        await supabase.functions.invoke("meta-purchase", {
-          body: {
-            order_id: orderId,
-            event_source_url: window.location.href,
-            fbp: getBrowserCookie("_fbp") || null,
-            fbc: getBrowserCookie("_fbc") || null,
-          },
-        });
+      const { data: capiResult, error: capiError } = await (
+        supabase as any
+      ).rpc("send_meta_purchase", {
+        p_order_id: orderId,
+        p_event_source_url: window.location.href,
+        p_fbp: getBrowserCookie("_fbp") || null,
+        p_fbc: getBrowserCookie("_fbc") || null,
+      });
 
       if (capiError) {
-        console.error("Meta CAPI invoke error:", capiError);
+        console.error("Meta CAPI SQL error:", capiError);
       } else if (capiResult?.ok === false) {
-        console.error("Meta CAPI rejected event:", capiResult);
+        console.error("Meta CAPI rechazó Purchase:", capiResult);
       } else {
-        console.info("Meta CAPI Purchase enviado:", capiResult);
+        console.info("✅ Meta CAPI Purchase enviado:", capiResult);
       }
     } catch (capiUnexpectedError) {
       console.error(
-        "Meta CAPI unexpected error:",
+        "Meta CAPI SQL unexpected error:",
         capiUnexpectedError,
       );
     }
