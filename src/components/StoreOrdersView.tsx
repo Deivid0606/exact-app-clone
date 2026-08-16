@@ -67,8 +67,11 @@ export default function StoreOrdersView({
 
   const [orders, setOrders] = useState<StoreOrder[]>([]);
   const [loading, setLoading] = useState(true);
-  const [scope, setScope] = useState<"today" | "all">("today");
+  const today = pyDate(new Date());
+  const [selectedDate, setSelectedDate] = useState(today);
+  const [showAllDates, setShowAllDates] = useState(false);
   const [search, setSearch] = useState("");
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const loadOrders = useCallback(async () => {
     if (!email) return;
@@ -120,13 +123,11 @@ export default function StoreOrdersView({
     };
   }, [email, loadOrders]);
 
-  const today = pyDate(new Date());
-
   const visibleOrders = useMemo(() => {
     const q = search.trim().toLowerCase();
 
     return orders.filter((order) => {
-      if (scope === "today" && pyDate(order.created_at) !== today) {
+      if (!showAllDates && pyDate(order.created_at) !== selectedDate) {
         return false;
       }
 
@@ -143,16 +144,27 @@ export default function StoreOrdersView({
         .filter(Boolean)
         .some((value) => String(value).toLowerCase().includes(q));
     });
-  }, [orders, scope, search, today]);
+  }, [orders, showAllDates, selectedDate, search]);
 
-  const todayOrders = orders.filter(
-    (order) => pyDate(order.created_at) === today,
-  );
-
-  const todayTotal = todayOrders.reduce(
+  const filteredTotal = visibleOrders.reduce(
     (sum, order) => sum + Number(order.total_gs || 0),
     0,
   );
+
+  const filteredOpened = visibleOrders.filter(
+    (order) => order.system_status === "opened",
+  ).length;
+
+  const selectedDateLabel = showAllDates
+    ? "Todos"
+    : selectedDate === today
+      ? "Hoy"
+      : new Intl.DateTimeFormat("es-PY", {
+          timeZone: "America/Asuncion",
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+        }).format(new Date(`${selectedDate}T12:00:00-03:00`));
 
   const sendToSystem = async (order: StoreOrder) => {
     const { error } = await supabase
@@ -190,52 +202,113 @@ export default function StoreOrdersView({
     });
   };
 
+
+  const deleteOrder = async (order: StoreOrder) => {
+    const confirmed = window.confirm(
+      `¿Eliminar este pedido?\n\nCliente: ${order.customer_name}\nProducto: ${order.product_title}\nTotal: Gs. ${nf(Number(order.total_gs || 0))}\n\nEsta acción no se puede deshacer.`,
+    );
+
+    if (!confirmed) return;
+
+    setDeletingId(order.id);
+
+    const { error } = await supabase
+      .from("landing_page_orders")
+      .delete()
+      .eq("id", order.id)
+      .eq("seller_email", email);
+
+    setDeletingId(null);
+
+    if (error) {
+      console.error(error);
+      toast.error(
+        error.message ||
+          "No se pudo eliminar el pedido. Ejecutá el SQL de permiso DELETE.",
+      );
+      return;
+    }
+
+    setOrders((prev) => prev.filter((item) => item.id !== order.id));
+    toast.success("🗑️ Pedido eliminado correctamente");
+  };
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="rounded-2xl border border-border p-4">
-          <div className="text-xs text-muted-foreground">Pedidos de hoy</div>
-          <div className="text-2xl font-black mt-1">{todayOrders.length}</div>
+          <div className="text-xs text-muted-foreground">
+            Pedidos · {selectedDateLabel}
+          </div>
+          <div className="text-2xl font-black mt-1">{visibleOrders.length}</div>
         </div>
         <div className="rounded-2xl border border-border p-4">
-          <div className="text-xs text-muted-foreground">Ventas de hoy</div>
-          <div className="text-2xl font-black mt-1">Gs. {nf(todayTotal)}</div>
+          <div className="text-xs text-muted-foreground">
+            Ventas · {selectedDateLabel}
+          </div>
+          <div className="text-2xl font-black mt-1">
+            Gs. {nf(filteredTotal)}
+          </div>
         </div>
         <div className="rounded-2xl border border-border p-4">
           <div className="text-xs text-muted-foreground">
             Enviados al formulario
           </div>
           <div className="text-2xl font-black mt-1">
-            {
-              todayOrders.filter((order) => order.system_status === "opened")
-                .length
-            }
+            {filteredOpened}
           </div>
         </div>
       </div>
 
-      <div className="flex flex-col md:flex-row gap-2 md:items-center md:justify-between">
-        <div className="flex gap-2">
-          <button
-            className={`nav-btn ${scope === "today" ? "active" : ""}`}
-            onClick={() => setScope("today")}
-          >
-            Hoy
-          </button>
-          <button
-            className={`nav-btn ${scope === "all" ? "active" : ""}`}
-            onClick={() => setScope("all")}
-          >
-            Todos
-          </button>
+      <div className="rounded-2xl border border-border p-3">
+        <div className="flex flex-col xl:flex-row gap-3 xl:items-end xl:justify-between">
+          <div className="flex flex-col sm:flex-row gap-2 sm:items-end">
+            <div>
+              <label className="app-label">📅 Filtrar por fecha</label>
+              <input
+                type="date"
+                className="app-input"
+                value={selectedDate}
+                onChange={(event) => {
+                  setSelectedDate(event.target.value || today);
+                  setShowAllDates(false);
+                }}
+              />
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                className={`nav-btn ${
+                  !showAllDates && selectedDate === today ? "active" : ""
+                }`}
+                onClick={() => {
+                  setSelectedDate(today);
+                  setShowAllDates(false);
+                }}
+              >
+                Hoy
+              </button>
+
+              <button
+                className={`nav-btn ${showAllDates ? "active" : ""}`}
+                onClick={() => setShowAllDates(true)}
+              >
+                Todos
+              </button>
+            </div>
+          </div>
+
+          <input
+            className="app-input xl:max-w-sm"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Buscar cliente, teléfono, ciudad, producto..."
+          />
         </div>
 
-        <input
-          className="app-input md:max-w-sm"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Buscar cliente, teléfono, ciudad, producto..."
-        />
+        <div className="mt-2 text-xs text-muted-foreground">
+          Vista actual: <b>{selectedDateLabel}</b>. Al entrar siempre inicia en la fecha de hoy.
+        </div>
       </div>
 
       {loading ? (
@@ -261,7 +334,7 @@ export default function StoreOrdersView({
                       {order.product_title}
                     </span>
                     <span className="chip">
-                      {pyTime(order.created_at)}
+                      {pyDate(order.created_at)} · {pyTime(order.created_at)}
                     </span>
                     <span className="chip">
                       {order.status || "nuevo"}
@@ -312,12 +385,22 @@ export default function StoreOrdersView({
                   )}
                 </div>
 
-                <div className="shrink-0">
+                <div className="shrink-0 flex flex-col sm:flex-row xl:flex-col gap-2">
                   <button
                     className="nav-btn active !px-5 !py-3"
                     onClick={() => sendToSystem(order)}
                   >
                     📦 Cargar pedido al sistema
+                  </button>
+
+                  <button
+                    className="nav-btn !px-5 !py-3 !border-red-500 !text-red-500"
+                    disabled={deletingId === order.id}
+                    onClick={() => deleteOrder(order)}
+                  >
+                    {deletingId === order.id
+                      ? "Eliminando..."
+                      : "🗑️ Eliminar pedido"}
                   </button>
                 </div>
               </div>
