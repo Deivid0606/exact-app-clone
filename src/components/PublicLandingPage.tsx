@@ -10,6 +10,41 @@ import type {
 const nf = (n: number) =>
   new Intl.NumberFormat("es-PY").format(Math.round(Number(n || 0)));
 
+
+const sanitizeCustomHtml = (html: string) => {
+  if (!html || typeof window === "undefined") return "";
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(html, "text/html");
+
+  doc
+    .querySelectorAll(
+      "script, iframe, object, embed, link, meta, base, form, input, textarea, select",
+    )
+    .forEach((node) => node.remove());
+
+  doc.querySelectorAll("*").forEach((element) => {
+    [...element.attributes].forEach((attribute) => {
+      const name = attribute.name.toLowerCase();
+      const value = attribute.value.trim().toLowerCase();
+
+      if (name.startsWith("on")) {
+        element.removeAttribute(attribute.name);
+        return;
+      }
+
+      if (
+        ["src", "href", "xlink:href", "formaction"].includes(name) &&
+        (value.startsWith("javascript:") || value.startsWith("data:text/html"))
+      ) {
+        element.removeAttribute(attribute.name);
+      }
+    });
+  });
+
+  return doc.body.innerHTML;
+};
+
 type PublicLandingRow = {
   id: string;
   owner_email: string;
@@ -83,6 +118,16 @@ const normalizePublicConfig = (raw: any): LandingConfig => {
             items: Array.isArray(block.items)
               ? block.items.filter((item: any) => ["image","video"].includes(item?.type) && typeof item?.url === "string" && item.url.trim())
               : [],
+          };
+        }
+
+        if (block.type === "custom_html") {
+          return {
+            ...block,
+            html: typeof block.html === "string" ? block.html : "",
+            width: ["normal", "wide", "full"].includes(block.width)
+              ? block.width
+              : "wide",
           };
         }
 
@@ -1222,6 +1267,29 @@ export default function PublicLandingPage({
             })}
           </div>
         </section>
+      );
+    }
+
+    if (block.type === "custom_html") {
+      const width = blockMaxWidth(block.width);
+
+      if (!block.html?.trim()) return null;
+
+      return (
+        <section
+          key={block.id}
+          className="sky-free-block sky-custom-html"
+          style={{
+            width: "100%",
+            maxWidth: width,
+            margin: "20px auto",
+            padding: 0,
+            overflow: "hidden",
+          }}
+          dangerouslySetInnerHTML={{
+            __html: sanitizeCustomHtml(block.html),
+          }}
+        />
       );
     }
 
