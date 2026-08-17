@@ -532,6 +532,14 @@ export default function ClosuresView() {
   const isAdmin = myRole === 'ADMIN';
   const isVendedor = myRole === 'VENDEDOR';
   const isDelivery = myRole === 'DELIVERY';
+
+  // Permisos base declarados temprano para evitar referencias antes de inicialización.
+  const canEditFull = isAdmin || isSupplier;
+  const canEditStatus1 = isAdmin || isSupplier || isDelivery || isVendedor;
+  const canManageRendicion = isAdmin || isSupplier;
+  const canViewRendicion = isAdmin || isSupplier || isDelivery;
+  const canMarkContacted = isAdmin || isDelivery || isSupplier;
+  const canBulkStatus = isAdmin || isSupplier || isDelivery;
   
   const [orders, setOrders] = useState<any[]>([]);
   const [deliveries, setDeliveries] = useState<any[]>([]);
@@ -2425,12 +2433,6 @@ export default function ClosuresView() {
   
   const allRendered = noRendidos.length === 0 && delivered.length > 0;
   
-  const canEditFull = isAdmin || isSupplier;
-  const canEditStatus1 = isAdmin || isSupplier || isDelivery || isVendedor;
-  const canManageRendicion = isAdmin || isSupplier;
-  const canViewRendicion = isAdmin || isSupplier || isDelivery;
-  const canMarkContacted = isAdmin || isDelivery || isSupplier;
-  const canBulkStatus = isAdmin || isSupplier || isDelivery;
   const acceptedTeamMembers = teamMembers.filter(member => member.status === 'ACCEPTED');
 
   // Visibilidad financiera en la pestaña NORMAL de Cierres.
