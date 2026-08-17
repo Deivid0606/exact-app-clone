@@ -718,18 +718,43 @@ export default function ClosuresView() {
 
     setTeamLoading(true);
     try {
-      if (isDelivery) {
-        const [teamResult, invitationsResult] = await Promise.all([
+      if (isDelivery || isSupplier) {
+        const requests: PromiseLike<any>[] = [
           supabase.rpc('get_delivery_team'),
-          supabase.rpc('get_delivery_team_invitations'),
-        ]);
+        ];
 
+        // Solo DELIVERY puede recibir invitaciones como miembro.
+        if (isDelivery) {
+          requests.push(supabase.rpc('get_delivery_team_invitations'));
+        }
+
+        // PROVEEDOR conserva además la vista global de todos los equipos.
+        if (isSupplier) {
+          requests.push(supabase.rpc('get_all_delivery_teams'));
+        }
+
+        const results = await Promise.all(requests);
+
+        const teamResult = results[0];
         if (teamResult.error) throw teamResult.error;
-        if (invitationsResult.error) throw invitationsResult.error;
-
         setTeamMembers((teamResult.data || []) as TeamMember[]);
-        setTeamInvitations((invitationsResult.data || []) as TeamInvitation[]);
-      } else {
+
+        let index = 1;
+
+        if (isDelivery) {
+          const invitationsResult = results[index++];
+          if (invitationsResult.error) throw invitationsResult.error;
+          setTeamInvitations((invitationsResult.data || []) as TeamInvitation[]);
+        } else {
+          setTeamInvitations([]);
+        }
+
+        if (isSupplier) {
+          const allTeamsResult = results[index];
+          if (allTeamsResult.error) throw allTeamsResult.error;
+          setAllTeams((allTeamsResult.data || []) as AdminTeamRow[]);
+        }
+      } else if (isAdmin) {
         const { data, error } = await supabase.rpc('get_all_delivery_teams');
         if (error) throw error;
         setAllTeams((data || []) as AdminTeamRow[]);
@@ -737,10 +762,9 @@ export default function ClosuresView() {
     } catch (error: any) {
       console.error('Error cargando equipo de logística:', error);
       toast.error(`No se pudo cargar Equipo de Logística: ${error?.message || 'Error desconocido'}`);
-      if (isDelivery) {
-        setTeamMembers([]);
-        setTeamInvitations([]);
-      } else {
+      setTeamMembers([]);
+      setTeamInvitations([]);
+      if (isAdmin || isSupplier) {
         setAllTeams([]);
       }
     } finally {
@@ -782,7 +806,7 @@ export default function ClosuresView() {
   };
 
   const markTeamReceiptReceived = async (memberUserId: string) => {
-    if (!isDelivery) return;
+    if (!(isDelivery || isSupplier)) return;
 
     const row = teamClosureSummary.find(
       item => item.member_user_id === memberUserId,
@@ -831,7 +855,7 @@ export default function ClosuresView() {
   };
 
   const inviteDelivery = async (memberUserId: string) => {
-    if (!isDelivery || !memberUserId) return;
+    if (!(isDelivery || isSupplier) || !memberUserId) return;
 
     setBulkBusy(true);
     try {
@@ -1920,7 +1944,7 @@ export default function ClosuresView() {
   };
 
   const assignSelectedToTeam = async () => {
-    if (!isDelivery) return;
+    if (!(isDelivery || isSupplier)) return;
 
     const ids = Array.from(selectedGuideIds);
     if (ids.length === 0) {
@@ -1930,6 +1954,11 @@ export default function ClosuresView() {
 
     if (!bulkTeamUserId) {
       toast.error('Seleccioná un integrante de tu equipo');
+      return;
+    }
+
+    if (isSupplier && bulkTeamUserId === 'SELF') {
+      toast.error('El PROVEEDOR líder debe asignar el pedido a un delivery de su equipo');
       return;
     }
 
@@ -2160,7 +2189,7 @@ export default function ClosuresView() {
   // DELIVERY común:
   //   solo los ve cuando SU propio usuario ya tiene al menos una tarifa
   //   configurada en delivery_fees. Si todavía no tiene ninguna, se ocultan.
-  const isTeamLeader = isDelivery && acceptedTeamMembers.length > 0;
+  const isTeamLeader = (isDelivery || isSupplier) && acceptedTeamMembers.length > 0;
 
   const deliveryHasOwnTariff = useMemo(() => {
     if (!isDelivery || !myEmail) return false;
@@ -2229,9 +2258,9 @@ export default function ClosuresView() {
         <div className="space-y-4">
           {teamLoading ? (
             <div className="app-card text-sm text-muted-foreground">Cargando Equipo de Logística...</div>
-          ) : isDelivery ? (
+          ) : (isDelivery || isSupplier) ? (
             <>
-              {teamInvitations.length > 0 && (
+              {isDelivery && teamInvitations.length > 0 && (
                 <div className="app-card !p-4 border border-amber-500/30 bg-amber-500/5">
                   <h4 className="font-extrabold mb-3">🔔 Solicitudes recibidas</h4>
                   <div className="space-y-2">
@@ -2266,9 +2295,12 @@ export default function ClosuresView() {
               <div className="app-card !p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
                   <div>
-                    <h4 className="font-extrabold text-lg">👥 Mi equipo</h4>
+                    <h4 className="font-extrabold text-lg">
+                      👥 {isSupplier ? 'Mi equipo de logística como PROVEEDOR' : 'Mi equipo'}
+                    </h4>
                     <p className="text-xs text-muted-foreground">
                       Solo los deliveries que acepten tu solicitud aparecerán al asignar pedidos.
+                      {isSupplier && ' Vos quedás como titular/líder del equipo.'}
                     </p>
                   </div>
                   <button className="nav-btn" type="button" onClick={loadTeamData}>🔄 Actualizar</button>
@@ -2340,6 +2372,55 @@ export default function ClosuresView() {
                   )}
                 </div>
               </div>
+
+              {isSupplier && (
+                <div className="app-card !p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+                    <div>
+                      <h4 className="font-extrabold text-lg">🌐 Todos los equipos de logística</h4>
+                      <p className="text-xs text-muted-foreground">
+                        Como PROVEEDOR conservás la vista global, además de administrar tu propio equipo.
+                      </p>
+                    </div>
+                    <button className="nav-btn" type="button" onClick={loadTeamData}>🔄 Actualizar</button>
+                  </div>
+
+                  {allTeams.length === 0 ? (
+                    <div className="text-sm text-muted-foreground py-4">No hay equipos creados.</div>
+                  ) : (
+                    <div className="overflow-auto">
+                      <table className="app-table min-w-[900px]">
+                        <thead>
+                          <tr>
+                            <th>Líder</th>
+                            <th>Miembro</th>
+                            <th>Estado</th>
+                            <th>Invitado</th>
+                            <th>Aceptado</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {allTeams.map(row => (
+                            <tr key={`supplier-global-${row.relation_id}`}>
+                              <td>
+                                <div className="font-bold text-xs">{row.owner_name || row.owner_email}</div>
+                                <div className="text-[11px] text-muted-foreground">{row.owner_email}</div>
+                              </td>
+                              <td>
+                                <div className="font-bold text-xs">{row.member_name || row.member_email}</div>
+                                <div className="text-[11px] text-muted-foreground">{row.member_email}</div>
+                              </td>
+                              <td><span className="badge-status">{row.status}</span></td>
+                              <td className="text-xs">{row.invited_at ? new Date(row.invited_at).toLocaleString('es-PY') : '—'}</td>
+                              <td className="text-xs">{row.accepted_at ? new Date(row.accepted_at).toLocaleString('es-PY') : '—'}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
             </>
           ) : (
             <div className="app-card !p-4">
@@ -2347,7 +2428,7 @@ export default function ClosuresView() {
                 <div>
                   <h4 className="font-extrabold text-lg">👥 Todos los equipos de logística</h4>
                   <p className="text-xs text-muted-foreground">
-                    Vista global para {isAdmin ? 'ADMIN' : 'PROVEEDOR'}.
+                    Vista global para ADMIN.
                   </p>
                 </div>
                 <button className="nav-btn" type="button" onClick={loadTeamData}>🔄 Actualizar</button>
@@ -2401,7 +2482,9 @@ export default function ClosuresView() {
                 <p className="text-xs text-muted-foreground mt-1">
                   {isDelivery
                     ? 'Control de rendiciones de los deliveries que aceptaron pertenecer a tu equipo.'
-                    : `Vista global de cierres de equipos para ${isAdmin ? 'ADMIN' : 'PROVEEDOR'}.`}
+                    : isSupplier
+                      ? 'Control de tu propio equipo y vista global de cierres de logística.'
+                      : 'Vista global de cierres de equipos para ADMIN.'}
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -2504,7 +2587,8 @@ export default function ClosuresView() {
                         )}
                       </div>
 
-                      {isDelivery && (
+                      {(isDelivery || isSupplier) &&
+                        String(row.owner_email || '').trim().toLowerCase() === myEmail.trim().toLowerCase() && (
                         <button
                           type="button"
                           className="nav-btn active"
@@ -2617,7 +2701,10 @@ export default function ClosuresView() {
       {(isSupplier || isAdmin) && (
         <div className="mb-3">
           <span className="badge-status badge-entregado">✏️ PROVEEDOR/ADMIN: edición completa</span>
-          <p className="text-xs text-muted-foreground mt-1">Podés actualizar estados, fechas, ciudades, marcar pedidos seleccionados como RENDIDO y gestionar rendiciones.</p>
+          <p className="text-xs text-muted-foreground mt-1">
+            Podés actualizar estados, fechas, ciudades, marcar pedidos seleccionados como RENDIDO y gestionar rendiciones.
+            {isSupplier && ' También podés crear tu propio Equipo de Logística, ser su titular/líder y usar tus tarifas por ciudad para los pedidos delegados.'}
+          </p>
         </div>
       )}
 
@@ -3181,7 +3268,7 @@ export default function ClosuresView() {
               </>
             )}
 
-            {isDelivery && (
+            {(isDelivery || isSupplier) && (
               <>
                 <select
                   className="app-input !w-auto !py-2 text-xs min-w-[210px]"
@@ -3190,7 +3277,9 @@ export default function ClosuresView() {
                   disabled={bulkBusy || selectedGuideOrders.length === 0}
                 >
                   <option value="">Asignar a mi equipo...</option>
-                  <option value="SELF">Yo — {profile?.name || myEmail}</option>
+                  {isDelivery && (
+                    <option value="SELF">Yo — {profile?.name || myEmail}</option>
+                  )}
                   {acceptedTeamMembers.map(member => (
                     <option key={member.member_user_id} value={member.member_user_id}>
                       {member.member_name || member.member_email}
