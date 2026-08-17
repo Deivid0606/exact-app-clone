@@ -1094,14 +1094,16 @@ export default function ClosuresView() {
         ? allTeams
             .filter(row => String(row.status || '').toUpperCase() === 'ACCEPTED')
             .map(row => String(row.member_email || '').toLowerCase())
-        : acceptedTeamMembers.map(member => String(member.member_email || '').toLowerCase())
+        : teamMembers
+            .filter(member => String(member.status || '').toUpperCase() === 'ACCEPTED')
+            .map(member => String(member.member_email || '').toLowerCase())
       ).filter(Boolean),
     );
 
     return deliveries.filter((delivery: any) =>
       allowedEmails.has(String(delivery.email || '').toLowerCase()),
     );
-  }, [activeSection, deliveries, allTeams, acceptedTeamMembers, isAdmin]);
+  }, [activeSection, deliveries, allTeams, teamMembers, isAdmin]);
 
   const filteredDeliveryOptions = useMemo(() => {
     const source = teamClosureDeliveryOptions;
@@ -1262,7 +1264,8 @@ export default function ClosuresView() {
                 .filter(Boolean),
             ),
           )
-        : acceptedTeamMembers
+        : teamMembers
+            .filter(member => String(member.status || '').toUpperCase() === 'ACCEPTED')
             .map(member => String(member.member_email || '').trim())
             .filter(Boolean);
 
