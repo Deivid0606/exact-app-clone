@@ -1011,7 +1011,23 @@ export default function ClosuresView() {
     loadSuppliers();
     loadDeliveries();
     loadTeamData();
-    supabase.from('delivery_fees').select('*').then(({ data }) => setFees(data || []));
+    // Tarifas para cierres:
+    // ADMIN/PROVEEDOR necesitan poder leer también la tarifa del líder de otro equipo.
+    // La RPC SECURITY DEFINER evita que RLS deje la tarifa en 0 por falta de visibilidad.
+    supabase.rpc('get_closure_delivery_fees').then(({ data, error }) => {
+      if (!error) {
+        setFees(data || []);
+        return;
+      }
+
+      console.warn('RPC get_closure_delivery_fees no disponible:', error.message);
+
+      // Fallback compatible mientras se instala el parche SQL.
+      supabase
+        .from('delivery_fees')
+        .select('*')
+        .then(({ data: directData }) => setFees(directData || []));
+    });
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setClientPrices(data || []));
     supabase.from('products').select('*').then(({ data }) => setProducts(data || []));
   }, []);
@@ -1488,9 +1504,24 @@ export default function ClosuresView() {
     });
   }, [orders, searchTerm]);
 
+  const normalizeFeeKey = (value: string) =>
+    String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+      .toLowerCase();
+
   const getFee = (deliveryEmail: string, city: string) => {
-    const f = fees.find(f => f.delivery_email?.toLowerCase() === deliveryEmail?.toLowerCase() && f.city?.toLowerCase() === city?.toLowerCase());
-    return Number(f?.fee_gs || 0);
+    const emailKey = normalizeFeeKey(deliveryEmail);
+    const cityKey = normalizeFeeKey(city);
+
+    const feeRow = fees.find(
+      fee =>
+        normalizeFeeKey(fee?.delivery_email || '') === emailKey &&
+        normalizeFeeKey(fee?.city || '') === cityKey,
+    );
+
+    return Number(feeRow?.fee_gs || 0);
   };
 
   const productCostMap = useMemo(() => {
@@ -3743,7 +3774,20 @@ export default function ClosuresView() {
                   <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
                   {canViewNormalClosureFinancials && (
                     <>
-                      <td className="text-right text-xs">{nf(fee)}</td>
+                      <td
+                        className="text-right text-xs"
+                        title={
+                          activeSection === 'teamClosures'
+                            ? `Tarifa del delivery: ${o.assigned_delivery || '—'}`
+                            : o.delivery_owner &&
+                                String(o.delivery_owner).toLowerCase() !==
+                                  String(o.assigned_delivery || '').toLowerCase()
+                              ? `Tarifa del líder: ${o.delivery_owner}`
+                              : `Tarifa del delivery: ${o.assigned_delivery || '—'}`
+                        }
+                      >
+                        {nf(fee)}
+                      </td>
                       <td className="text-right text-xs">{nf(net)}</td>
                     </>
                   )}
