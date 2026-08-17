@@ -2529,9 +2529,9 @@ export default function ClosuresView() {
                 <h4 className="font-extrabold text-lg">📊 Cierres de Equipo</h4>
                 <p className="text-xs text-muted-foreground mt-1">
                   {isDelivery
-                    ? 'Control de rendiciones de los deliveries que aceptaron pertenecer a tu equipo.'
+                    ? 'Control de rendiciones de los deliveries que aceptaron pertenecer a tu equipo. Acá se incluyen sus pedidos asignados sin importar de qué proveedor sea la venta.'
                     : isSupplier
-                      ? 'Control de tu propio equipo y vista global de cierres de logística.'
+                      ? 'Control de tu propio equipo y vista global de cierres. Los pedidos de tus miembros aparecen acá sin importar de qué proveedor sea la venta.'
                       : 'Vista global de cierres de equipos para ADMIN.'}
                 </p>
               </div>
