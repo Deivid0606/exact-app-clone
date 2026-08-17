@@ -1515,40 +1515,73 @@ export default function ClosuresView() {
     }
   };
 
+  const getOrderTeamLeaderLabel = (order: any) => {
+    const ownerEmail = String(order?.delivery_owner || '').trim();
+    const memberEmail = String(order?.assigned_delivery || '').trim();
+
+    if (
+      !ownerEmail ||
+      !memberEmail ||
+      ownerEmail.toLowerCase() === memberEmail.toLowerCase()
+    ) {
+      return '';
+    }
+
+    const teamRow = allTeams.find(
+      row =>
+        String(row.owner_email || '').trim().toLowerCase() ===
+          ownerEmail.toLowerCase() &&
+        String(row.member_email || '').trim().toLowerCase() ===
+          memberEmail.toLowerCase(),
+    );
+
+    if (teamRow) {
+      return String(teamRow.owner_name || teamRow.owner_email || ownerEmail);
+    }
+
+    const deliveryLeader = deliveries.find(
+      (delivery: any) =>
+        String(delivery?.email || '').trim().toLowerCase() ===
+        ownerEmail.toLowerCase(),
+    );
+
+    return String(deliveryLeader?.name || ownerEmail);
+  };
+
   const getDeliveryFeeForOrder = (order: any) => {
     /*
-     * TARIFA CANÓNICA PARA TODO EL MÓDULO DE CIERRES
+     * REGLA DE TARIFA SEGÚN PESTAÑA
      *
-     * Esta función se usa tanto en:
-     * - tabla principal,
-     * - Cierre normal / Control de Rendición,
-     * - KPIs,
-     * - monto pendiente,
-     * - monto rendido,
-     * - pago delivery,
-     * - neto a rendir.
+     * CIERRE NORMAL:
+     * - Se conserva exactamente la lógica actual.
+     * - Si el pedido pertenece a un Equipo de Logística, usa la tarifa
+     *   del titular/líder mediante delivery_owner.
      *
-     * REGLA:
-     * 1) Si el pedido ya tiene delivery_fee_gs > 0, se respeta.
-     * 2) Si pertenece a un Equipo de Logística, usa la tarifa por ciudad
-     *    del TITULAR/LÍDER guardado en delivery_owner.
-     * 3) Si no pertenece a equipo, usa assigned_delivery.
+     * CIERRES DE EQUIPO:
+     * - Usa SIEMPRE la tarifa propia del DELIVERY miembro asignado
+     *   mediante assigned_delivery.
+     * - Así cada delivery del equipo muestra su tarifa real por ciudad.
      */
     const storedFee = Number(order?.delivery_fee_gs || 0);
 
+    // Si hay una tarifa explícitamente congelada/guardada en el pedido,
+    // se respeta en ambas pestañas.
     if (storedFee > 0) {
       return storedFee;
     }
 
-    const logisticsOwnerEmail = String(
-      order?.delivery_owner ||
-      order?.assigned_delivery ||
-      '',
-    ).trim();
+    const tariffEmail =
+      activeSection === 'teamClosures'
+        ? String(order?.assigned_delivery || '').trim()
+        : String(
+            order?.delivery_owner ||
+            order?.assigned_delivery ||
+            '',
+          ).trim();
 
-    if (!logisticsOwnerEmail) return 0;
+    if (!tariffEmail) return 0;
 
-    return getFee(logisticsOwnerEmail, order?.city || '');
+    return getFee(tariffEmail, order?.city || '');
   };
 
   const delivered = useMemo(
@@ -2769,10 +2802,10 @@ export default function ClosuresView() {
           <div className="font-extrabold">📊 CIERRES DE EQUIPO</div>
           <p className="text-xs text-muted-foreground mt-1">
             {isAdmin
-              ? 'ADMIN puede elegir cualquier equipo, filtrar sus deliveries y realizar el cierre completo de todos los pedidos.'
+              ? 'ADMIN puede elegir cualquier equipo, filtrar sus deliveries y realizar el cierre completo de todos los pedidos. La tarifa mostrada es la tarifa propia de cada DELIVERY miembro.'
               : isSupplier
-                ? 'Solo aparecen pedidos del equipo donde vos sos líder. Podés controlar ventas de cualquier proveedor, pero solo marcar RENDIDO cuando provider_email sea tu propio usuario.'
-                : 'Solo aparecen pedidos del equipo donde vos sos líder. Podés controlarlos por delivery, pero DELIVERY no puede marcar RENDIDO aunque sea líder.'}
+                ? 'Solo aparecen pedidos del equipo donde vos sos líder. Podés controlar ventas de cualquier proveedor, pero solo marcar RENDIDO cuando provider_email sea tu propio usuario. La tarifa mostrada es la tarifa propia de cada DELIVERY miembro.'
+                : 'Solo aparecen pedidos del equipo donde vos sos líder. Podés controlarlos por delivery, pero DELIVERY no puede marcar RENDIDO aunque sea líder. La tarifa mostrada es la tarifa propia de cada DELIVERY miembro.'}
           </p>
         </div>
       )}
@@ -3672,34 +3705,40 @@ export default function ClosuresView() {
                   )}
                   <td className="text-xs">{o.provider_email || '—'}</td>
                   <td className="text-xs">
-                    {canEditFull ? (
-                      <select
-                        className="app-input !w-auto !py-1 !px-2 text-xs min-w-[220px]"
-                        value={o.assigned_delivery || ''}
-                        onChange={e => updateAssignedDelivery(o.id, e.target.value)}
-                      >
-                        <option value="">Seleccionar delivery</option>
-                        {deliveries.map((d: any) => (
-                          <option key={d.email} value={d.email}>
-                            {d.name || d.email}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <div>
+                    <div>
+                      {canEditFull ? (
+                        <select
+                          className="app-input !w-auto !py-1 !px-2 text-xs min-w-[220px]"
+                          value={o.assigned_delivery || ''}
+                          onChange={e => updateAssignedDelivery(o.id, e.target.value)}
+                        >
+                          <option value="">Seleccionar delivery</option>
+                          {deliveries.map((d: any) => (
+                            <option key={d.email} value={d.email}>
+                              {d.name || d.email}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
                         <div className="font-bold">
                           {(() => {
-                            const found = deliveries.find((d: any) => d.email === o.assigned_delivery);
+                            const found = deliveries.find(
+                              (d: any) => d.email === o.assigned_delivery,
+                            );
                             return found?.name || o.assigned_delivery || '—';
                           })()}
                         </div>
-                        {o.delivery_owner && o.delivery_owner !== o.assigned_delivery && (
-                          <div className="text-[10px] text-muted-foreground mt-1">
-                            Líder: {deliveries.find((d: any) => d.email === o.delivery_owner)?.name || o.delivery_owner}
+                      )}
+
+                      {activeSection === 'orders' &&
+                        o.delivery_owner &&
+                        String(o.delivery_owner).trim().toLowerCase() !==
+                          String(o.assigned_delivery || '').trim().toLowerCase() && (
+                          <div className="mt-1 inline-flex items-center rounded-md border border-violet-500/30 bg-violet-500/10 px-2 py-1 text-[10px] font-bold text-violet-300">
+                            👥 Miembro del equipo de: {getOrderTeamLeaderLabel(o)}
                           </div>
                         )}
-                      </div>
-                    )}
+                    </div>
                   </td>
                   <td className="text-right text-xs font-bold">{nf(Number(o.total_gs || 0))}</td>
                   {canViewNormalClosureFinancials && (
