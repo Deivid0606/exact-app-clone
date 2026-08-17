@@ -82,7 +82,7 @@ export default function RatesView() {
   const [cpCity, setCpCity] = useState('');
   const [cpDepartamento, setCpDepartamento] = useState('');
   const [cpPrice, setCpPrice] = useState('');
-  const [deliveries, setDeliveries] = useState<any[]>([]);
+  const [rateUsers, setRateUsers] = useState<any[]>([]);
   const [filtroDepartamento, setFiltroDepartamento] = useState('');
 
   const load = () => {
@@ -90,22 +90,102 @@ export default function RatesView() {
     supabase.from('client_prices').select('*').order('city').then(({ data }) => setPrices(data || []));
     supabase.from('profiles').select('email, name, user_id').then(async ({ data }) => {
       const profiles = data || [];
-      const { data: roles } = await supabase.from('user_roles').select('user_id, role').eq('role', 'DELIVERY');
-      const deliveryIds = new Set((roles || []).map(r => r.user_id));
-      setDeliveries(profiles.filter(p => deliveryIds.has(p.user_id)));
+
+      // Cargar usuarios aprobados que pueden tener tarifa:
+      // DELIVERY y PROVEEDOR.
+      const { data: roles, error: rolesError } = await supabase
+        .from('user_roles')
+        .select('user_id, role, approved')
+        .in('role', ['DELIVERY', 'PROVEEDOR'])
+        .eq('approved', true);
+
+      if (rolesError) {
+        console.error('Error cargando usuarios para tarifas:', rolesError);
+        setRateUsers([]);
+        return;
+      }
+
+      const roleByUserId = new Map<string, string>();
+      (roles || []).forEach((item: any) => {
+        roleByUserId.set(String(item.user_id), String(item.role || ''));
+      });
+
+      const users = profiles
+        .filter((p: any) => roleByUserId.has(String(p.user_id)))
+        .map((p: any) => ({
+          ...p,
+          role: roleByUserId.get(String(p.user_id)) || '',
+        }))
+        .filter((p: any) => {
+          // ADMIN puede gestionar DELIVERY y PROVEEDOR.
+          if (role === 'ADMIN') return true;
+
+          // PROVEEDOR puede gestionarse a sí mismo y también DELIVERY.
+          if (role === 'PROVEEDOR') {
+            return (
+              String(p.email || '').toLowerCase() === myEmail.toLowerCase() ||
+              p.role === 'DELIVERY'
+            );
+          }
+
+          return false;
+        })
+        .sort((a: any, b: any) =>
+          String(a.name || a.email).localeCompare(
+            String(b.name || b.email),
+            'es',
+            { sensitivity: 'base' },
+          ),
+        );
+
+      setRateUsers(users);
     });
   };
   
   useEffect(() => { load(); }, []);
 
   const visibleFees = role === 'PROVEEDOR'
-    ? fees.filter(f => f.delivery_email?.toLowerCase() === myEmail.toLowerCase() ||
-        deliveries.some(d => d.email === f.delivery_email))
+    ? fees.filter(f =>
+        f.delivery_email?.toLowerCase() === myEmail.toLowerCase() ||
+        rateUsers.some(
+          user =>
+            user.role === 'DELIVERY' &&
+            String(user.email || '').toLowerCase() ===
+              String(f.delivery_email || '').toLowerCase(),
+        )
+      )
     : fees;
 
   const saveRate = async () => {
-    if (!drEmail || !drCity || !drRate) { toast.error('Completá todos los campos'); return; }
-    const existing = fees.find(f => f.delivery_email?.toLowerCase() === drEmail.toLowerCase() && f.city?.toLowerCase() === drCity.toLowerCase());
+    if (!drEmail || !drCity || !drRate) {
+      toast.error('Completá todos los campos');
+      return;
+    }
+
+    const selectedUser = rateUsers.find(
+      user =>
+        String(user.email || '').toLowerCase() === drEmail.toLowerCase(),
+    );
+
+    if (!selectedUser) {
+      toast.error('El usuario seleccionado no está disponible para cargar tarifa');
+      return;
+    }
+
+    if (
+      role === 'PROVEEDOR' &&
+      selectedUser.role === 'PROVEEDOR' &&
+      drEmail.toLowerCase() !== myEmail.toLowerCase()
+    ) {
+      toast.error('Un PROVEEDOR solo puede modificar su propia tarifa');
+      return;
+    }
+
+    const existing = fees.find(
+      f =>
+        f.delivery_email?.toLowerCase() === drEmail.toLowerCase() &&
+        f.city?.toLowerCase() === drCity.toLowerCase(),
+    );
     if (existing) {
       await supabase.from('delivery_fees').update({ fee_gs: Number(drRate) }).eq('id', existing.id);
     } else {
@@ -117,10 +197,43 @@ export default function RatesView() {
   };
 
   const deleteRate = async (id: string) => {
+    const rate = fees.find(item => item.id === id);
+
+    if (!rate) {
+      toast.error('Tarifa no encontrada');
+      return;
+    }
+
+    if (role === 'PROVEEDOR') {
+      const rateEmail = String(rate.delivery_email || '').toLowerCase();
+
+      const targetUser = rateUsers.find(
+        user =>
+          String(user.email || '').toLowerCase() === rateEmail,
+      );
+
+      const allowed =
+        rateEmail === myEmail.toLowerCase() ||
+        targetUser?.role === 'DELIVERY';
+
+      if (!allowed) {
+        toast.error('No tenés permiso para eliminar la tarifa de otro PROVEEDOR');
+        return;
+      }
+    }
+
     if (!confirm('¿Eliminar esta tarifa?')) return;
-    const { error } = await supabase.from('delivery_fees').delete().eq('id', id);
+
+    const { error } = await supabase
+      .from('delivery_fees')
+      .delete()
+      .eq('id', id);
+
     if (error) toast.error(error.message);
-    else { toast.success('Tarifa eliminada'); load(); }
+    else {
+      toast.success('Tarifa eliminada');
+      load();
+    }
   };
 
   const saveClientPrice = async () => {
@@ -178,24 +291,32 @@ export default function RatesView() {
   return (
     <div className="app-card">
       <h3 className="text-lg font-extrabold mb-3">Costos de delivery por ciudad</h3>
+      <p className="text-xs text-muted-foreground mb-4">
+        Las tarifas pueden pertenecer a un DELIVERY o a un PROVEEDOR líder de Equipo de Logística.
+        Cuando un PROVEEDOR sea titular del equipo, sus pedidos delegados usarán su tarifa por ciudad.
+      </p>
 
       {canManage && (
         <div className="app-card !p-4 mb-4">
           <h4 className="font-bold mb-3">
-            {role === 'PROVEEDOR' ? 'Configurar tarifa de tu delivery' : 'Agregar/Actualizar tarifa'}
+            {role === 'PROVEEDOR' ? 'Configurar tarifa propia o de delivery' : 'Agregar/Actualizar tarifa de Delivery o Proveedor'}
           </h4>
           <div className="flex flex-wrap gap-2">
             <div className="flex-1 min-w-[200px]">
-              <label className="app-label">Delivery</label>
+              <label className="app-label">Titular de la tarifa</label>
               <select 
                 className="app-input" 
                 value={drEmail} 
                 onChange={e => setDrEmail(e.target.value)}
               >
-                <option value="">Seleccionar delivery…</option>
-                {deliveries.map(d => (
-                  <option key={d.email} value={d.email}>
-                    {d.name || d.email}
+                <option value="">Seleccionar usuario…</option>
+                {rateUsers.map(user => (
+                  <option key={`${user.role}-${user.email}`} value={user.email}>
+                    {user.role === 'PROVEEDOR' ? '🏢 PROVEEDOR — ' : '🚚 DELIVERY — '}
+                    {user.name || user.email}
+                    {String(user.email || '').toLowerCase() === myEmail.toLowerCase()
+                      ? ' (Vos)'
+                      : ''}
                   </option>
                 ))}
               </select>
@@ -221,7 +342,7 @@ export default function RatesView() {
       <table className="app-table">
         <thead>
           <tr>
-            <th>Delivery</th>
+            <th>Titular</th>
             <th>Ciudad</th>
             <th className="text-right">Tarifa (Gs)</th>
             {canManage && <th>Acción</th>}
@@ -230,7 +351,22 @@ export default function RatesView() {
         <tbody>
           {visibleFees.map(f => (
             <tr key={f.id}>
-              <td className="text-sm">{f.delivery_email}</td>
+              <td className="text-sm">
+                <div className="font-bold">{f.delivery_email}</div>
+                {(() => {
+                  const user = rateUsers.find(
+                    item =>
+                      String(item.email || '').toLowerCase() ===
+                      String(f.delivery_email || '').toLowerCase(),
+                  );
+
+                  return user ? (
+                    <span className="text-[10px] text-muted-foreground">
+                      {user.role === 'PROVEEDOR' ? '🏢 PROVEEDOR' : '🚚 DELIVERY'}
+                    </span>
+                  ) : null;
+                })()}
+              </td>
               <td className="text-sm">{f.city}</td>
               <td className="text-right text-sm font-bold">{nf(Number(f.fee_gs || 0))}</td>
               {canManage && (
