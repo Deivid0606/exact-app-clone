@@ -576,6 +576,7 @@ export default function ClosuresView() {
   const [teamClosureSummary, setTeamClosureSummary] = useState<TeamClosureSummary[]>([]);
   const [teamReceiptHistory, setTeamReceiptHistory] = useState<TeamReceiptHistory[]>([]);
   const [teamClosureLoading, setTeamClosureLoading] = useState(false);
+  const [selectedTeamOwnerEmail, setSelectedTeamOwnerEmail] = useState<string>('');
   
   // Estados para el modal de cambio de estado
   const [statusChangeModal, setStatusChangeModal] = useState<{
@@ -1084,26 +1085,131 @@ export default function ClosuresView() {
     );
   };
 
+  const teamClosureTeamOptions = useMemo(() => {
+    if (activeSection !== 'teamClosures') return [];
+
+    if (isAdmin) {
+      const unique = new Map<
+        string,
+        { owner_email: string; owner_name: string; owner_user_id: string }
+      >();
+
+      allTeams
+        .filter(row => String(row.status || '').toUpperCase() === 'ACCEPTED')
+        .forEach(row => {
+          const email = String(row.owner_email || '').trim();
+          if (!email) return;
+
+          unique.set(email.toLowerCase(), {
+            owner_email: email,
+            owner_name: String(row.owner_name || email),
+            owner_user_id: String(row.owner_user_id || ''),
+          });
+        });
+
+      return Array.from(unique.values()).sort((a, b) =>
+        String(a.owner_name || a.owner_email).localeCompare(
+          String(b.owner_name || b.owner_email),
+          'es',
+          { sensitivity: 'base' },
+        ),
+      );
+    }
+
+    const hasAcceptedMembers = teamMembers.some(
+      member => String(member.status || '').toUpperCase() === 'ACCEPTED',
+    );
+
+    if (!hasAcceptedMembers || !myEmail) return [];
+
+    return [
+      {
+        owner_email: myEmail,
+        owner_name: String(profile?.name || myEmail),
+        owner_user_id: String(profile?.user_id || ''),
+      },
+    ];
+  }, [
+    activeSection,
+    isAdmin,
+    allTeams,
+    teamMembers,
+    myEmail,
+    profile?.name,
+    profile?.user_id,
+  ]);
+
+  useEffect(() => {
+    if (activeSection !== 'teamClosures') return;
+
+    // DELIVERY/PROVEEDOR líder: su propio equipo queda seleccionado automáticamente.
+    if (!isAdmin) {
+      const ownTeam = teamClosureTeamOptions[0];
+
+      setSelectedTeamOwnerEmail(ownTeam?.owner_email || '');
+      setFilterDeliveries(new Set());
+      return;
+    }
+
+    // ADMIN debe elegir el equipo a cerrar.
+    const stillExists = teamClosureTeamOptions.some(
+      team =>
+        String(team.owner_email || '').toLowerCase() ===
+        String(selectedTeamOwnerEmail || '').toLowerCase(),
+    );
+
+    if (!stillExists) {
+      setSelectedTeamOwnerEmail('');
+      setFilterDeliveries(new Set());
+    }
+  }, [
+    activeSection,
+    isAdmin,
+    teamClosureTeamOptions,
+    selectedTeamOwnerEmail,
+  ]);
+
   const teamClosureDeliveryOptions = useMemo(() => {
     if (activeSection !== 'teamClosures') return deliveries;
+    if (!selectedTeamOwnerEmail) return [];
 
-    // En Cierres de Equipo el filtro de repartidores queda limitado al equipo.
-    // ADMIN ve los miembros ACCEPTED de todos los equipos.
+    const ownerEmail = selectedTeamOwnerEmail.trim().toLowerCase();
+
     const allowedEmails = new Set<string>(
-      (isAdmin
-        ? allTeams
-            .filter(row => String(row.status || '').toUpperCase() === 'ACCEPTED')
-            .map(row => String(row.member_email || '').toLowerCase())
-        : teamMembers
-            .filter(member => String(member.status || '').toUpperCase() === 'ACCEPTED')
-            .map(member => String(member.member_email || '').toLowerCase())
+      (
+        isAdmin
+          ? allTeams
+              .filter(
+                row =>
+                  String(row.status || '').toUpperCase() === 'ACCEPTED' &&
+                  String(row.owner_email || '').trim().toLowerCase() === ownerEmail,
+              )
+              .map(row => String(row.member_email || '').trim().toLowerCase())
+          : String(myEmail || '').trim().toLowerCase() === ownerEmail
+            ? teamMembers
+                .filter(
+                  member =>
+                    String(member.status || '').toUpperCase() === 'ACCEPTED',
+                )
+                .map(member =>
+                  String(member.member_email || '').trim().toLowerCase(),
+                )
+            : []
       ).filter(Boolean),
     );
 
     return deliveries.filter((delivery: any) =>
-      allowedEmails.has(String(delivery.email || '').toLowerCase()),
+      allowedEmails.has(String(delivery.email || '').trim().toLowerCase()),
     );
-  }, [activeSection, deliveries, allTeams, teamMembers, isAdmin]);
+  }, [
+    activeSection,
+    deliveries,
+    allTeams,
+    teamMembers,
+    isAdmin,
+    myEmail,
+    selectedTeamOwnerEmail,
+  ]);
 
   const filteredDeliveryOptions = useMemo(() => {
     const source = teamClosureDeliveryOptions;
@@ -1251,43 +1357,68 @@ export default function ClosuresView() {
     if (activeSection === 'teamClosures' && (isDelivery || isSupplier || isAdmin)) {
       /*
        * CIERRES DE EQUIPO:
-       * usa exactamente la misma pantalla del Cierre normal,
-       * pero la fuente de pedidos queda limitada a miembros ACCEPTED.
-       * NO se filtra por provider_email: importa el equipo logístico.
+       * - primero se identifica el LÍDER mediante delivery_owner;
+       * - luego se limita a DELIVERY ACCEPTED de ese equipo;
+       * - provider_email NO limita la visualización.
+       *
+       * Esto evita mezclar pedidos si un DELIVERY participa en más de un equipo.
        */
-      const allowedTeamEmails = isAdmin
-        ? Array.from(
-            new Set(
-              allTeams
-                .filter(row => String(row.status || '').toUpperCase() === 'ACCEPTED')
-                .map(row => String(row.member_email || '').trim())
-                .filter(Boolean),
-            ),
-          )
-        : teamMembers
-            .filter(member => String(member.status || '').toUpperCase() === 'ACCEPTED')
-            .map(member => String(member.member_email || '').trim())
-            .filter(Boolean);
+      const teamOwnerEmail = isAdmin
+        ? String(selectedTeamOwnerEmail || '').trim()
+        : String(myEmail || '').trim();
 
-      const requestedEmails = selectedDeliveryList.length > 0
-        ? selectedDeliveryList.filter(email =>
-            allowedTeamEmails.some(
-              allowed => allowed.toLowerCase() === String(email).toLowerCase(),
-            ),
-          )
-        : allowedTeamEmails;
-
-      if (requestedEmails.length === 0) {
+      if (!teamOwnerEmail) {
         setOrders([]);
         setTotalPedidosAsignados(0);
         setRendicionPagada(null);
         return;
       }
 
-      query = query.in('assigned_delivery', requestedEmails);
+      const allowedTeamEmails = isAdmin
+        ? Array.from(
+            new Set(
+              allTeams
+                .filter(
+                  row =>
+                    String(row.status || '').toUpperCase() === 'ACCEPTED' &&
+                    String(row.owner_email || '').trim().toLowerCase() ===
+                      teamOwnerEmail.toLowerCase(),
+                )
+                .map(row => String(row.member_email || '').trim())
+                .filter(Boolean),
+            ),
+          )
+        : teamMembers
+            .filter(
+              member =>
+                String(member.status || '').toUpperCase() === 'ACCEPTED',
+            )
+            .map(member => String(member.member_email || '').trim())
+            .filter(Boolean);
 
-      // En Cierres de Equipo el filtro de proveedor NO limita los pedidos.
-      // La venta puede pertenecer a cualquier proveedor.
+      const requestedEmails =
+        selectedDeliveryList.length > 0
+          ? selectedDeliveryList.filter(email =>
+              allowedTeamEmails.some(
+                allowed =>
+                  allowed.toLowerCase() === String(email).toLowerCase(),
+              ),
+            )
+          : allowedTeamEmails;
+
+      if (allowedTeamEmails.length === 0 || requestedEmails.length === 0) {
+        setOrders([]);
+        setTotalPedidosAsignados(0);
+        setRendicionPagada(null);
+        return;
+      }
+
+      query = query
+        .eq('delivery_owner', teamOwnerEmail)
+        .in('assigned_delivery', requestedEmails);
+
+      // NO aplicar provider_email: una venta de cualquier proveedor entra
+      // mientras pertenezca logísticamente a este equipo.
     } else if (isSupplier) {
       // CIERRE NORMAL: se mantiene exactamente como estaba.
       query = query.eq('provider_email', myEmail);
@@ -1353,6 +1484,7 @@ export default function ClosuresView() {
     activeSection,
     teamMembers,
     allTeams,
+    selectedTeamOwnerEmail,
   ]);
 
   const filteredOrders = useMemo(() => {
@@ -1945,21 +2077,60 @@ export default function ClosuresView() {
     [selectedOrders],
   );
 
+  const selectedRendibleOrders = useMemo(() => {
+    // Cierre normal: conservar exactamente el comportamiento existente.
+    if (activeSection !== 'teamClosures') {
+      return selectedDeliveredOrders;
+    }
+
+    // Cierres de Equipo:
+    // ADMIN puede rendir cualquiera.
+    if (isAdmin) {
+      return selectedDeliveredOrders;
+    }
+
+    // PROVEEDOR solo puede rendir ventas/productos propios.
+    if (isSupplier) {
+      const email = myEmail.trim().toLowerCase();
+
+      return selectedDeliveredOrders.filter(
+        order =>
+          String(order.provider_email || '').trim().toLowerCase() === email,
+      );
+    }
+
+    // DELIVERY, incluso si es líder, nunca puede marcar RENDIDO.
+    return [];
+  }, [
+    activeSection,
+    selectedDeliveredOrders,
+    isAdmin,
+    isSupplier,
+    myEmail,
+  ]);
+
+  const canMarkSelectedAsRendido =
+    activeSection === 'teamClosures'
+      ? isAdmin || isSupplier
+      : canManageRendicion;
+
   // ADMIN / PROVEEDOR: marcar SOLO los pedidos seleccionados como RENDIDO.
   // No marca la rendición como PAGADA; eso sigue siendo un proceso independiente.
   const markSelectedAsRendido = async () => {
-    if (!canManageRendicion) return;
+    if (!canMarkSelectedAsRendido) return;
 
-    if (selectedDeliveredOrders.length === 0) {
+    if (selectedRendibleOrders.length === 0) {
       toast.error(
-        'Seleccioná pedidos ENTREGADO o ENCOMIENDA ENTREGADA que todavía no estén RENDIDOS',
+        activeSection === 'teamClosures' && isSupplier
+          ? 'En Cierres de Equipo solo podés marcar RENDIDO pedidos ENTREGADOS que sean ventas de tu propio proveedor'
+          : 'Seleccioná pedidos ENTREGADO o ENCOMIENDA ENTREGADA que todavía no estén RENDIDOS',
       );
       return;
     }
 
     if (
       !confirm(
-        `¿Marcar como RENDIDO ${selectedDeliveredOrders.length} pedido(s) seleccionado(s)?\n\n` +
+        `¿Marcar como RENDIDO ${selectedRendibleOrders.length} pedido(s) seleccionado(s)?\n\n` +
         'Solo se modificarán los pedidos seleccionados. Los demás quedarán sin cambios.',
       )
     ) return;
@@ -1968,7 +2139,7 @@ export default function ClosuresView() {
 
     try {
       const now = new Date().toISOString();
-      const ids = selectedDeliveredOrders.map(order => order.id);
+      const ids = selectedRendibleOrders.map(order => order.id);
 
       const { error } = await supabase
         .from('orders')
@@ -2606,11 +2777,18 @@ export default function ClosuresView() {
 
       {activeSection === 'teamClosures' && (isDelivery || isSupplier || isAdmin) && (
         <div className="mb-3 app-card !p-3 border border-violet-500/30 bg-violet-500/5">
+          {teamClosureTeamOptions.length === 0 && (
+            <div className="mb-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs font-bold text-amber-300">
+              ⚠️ Cierres de Equipo está vacío porque todavía no existe un equipo activo con miembros ACCEPTED.
+            </div>
+          )}
           <div className="font-extrabold">📊 CIERRES DE EQUIPO</div>
           <p className="text-xs text-muted-foreground mt-1">
             {isAdmin
-              ? 'ADMIN puede ver y realizar cierres de todos los equipos. El filtro de repartidores contiene únicamente miembros ACCEPTED de equipos.'
-              : 'Esta pantalla es igual al Cierre normal, pero acá solo aparecen pedidos asignados a miembros ACCEPTED de tu equipo, sin importar de qué proveedor sea la venta.'}
+              ? 'ADMIN puede elegir cualquier equipo, filtrar sus deliveries y realizar el cierre completo de todos los pedidos.'
+              : isSupplier
+                ? 'Solo aparecen pedidos del equipo donde vos sos líder. Podés controlar ventas de cualquier proveedor, pero solo marcar RENDIDO cuando provider_email sea tu propio usuario.'
+                : 'Solo aparecen pedidos del equipo donde vos sos líder. Podés controlarlos por delivery, pero DELIVERY no puede marcar RENDIDO aunque sea líder.'}
           </p>
         </div>
       )}
@@ -2653,7 +2831,40 @@ export default function ClosuresView() {
         <label className="app-label !mt-0">Hasta</label>
         <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
         
-        {(isSupplier || isAdmin) && (
+        {activeSection === 'teamClosures' && (isDelivery || isSupplier || isAdmin) && (
+          <div className="flex items-center gap-1">
+            <select
+              className="app-input !w-auto min-w-[280px]"
+              value={selectedTeamOwnerEmail}
+              onChange={event => {
+                setSelectedTeamOwnerEmail(event.target.value);
+                setFilterDeliveries(new Set());
+                setSelectedGuideIds(new Set());
+              }}
+              disabled={!isAdmin}
+              title={isAdmin ? 'Seleccionar equipo/líder' : 'Tu equipo de logística'}
+            >
+              {isAdmin && <option value="">Seleccionar equipo...</option>}
+              {teamClosureTeamOptions.map(team => (
+                <option key={team.owner_email} value={team.owner_email}>
+                  👥 {team.owner_name || team.owner_email}
+                </option>
+              ))}
+            </select>
+
+            {teamClosureTeamOptions.length === 0 && (
+              <span className="text-xs text-amber-400 font-bold">
+                No hay equipos activos con miembros ACCEPTED
+              </span>
+            )}
+          </div>
+        )}
+
+        {(
+          activeSection === 'teamClosures'
+            ? (isDelivery || isSupplier || isAdmin)
+            : (isSupplier || isAdmin)
+        ) && (
           <div className="relative flex items-center gap-1">
             <button
               type="button"
@@ -2661,7 +2872,9 @@ export default function ClosuresView() {
               onClick={() => setShowDeliveryDropdown(!showDeliveryDropdown)}
             >
               {selectedDeliveryList.length === 0
-                ? 'Todos los repartidores'
+                ? activeSection === 'teamClosures'
+                  ? 'Todos los deliveries del equipo'
+                  : 'Todos los repartidores'
                 : `${selectedDeliveryList.length} repartidor${selectedDeliveryList.length > 1 ? 'es' : ''} seleccionado${selectedDeliveryList.length > 1 ? 's' : ''}`}
             </button>
 
@@ -3229,16 +3442,20 @@ export default function ClosuresView() {
               </>
             )}
 
-            {canManageRendicion && (
+            {canMarkSelectedAsRendido && (
               <>
                 <button
                   type="button"
                   className="nav-btn active"
                   onClick={markSelectedAsRendido}
-                  disabled={bulkBusy || selectedDeliveredOrders.length === 0}
-                  title="Solo marca como RENDIDO los pedidos ENTREGADO / ENCOMIENDA ENTREGADA seleccionados"
+                  disabled={bulkBusy || selectedRendibleOrders.length === 0}
+                  title={
+                    activeSection === 'teamClosures' && isSupplier
+                      ? 'En Cierres de Equipo, PROVEEDOR solo puede rendir ventas propias'
+                      : 'Solo marca como RENDIDO los pedidos ENTREGADO / ENCOMIENDA ENTREGADA seleccionados'
+                  }
                 >
-                  ✅ Marcar como RENDIDO ({selectedDeliveredOrders.length})
+                  ✅ Marcar como RENDIDO ({selectedRendibleOrders.length})
                 </button>
 
                 <input
