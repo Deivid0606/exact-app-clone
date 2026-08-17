@@ -718,7 +718,7 @@ export default function ClosuresView() {
 
     setTeamLoading(true);
     try {
-      if (isDelivery || isSupplier) {
+      if (isDelivery || isSupplier || isAdmin) {
         const requests: PromiseLike<any>[] = [
           supabase.rpc('get_delivery_team'),
         ];
@@ -728,8 +728,8 @@ export default function ClosuresView() {
           requests.push(supabase.rpc('get_delivery_team_invitations'));
         }
 
-        // PROVEEDOR conserva además la vista global de todos los equipos.
-        if (isSupplier) {
+        // ADMIN y PROVEEDOR conservan además la vista global de todos los equipos.
+        if (isSupplier || isAdmin) {
           requests.push(supabase.rpc('get_all_delivery_teams'));
         }
 
@@ -749,15 +749,11 @@ export default function ClosuresView() {
           setTeamInvitations([]);
         }
 
-        if (isSupplier) {
+        if (isSupplier || isAdmin) {
           const allTeamsResult = results[index];
           if (allTeamsResult.error) throw allTeamsResult.error;
           setAllTeams((allTeamsResult.data || []) as AdminTeamRow[]);
         }
-      } else if (isAdmin) {
-        const { data, error } = await supabase.rpc('get_all_delivery_teams');
-        if (error) throw error;
-        setAllTeams((data || []) as AdminTeamRow[]);
       }
     } catch (error: any) {
       console.error('Error cargando equipo de logística:', error);
@@ -835,7 +831,7 @@ export default function ClosuresView() {
   };
 
   const markTeamReceiptReceived = async (memberUserId: string) => {
-    if (!(isDelivery || isSupplier)) return;
+    if (!(isDelivery || isSupplier || isAdmin)) return;
 
     const row = teamClosureSummary.find(
       item => item.member_user_id === memberUserId,
@@ -884,7 +880,7 @@ export default function ClosuresView() {
   };
 
   const inviteDelivery = async (memberUserId: string) => {
-    if (!(isDelivery || isSupplier) || !memberUserId) return;
+    if (!(isDelivery || isSupplier || isAdmin) || !memberUserId) return;
 
     setBulkBusy(true);
     try {
@@ -1973,7 +1969,7 @@ export default function ClosuresView() {
   };
 
   const assignSelectedToTeam = async () => {
-    if (!(isDelivery || isSupplier)) return;
+    if (!(isDelivery || isSupplier || isAdmin)) return;
 
     const ids = Array.from(selectedGuideIds);
     if (ids.length === 0) {
@@ -1986,8 +1982,10 @@ export default function ClosuresView() {
       return;
     }
 
-    if (isSupplier && bulkTeamUserId === 'SELF') {
-      toast.error('El PROVEEDOR líder debe asignar el pedido a un delivery de su equipo');
+    if ((isSupplier || isAdmin) && bulkTeamUserId === 'SELF') {
+      toast.error(
+        `${isAdmin ? 'El ADMIN' : 'El PROVEEDOR'} líder debe asignar el pedido a un delivery de su equipo`,
+      );
       return;
     }
 
@@ -2218,7 +2216,7 @@ export default function ClosuresView() {
   // DELIVERY común:
   //   solo los ve cuando SU propio usuario ya tiene al menos una tarifa
   //   configurada en delivery_fees. Si todavía no tiene ninguna, se ocultan.
-  const isTeamLeader = (isDelivery || isSupplier) && acceptedTeamMembers.length > 0;
+  const isTeamLeader = (isDelivery || isSupplier || isAdmin) && acceptedTeamMembers.length > 0;
 
   const deliveryHasOwnTariff = useMemo(() => {
     if (!isDelivery || !myEmail) return false;
@@ -2302,7 +2300,7 @@ export default function ClosuresView() {
           )}
           {teamLoading ? (
             <div className="app-card text-sm text-muted-foreground">Cargando Equipo de Logística...</div>
-          ) : (isDelivery || isSupplier) ? (
+          ) : (isDelivery || isSupplier || isAdmin) ? (
             <>
               {isDelivery && teamInvitations.length > 0 && (
                 <div className="app-card !p-4 border border-amber-500/30 bg-amber-500/5">
@@ -2340,11 +2338,15 @@ export default function ClosuresView() {
                 <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
                   <div>
                     <h4 className="font-extrabold text-lg">
-                      👥 {isSupplier ? 'Mi equipo de logística como PROVEEDOR' : 'Mi equipo'}
+                      👥 {isAdmin
+                        ? 'Mi equipo de logística como ADMIN'
+                        : isSupplier
+                          ? 'Mi equipo de logística como PROVEEDOR'
+                          : 'Mi equipo'}
                     </h4>
                     <p className="text-xs text-muted-foreground">
                       Solo los deliveries que acepten tu solicitud aparecerán al asignar pedidos.
-                      {isSupplier && ' Vos quedás como titular/líder del equipo.'}
+                      {(isSupplier || isAdmin) && ' Vos quedás como titular/líder del equipo.'}
                     </p>
                   </div>
                   <button className="nav-btn" type="button" onClick={loadTeamData}>🔄 Actualizar</button>
@@ -2417,13 +2419,15 @@ export default function ClosuresView() {
                 </div>
               </div>
 
-              {isSupplier && (
+              {(isSupplier || isAdmin) && (
                 <div className="app-card !p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
                     <div>
                       <h4 className="font-extrabold text-lg">🌐 Todos los equipos de logística</h4>
                       <p className="text-xs text-muted-foreground">
-                        Como PROVEEDOR conservás la vista global, además de administrar tu propio equipo.
+                        {isAdmin
+                          ? 'Como ADMIN conservás la vista global, además de administrar tu propio equipo.'
+                          : 'Como PROVEEDOR conservás la vista global, además de administrar tu propio equipo.'}
                       </p>
                     </div>
                     <button className="nav-btn" type="button" onClick={loadTeamData}>🔄 Actualizar</button>
@@ -2631,7 +2635,7 @@ export default function ClosuresView() {
                         )}
                       </div>
 
-                      {(isDelivery || isSupplier) &&
+                      {(isDelivery || isSupplier || isAdmin) &&
                         String(row.owner_email || '').trim().toLowerCase() === myEmail.trim().toLowerCase() && (
                         <button
                           type="button"
@@ -2747,7 +2751,7 @@ export default function ClosuresView() {
           <span className="badge-status badge-entregado">✏️ PROVEEDOR/ADMIN: edición completa</span>
           <p className="text-xs text-muted-foreground mt-1">
             Podés actualizar estados, fechas, ciudades, marcar pedidos seleccionados como RENDIDO y gestionar rendiciones.
-            {isSupplier && ' También podés crear tu propio Equipo de Logística, ser su titular/líder y usar tus tarifas por ciudad para los pedidos delegados.'}
+            {(isSupplier || isAdmin) && ` También podés crear tu propio Equipo de Logística, ser su titular/líder y ${isSupplier ? 'usar tus tarifas por ciudad' : 'asignar pedidos a tus miembros'} para los pedidos delegados.`}
           </p>
         </div>
       )}
@@ -3312,7 +3316,7 @@ export default function ClosuresView() {
               </>
             )}
 
-            {(isDelivery || isSupplier) && (
+            {(isDelivery || isSupplier || isAdmin) && (
               <>
                 <select
                   className="app-input !w-auto !py-2 text-xs min-w-[210px]"
