@@ -1139,41 +1139,21 @@ export default function ClosuresView() {
     profile?.user_id,
   ]);
 
-  useEffect(() => {
-    if (activeSection !== 'teamClosures') return;
 
-    // DELIVERY/PROVEEDOR líder: su propio equipo queda seleccionado automáticamente.
-    if (!isAdmin) {
-      const ownTeam = teamClosureTeamOptions[0];
 
-      setSelectedTeamOwnerEmail(ownTeam?.owner_email || '');
-      setFilterDeliveries(new Set());
-      return;
-    }
+  const effectiveTeamOwnerEmail =
+    activeSection === 'teamClosures'
+      ? isAdmin
+        ? String(selectedTeamOwnerEmail || '').trim()
+        : String(myEmail || '').trim()
+      : '';
 
-    // ADMIN debe elegir el equipo a cerrar.
-    const stillExists = teamClosureTeamOptions.some(
-      team =>
-        String(team.owner_email || '').toLowerCase() ===
-        String(selectedTeamOwnerEmail || '').toLowerCase(),
-    );
-
-    if (!stillExists) {
-      setSelectedTeamOwnerEmail('');
-      setFilterDeliveries(new Set());
-    }
-  }, [
-    activeSection,
-    isAdmin,
-    teamClosureTeamOptions,
-    selectedTeamOwnerEmail,
-  ]);
 
   const teamClosureDeliveryOptions = useMemo(() => {
     if (activeSection !== 'teamClosures') return deliveries;
-    if (!selectedTeamOwnerEmail) return [];
+    if (!effectiveTeamOwnerEmail) return [];
 
-    const ownerEmail = selectedTeamOwnerEmail.trim().toLowerCase();
+    const ownerEmail = effectiveTeamOwnerEmail.toLowerCase();
 
     const allowedEmails = new Set<string>(
       (
@@ -1208,7 +1188,7 @@ export default function ClosuresView() {
     teamMembers,
     isAdmin,
     myEmail,
-    selectedTeamOwnerEmail,
+    effectiveTeamOwnerEmail,
   ]);
 
   const filteredDeliveryOptions = useMemo(() => {
@@ -1363,9 +1343,7 @@ export default function ClosuresView() {
        *
        * Esto evita mezclar pedidos si un DELIVERY participa en más de un equipo.
        */
-      const teamOwnerEmail = isAdmin
-        ? String(selectedTeamOwnerEmail || '').trim()
-        : String(myEmail || '').trim();
+      const teamOwnerEmail = effectiveTeamOwnerEmail;
 
       if (!teamOwnerEmail) {
         setOrders([]);
@@ -1484,7 +1462,7 @@ export default function ClosuresView() {
     activeSection,
     teamMembers,
     allTeams,
-    selectedTeamOwnerEmail,
+    effectiveTeamOwnerEmail,
   ]);
 
   const filteredOrders = useMemo(() => {
@@ -2527,8 +2505,12 @@ export default function ClosuresView() {
             type="button"
             className={`nav-btn ${activeSection === 'teamClosures' ? 'active' : ''}`}
             onClick={async () => {
+              if (isAdmin) {
+                setSelectedTeamOwnerEmail('');
+              }
               setFilterDeliveries(new Set());
               setFilterSuppliers(new Set());
+              setSelectedGuideIds(new Set());
               await loadTeamData();
               setActiveSection('teamClosures');
             }}
@@ -2835,8 +2817,9 @@ export default function ClosuresView() {
           <div className="flex items-center gap-1">
             <select
               className="app-input !w-auto min-w-[280px]"
-              value={selectedTeamOwnerEmail}
+              value={isAdmin ? selectedTeamOwnerEmail : effectiveTeamOwnerEmail}
               onChange={event => {
+                if (!isAdmin) return;
                 setSelectedTeamOwnerEmail(event.target.value);
                 setFilterDeliveries(new Set());
                 setSelectedGuideIds(new Set());
