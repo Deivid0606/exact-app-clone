@@ -773,6 +773,35 @@ export default function ClosuresView() {
   };
 
 
+  // Mantener visibles las invitaciones recibidas.
+  // Un DELIVERY puede recibir solicitudes tanto de un DELIVERY líder
+  // como de un PROVEEDOR líder.
+  useEffect(() => {
+    if (!isDelivery) return;
+
+    const loadPendingInvitations = async () => {
+      try {
+        const { data, error } = await supabase.rpc(
+          'get_delivery_team_invitations',
+        );
+
+        if (error) throw error;
+
+        setTeamInvitations((data || []) as TeamInvitation[]);
+      } catch (error) {
+        console.error('Error cargando solicitudes de equipo:', error);
+      }
+    };
+
+    loadPendingInvitations();
+  }, [isDelivery, myEmail]);
+
+  useEffect(() => {
+    if (activeSection === 'team' && (isDelivery || isSupplier || isAdmin)) {
+      loadTeamData();
+    }
+  }, [activeSection]);
+
   const loadTeamClosures = async () => {
     if (!(isDelivery || isAdmin || isSupplier)) return;
 
@@ -2240,6 +2269,11 @@ export default function ClosuresView() {
             }}
           >
             👥 Equipo de Logística
+            {isDelivery && teamInvitations.length > 0 && (
+              <span className="ml-2 inline-flex min-w-[20px] h-5 px-1.5 items-center justify-center rounded-full bg-amber-500 text-black text-[10px] font-extrabold">
+                {teamInvitations.length}
+              </span>
+            )}
           </button>
           <button
             type="button"
@@ -2256,6 +2290,16 @@ export default function ClosuresView() {
 
       {activeSection === 'team' && (isDelivery || isAdmin || isSupplier) && (
         <div className="space-y-4">
+          {isDelivery && teamInvitations.length > 0 && (
+            <div className="app-card !p-4 border-2 border-amber-500/50 bg-amber-500/10">
+              <div className="font-extrabold text-base">
+                🔔 Tenés {teamInvitations.length} solicitud{teamInvitations.length === 1 ? '' : 'es'} para unirte a un equipo
+              </div>
+              <div className="text-xs text-muted-foreground mt-1">
+                Aceptá la solicitud para que el líder pueda asignarte pedidos.
+              </div>
+            </div>
+          )}
           {teamLoading ? (
             <div className="app-card text-sm text-muted-foreground">Cargando Equipo de Logística...</div>
           ) : (isDelivery || isSupplier) ? (
