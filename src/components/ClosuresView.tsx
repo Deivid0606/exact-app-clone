@@ -1084,14 +1084,34 @@ export default function ClosuresView() {
     );
   };
 
+  const teamClosureDeliveryOptions = useMemo(() => {
+    if (activeSection !== 'teamClosures') return deliveries;
+
+    // En Cierres de Equipo el filtro de repartidores queda limitado al equipo.
+    // ADMIN ve los miembros ACCEPTED de todos los equipos.
+    const allowedEmails = new Set<string>(
+      (isAdmin
+        ? allTeams
+            .filter(row => String(row.status || '').toUpperCase() === 'ACCEPTED')
+            .map(row => String(row.member_email || '').toLowerCase())
+        : acceptedTeamMembers.map(member => String(member.member_email || '').toLowerCase())
+      ).filter(Boolean),
+    );
+
+    return deliveries.filter((delivery: any) =>
+      allowedEmails.has(String(delivery.email || '').toLowerCase()),
+    );
+  }, [activeSection, deliveries, allTeams, acceptedTeamMembers, isAdmin]);
+
   const filteredDeliveryOptions = useMemo(() => {
-    if (!deliverySearch.trim()) return deliveries;
+    const source = teamClosureDeliveryOptions;
+    if (!deliverySearch.trim()) return source;
     const q = deliverySearch.toLowerCase().trim();
-    return deliveries.filter((d: any) =>
+    return source.filter((d: any) =>
       String(d.name || '').toLowerCase().includes(q) ||
       String(d.email || '').toLowerCase().includes(q)
     );
-  }, [deliveries, deliverySearch]);
+  }, [teamClosureDeliveryOptions, deliverySearch]);
 
   const toggleDeliveryFilter = (email: string) => {
     setFilterDeliveries(prev => {
@@ -1103,10 +1123,14 @@ export default function ClosuresView() {
   };
 
   const selectAllDeliveryFilters = () => {
-    if (filterDeliveries.size === deliveries.length) {
+    const source = activeSection === 'teamClosures'
+      ? teamClosureDeliveryOptions
+      : deliveries;
+
+    if (filterDeliveries.size === source.length) {
       setFilterDeliveries(new Set());
     } else {
-      setFilterDeliveries(new Set(deliveries.map((d: any) => d.email)));
+      setFilterDeliveries(new Set(source.map((d: any) => d.email)));
     }
   };
 
@@ -1222,7 +1246,47 @@ export default function ClosuresView() {
       .lte(dateField, dateTo + 'T23:59:59')
       .order(dateField, { ascending: false });
 
-    if (isSupplier) {
+    if (activeSection === 'teamClosures' && (isDelivery || isSupplier || isAdmin)) {
+      /*
+       * CIERRES DE EQUIPO:
+       * usa exactamente la misma pantalla del Cierre normal,
+       * pero la fuente de pedidos queda limitada a miembros ACCEPTED.
+       * NO se filtra por provider_email: importa el equipo logístico.
+       */
+      const allowedTeamEmails = isAdmin
+        ? Array.from(
+            new Set(
+              allTeams
+                .filter(row => String(row.status || '').toUpperCase() === 'ACCEPTED')
+                .map(row => String(row.member_email || '').trim())
+                .filter(Boolean),
+            ),
+          )
+        : acceptedTeamMembers
+            .map(member => String(member.member_email || '').trim())
+            .filter(Boolean);
+
+      const requestedEmails = selectedDeliveryList.length > 0
+        ? selectedDeliveryList.filter(email =>
+            allowedTeamEmails.some(
+              allowed => allowed.toLowerCase() === String(email).toLowerCase(),
+            ),
+          )
+        : allowedTeamEmails;
+
+      if (requestedEmails.length === 0) {
+        setOrders([]);
+        setTotalPedidosAsignados(0);
+        setRendicionPagada(null);
+        return;
+      }
+
+      query = query.in('assigned_delivery', requestedEmails);
+
+      // En Cierres de Equipo el filtro de proveedor NO limita los pedidos.
+      // La venta puede pertenecer a cualquier proveedor.
+    } else if (isSupplier) {
+      // CIERRE NORMAL: se mantiene exactamente como estaba.
       query = query.eq('provider_email', myEmail);
       if (selectedDeliveryList.length > 0) {
         query = query.in('assigned_delivery', selectedDeliveryList);
@@ -1274,7 +1338,19 @@ export default function ClosuresView() {
     }
   };
 
-  useEffect(() => { loadClosures(); }, [filterSuppliers, filterDeliveries, filterStatuses, dateFrom, dateTo, filterDateBy]);
+  useEffect(() => {
+    loadClosures();
+  }, [
+    filterSuppliers,
+    filterDeliveries,
+    filterStatuses,
+    dateFrom,
+    dateTo,
+    filterDateBy,
+    activeSection,
+    teamMembers,
+    allTeams,
+  ]);
 
   const filteredOrders = useMemo(() => {
     if (!searchTerm.trim()) return orders;
@@ -2276,9 +2352,11 @@ export default function ClosuresView() {
           <button
             type="button"
             className={`nav-btn ${activeSection === 'teamClosures' ? 'active' : ''}`}
-            onClick={() => {
+            onClick={async () => {
+              setFilterDeliveries(new Set());
+              setFilterSuppliers(new Set());
+              await loadTeamData();
               setActiveSection('teamClosures');
-              loadTeamClosures();
             }}
           >
             📊 Cierres de Equipo
@@ -2521,215 +2599,18 @@ export default function ClosuresView() {
         </div>
       )}
 
-      {activeSection === 'teamClosures' && (isDelivery || isAdmin || isSupplier) && (
-        <div className="space-y-4">
-          <div className="app-card !p-4 border border-violet-500/25 bg-violet-500/5">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <h4 className="font-extrabold text-lg">📊 Cierres de Equipo</h4>
-                <p className="text-xs text-muted-foreground mt-1">
-                  {isDelivery
-                    ? 'Control de rendiciones de los deliveries que aceptaron pertenecer a tu equipo. Acá se incluyen sus pedidos asignados sin importar de qué proveedor sea la venta.'
-                    : isSupplier
-                      ? 'Control de tu propio equipo y vista global de cierres. Los pedidos de tus miembros aparecen acá sin importar de qué proveedor sea la venta.'
-                      : 'Vista global de cierres de equipos para ADMIN.'}
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  type="date"
-                  className="app-input !w-auto"
-                  value={dateFrom}
-                  onChange={event => setDateFrom(event.target.value)}
-                />
-                <span className="text-xs text-muted-foreground">a</span>
-                <input
-                  type="date"
-                  className="app-input !w-auto"
-                  value={dateTo}
-                  onChange={event => setDateTo(event.target.value)}
-                />
-                <button
-                  type="button"
-                  className="nav-btn active"
-                  onClick={loadTeamClosures}
-                  disabled={teamClosureLoading}
-                >
-                  {teamClosureLoading ? 'Cargando...' : '🔄 Actualizar'}
-                </button>
-              </div>
-            </div>
-          </div>
+      <div className={activeSection === 'orders' || activeSection === 'teamClosures' ? '' : 'hidden'}>
 
-          {teamClosureLoading ? (
-            <div className="app-card !p-6 text-sm text-muted-foreground">
-              Cargando panorama de cierres...
-            </div>
-          ) : teamClosureSummary.length === 0 ? (
-            <div className="app-card !p-6">
-              <div className="font-bold">Todavía no hay miembros activos con movimientos.</div>
-              <div className="text-xs text-muted-foreground mt-1">
-                Cuando un delivery acepte tu invitación y tenga pedidos asignados, aparecerá acá.
-              </div>
-            </div>
-          ) : (
-            <>
-              <div className="grid gap-4">
-                {teamClosureSummary.map(row => (
-                  <div
-                    key={`${row.owner_user_id}-${row.member_user_id}`}
-                    className="app-card !p-4 border border-border"
-                  >
-                    <div className="flex flex-wrap items-start justify-between gap-4">
-                      <div className="min-w-[220px]">
-                        {!isDelivery && (
-                          <div className="text-[11px] text-muted-foreground mb-1">
-                            Encargado: <span className="font-bold text-foreground">{row.owner_name || row.owner_email}</span>
-                          </div>
-                        )}
-                        <div className="text-lg font-extrabold">
-                          🚚 {row.member_name || row.member_email}
-                        </div>
-                        <div className="text-xs text-muted-foreground">{row.member_email}</div>
-                      </div>
-
-                      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 flex-1">
-                        <div className="rounded-xl border border-border p-3">
-                          <div className="text-[11px] text-muted-foreground">Pedidos asignados</div>
-                          <div className="text-2xl font-extrabold">{Number(row.assigned_count || 0)}</div>
-                        </div>
-                        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 p-3">
-                          <div className="text-[11px] text-muted-foreground">Entregados</div>
-                          <div className="text-2xl font-extrabold">{Number(row.delivered_count || 0)}</div>
-                        </div>
-                        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
-                          <div className="text-[11px] text-muted-foreground">Pendientes de rendir</div>
-                          <div className="text-2xl font-extrabold">{Number(row.pending_receipt_count || 0)}</div>
-                        </div>
-                        <div className="rounded-xl border border-violet-500/30 bg-violet-500/5 p-3">
-                          <div className="text-[11px] text-muted-foreground">Monto a rendir</div>
-                          <div className="text-xl font-extrabold">
-                            Gs {nf(Number(row.amount_to_render || 0))}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-border pt-3">
-                      <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-                        <span>
-                          Cobrado: <strong className="text-foreground">Gs {nf(Number(row.amount_collected || 0))}</strong>
-                        </span>
-                        {(!isDelivery || row.fee_configured) && (
-                          <span>
-                            Tarifa delivery: <strong className="text-foreground">Gs {nf(Number(row.delivery_fee_total || 0))}</strong>
-                          </span>
-                        )}
-                        <span>
-                          Período: <strong className="text-foreground">{formatDatePY(dateFrom)} - {formatDatePY(dateTo)}</strong>
-                        </span>
-                        {!isDelivery && (
-                          <span className="text-violet-300">
-                            Tarifa calculada con costos por ciudad del titular del equipo
-                          </span>
-                        )}
-                      </div>
-
-                      {(isDelivery || isSupplier || isAdmin) &&
-                        String(row.owner_email || '').trim().toLowerCase() === myEmail.trim().toLowerCase() && (
-                        <button
-                          type="button"
-                          className="nav-btn active"
-                          disabled={bulkBusy || Number(row.pending_receipt_count || 0) === 0}
-                          onClick={() => markTeamReceiptReceived(row.member_user_id)}
-                          title="Solo el delivery encargado puede confirmar que recibió esta rendición"
-                        >
-                          ✅ RECIBIDO — Gs {nf(Number(row.amount_to_render || 0))}
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="app-card !p-4">
-                <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-                  <div>
-                    <h4 className="font-extrabold text-lg">📜 Historial de recibidos</h4>
-                    <p className="text-xs text-muted-foreground">
-                      Cada confirmación guarda los pedidos incluidos, monto, período, fecha y encargado que recibió.
-                    </p>
-                  </div>
-                  <span className="chip text-[11px]">
-                    {teamReceiptHistory.length} registro{teamReceiptHistory.length === 1 ? '' : 's'}
-                  </span>
-                </div>
-
-                {teamReceiptHistory.length === 0 ? (
-                  <div className="text-sm text-muted-foreground py-4">
-                    Todavía no hay rendiciones recibidas.
-                  </div>
-                ) : (
-                  <div className="overflow-auto">
-                    <table className="app-table min-w-[1100px]">
-                      <thead>
-                        <tr>
-                          <th>Fecha recibido</th>
-                          {!isDelivery && <th>Encargado</th>}
-                          <th>Delivery</th>
-                          <th>Período</th>
-                          <th className="text-right">Pedidos</th>
-                          <th className="text-right">Cobrado</th>
-                          {(!isDelivery || teamReceiptHistory.some(item => item.fee_configured)) && (
-                            <th className="text-right">Tarifa</th>
-                          )}
-                          <th className="text-right">Recibido</th>
-                          <th>Registrado por</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {teamReceiptHistory.map(item => (
-                          <tr key={item.receipt_id}>
-                            <td className="text-xs whitespace-nowrap">
-                              {item.received_at ? new Date(item.received_at).toLocaleString('es-PY') : '—'}
-                            </td>
-                            {!isDelivery && (
-                              <td>
-                                <div className="font-bold text-xs">{item.owner_name || item.owner_email}</div>
-                                <div className="text-[11px] text-muted-foreground">{item.owner_email}</div>
-                              </td>
-                            )}
-                            <td>
-                              <div className="font-bold text-xs">{item.member_name || item.member_email}</div>
-                              <div className="text-[11px] text-muted-foreground">{item.member_email}</div>
-                            </td>
-                            <td className="text-xs whitespace-nowrap">
-                              {formatDatePY(item.period_from)} - {formatDatePY(item.period_to)}
-                            </td>
-                            <td className="text-right text-xs font-bold">{Number(item.order_count || 0)}</td>
-                            <td className="text-right text-xs">Gs {nf(Number(item.amount_collected || 0))}</td>
-                            {(!isDelivery || teamReceiptHistory.some(historyItem => historyItem.fee_configured)) && (
-                              <td className="text-right text-xs">
-                                {isDelivery && !item.fee_configured
-                                  ? '—'
-                                  : `Gs ${nf(Number(item.delivery_fee_total || 0))}`}
-                              </td>
-                            )}
-                            <td className="text-right text-xs font-extrabold">Gs {nf(Number(item.amount_received || 0))}</td>
-                            <td className="text-xs">{item.received_by_email || '—'}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
+      {activeSection === 'teamClosures' && (isDelivery || isSupplier || isAdmin) && (
+        <div className="mb-3 app-card !p-3 border border-violet-500/30 bg-violet-500/5">
+          <div className="font-extrabold">📊 CIERRES DE EQUIPO</div>
+          <p className="text-xs text-muted-foreground mt-1">
+            {isAdmin
+              ? 'ADMIN puede ver y realizar cierres de todos los equipos. El filtro de repartidores contiene únicamente miembros ACCEPTED de equipos.'
+              : 'Esta pantalla es igual al Cierre normal, pero acá solo aparecen pedidos asignados a miembros ACCEPTED de tu equipo, sin importar de qué proveedor sea la venta.'}
+          </p>
         </div>
       )}
-
-      <div className={activeSection === 'orders' ? '' : 'hidden'}>
 
       {isDelivery && (
         <div className="mb-3">
@@ -2802,7 +2683,7 @@ export default function ClosuresView() {
                 </div>
                 <div className="flex gap-2 p-2 border-b border-border">
                   <button className="nav-btn !py-1 text-xs" type="button" onClick={selectAllDeliveryFilters}>
-                    {filterDeliveries.size === deliveries.length ? 'Deseleccionar todos' : 'Seleccionar todos'}
+                    {filterDeliveries.size === (activeSection === 'teamClosures' ? teamClosureDeliveryOptions.length : deliveries.length) ? 'Deseleccionar todos' : 'Seleccionar todos'}
                   </button>
                   <button className="nav-btn !py-1 text-xs" type="button" onClick={() => setFilterDeliveries(new Set())}>
                     Limpiar
@@ -2832,7 +2713,7 @@ export default function ClosuresView() {
           </div>
         )}
 
-        {(isAdmin || isDelivery) && (
+        {activeSection !== 'teamClosures' && (isAdmin || isDelivery) && (
           <div className="relative">
             <button
               type="button"
