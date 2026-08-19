@@ -1177,29 +1177,34 @@ export default function ClosuresView() {
     if (activeSection !== 'teamClosures') return deliveries;
     if (!effectiveTeamOwnerEmail) return [];
 
-    const ownerEmail = effectiveTeamOwnerEmail.toLowerCase();
+    const ownerEmail = effectiveTeamOwnerEmail.trim().toLowerCase();
+
+    /*
+     * CIERRES DE EQUIPO:
+     * El filtro incluye SIEMPRE al líder + todos sus miembros ACCEPTED.
+     * Así también aparecen los pedidos asignados directamente al líder.
+     */
+    const memberEmails = isAdmin
+      ? allTeams
+          .filter(
+            row =>
+              String(row.status || '').toUpperCase() === 'ACCEPTED' &&
+              String(row.owner_email || '').trim().toLowerCase() === ownerEmail,
+          )
+          .map(row => String(row.member_email || '').trim().toLowerCase())
+      : String(myEmail || '').trim().toLowerCase() === ownerEmail
+        ? teamMembers
+            .filter(
+              member =>
+                String(member.status || '').toUpperCase() === 'ACCEPTED',
+            )
+            .map(member =>
+              String(member.member_email || '').trim().toLowerCase(),
+            )
+        : [];
 
     const allowedEmails = new Set<string>(
-      (
-        isAdmin
-          ? allTeams
-              .filter(
-                row =>
-                  String(row.status || '').toUpperCase() === 'ACCEPTED' &&
-                  String(row.owner_email || '').trim().toLowerCase() === ownerEmail,
-              )
-              .map(row => String(row.member_email || '').trim().toLowerCase())
-          : String(myEmail || '').trim().toLowerCase() === ownerEmail
-            ? teamMembers
-                .filter(
-                  member =>
-                    String(member.status || '').toUpperCase() === 'ACCEPTED',
-                )
-                .map(member =>
-                  String(member.member_email || '').trim().toLowerCase(),
-                )
-            : []
-      ).filter(Boolean),
+      [ownerEmail, ...memberEmails].filter(Boolean),
     );
 
     return deliveries.filter((delivery: any) =>
@@ -1214,6 +1219,7 @@ export default function ClosuresView() {
     myEmail,
     effectiveTeamOwnerEmail,
   ]);
+
 
   const filteredDeliveryOptions = useMemo(() => {
     const source = teamClosureDeliveryOptions;
@@ -1376,20 +1382,22 @@ export default function ClosuresView() {
         return;
       }
 
-      const allowedTeamEmails = isAdmin
-        ? Array.from(
-            new Set(
-              allTeams
-                .filter(
-                  row =>
-                    String(row.status || '').toUpperCase() === 'ACCEPTED' &&
-                    String(row.owner_email || '').trim().toLowerCase() ===
-                      teamOwnerEmail.toLowerCase(),
-                )
-                .map(row => String(row.member_email || '').trim())
-                .filter(Boolean),
-            ),
-          )
+      /*
+       * IMPORTANTE:
+       * El propio líder también forma parte del cierre del equipo.
+       * Antes solo entraban miembros ACCEPTED y los pedidos asignados
+       * directamente al líder quedaban fuera.
+       */
+      const teamMemberEmails = isAdmin
+        ? allTeams
+            .filter(
+              row =>
+                String(row.status || '').toUpperCase() === 'ACCEPTED' &&
+                String(row.owner_email || '').trim().toLowerCase() ===
+                  teamOwnerEmail.toLowerCase(),
+            )
+            .map(row => String(row.member_email || '').trim())
+            .filter(Boolean)
         : teamMembers
             .filter(
               member =>
@@ -1397,6 +1405,14 @@ export default function ClosuresView() {
             )
             .map(member => String(member.member_email || '').trim())
             .filter(Boolean);
+
+      const allowedTeamEmails = Array.from(
+        new Set(
+          [teamOwnerEmail, ...teamMemberEmails]
+            .map(email => String(email || '').trim())
+            .filter(Boolean),
+        ),
+      );
 
       const requestedEmails =
         selectedDeliveryList.length > 0
