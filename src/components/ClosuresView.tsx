@@ -1177,13 +1177,10 @@ export default function ClosuresView() {
     if (activeSection !== 'teamClosures') return deliveries;
     if (!effectiveTeamOwnerEmail) return [];
 
-    const ownerEmail = effectiveTeamOwnerEmail.trim().toLowerCase();
+    const ownerEmail = effectiveTeamOwnerEmail.toLowerCase();
 
-    /*
-     * CIERRES DE EQUIPO:
-     * El filtro incluye SIEMPRE al líder + todos sus miembros ACCEPTED.
-     * Así también aparecen los pedidos asignados directamente al líder.
-     */
+    // En Cierres de Equipo el filtro incluye al propio líder + todos sus
+    // miembros ACCEPTED. No depende del proveedor del producto.
     const memberEmails = isAdmin
       ? allTeams
           .filter(
@@ -1219,7 +1216,6 @@ export default function ClosuresView() {
     myEmail,
     effectiveTeamOwnerEmail,
   ]);
-
 
   const filteredDeliveryOptions = useMemo(() => {
     const source = teamClosureDeliveryOptions;
@@ -1352,27 +1348,26 @@ export default function ClosuresView() {
 
   const loadClosures = async () => {
     let dateField = filterDateBy;
-    
+
     if (isDelivery || isSupplier) {
       dateField = 'assigned_at';
     } else if (isVendedor) {
       dateField = 'created_at';
     }
-    
-    let query = supabase.from('orders').select('*')
-      .gte(dateField, dateFrom + 'T00:00:00')
-      .lte(dateField, dateTo + 'T23:59:59')
-      .order(dateField, { ascending: false });
 
+    /*
+     * CIERRES DE EQUIPO
+     * -----------------
+     * NO leer directamente public.orders para esta pestaña.
+     * Un PROVEEDOR normalmente tiene RLS que solo le permite ver sus propias
+     * ventas, por lo que un .from('orders').select('*') elimina silenciosamente
+     * los pedidos de otros proveedores antes de que lleguen al frontend.
+     *
+     * Esta RPC es SECURITY DEFINER y valida en el servidor que el usuario sea
+     * el líder del equipo (o ADMIN). Después devuelve TODOS los pedidos cuya
+     * gestión logística pertenece a ese líder, sin filtrar provider_email.
+     */
     if (activeSection === 'teamClosures' && (isDelivery || isSupplier || isAdmin)) {
-      /*
-       * CIERRES DE EQUIPO:
-       * - primero se identifica el LÍDER mediante delivery_owner;
-       * - luego se limita a DELIVERY ACCEPTED de ese equipo;
-       * - provider_email NO limita la visualización.
-       *
-       * Esto evita mezclar pedidos si un DELIVERY participa en más de un equipo.
-       */
       const teamOwnerEmail = effectiveTeamOwnerEmail;
 
       if (!teamOwnerEmail) {
@@ -1382,63 +1377,126 @@ export default function ClosuresView() {
         return;
       }
 
-      /*
-       * IMPORTANTE:
-       * El propio líder también forma parte del cierre del equipo.
-       * Antes solo entraban miembros ACCEPTED y los pedidos asignados
-       * directamente al líder quedaban fuera.
-       */
-      const teamMemberEmails = isAdmin
-        ? allTeams
-            .filter(
-              row =>
-                String(row.status || '').toUpperCase() === 'ACCEPTED' &&
-                String(row.owner_email || '').trim().toLowerCase() ===
-                  teamOwnerEmail.toLowerCase(),
-            )
-            .map(row => String(row.member_email || '').trim())
-            .filter(Boolean)
-        : teamMembers
-            .filter(
-              member =>
-                String(member.status || '').toUpperCase() === 'ACCEPTED',
-            )
-            .map(member => String(member.member_email || '').trim())
-            .filter(Boolean);
+      let teamOrders: any[] = [];
 
-      const allowedTeamEmails = Array.from(
-        new Set(
-          [teamOwnerEmail, ...teamMemberEmails]
-            .map(email => String(email || '').trim())
-            .filter(Boolean),
-        ),
-      );
+      if (isAdmin) {
+        // ADMIN conserva su acceso global normal.
+        let adminTeamQuery = supabase
+          .from('orders')
+          .select('*')
+          .eq('delivery_owner', teamOwnerEmail)
+          .gte('assigned_at', dateFrom + 'T00:00:00')
+          .lte('assigned_at', dateTo + 'T23:59:59')
+          .order('assigned_at', { ascending: false });
 
-      const requestedEmails =
-        selectedDeliveryList.length > 0
-          ? selectedDeliveryList.filter(email =>
-              allowedTeamEmails.some(
-                allowed =>
-                  allowed.toLowerCase() === String(email).toLowerCase(),
-              ),
-            )
-          : allowedTeamEmails;
+        const { data: adminTeamOrders, error: adminTeamError } = await adminTeamQuery;
 
-      if (allowedTeamEmails.length === 0 || requestedEmails.length === 0) {
-        setOrders([]);
-        setTotalPedidosAsignados(0);
-        setRendicionPagada(null);
-        return;
+        if (adminTeamError) {
+          console.error('Error cargando pedidos del equipo como ADMIN:', adminTeamError);
+          toast.error(`No se pudieron cargar los pedidos del equipo: ${adminTeamError.message}`);
+          setOrders([]);
+          setTotalPedidosAsignados(0);
+          setRendicionPagada(null);
+          return;
+        }
+
+        teamOrders = adminTeamOrders || [];
+      } else {
+        // PROVEEDOR/DELIVERY líder: SECURITY DEFINER evita que RLS de orders
+        // esconda pedidos cuyo provider_email pertenece a otro proveedor.
+        const { data: leaderTeamOrders, error: leaderTeamError } = await supabase.rpc(
+          'get_delivery_team_orders_for_closure',
+          {
+            p_team_owner_email: teamOwnerEmail,
+            p_date_from: dateFrom,
+            p_date_to: dateTo,
+          },
+        );
+
+        if (leaderTeamError) {
+          console.error('Error cargando pedidos del cierre de equipo:', leaderTeamError);
+          toast.error(
+            `No se pudieron cargar todos los pedidos del equipo: ${leaderTeamError.message}`,
+          );
+          setOrders([]);
+          setTotalPedidosAsignados(0);
+          setRendicionPagada(null);
+          return;
+        }
+
+        teamOrders = (leaderTeamOrders || []) as any[];
       }
 
-      query = query
-        .eq('delivery_owner', teamOwnerEmail)
-        .in('assigned_delivery', requestedEmails);
+      let visibleTeamOrders = teamOrders;
 
-      // NO aplicar provider_email: una venta de cualquier proveedor entra
-      // mientras pertenezca logísticamente a este equipo.
-    } else if (isSupplier) {
-      // CIERRE NORMAL: se mantiene exactamente como estaba.
+      // El filtro de delivery se aplica en memoria sobre el resultado completo
+      // de la RPC, para no volver a depender de RLS de orders.
+      if (selectedDeliveryList.length > 0) {
+        const selected = new Set(
+          selectedDeliveryList.map(email => String(email).trim().toLowerCase()),
+        );
+        visibleTeamOrders = visibleTeamOrders.filter(order =>
+          selected.has(String(order?.assigned_delivery || '').trim().toLowerCase()),
+        );
+      }
+
+      if (selectedStatusList.length > 0) {
+        const statuses = new Set(selectedStatusList);
+        visibleTeamOrders = visibleTeamOrders.filter(order =>
+          statuses.has(String(order?.status || '')),
+        );
+      }
+
+      visibleTeamOrders.sort((a, b) =>
+        String(b?.assigned_at || '').localeCompare(String(a?.assigned_at || '')),
+      );
+
+      setOrders(visibleTeamOrders);
+      setTotalPedidosAsignados(visibleTeamOrders.length);
+
+      let deliveryToCheck = '';
+      if (isDelivery) {
+        deliveryToCheck = myEmail;
+      } else if ((isAdmin || isSupplier) && selectedDeliveryList.length === 1) {
+        deliveryToCheck = selectedDeliveryList[0];
+      }
+
+      if (deliveryToCheck) {
+        const { data: rp } = await supabase
+          .from('rendiciones_pagadas')
+          .select('*')
+          .eq('delivery_email', deliveryToCheck)
+          .gte('pagado_en', dateFrom + 'T00:00:00')
+          .lte('pagado_en', dateTo + 'T23:59:59')
+          .order('pagado_en', { ascending: false })
+          .limit(1);
+
+        setRendicionPagada(
+          rp && rp.length > 0
+            ? {
+                id: rp[0].id,
+                pagado_en: rp[0].pagado_en,
+                nota: rp[0].nota || '',
+                marcado_por: rp[0].marcado_por || '',
+              }
+            : null,
+        );
+      } else {
+        setRendicionPagada(null);
+      }
+
+      return;
+    }
+
+    // CIERRE NORMAL: conserva la lógica existente.
+    let query = supabase
+      .from('orders')
+      .select('*')
+      .gte(dateField, dateFrom + 'T00:00:00')
+      .lte(dateField, dateTo + 'T23:59:59')
+      .order(dateField, { ascending: false });
+
+    if (isSupplier) {
       query = query.eq('provider_email', myEmail);
       if (selectedDeliveryList.length > 0) {
         query = query.in('assigned_delivery', selectedDeliveryList);
@@ -1466,7 +1524,16 @@ export default function ClosuresView() {
       query = query.in('status', selectedStatusList);
     }
 
-    const { data } = await query;
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Error cargando cierres:', error);
+      toast.error(`Error cargando cierres: ${error.message}`);
+      setOrders([]);
+      setTotalPedidosAsignados(0);
+      return;
+    }
+
     setOrders(data || []);
     setTotalPedidosAsignados(data?.length || 0);
 
@@ -1476,15 +1543,27 @@ export default function ClosuresView() {
     } else if ((isAdmin || isSupplier) && selectedDeliveryList.length === 1) {
       deliveryToCheck = selectedDeliveryList[0];
     }
-    
+
     if (deliveryToCheck) {
-      const { data: rp } = await supabase.from('rendiciones_pagadas').select('*')
+      const { data: rp } = await supabase
+        .from('rendiciones_pagadas')
+        .select('*')
         .eq('delivery_email', deliveryToCheck)
         .gte('pagado_en', dateFrom + 'T00:00:00')
         .lte('pagado_en', dateTo + 'T23:59:59')
         .order('pagado_en', { ascending: false })
         .limit(1);
-      setRendicionPagada(rp && rp.length > 0 ? { id: rp[0].id, pagado_en: rp[0].pagado_en, nota: rp[0].nota || '', marcado_por: rp[0].marcado_por || '' } : null);
+
+      setRendicionPagada(
+        rp && rp.length > 0
+          ? {
+              id: rp[0].id,
+              pagado_en: rp[0].pagado_en,
+              nota: rp[0].nota || '',
+              marcado_por: rp[0].marcado_por || '',
+            }
+          : null,
+      );
     } else {
       setRendicionPagada(null);
     }
