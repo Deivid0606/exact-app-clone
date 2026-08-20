@@ -3785,7 +3785,7 @@ export default function ClosuresView() {
       </div>
 
       <div className="overflow-auto">
-        <table className="app-table min-w-[1800px]">
+        <table className="app-table min-w-[2050px]">
           <thead>
             <tr>
               {canUseGuides && <th className="text-center">✓</th>}
@@ -3794,6 +3794,7 @@ export default function ClosuresView() {
               <th>ID</th>
               <th>Ciudad</th>
               <th>Cliente</th>
+              <th>Productos</th>
               <th>Teléfono</th>
               {canUseGuides && <th>Guía</th>}
               <th>Proveedor</th>
@@ -3895,6 +3896,60 @@ export default function ClosuresView() {
                     )}
                   </td>
                   <td className="text-xs">{o.customer_name}</td>
+                  <td className="text-xs min-w-[220px]">
+                    {(() => {
+                      const items = getOrderItems(o);
+
+                      if (items.length === 0) {
+                        return <span className="text-muted-foreground">—</span>;
+                      }
+
+                      return (
+                        <div className="flex flex-col gap-1">
+                          {items.map((item: any, index: number) => {
+                            const sku = String(item?.sku || '').trim();
+
+                            const productFromCatalog = products.find(
+                              (product: any) =>
+                                sku &&
+                                String(product?.sku || '').trim().toLowerCase() ===
+                                  sku.toLowerCase(),
+                            );
+
+                            const productName = String(
+                              item?.title ||
+                              item?.name ||
+                              item?.product_name ||
+                              productFromCatalog?.name ||
+                              sku ||
+                              'Producto',
+                            ).trim();
+
+                            const qty = Number(
+                              item?.qty ||
+                              item?.quantity ||
+                              item?.cantidad ||
+                              1,
+                            );
+
+                            return (
+                              <div
+                                key={`${o.id}-product-${index}`}
+                                className="inline-flex w-fit max-w-[260px] items-center gap-1 rounded-lg border border-primary/20 bg-primary/5 px-2 py-1 font-semibold"
+                                title={sku ? `${productName} — SKU: ${sku}` : productName}
+                              >
+                                <span>📦</span>
+                                <span className="break-words">{productName}</span>
+                                <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-extrabold">
+                                  x{Number.isFinite(qty) && qty > 0 ? qty : 1}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                  </td>
                   <td className="text-xs">
                     <div className="flex items-center gap-2 whitespace-nowrap">
                       {getOrderPhone(o) ? (
