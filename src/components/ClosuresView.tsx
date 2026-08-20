@@ -2182,14 +2182,42 @@ export default function ClosuresView() {
   };
 
   const markSingleRendido = async (orderId: string) => {
-    const { error } = await supabase.from('orders').update({
-      delivery_settled: true,
-      status2: 'RENDIDO',
-      updated_at: new Date().toISOString(),
-    }).eq('id', orderId);
-    if (error) { toast.error(error.message); return; }
-    toast.success('Marcado como RENDIDO');
-    loadClosures();
+    try {
+      // En Cierres de Equipo, PROVEEDOR líder puede rendir cualquier pedido
+      // gestionado por su equipo aunque provider_email sea de otro proveedor.
+      // Se usa SECURITY DEFINER para evitar el bloqueo de RLS sobre orders.
+      if (activeSection === 'teamClosures' && isSupplier) {
+        const { error } = await supabase.rpc(
+          'mark_delivery_team_orders_as_settled',
+          {
+            p_order_ids: [orderId],
+          },
+        );
+
+        if (error) throw error;
+      } else {
+        // ADMIN y Cierre Normal conservan el comportamiento existente.
+        const { error } = await supabase
+          .from('orders')
+          .update({
+            delivery_settled: true,
+            status2: 'RENDIDO',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', orderId);
+
+        if (error) throw error;
+      }
+
+      toast.success('Marcado como RENDIDO');
+      await loadClosures();
+    } catch (error: any) {
+      console.error('Error marcando pedido como RENDIDO:', error);
+      toast.error(
+        error?.message ||
+          'No se pudo marcar el pedido como RENDIDO',
+      );
+    }
   };
 
   const markRendicionPagada = async () => {
@@ -3721,7 +3749,7 @@ export default function ClosuresView() {
                   disabled={bulkBusy || selectedRendibleOrders.length === 0}
                   title={
                     activeSection === 'teamClosures' && isSupplier
-                      ? 'En Cierres de Equipo, PROVEEDOR solo puede rendir ventas propias'
+                      ? 'En Cierres de Equipo, podés marcar RENDIDO cualquier pedido entregado gestionado por tu equipo, aunque sea de otro proveedor'
                       : 'Solo marca como RENDIDO los pedidos ENTREGADO / ENCOMIENDA ENTREGADA seleccionados'
                   }
                 >
