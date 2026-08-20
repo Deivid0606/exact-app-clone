@@ -573,6 +573,7 @@ export default function ClosuresView() {
   const [updatingContactedIds, setUpdatingContactedIds] = useState<Set<string>>(new Set());
   const [activeSection, setActiveSection] = useState<'orders' | 'team' | 'teamClosures'>('orders');
   const [bulkStatus, setBulkStatus] = useState<string>('EN RUTA');
+  const [bulkRetiroStatus, setBulkRetiroStatus] = useState<string>('REALIZADO');
   const [bulkTeamUserId, setBulkTeamUserId] = useState<string>('');
   const [bulkAssignedDate, setBulkAssignedDate] = useState<string>('');
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -1440,6 +1441,18 @@ export default function ClosuresView() {
         );
       }
 
+      // Filtro por proveedor disponible para ADMIN y PROVEEDOR líder.
+      // Se aplica en memoria porque la carga del equipo ya vino completa
+      // (sin depender de RLS de orders).
+      if (selectedSupplierList.length > 0) {
+        const selectedProviders = new Set(
+          selectedSupplierList.map(email => String(email).trim().toLowerCase()),
+        );
+        visibleTeamOrders = visibleTeamOrders.filter(order =>
+          selectedProviders.has(String(order?.provider_email || '').trim().toLowerCase()),
+        );
+      }
+
       if (selectedStatusList.length > 0) {
         const statuses = new Set(selectedStatusList);
         visibleTeamOrders = visibleTeamOrders.filter(order =>
@@ -2067,6 +2080,76 @@ export default function ClosuresView() {
     else { toast.success('Estado de retiro actualizado'); loadClosures(); }
   };
 
+  const applyBulkRetiro = async () => {
+    const ids = Array.from(selectedGuideIds);
+
+    if (ids.length === 0) {
+      toast.error('Seleccioná al menos un pedido');
+      return;
+    }
+
+    if (!canEditFull) {
+      toast.error('No tenés permiso para cambiar el Estado de retiro');
+      return;
+    }
+
+    if (!bulkRetiroStatus) {
+      toast.error('Seleccioná un Estado de retiro');
+      return;
+    }
+
+    if (!confirm(`¿Cambiar Estado de retiro de ${ids.length} pedido(s) a ${bulkRetiroStatus}?`)) return;
+
+    setBulkBusy(true);
+    try {
+      const now = new Date().toISOString();
+      const { error } = await supabase
+        .from('orders')
+        .update({
+          estado_retiro: bulkRetiroStatus,
+          updated_at: now,
+        })
+        .in('id', ids);
+
+      if (error) throw error;
+
+      setOrders(previous =>
+        previous.map(order =>
+          ids.includes(order.id)
+            ? { ...order, estado_retiro: bulkRetiroStatus, updated_at: now }
+            : order,
+        ),
+      );
+
+      toast.success(
+        `Estado de retiro actualizado a ${bulkRetiroStatus} en ${ids.length} pedido(s)`,
+      );
+    } catch (error: any) {
+      toast.error(error?.message || 'No se pudo actualizar el Estado de retiro');
+      await loadClosures();
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const getRetiroSelectClass = (estado: string) => {
+    const value = String(estado || '').toUpperCase();
+
+    if (value === 'REALIZADO') {
+      return '!border-emerald-500 !bg-emerald-500/20 !text-emerald-300 font-extrabold shadow-sm shadow-emerald-500/20';
+    }
+
+    if (value === 'PENDIENTE') {
+      return '!border-amber-500 !bg-amber-500/20 !text-amber-300 font-extrabold shadow-sm shadow-amber-500/20';
+    }
+
+    if (value === 'CANCELADO') {
+      return '!border-red-500 !bg-red-500/20 !text-red-300 font-extrabold shadow-sm shadow-red-500/20';
+    }
+
+    return '!border-slate-500/50 !bg-slate-500/10 font-bold';
+  };
+
   const handleDateChange = async (orderId: string, newDate: string) => {
     if (!newDate) return;
 
@@ -2234,14 +2317,11 @@ export default function ClosuresView() {
       return selectedDeliveredOrders;
     }
 
-    // PROVEEDOR solo puede rendir ventas/productos propios.
+    // PROVEEDOR líder puede rendir CUALQUIER pedido de su equipo,
+    // aunque provider_email corresponda a otro proveedor. La seguridad real
+    // se valida en servidor mediante la RPC al momento de actualizar.
     if (isSupplier) {
-      const email = myEmail.trim().toLowerCase();
-
-      return selectedDeliveredOrders.filter(
-        order =>
-          String(order.provider_email || '').trim().toLowerCase() === email,
-      );
+      return selectedDeliveredOrders;
     }
 
     // DELIVERY, incluso si es líder, nunca puede marcar RENDIDO.
@@ -2266,9 +2346,7 @@ export default function ClosuresView() {
 
     if (selectedRendibleOrders.length === 0) {
       toast.error(
-        activeSection === 'teamClosures' && isSupplier
-          ? 'En Cierres de Equipo solo podés marcar RENDIDO pedidos ENTREGADOS que sean ventas de tu propio proveedor'
-          : 'Seleccioná pedidos ENTREGADO o ENCOMIENDA ENTREGADA que todavía no estén RENDIDOS',
+        'Seleccioná pedidos ENTREGADO o ENCOMIENDA ENTREGADA que todavía no estén RENDIDOS',
       );
       return;
     }
@@ -2286,16 +2364,29 @@ export default function ClosuresView() {
       const now = new Date().toISOString();
       const ids = selectedRendibleOrders.map(order => order.id);
 
-      const { error } = await supabase
-        .from('orders')
-        .update({
-          delivery_settled: true,
-          status2: 'RENDIDO',
-          updated_at: now,
-        })
-        .in('id', ids);
+      // En Cierres de Equipo, un PROVEEDOR líder puede rendir pedidos de
+      // otros proveedores porque su equipo realizó la gestión logística.
+      // Se usa SECURITY DEFINER para no quedar bloqueado por RLS de orders.
+      if (activeSection === 'teamClosures' && isSupplier) {
+        const { error } = await supabase.rpc(
+          'mark_delivery_team_orders_as_settled',
+          { p_order_ids: ids },
+        );
 
-      if (error) throw error;
+        if (error) throw error;
+      } else {
+        // ADMIN y cierre normal conservan el comportamiento existente.
+        const { error } = await supabase
+          .from('orders')
+          .update({
+            delivery_settled: true,
+            status2: 'RENDIDO',
+            updated_at: now,
+          })
+          .in('id', ids);
+
+        if (error) throw error;
+      }
 
       toast.success(
         `${ids.length} pedido${ids.length === 1 ? '' : 's'} marcado${ids.length === 1 ? '' : 's'} como RENDIDO`,
@@ -2930,7 +3021,7 @@ export default function ClosuresView() {
             {isAdmin
               ? 'ADMIN puede elegir cualquier equipo, filtrar sus deliveries y realizar el cierre completo de todos los pedidos. La tarifa mostrada es la tarifa propia de cada DELIVERY miembro.'
               : isSupplier
-                ? 'Solo aparecen pedidos del equipo donde vos sos líder. Podés controlar ventas de cualquier proveedor, pero solo marcar RENDIDO cuando provider_email sea tu propio usuario. La tarifa mostrada es la tarifa propia de cada DELIVERY miembro.'
+                ? 'Aparecen todos los pedidos gestionados por tu equipo, sin importar el proveedor. Podés filtrar por proveedor y marcar RENDIDO cualquier pedido entregado de tu equipo. La tarifa mostrada es la tarifa propia de cada DELIVERY miembro.'
                 : 'Solo aparecen pedidos del equipo donde vos sos líder. Podés controlarlos por delivery, pero DELIVERY no puede marcar RENDIDO aunque sea líder. La tarifa mostrada es la tarifa propia de cada DELIVERY miembro.'}
           </p>
         </div>
@@ -2983,6 +3074,7 @@ export default function ClosuresView() {
                 if (!isAdmin) return;
                 setSelectedTeamOwnerEmail(event.target.value);
                 setFilterDeliveries(new Set());
+                setFilterSuppliers(new Set());
                 setSelectedGuideIds(new Set());
               }}
               disabled={!isAdmin}
@@ -3073,7 +3165,11 @@ export default function ClosuresView() {
           </div>
         )}
 
-        {activeSection !== 'teamClosures' && (isAdmin || isDelivery) && (
+        {(
+          activeSection === 'teamClosures'
+            ? (isAdmin || isSupplier)
+            : (isAdmin || isDelivery)
+        ) && (
           <div className="relative">
             <button
               type="button"
@@ -3082,7 +3178,9 @@ export default function ClosuresView() {
             >
               <span className="truncate">
                 {selectedSupplierList.length === 0
-                  ? 'Todos los proveedores'
+                  ? activeSection === 'teamClosures'
+                    ? 'Todos los proveedores del equipo'
+                    : 'Todos los proveedores'
                   : `${selectedSupplierList.length} proveedor${
                       selectedSupplierList.length === 1 ? '' : 'es'
                     } seleccionado${
@@ -3557,6 +3655,34 @@ export default function ClosuresView() {
               </>
             )}
 
+            {canEditFull && (
+              <>
+                <div className="h-7 w-px bg-border mx-1 hidden sm:block" />
+                <select
+                  className={`app-input !w-auto !py-2 text-xs min-w-[165px] ${getRetiroSelectClass(bulkRetiroStatus)}`}
+                  value={bulkRetiroStatus}
+                  onChange={event => setBulkRetiroStatus(event.target.value)}
+                  disabled={bulkBusy || selectedGuideOrders.length === 0}
+                  title="Estado de retiro para los pedidos seleccionados"
+                >
+                  {retiroOpts.filter(Boolean).map(status => (
+                    <option key={status} value={status}>
+                      {status === 'REALIZADO' ? '✅ REALIZADO' : status === 'PENDIENTE' ? '⏳ PENDIENTE' : status === 'CANCELADO' ? '❌ CANCELADO' : status}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="nav-btn !border-emerald-500/60 !bg-emerald-500/20 hover:!bg-emerald-500/30 !text-emerald-300 font-extrabold shadow-sm shadow-emerald-500/20"
+                  onClick={applyBulkRetiro}
+                  disabled={bulkBusy || selectedGuideOrders.length === 0}
+                  title="Cambiar Estado de retiro de todos los pedidos seleccionados"
+                >
+                  ✨ Estado de retiro ({selectedGuideOrders.length})
+                </button>
+              </>
+            )}
+
             {(isDelivery || isSupplier || isAdmin) && (
               <>
                 <select
@@ -3902,9 +4028,17 @@ export default function ClosuresView() {
                   </td>
                   <td>
                     {canEditFull ? (
-                      <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.estado_retiro || ''}
-                        onChange={e => updateRetiro(o.id, e.target.value)}>
-                        {retiroOpts.map(s => <option key={s} value={s}>{s || '—'}</option>)}
+                      <select
+                        className={`app-input !w-auto !py-1.5 !px-2.5 text-xs min-w-[135px] rounded-lg transition-all ${getRetiroSelectClass(o.estado_retiro || '')}`}
+                        value={o.estado_retiro || ''}
+                        onChange={e => updateRetiro(o.id, e.target.value)}
+                        title="Cambiar Estado de retiro"
+                      >
+                        {retiroOpts.map(s => (
+                          <option key={s} value={s}>
+                            {s === 'REALIZADO' ? '✅ REALIZADO' : s === 'PENDIENTE' ? '⏳ PENDIENTE' : s === 'CANCELADO' ? '❌ CANCELADO' : '—'}
+                          </option>
+                        ))}
                       </select>
                     ) : <span className="text-xs">{o.estado_retiro || '—'}</span>}
                   </td>
