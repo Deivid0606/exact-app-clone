@@ -1467,11 +1467,21 @@ export default function ClosuresView() {
        * o asignaciones hechas antes del trigger V18 pueden no tenerlo todavía.
        * delivery_owner sigue utilizándose para identificar/tarifar al líder.
        */
-      query = query.in('assigned_delivery', requestedEmails);
+      query = query
+        .in('assigned_delivery', requestedEmails)
+        .order('assigned_at', { ascending: false });
 
-      // NO aplicar provider_email:
-      // una venta de cualquier proveedor entra mientras esté asignada
-      // a un miembro ACCEPTED del equipo seleccionado.
+      /*
+       * FILTRO PROVEEDOR EN CIERRES DE EQUIPO:
+       *
+       * - Por defecto NO limita provider_email.
+       * - Por eso el líder ve ventas de cualquier proveedor.
+       * - Si el usuario elige uno o varios proveedores en el filtro,
+       *   recién ahí se aplica provider_email.
+       */
+      if (selectedSupplierList.length > 0) {
+        query = query.in('provider_email', selectedSupplierList);
+      }
     } else if (isSupplier) {
       // CIERRE NORMAL: se mantiene exactamente como estaba.
       query = query.eq('provider_email', myEmail);
@@ -1501,9 +1511,44 @@ export default function ClosuresView() {
       query = query.in('status', selectedStatusList);
     }
 
-    const { data } = await query;
+    /*
+     * Supabase/PostgREST normalmente limita una respuesta a 1000 filas.
+     * Para que PROVEEDOR, ADMIN y DELIVERY líder reciban TODOS los pedidos,
+     * cargamos por páginas hasta que la última página tenga menos de 1000.
+     */
+    const PAGE_SIZE = 1000;
+    const allLoadedOrders: any[] = [];
+    let pageFrom = 0;
 
-    let finalOrders = data || [];
+    while (true) {
+      const { data: pageData, error: pageError } = await query.range(
+        pageFrom,
+        pageFrom + PAGE_SIZE - 1,
+      );
+
+      if (pageError) {
+        console.error('Error cargando pedidos de cierres:', pageError);
+        toast.error(`No se pudieron cargar todos los pedidos: ${pageError.message}`);
+        break;
+      }
+
+      const pageRows = pageData || [];
+      allLoadedOrders.push(...pageRows);
+
+      if (pageRows.length < PAGE_SIZE) {
+        break;
+      }
+
+      pageFrom += PAGE_SIZE;
+
+      // Límite defensivo alto para evitar un ciclo accidental por backend.
+      if (pageFrom >= 50000) {
+        console.warn('Se alcanzó el límite defensivo de 50.000 pedidos en Cierres');
+        break;
+      }
+    }
+
+    let finalOrders = allLoadedOrders;
 
     if (isTeamClosureView) {
       finalOrders = finalOrders
@@ -2923,8 +2968,8 @@ export default function ClosuresView() {
             {isAdmin
               ? 'ADMIN puede elegir cualquier equipo, filtrar sus deliveries y realizar el cierre completo. Todo pedido asignado a un miembro ACCEPTED aparece en su equipo. La tarifa mostrada es la tarifa propia de cada DELIVERY miembro.'
               : isSupplier
-                ? 'Todo pedido asignado a un DELIVERY ACCEPTED de tu equipo aparece acá, sin importar proveedor. Solo podés marcar RENDIDO cuando provider_email sea tu propio usuario. La tarifa es la propia de cada DELIVERY miembro.'
-                : 'Todo pedido asignado a un DELIVERY ACCEPTED de tu equipo aparece automáticamente acá. DELIVERY no puede marcar RENDIDO aunque sea líder. La tarifa es la propia de cada DELIVERY miembro.'}
+                ? 'Todo pedido asignado a un DELIVERY ACCEPTED de tu equipo aparece acá, aunque la venta sea de otro proveedor. El filtro Proveedor sirve solo para organizar la vista. Solo podés marcar RENDIDO cuando provider_email sea tu propio usuario. La tarifa es la propia de cada DELIVERY miembro.'
+                : 'Todo pedido asignado a un DELIVERY ACCEPTED de tu equipo aparece automáticamente acá, aunque la venta sea de otro proveedor. Podés usar el filtro Proveedor para organizar la vista. DELIVERY no puede marcar RENDIDO aunque sea líder. La tarifa es la propia de cada DELIVERY miembro.'}
           </p>
         </div>
       )}
@@ -3066,7 +3111,11 @@ export default function ClosuresView() {
           </div>
         )}
 
-        {activeSection !== 'teamClosures' && (isAdmin || isDelivery) && (
+        {(
+          activeSection === 'teamClosures'
+            ? (isAdmin || isSupplier || isDelivery)
+            : (isAdmin || isDelivery)
+        ) && (
           <div className="relative">
             <button
               type="button"
@@ -3075,7 +3124,9 @@ export default function ClosuresView() {
             >
               <span className="truncate">
                 {selectedSupplierList.length === 0
-                  ? 'Todos los proveedores'
+                  ? activeSection === 'teamClosures'
+                    ? 'Todos los proveedores de las ventas'
+                    : 'Todos los proveedores'
                   : `${selectedSupplierList.length} proveedor${
                       selectedSupplierList.length === 1 ? '' : 'es'
                     } seleccionado${
@@ -3646,7 +3697,7 @@ export default function ClosuresView() {
         </div>
         {searchTerm && (
           <p className="text-xs text-muted-foreground mt-1">
-            Mostrando {filteredOrders.length} de {orders.length} pedidos
+            Mostrando {filteredOrders.length} de {orders.length} pedidos cargados
           </p>
         )}
       </div>
