@@ -573,7 +573,6 @@ export default function ClosuresView() {
   const [updatingContactedIds, setUpdatingContactedIds] = useState<Set<string>>(new Set());
   const [activeSection, setActiveSection] = useState<'orders' | 'team' | 'teamClosures'>('orders');
   const [bulkStatus, setBulkStatus] = useState<string>('EN RUTA');
-  const [bulkRetiroStatus, setBulkRetiroStatus] = useState<string>('REALIZADO');
   const [bulkTeamUserId, setBulkTeamUserId] = useState<string>('');
   const [bulkAssignedDate, setBulkAssignedDate] = useState<string>('');
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -1180,29 +1179,27 @@ export default function ClosuresView() {
 
     const ownerEmail = effectiveTeamOwnerEmail.toLowerCase();
 
-    // En Cierres de Equipo el filtro incluye al propio líder + todos sus
-    // miembros ACCEPTED. No depende del proveedor del producto.
-    const memberEmails = isAdmin
-      ? allTeams
-          .filter(
-            row =>
-              String(row.status || '').toUpperCase() === 'ACCEPTED' &&
-              String(row.owner_email || '').trim().toLowerCase() === ownerEmail,
-          )
-          .map(row => String(row.member_email || '').trim().toLowerCase())
-      : String(myEmail || '').trim().toLowerCase() === ownerEmail
-        ? teamMembers
-            .filter(
-              member =>
-                String(member.status || '').toUpperCase() === 'ACCEPTED',
-            )
-            .map(member =>
-              String(member.member_email || '').trim().toLowerCase(),
-            )
-        : [];
-
     const allowedEmails = new Set<string>(
-      [ownerEmail, ...memberEmails].filter(Boolean),
+      (
+        isAdmin
+          ? allTeams
+              .filter(
+                row =>
+                  String(row.status || '').toUpperCase() === 'ACCEPTED' &&
+                  String(row.owner_email || '').trim().toLowerCase() === ownerEmail,
+              )
+              .map(row => String(row.member_email || '').trim().toLowerCase())
+          : String(myEmail || '').trim().toLowerCase() === ownerEmail
+            ? teamMembers
+                .filter(
+                  member =>
+                    String(member.status || '').toUpperCase() === 'ACCEPTED',
+                )
+                .map(member =>
+                  String(member.member_email || '').trim().toLowerCase(),
+                )
+            : []
+      ).filter(Boolean),
     );
 
     return deliveries.filter((delivery: any) =>
@@ -1349,26 +1346,27 @@ export default function ClosuresView() {
 
   const loadClosures = async () => {
     let dateField = filterDateBy;
-
+    
     if (isDelivery || isSupplier) {
       dateField = 'assigned_at';
     } else if (isVendedor) {
       dateField = 'created_at';
     }
+    
+    let query = supabase.from('orders').select('*')
+      .gte(dateField, dateFrom + 'T00:00:00')
+      .lte(dateField, dateTo + 'T23:59:59')
+      .order(dateField, { ascending: false });
 
-    /*
-     * CIERRES DE EQUIPO
-     * -----------------
-     * NO leer directamente public.orders para esta pestaña.
-     * Un PROVEEDOR normalmente tiene RLS que solo le permite ver sus propias
-     * ventas, por lo que un .from('orders').select('*') elimina silenciosamente
-     * los pedidos de otros proveedores antes de que lleguen al frontend.
-     *
-     * Esta RPC es SECURITY DEFINER y valida en el servidor que el usuario sea
-     * el líder del equipo (o ADMIN). Después devuelve TODOS los pedidos cuya
-     * gestión logística pertenece a ese líder, sin filtrar provider_email.
-     */
     if (activeSection === 'teamClosures' && (isDelivery || isSupplier || isAdmin)) {
+      /*
+       * CIERRES DE EQUIPO:
+       * - primero se identifica el LÍDER mediante delivery_owner;
+       * - luego se limita a DELIVERY ACCEPTED de ese equipo;
+       * - provider_email NO limita la visualización.
+       *
+       * Esto evita mezclar pedidos si un DELIVERY participa en más de un equipo.
+       */
       const teamOwnerEmail = effectiveTeamOwnerEmail;
 
       if (!teamOwnerEmail) {
@@ -1378,138 +1376,61 @@ export default function ClosuresView() {
         return;
       }
 
-      let teamOrders: any[] = [];
+      const allowedTeamEmails = isAdmin
+        ? Array.from(
+            new Set(
+              allTeams
+                .filter(
+                  row =>
+                    String(row.status || '').toUpperCase() === 'ACCEPTED' &&
+                    String(row.owner_email || '').trim().toLowerCase() ===
+                      teamOwnerEmail.toLowerCase(),
+                )
+                .map(row => String(row.member_email || '').trim())
+                .filter(Boolean),
+            ),
+          )
+        : teamMembers
+            .filter(
+              member =>
+                String(member.status || '').toUpperCase() === 'ACCEPTED',
+            )
+            .map(member => String(member.member_email || '').trim())
+            .filter(Boolean);
 
-      if (isAdmin) {
-        // ADMIN conserva su acceso global normal.
-        let adminTeamQuery = supabase
-          .from('orders')
-          .select('*')
-          .eq('delivery_owner', teamOwnerEmail)
-          .gte('assigned_at', dateFrom + 'T00:00:00')
-          .lte('assigned_at', dateTo + 'T23:59:59')
-          .order('assigned_at', { ascending: false });
+      const requestedEmails =
+        selectedDeliveryList.length > 0
+          ? selectedDeliveryList.filter(email =>
+              allowedTeamEmails.some(
+                allowed =>
+                  allowed.toLowerCase() === String(email).toLowerCase(),
+              ),
+            )
+          : allowedTeamEmails;
 
-        const { data: adminTeamOrders, error: adminTeamError } = await adminTeamQuery;
-
-        if (adminTeamError) {
-          console.error('Error cargando pedidos del equipo como ADMIN:', adminTeamError);
-          toast.error(`No se pudieron cargar los pedidos del equipo: ${adminTeamError.message}`);
-          setOrders([]);
-          setTotalPedidosAsignados(0);
-          setRendicionPagada(null);
-          return;
-        }
-
-        teamOrders = adminTeamOrders || [];
-      } else {
-        // PROVEEDOR/DELIVERY líder: SECURITY DEFINER evita que RLS de orders
-        // esconda pedidos cuyo provider_email pertenece a otro proveedor.
-        const { data: leaderTeamOrders, error: leaderTeamError } = await supabase.rpc(
-          'get_delivery_team_orders_for_closure',
-          {
-            p_team_owner_email: teamOwnerEmail,
-            p_date_from: dateFrom,
-            p_date_to: dateTo,
-          },
-        );
-
-        if (leaderTeamError) {
-          console.error('Error cargando pedidos del cierre de equipo:', leaderTeamError);
-          toast.error(
-            `No se pudieron cargar todos los pedidos del equipo: ${leaderTeamError.message}`,
-          );
-          setOrders([]);
-          setTotalPedidosAsignados(0);
-          setRendicionPagada(null);
-          return;
-        }
-
-        teamOrders = (leaderTeamOrders || []) as any[];
-      }
-
-      let visibleTeamOrders = teamOrders;
-
-      // El filtro de delivery se aplica en memoria sobre el resultado completo
-      // de la RPC, para no volver a depender de RLS de orders.
-      if (selectedDeliveryList.length > 0) {
-        const selected = new Set(
-          selectedDeliveryList.map(email => String(email).trim().toLowerCase()),
-        );
-        visibleTeamOrders = visibleTeamOrders.filter(order =>
-          selected.has(String(order?.assigned_delivery || '').trim().toLowerCase()),
-        );
-      }
-
-      // Filtro por proveedor disponible para ADMIN y PROVEEDOR líder.
-      // Se aplica en memoria porque la carga del equipo ya vino completa
-      // (sin depender de RLS de orders).
-      if (selectedSupplierList.length > 0) {
-        const selectedProviders = new Set(
-          selectedSupplierList.map(email => String(email).trim().toLowerCase()),
-        );
-        visibleTeamOrders = visibleTeamOrders.filter(order =>
-          selectedProviders.has(String(order?.provider_email || '').trim().toLowerCase()),
-        );
-      }
-
-      if (selectedStatusList.length > 0) {
-        const statuses = new Set(selectedStatusList);
-        visibleTeamOrders = visibleTeamOrders.filter(order =>
-          statuses.has(String(order?.status || '')),
-        );
-      }
-
-      visibleTeamOrders.sort((a, b) =>
-        String(b?.assigned_at || '').localeCompare(String(a?.assigned_at || '')),
-      );
-
-      setOrders(visibleTeamOrders);
-      setTotalPedidosAsignados(visibleTeamOrders.length);
-
-      let deliveryToCheck = '';
-      if (isDelivery) {
-        deliveryToCheck = myEmail;
-      } else if ((isAdmin || isSupplier) && selectedDeliveryList.length === 1) {
-        deliveryToCheck = selectedDeliveryList[0];
-      }
-
-      if (deliveryToCheck) {
-        const { data: rp } = await supabase
-          .from('rendiciones_pagadas')
-          .select('*')
-          .eq('delivery_email', deliveryToCheck)
-          .gte('pagado_en', dateFrom + 'T00:00:00')
-          .lte('pagado_en', dateTo + 'T23:59:59')
-          .order('pagado_en', { ascending: false })
-          .limit(1);
-
-        setRendicionPagada(
-          rp && rp.length > 0
-            ? {
-                id: rp[0].id,
-                pagado_en: rp[0].pagado_en,
-                nota: rp[0].nota || '',
-                marcado_por: rp[0].marcado_por || '',
-              }
-            : null,
-        );
-      } else {
+      if (allowedTeamEmails.length === 0 || requestedEmails.length === 0) {
+        setOrders([]);
+        setTotalPedidosAsignados(0);
         setRendicionPagada(null);
+        return;
       }
 
-      return;
-    }
+      /*
+       * REGLA FINAL:
+       * Si el pedido está asignado a un DELIVERY ACCEPTED de este equipo,
+       * pertenece al cierre de este líder.
+       *
+       * No exigimos delivery_owner para MOSTRARLO, porque pedidos antiguos
+       * o asignaciones hechas antes del trigger V18 pueden no tenerlo todavía.
+       * delivery_owner sigue utilizándose para identificar/tarifar al líder.
+       */
+      query = query.in('assigned_delivery', requestedEmails);
 
-    // CIERRE NORMAL: conserva la lógica existente.
-    let query = supabase
-      .from('orders')
-      .select('*')
-      .gte(dateField, dateFrom + 'T00:00:00')
-      .lte(dateField, dateTo + 'T23:59:59')
-      .order(dateField, { ascending: false });
-
-    if (isSupplier) {
+      // NO aplicar provider_email:
+      // una venta de cualquier proveedor entra mientras esté asignada
+      // a un miembro ACCEPTED del equipo seleccionado.
+    } else if (isSupplier) {
+      // CIERRE NORMAL: se mantiene exactamente como estaba.
       query = query.eq('provider_email', myEmail);
       if (selectedDeliveryList.length > 0) {
         query = query.in('assigned_delivery', selectedDeliveryList);
@@ -1537,16 +1458,7 @@ export default function ClosuresView() {
       query = query.in('status', selectedStatusList);
     }
 
-    const { data, error } = await query;
-
-    if (error) {
-      console.error('Error cargando cierres:', error);
-      toast.error(`Error cargando cierres: ${error.message}`);
-      setOrders([]);
-      setTotalPedidosAsignados(0);
-      return;
-    }
-
+    const { data } = await query;
     setOrders(data || []);
     setTotalPedidosAsignados(data?.length || 0);
 
@@ -1556,27 +1468,15 @@ export default function ClosuresView() {
     } else if ((isAdmin || isSupplier) && selectedDeliveryList.length === 1) {
       deliveryToCheck = selectedDeliveryList[0];
     }
-
+    
     if (deliveryToCheck) {
-      const { data: rp } = await supabase
-        .from('rendiciones_pagadas')
-        .select('*')
+      const { data: rp } = await supabase.from('rendiciones_pagadas').select('*')
         .eq('delivery_email', deliveryToCheck)
         .gte('pagado_en', dateFrom + 'T00:00:00')
         .lte('pagado_en', dateTo + 'T23:59:59')
         .order('pagado_en', { ascending: false })
         .limit(1);
-
-      setRendicionPagada(
-        rp && rp.length > 0
-          ? {
-              id: rp[0].id,
-              pagado_en: rp[0].pagado_en,
-              nota: rp[0].nota || '',
-              marcado_por: rp[0].marcado_por || '',
-            }
-          : null,
-      );
+      setRendicionPagada(rp && rp.length > 0 ? { id: rp[0].id, pagado_en: rp[0].pagado_en, nota: rp[0].nota || '', marcado_por: rp[0].marcado_por || '' } : null);
     } else {
       setRendicionPagada(null);
     }
@@ -2080,76 +1980,6 @@ export default function ClosuresView() {
     else { toast.success('Estado de retiro actualizado'); loadClosures(); }
   };
 
-  const applyBulkRetiro = async () => {
-    const ids = Array.from(selectedGuideIds);
-
-    if (ids.length === 0) {
-      toast.error('Seleccioná al menos un pedido');
-      return;
-    }
-
-    if (!canEditFull) {
-      toast.error('No tenés permiso para cambiar el Estado de retiro');
-      return;
-    }
-
-    if (!bulkRetiroStatus) {
-      toast.error('Seleccioná un Estado de retiro');
-      return;
-    }
-
-    if (!confirm(`¿Cambiar Estado de retiro de ${ids.length} pedido(s) a ${bulkRetiroStatus}?`)) return;
-
-    setBulkBusy(true);
-    try {
-      const now = new Date().toISOString();
-      const { error } = await supabase
-        .from('orders')
-        .update({
-          estado_retiro: bulkRetiroStatus,
-          updated_at: now,
-        })
-        .in('id', ids);
-
-      if (error) throw error;
-
-      setOrders(previous =>
-        previous.map(order =>
-          ids.includes(order.id)
-            ? { ...order, estado_retiro: bulkRetiroStatus, updated_at: now }
-            : order,
-        ),
-      );
-
-      toast.success(
-        `Estado de retiro actualizado a ${bulkRetiroStatus} en ${ids.length} pedido(s)`,
-      );
-    } catch (error: any) {
-      toast.error(error?.message || 'No se pudo actualizar el Estado de retiro');
-      await loadClosures();
-    } finally {
-      setBulkBusy(false);
-    }
-  };
-
-  const getRetiroSelectClass = (estado: string) => {
-    const value = String(estado || '').toUpperCase();
-
-    if (value === 'REALIZADO') {
-      return '!border-emerald-500 !bg-emerald-500/20 !text-emerald-300 font-extrabold shadow-sm shadow-emerald-500/20';
-    }
-
-    if (value === 'PENDIENTE') {
-      return '!border-amber-500 !bg-amber-500/20 !text-amber-300 font-extrabold shadow-sm shadow-amber-500/20';
-    }
-
-    if (value === 'CANCELADO') {
-      return '!border-red-500 !bg-red-500/20 !text-red-300 font-extrabold shadow-sm shadow-red-500/20';
-    }
-
-    return '!border-slate-500/50 !bg-slate-500/10 font-bold';
-  };
-
   const handleDateChange = async (orderId: string, newDate: string) => {
     if (!newDate) return;
 
@@ -2182,42 +2012,14 @@ export default function ClosuresView() {
   };
 
   const markSingleRendido = async (orderId: string) => {
-    try {
-      // En Cierres de Equipo, PROVEEDOR líder puede rendir cualquier pedido
-      // gestionado por su equipo aunque provider_email sea de otro proveedor.
-      // Se usa SECURITY DEFINER para evitar el bloqueo de RLS sobre orders.
-      if (activeSection === 'teamClosures' && isSupplier) {
-        const { error } = await supabase.rpc(
-          'mark_delivery_team_orders_as_settled',
-          {
-            p_order_ids: [orderId],
-          },
-        );
-
-        if (error) throw error;
-      } else {
-        // ADMIN y Cierre Normal conservan el comportamiento existente.
-        const { error } = await supabase
-          .from('orders')
-          .update({
-            delivery_settled: true,
-            status2: 'RENDIDO',
-            updated_at: new Date().toISOString(),
-          })
-          .eq('id', orderId);
-
-        if (error) throw error;
-      }
-
-      toast.success('Marcado como RENDIDO');
-      await loadClosures();
-    } catch (error: any) {
-      console.error('Error marcando pedido como RENDIDO:', error);
-      toast.error(
-        error?.message ||
-          'No se pudo marcar el pedido como RENDIDO',
-      );
-    }
+    const { error } = await supabase.from('orders').update({
+      delivery_settled: true,
+      status2: 'RENDIDO',
+      updated_at: new Date().toISOString(),
+    }).eq('id', orderId);
+    if (error) { toast.error(error.message); return; }
+    toast.success('Marcado como RENDIDO');
+    loadClosures();
   };
 
   const markRendicionPagada = async () => {
@@ -2345,11 +2147,14 @@ export default function ClosuresView() {
       return selectedDeliveredOrders;
     }
 
-    // PROVEEDOR líder puede rendir CUALQUIER pedido de su equipo,
-    // aunque provider_email corresponda a otro proveedor. La seguridad real
-    // se valida en servidor mediante la RPC al momento de actualizar.
+    // PROVEEDOR solo puede rendir ventas/productos propios.
     if (isSupplier) {
-      return selectedDeliveredOrders;
+      const email = myEmail.trim().toLowerCase();
+
+      return selectedDeliveredOrders.filter(
+        order =>
+          String(order.provider_email || '').trim().toLowerCase() === email,
+      );
     }
 
     // DELIVERY, incluso si es líder, nunca puede marcar RENDIDO.
@@ -2374,7 +2179,9 @@ export default function ClosuresView() {
 
     if (selectedRendibleOrders.length === 0) {
       toast.error(
-        'Seleccioná pedidos ENTREGADO o ENCOMIENDA ENTREGADA que todavía no estén RENDIDOS',
+        activeSection === 'teamClosures' && isSupplier
+          ? 'En Cierres de Equipo solo podés marcar RENDIDO pedidos ENTREGADOS que sean ventas de tu propio proveedor'
+          : 'Seleccioná pedidos ENTREGADO o ENCOMIENDA ENTREGADA que todavía no estén RENDIDOS',
       );
       return;
     }
@@ -2392,29 +2199,16 @@ export default function ClosuresView() {
       const now = new Date().toISOString();
       const ids = selectedRendibleOrders.map(order => order.id);
 
-      // En Cierres de Equipo, un PROVEEDOR líder puede rendir pedidos de
-      // otros proveedores porque su equipo realizó la gestión logística.
-      // Se usa SECURITY DEFINER para no quedar bloqueado por RLS de orders.
-      if (activeSection === 'teamClosures' && isSupplier) {
-        const { error } = await supabase.rpc(
-          'mark_delivery_team_orders_as_settled',
-          { p_order_ids: ids },
-        );
+      const { error } = await supabase
+        .from('orders')
+        .update({
+          delivery_settled: true,
+          status2: 'RENDIDO',
+          updated_at: now,
+        })
+        .in('id', ids);
 
-        if (error) throw error;
-      } else {
-        // ADMIN y cierre normal conservan el comportamiento existente.
-        const { error } = await supabase
-          .from('orders')
-          .update({
-            delivery_settled: true,
-            status2: 'RENDIDO',
-            updated_at: now,
-          })
-          .in('id', ids);
-
-        if (error) throw error;
-      }
+      if (error) throw error;
 
       toast.success(
         `${ids.length} pedido${ids.length === 1 ? '' : 's'} marcado${ids.length === 1 ? '' : 's'} como RENDIDO`,
@@ -3047,10 +2841,10 @@ export default function ClosuresView() {
           <div className="font-extrabold">📊 CIERRES DE EQUIPO</div>
           <p className="text-xs text-muted-foreground mt-1">
             {isAdmin
-              ? 'ADMIN puede elegir cualquier equipo, filtrar sus deliveries y realizar el cierre completo de todos los pedidos. La tarifa mostrada es la tarifa propia de cada DELIVERY miembro.'
+              ? 'ADMIN puede elegir cualquier equipo, filtrar sus deliveries y realizar el cierre completo. Todo pedido asignado a un miembro ACCEPTED aparece en su equipo. La tarifa mostrada es la tarifa propia de cada DELIVERY miembro.'
               : isSupplier
-                ? 'Aparecen todos los pedidos gestionados por tu equipo, sin importar el proveedor. Podés filtrar por proveedor y marcar RENDIDO cualquier pedido entregado de tu equipo. La tarifa mostrada es la tarifa propia de cada DELIVERY miembro.'
-                : 'Solo aparecen pedidos del equipo donde vos sos líder. Podés controlarlos por delivery, pero DELIVERY no puede marcar RENDIDO aunque sea líder. La tarifa mostrada es la tarifa propia de cada DELIVERY miembro.'}
+                ? 'Todo pedido asignado a un DELIVERY ACCEPTED de tu equipo aparece acá, sin importar proveedor. Solo podés marcar RENDIDO cuando provider_email sea tu propio usuario. La tarifa es la propia de cada DELIVERY miembro.'
+                : 'Todo pedido asignado a un DELIVERY ACCEPTED de tu equipo aparece automáticamente acá. DELIVERY no puede marcar RENDIDO aunque sea líder. La tarifa es la propia de cada DELIVERY miembro.'}
           </p>
         </div>
       )}
@@ -3102,7 +2896,6 @@ export default function ClosuresView() {
                 if (!isAdmin) return;
                 setSelectedTeamOwnerEmail(event.target.value);
                 setFilterDeliveries(new Set());
-                setFilterSuppliers(new Set());
                 setSelectedGuideIds(new Set());
               }}
               disabled={!isAdmin}
@@ -3193,11 +2986,7 @@ export default function ClosuresView() {
           </div>
         )}
 
-        {(
-          activeSection === 'teamClosures'
-            ? (isAdmin || isSupplier)
-            : (isAdmin || isDelivery)
-        ) && (
+        {activeSection !== 'teamClosures' && (isAdmin || isDelivery) && (
           <div className="relative">
             <button
               type="button"
@@ -3206,9 +2995,7 @@ export default function ClosuresView() {
             >
               <span className="truncate">
                 {selectedSupplierList.length === 0
-                  ? activeSection === 'teamClosures'
-                    ? 'Todos los proveedores del equipo'
-                    : 'Todos los proveedores'
+                  ? 'Todos los proveedores'
                   : `${selectedSupplierList.length} proveedor${
                       selectedSupplierList.length === 1 ? '' : 'es'
                     } seleccionado${
@@ -3683,34 +3470,6 @@ export default function ClosuresView() {
               </>
             )}
 
-            {canEditFull && (
-              <>
-                <div className="h-7 w-px bg-border mx-1 hidden sm:block" />
-                <select
-                  className={`app-input !w-auto !py-2 text-xs min-w-[165px] ${getRetiroSelectClass(bulkRetiroStatus)}`}
-                  value={bulkRetiroStatus}
-                  onChange={event => setBulkRetiroStatus(event.target.value)}
-                  disabled={bulkBusy || selectedGuideOrders.length === 0}
-                  title="Estado de retiro para los pedidos seleccionados"
-                >
-                  {retiroOpts.filter(Boolean).map(status => (
-                    <option key={status} value={status}>
-                      {status === 'REALIZADO' ? '✅ REALIZADO' : status === 'PENDIENTE' ? '⏳ PENDIENTE' : status === 'CANCELADO' ? '❌ CANCELADO' : status}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  className="nav-btn !border-emerald-500/60 !bg-emerald-500/20 hover:!bg-emerald-500/30 !text-emerald-300 font-extrabold shadow-sm shadow-emerald-500/20"
-                  onClick={applyBulkRetiro}
-                  disabled={bulkBusy || selectedGuideOrders.length === 0}
-                  title="Cambiar Estado de retiro de todos los pedidos seleccionados"
-                >
-                  ✨ Estado de retiro ({selectedGuideOrders.length})
-                </button>
-              </>
-            )}
-
             {(isDelivery || isSupplier || isAdmin) && (
               <>
                 <select
@@ -3749,7 +3508,7 @@ export default function ClosuresView() {
                   disabled={bulkBusy || selectedRendibleOrders.length === 0}
                   title={
                     activeSection === 'teamClosures' && isSupplier
-                      ? 'En Cierres de Equipo, podés marcar RENDIDO cualquier pedido entregado gestionado por tu equipo, aunque sea de otro proveedor'
+                      ? 'En Cierres de Equipo, PROVEEDOR solo puede rendir ventas propias'
                       : 'Solo marca como RENDIDO los pedidos ENTREGADO / ENCOMIENDA ENTREGADA seleccionados'
                   }
                 >
@@ -3813,7 +3572,7 @@ export default function ClosuresView() {
       </div>
 
       <div className="overflow-auto">
-        <table className="app-table min-w-[2050px]">
+        <table className="app-table min-w-[1800px]">
           <thead>
             <tr>
               {canUseGuides && <th className="text-center">✓</th>}
@@ -3822,7 +3581,6 @@ export default function ClosuresView() {
               <th>ID</th>
               <th>Ciudad</th>
               <th>Cliente</th>
-              <th>Productos</th>
               <th>Teléfono</th>
               {canUseGuides && <th>Guía</th>}
               <th>Proveedor</th>
@@ -3924,60 +3682,6 @@ export default function ClosuresView() {
                     )}
                   </td>
                   <td className="text-xs">{o.customer_name}</td>
-                  <td className="text-xs min-w-[220px]">
-                    {(() => {
-                      const items = getOrderItems(o);
-
-                      if (items.length === 0) {
-                        return <span className="text-muted-foreground">—</span>;
-                      }
-
-                      return (
-                        <div className="flex flex-col gap-1">
-                          {items.map((item: any, index: number) => {
-                            const sku = String(item?.sku || '').trim();
-
-                            const productFromCatalog = products.find(
-                              (product: any) =>
-                                sku &&
-                                String(product?.sku || '').trim().toLowerCase() ===
-                                  sku.toLowerCase(),
-                            );
-
-                            const productName = String(
-                              item?.title ||
-                              item?.name ||
-                              item?.product_name ||
-                              productFromCatalog?.name ||
-                              sku ||
-                              'Producto',
-                            ).trim();
-
-                            const qty = Number(
-                              item?.qty ||
-                              item?.quantity ||
-                              item?.cantidad ||
-                              1,
-                            );
-
-                            return (
-                              <div
-                                key={`${o.id}-product-${index}`}
-                                className="inline-flex w-fit max-w-[260px] items-center gap-1 rounded-lg border border-primary/20 bg-primary/5 px-2 py-1 font-semibold"
-                                title={sku ? `${productName} — SKU: ${sku}` : productName}
-                              >
-                                <span>📦</span>
-                                <span className="break-words">{productName}</span>
-                                <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-extrabold">
-                                  x{Number.isFinite(qty) && qty > 0 ? qty : 1}
-                                </span>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      );
-                    })()}
-                  </td>
                   <td className="text-xs">
                     <div className="flex items-center gap-2 whitespace-nowrap">
                       {getOrderPhone(o) ? (
@@ -4111,17 +3815,9 @@ export default function ClosuresView() {
                   </td>
                   <td>
                     {canEditFull ? (
-                      <select
-                        className={`app-input !w-auto !py-1.5 !px-2.5 text-xs min-w-[135px] rounded-lg transition-all ${getRetiroSelectClass(o.estado_retiro || '')}`}
-                        value={o.estado_retiro || ''}
-                        onChange={e => updateRetiro(o.id, e.target.value)}
-                        title="Cambiar Estado de retiro"
-                      >
-                        {retiroOpts.map(s => (
-                          <option key={s} value={s}>
-                            {s === 'REALIZADO' ? '✅ REALIZADO' : s === 'PENDIENTE' ? '⏳ PENDIENTE' : s === 'CANCELADO' ? '❌ CANCELADO' : '—'}
-                          </option>
-                        ))}
+                      <select className="app-input !w-auto !py-1 !px-2 text-xs" value={o.estado_retiro || ''}
+                        onChange={e => updateRetiro(o.id, e.target.value)}>
+                        {retiroOpts.map(s => <option key={s} value={s}>{s || '—'}</option>)}
                       </select>
                     ) : <span className="text-xs">{o.estado_retiro || '—'}</span>}
                   </td>
