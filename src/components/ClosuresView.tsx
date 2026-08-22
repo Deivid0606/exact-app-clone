@@ -6,6 +6,29 @@ import { toast } from 'sonner';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
+const dateKeyPY = (value: string | null | undefined) => {
+  if (!value) return '';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Asuncion',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+
+  const get = (type: string) =>
+    parts.find(part => part.type === type)?.value || '';
+
+  const year = get('year');
+  const month = get('month');
+  const day = get('day');
+
+  return year && month && day ? `${year}-${month}-${day}` : '';
+};
+
 const STATUS_1_OPTIONS = [
   'PENDIENTE',
   'EN RUTA',
@@ -1353,12 +1376,32 @@ export default function ClosuresView() {
       dateField = 'created_at';
     }
     
-    let query = supabase.from('orders').select('*')
-      .gte(dateField, dateFrom + 'T00:00:00')
-      .lte(dateField, dateTo + 'T23:59:59')
-      .order(dateField, { ascending: false });
+    const isTeamClosureView =
+      activeSection === 'teamClosures' &&
+      (isDelivery || isSupplier || isAdmin);
 
-    if (activeSection === 'teamClosures' && (isDelivery || isSupplier || isAdmin)) {
+    /*
+     * CIERRE NORMAL:
+     * conserva el filtro SQL por assigned_at / created_at.
+     *
+     * CIERRES DE EQUIPO:
+     * primero traemos los pedidos de los miembros y luego filtramos por la
+     * FECHA REAL DE ASIGNACIÓN AL DELIVERY:
+     *   team_assigned_at ?? assigned_at
+     *
+     * Esto evita que una sincronización posterior del líder cambie el día
+     * en que el pedido debe aparecer para el DELIVERY encargado.
+     */
+    let query = supabase.from('orders').select('*');
+
+    if (!isTeamClosureView) {
+      query = query
+        .gte(dateField, dateFrom + 'T00:00:00')
+        .lte(dateField, dateTo + 'T23:59:59')
+        .order(dateField, { ascending: false });
+    }
+
+    if (isTeamClosureView) {
       /*
        * CIERRES DE EQUIPO:
        * - primero se identifica el LÍDER mediante delivery_owner;
@@ -1459,8 +1502,45 @@ export default function ClosuresView() {
     }
 
     const { data } = await query;
-    setOrders(data || []);
-    setTotalPedidosAsignados(data?.length || 0);
+
+    let finalOrders = data || [];
+
+    if (isTeamClosureView) {
+      finalOrders = finalOrders
+        .filter(order => {
+          const effectiveAssignedAt =
+            order.team_assigned_at ||
+            order.assigned_at;
+
+          const key = dateKeyPY(effectiveAssignedAt);
+
+          return Boolean(
+            key &&
+            key >= dateFrom &&
+            key <= dateTo,
+          );
+        })
+        .sort((a, b) => {
+          const aTime = new Date(
+            a.team_assigned_at ||
+            a.assigned_at ||
+            a.created_at ||
+            0,
+          ).getTime();
+
+          const bTime = new Date(
+            b.team_assigned_at ||
+            b.assigned_at ||
+            b.created_at ||
+            0,
+          ).getTime();
+
+          return bTime - aTime;
+        });
+    }
+
+    setOrders(finalOrders);
+    setTotalPedidosAsignados(finalOrders.length);
 
     let deliveryToCheck = '';
     if (isDelivery) {
@@ -3628,13 +3708,21 @@ export default function ClosuresView() {
                   <td className="text-xs whitespace-nowrap">
                     <div className="flex items-center gap-1">
                       <span>
-                        {formatDatePY(o.assigned_at)}
+                        {formatDatePY(
+                          activeSection === 'teamClosures'
+                            ? (o.team_assigned_at || o.assigned_at)
+                            : o.assigned_at,
+                        )}
                       </span>
                       {canEditFull && editingDateId === o.id ? (
                         <input
                           type="date"
                           className="app-input !py-0 !px-1 text-xs w-auto"
-                          defaultValue={dateInputValue(o.assigned_at)}
+                          defaultValue={dateInputValue(
+                            activeSection === 'teamClosures'
+                              ? (o.team_assigned_at || o.assigned_at)
+                              : o.assigned_at,
+                          )}
                           onChange={(e) => handleDateChange(o.id, e.target.value)}
                           onBlur={() => setEditingDateId(null)}
                           onKeyDown={(e) => {
