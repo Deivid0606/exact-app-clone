@@ -2710,7 +2710,14 @@ export default function ClosuresView() {
               setFilterDeliveries(new Set());
               setFilterSuppliers(new Set());
               setSelectedGuideIds(new Set());
-              await loadTeamData();
+
+              // En Cierres de Equipo, ADMIN / PROVEEDOR / DELIVERY
+              // también deben poder filtrar por proveedor.
+              await Promise.all([
+                loadTeamData(),
+                loadSuppliers(),
+              ]);
+
               setActiveSection('teamClosures');
             }}
           >
@@ -2969,7 +2976,7 @@ export default function ClosuresView() {
               ? 'ADMIN puede elegir cualquier equipo, filtrar sus deliveries y realizar el cierre completo. Todo pedido asignado a un miembro ACCEPTED aparece en su equipo. La tarifa mostrada es la tarifa propia de cada DELIVERY miembro.'
               : isSupplier
                 ? 'Todo pedido asignado a un DELIVERY ACCEPTED de tu equipo aparece acá, aunque la venta sea de otro proveedor. El filtro Proveedor sirve solo para organizar la vista. Solo podés marcar RENDIDO cuando provider_email sea tu propio usuario. La tarifa es la propia de cada DELIVERY miembro.'
-                : 'Todo pedido asignado a un DELIVERY ACCEPTED de tu equipo aparece automáticamente acá, aunque la venta sea de otro proveedor. Podés usar el filtro Proveedor para organizar la vista. DELIVERY no puede marcar RENDIDO aunque sea líder. La tarifa es la propia de cada DELIVERY miembro.'}
+                : 'Todo pedido asignado a un DELIVERY ACCEPTED de tu equipo aparece automáticamente acá, aunque la venta sea de otro proveedor. DELIVERY también puede usar el filtro Proveedor para organizar la vista. DELIVERY no puede marcar RENDIDO aunque sea líder. La tarifa es la propia de cada DELIVERY miembro.'}
           </p>
         </div>
       )}
