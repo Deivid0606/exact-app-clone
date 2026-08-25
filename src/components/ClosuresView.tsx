@@ -596,6 +596,7 @@ export default function ClosuresView() {
   const [updatingContactedIds, setUpdatingContactedIds] = useState<Set<string>>(new Set());
   const [activeSection, setActiveSection] = useState<'orders' | 'team' | 'teamClosures'>('orders');
   const [bulkStatus, setBulkStatus] = useState<string>('EN RUTA');
+  const [bulkRetiroStatus, setBulkRetiroStatus] = useState<string>('REALIZADO');
   const [bulkTeamUserId, setBulkTeamUserId] = useState<string>('');
   const [bulkAssignedDate, setBulkAssignedDate] = useState<string>('');
   const [bulkBusy, setBulkBusy] = useState(false);
@@ -1003,6 +1004,34 @@ export default function ClosuresView() {
         });
       });
 
+      /*
+       * PROVEEDOR:
+       * agregar también los provider_email presentes en pedidos que él
+       * gestiona como delivery_owner. Así el filtro normal nunca depende
+       * únicamente de que la RPC devuelva esos proveedores.
+       */
+      if (isSupplier && myEmail) {
+        const { data: managedProviderRows } = await supabase
+          .from('orders')
+          .select('provider_email')
+          .or(`provider_email.eq.${myEmail},delivery_owner.eq.${myEmail}`)
+          .not('provider_email', 'is', null)
+          .limit(5000);
+
+        (managedProviderRows || []).forEach((row: any) => {
+          const email = String(row?.provider_email || '')
+            .trim()
+            .toLowerCase();
+
+          if (!email || supplierMap.has(email)) return;
+
+          supplierMap.set(email, {
+            email,
+            name: email,
+          });
+        });
+      }
+
       const finalSuppliers = Array
         .from(supplierMap.values())
         .sort((a, b) =>
@@ -1019,6 +1048,40 @@ export default function ClosuresView() {
         'Error cargando proveedores oficiales en Cierres:',
         error,
       );
+
+      if (isSupplier && myEmail) {
+        const { data: fallbackRows, error: fallbackError } = await supabase
+          .from('orders')
+          .select('provider_email')
+          .or(`provider_email.eq.${myEmail},delivery_owner.eq.${myEmail}`)
+          .not('provider_email', 'is', null)
+          .limit(5000);
+
+        if (!fallbackError) {
+          const map = new Map<string, { email: string; name: string }>();
+
+          (fallbackRows || []).forEach((row: any) => {
+            const email = String(row?.provider_email || '')
+              .trim()
+              .toLowerCase();
+
+            if (!email) return;
+
+            map.set(email, {
+              email,
+              name: email,
+            });
+          });
+
+          setSuppliers(
+            Array.from(map.values()).sort((a, b) =>
+              a.email.localeCompare(b.email),
+            ),
+          );
+
+          return;
+        }
+      }
 
       toast.error(
         `Error al cargar proveedores: ${
@@ -1483,10 +1546,27 @@ export default function ClosuresView() {
         query = query.in('provider_email', selectedSupplierList);
       }
     } else if (isSupplier) {
-      // CIERRE NORMAL: se mantiene exactamente como estaba.
-      query = query.eq('provider_email', myEmail);
+      /*
+       * CIERRE NORMAL - PROVEEDOR
+       *
+       * El proveedor ve:
+       * 1) sus propias ventas;
+       * 2) ventas de otros proveedores que él está gestionando como
+       *    titular/líder mediante delivery_owner.
+       *
+       * El filtro Proveedor solo organiza esa vista: no abre pedidos
+       * ajenos que el proveedor no esté gestionando.
+       */
+      query = query.or(
+        `provider_email.eq.${myEmail},delivery_owner.eq.${myEmail}`,
+      );
+
       if (selectedDeliveryList.length > 0) {
         query = query.in('assigned_delivery', selectedDeliveryList);
+      }
+
+      if (selectedSupplierList.length > 0) {
+        query = query.in('provider_email', selectedSupplierList);
       }
     } else if (isVendedor) {
       query = query.eq('created_by', myEmail);
@@ -2103,6 +2183,51 @@ export default function ClosuresView() {
     }).eq('id', orderId);
     if (error) toast.error(error.message);
     else { toast.success('Estado de retiro actualizado'); loadClosures(); }
+  };
+
+  const applyBulkRetiroStatus = async () => {
+    const ids = Array.from(selectedGuideIds);
+
+    if (ids.length === 0) {
+      toast.error('Seleccioná al menos un pedido');
+      return;
+    }
+
+    if (!canEditFull) {
+      toast.error('No tenés permiso para cambiar el estado de retiro');
+      return;
+    }
+
+    if (!bulkRetiroStatus) {
+      toast.error('Seleccioná un estado de retiro');
+      return;
+    }
+
+    if (!confirm(`¿Cambiar ${ids.length} pedido(s) a Estado de retiro: ${bulkRetiroStatus}?`)) {
+      return;
+    }
+
+    setBulkBusy(true);
+
+    try {
+      const { error } = await supabase
+        .from('orders')
+        .update({
+          estado_retiro: bulkRetiroStatus,
+          updated_at: new Date().toISOString(),
+        })
+        .in('id', ids);
+
+      if (error) throw error;
+
+      toast.success(`${ids.length} pedido(s) actualizado(s) a ${bulkRetiroStatus}`);
+      setSelectedGuideIds(new Set());
+      await loadClosures();
+    } catch (error: any) {
+      toast.error(error?.message || 'No se pudo actualizar el Estado de retiro');
+    } finally {
+      setBulkBusy(false);
+    }
   };
 
   const handleDateChange = async (orderId: string, newDate: string) => {
@@ -3121,7 +3246,7 @@ export default function ClosuresView() {
         {(
           activeSection === 'teamClosures'
             ? (isAdmin || isSupplier || isDelivery)
-            : (isAdmin || isDelivery)
+            : (isAdmin || isSupplier || isDelivery)
         ) && (
           <div className="relative">
             <button
@@ -3133,7 +3258,9 @@ export default function ClosuresView() {
                 {selectedSupplierList.length === 0
                   ? activeSection === 'teamClosures'
                     ? 'Todos los proveedores de las ventas'
-                    : 'Todos los proveedores'
+                    : isSupplier
+                      ? 'Todos los proveedores que gestiono'
+                      : 'Todos los proveedores'
                   : `${selectedSupplierList.length} proveedor${
                       selectedSupplierList.length === 1 ? '' : 'es'
                     } seleccionado${
@@ -3608,6 +3735,34 @@ export default function ClosuresView() {
               </>
             )}
 
+            {canEditFull && (
+              <>
+                <select
+                  className="app-input !w-auto !py-2 text-xs"
+                  value={bulkRetiroStatus}
+                  onChange={event => setBulkRetiroStatus(event.target.value)}
+                  disabled={bulkBusy || selectedGuideOrders.length === 0}
+                  title="Estado de retiro para selección masiva"
+                >
+                  {retiroOpts.filter(Boolean).map(status => (
+                    <option key={status} value={status}>
+                      {status}
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  type="button"
+                  className="nav-btn active"
+                  onClick={applyBulkRetiroStatus}
+                  disabled={bulkBusy || selectedGuideOrders.length === 0}
+                  title="Cambiar Estado de retiro de todos los seleccionados"
+                >
+                  ✅ Retiro masivo ({selectedGuideOrders.length})
+                </button>
+              </>
+            )}
+
             {(isDelivery || isSupplier || isAdmin) && (
               <>
                 <select
@@ -3722,6 +3877,7 @@ export default function ClosuresView() {
               <th>Teléfono</th>
               {canUseGuides && <th>Guía</th>}
               <th>Proveedor</th>
+              <th>Productos</th>
               <th>Delivery</th>
               <th className="text-right">Total (Gs)</th>
               {canViewNormalClosureFinancials && (
@@ -3889,6 +4045,41 @@ export default function ClosuresView() {
                     </td>
                   )}
                   <td className="text-xs">{o.provider_email || '—'}</td>
+                  <td className="text-xs min-w-[240px]">
+                    {(() => {
+                      const items = getOrderItems(o);
+
+                      if (items.length === 0) {
+                        return <span className="text-muted-foreground">Sin detalle de productos</span>;
+                      }
+
+                      return (
+                        <div className="flex flex-col gap-1">
+                          {items.map((item: any, index: number) => {
+                            const productName =
+                              item.title ||
+                              item.name ||
+                              item.product_name ||
+                              item.sku ||
+                              'Producto';
+
+                            const quantity = Number(item.quantity ?? item.qty ?? 1);
+
+                            return (
+                              <div key={`${o.id}-product-${index}`} className="leading-tight">
+                                <span className="font-bold">{productName}</span>
+                                {quantity > 1 && (
+                                  <span className="ml-1 text-muted-foreground">
+                                    × {quantity}
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()}
+                  </td>
                   <td className="text-xs">
                     <div>
                       {canEditFull ? (
