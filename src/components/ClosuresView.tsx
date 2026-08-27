@@ -1547,22 +1547,61 @@ export default function ClosuresView() {
       }
     } else if (isSupplier) {
       /*
-       * CIERRE NORMAL - PROVEEDOR
+       * CIERRE NORMAL - PROVEEDOR LÍDER
        *
-       * El proveedor ve:
-       * 1) sus propias ventas;
-       * 2) ventas de otros proveedores que él está gestionando como
-       *    titular/líder mediante delivery_owner.
+       * Puede ver pedidos cuando ÉL gestiona la entrega:
        *
-       * El filtro Proveedor solo organiza esa vista: no abre pedidos
-       * ajenos que el proveedor no esté gestionando.
+       * A) delivery_owner = su correo
+       *    -> él figura como titular/líder de esa gestión.
+       *
+       * B) assigned_delivery = él mismo o un miembro ACCEPTED de SU equipo.
+       *
+       * provider_email NO concede visibilidad por sí solo.
+       * Solo sirve como filtro para separar productos/proveedores dentro
+       * de los pedidos que realmente gestiona.
+       */
+      const supplierManagedEmails = Array.from(
+        new Set(
+          [
+            String(myEmail || '').trim().toLowerCase(),
+            ...teamMembers
+              .filter(
+                member =>
+                  String(member.status || '').toUpperCase() === 'ACCEPTED',
+              )
+              .map(member =>
+                String(member.member_email || '').trim().toLowerCase(),
+              ),
+          ].filter(Boolean),
+        ),
+      );
+
+      const managedDeliveryFilter =
+        supplierManagedEmails.length > 0
+          ? supplierManagedEmails.join(',')
+          : '__NO_MATCH__';
+
+      /*
+       * PostgREST OR:
+       * - delivery_owner = líder
+       * - assigned_delivery IN miembros gestionados
        */
       query = query.or(
-        `provider_email.eq.${myEmail},delivery_owner.eq.${myEmail}`,
+        `delivery_owner.eq.${myEmail},assigned_delivery.in.(${managedDeliveryFilter})`,
       );
 
       if (selectedDeliveryList.length > 0) {
-        query = query.in('assigned_delivery', selectedDeliveryList);
+        const allowedSelectedDeliveries = selectedDeliveryList.filter(email =>
+          supplierManagedEmails.includes(
+            String(email || '').trim().toLowerCase(),
+          ),
+        );
+
+        if (allowedSelectedDeliveries.length > 0) {
+          query = query.in('assigned_delivery', allowedSelectedDeliveries);
+        } else {
+          query = query.eq('assigned_delivery', '__NO_MATCH__');
+        }
       }
 
       if (selectedSupplierList.length > 0) {
@@ -3259,7 +3298,7 @@ export default function ClosuresView() {
                   ? activeSection === 'teamClosures'
                     ? 'Todos los proveedores de las ventas'
                     : isSupplier
-                      ? 'Todos los proveedores que gestiono'
+                      ? 'Todos los proveedores de mis pedidos gestionados'
                       : 'Todos los proveedores'
                   : `${selectedSupplierList.length} proveedor${
                       selectedSupplierList.length === 1 ? '' : 'es'
