@@ -6,6 +6,24 @@ import { toast } from 'sonner';
 
 const nf = (n: number) => new Intl.NumberFormat('es-PY').format(n);
 
+const getTodayAndTomorrowPY = () => {
+  const now = new Date();
+
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Asuncion',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+
+  const today = formatter.format(now);
+  const [year, month, day] = today.split('-').map(Number);
+  const nextDate = new Date(Date.UTC(year, month - 1, day + 1, 12, 0, 0));
+  const tomorrow = formatter.format(nextDate);
+
+  return { today, tomorrow };
+};
+
 const dateKeyPY = (value: string | null | undefined) => {
   if (!value) return '';
 
@@ -583,11 +601,12 @@ export default function ClosuresView() {
   const [searchTerm, setSearchTerm] = useState('');
   const [rendicionNote, setRendicionNote] = useState('');
   const [rendicionPagada, setRendicionPagada] = useState<{ id: string; pagado_en: string; nota: string; marcado_por: string } | null>(null);
-  const [dateFrom, setDateFrom] = useState(() => {
-    const d = new Date(); d.setDate(1);
-    return d.toISOString().slice(0, 10);
-  });
-  const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
+  const [dateFrom, setDateFrom] = useState(
+    () => getTodayAndTomorrowPY().today,
+  );
+  const [dateTo, setDateTo] = useState(
+    () => getTodayAndTomorrowPY().tomorrow,
+  );
   const [filterDateBy, setFilterDateBy] = useState<'assigned_at' | 'created_at'>('assigned_at');
   const [totalPedidosAsignados, setTotalPedidosAsignados] = useState(0);
   const [loadingDeliveries, setLoadingDeliveries] = useState(false);
@@ -1547,18 +1566,17 @@ export default function ClosuresView() {
       }
     } else if (isSupplier) {
       /*
-       * CIERRE NORMAL - PROVEEDOR LÍDER
+       * CIERRE NORMAL - PROVEEDOR
        *
-       * Puede ver pedidos cuando ÉL gestiona la entrega:
+       * Debe ver:
+       * 1) TODOS SUS PEDIDOS COMERCIALES:
+       *    provider_email = su correo
        *
-       * A) delivery_owner = su correo
-       *    -> él figura como titular/líder de esa gestión.
+       * 2) PEDIDOS DE OTROS PROVEEDORES QUE ÉL GESTIONA COMO LÍDER:
+       *    delivery_owner = su correo
+       *    O assigned_delivery = él / miembro ACCEPTED de su equipo
        *
-       * B) assigned_delivery = él mismo o un miembro ACCEPTED de SU equipo.
-       *
-       * provider_email NO concede visibilidad por sí solo.
-       * Solo sirve como filtro para separar productos/proveedores dentro
-       * de los pedidos que realmente gestiona.
+       * provider_email puede usarse después como filtro visual.
        */
       const supplierManagedEmails = Array.from(
         new Set(
@@ -1581,27 +1599,16 @@ export default function ClosuresView() {
           ? supplierManagedEmails.join(',')
           : '__NO_MATCH__';
 
-      /*
-       * PostgREST OR:
-       * - delivery_owner = líder
-       * - assigned_delivery IN miembros gestionados
-       */
       query = query.or(
-        `delivery_owner.eq.${myEmail},assigned_delivery.in.(${managedDeliveryFilter})`,
+        [
+          `provider_email.eq.${myEmail}`,
+          `delivery_owner.eq.${myEmail}`,
+          `assigned_delivery.in.(${managedDeliveryFilter})`,
+        ].join(','),
       );
 
       if (selectedDeliveryList.length > 0) {
-        const allowedSelectedDeliveries = selectedDeliveryList.filter(email =>
-          supplierManagedEmails.includes(
-            String(email || '').trim().toLowerCase(),
-          ),
-        );
-
-        if (allowedSelectedDeliveries.length > 0) {
-          query = query.in('assigned_delivery', allowedSelectedDeliveries);
-        } else {
-          query = query.eq('assigned_delivery', '__NO_MATCH__');
-        }
+        query = query.in('assigned_delivery', selectedDeliveryList);
       }
 
       if (selectedSupplierList.length > 0) {
@@ -3179,9 +3186,25 @@ export default function ClosuresView() {
 
       <div className="flex flex-wrap gap-2 mb-3">
         <label className="app-label !mt-0">Desde</label>
-        <input type="date" className="app-input !w-auto" value={dateFrom} onChange={e => setDateFrom(e.target.value)} />
+        <input
+          type="date"
+          className="app-input !w-auto"
+          value={dateFrom}
+          onChange={e => setDateFrom(e.target.value)}
+        />
         <label className="app-label !mt-0">Hasta</label>
-        <input type="date" className="app-input !w-auto" value={dateTo} onChange={e => setDateTo(e.target.value)} />
+        <input
+          type="date"
+          className="app-input !w-auto"
+          value={dateTo}
+          onChange={e => setDateTo(e.target.value)}
+        />
+        <span
+          className="self-center text-[10px] text-muted-foreground"
+          title="El rango inicial es hoy a mañana, pero podés cambiar ambas fechas libremente."
+        >
+          24 h iniciales
+        </span>
         
         {activeSection === 'teamClosures' && (isDelivery || isSupplier || isAdmin) && (
           <div className="flex items-center gap-1">
