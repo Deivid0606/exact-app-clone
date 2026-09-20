@@ -26,6 +26,25 @@ const displayClientName = (value: any): string => {
   return String(value || '').replace(/\s+/g, ' ').trim() || 'SIN NOMBRE';
 };
 
+const getOrderItems = (order: any): any[] => {
+  try {
+    if (Array.isArray(order?.items_json)) return order.items_json;
+    if (typeof order?.items_json === 'string') {
+      const parsed = JSON.parse(order.items_json || '[]');
+      return Array.isArray(parsed) ? parsed : [];
+    }
+    return [];
+  } catch {
+    return [];
+  }
+};
+
+const getProductNames = (order: any): string[] => {
+  return getOrderItems(order)
+    .map((item: any) => String(item?.title || item?.sku || 'Item').trim())
+    .filter(Boolean);
+};
+
 const panelCls = "rounded-3xl border border-slate-700/70 bg-[#0b1020]/95 shadow-[0_24px_80px_rgba(0,0,0,.35)] p-4 md:p-6 text-white";
 const cardCls = "rounded-2xl border border-slate-700/70 bg-[#101827]/90 shadow-xl";
 const kpiBaseCls = "relative overflow-hidden rounded-2xl border p-4 min-h-[96px] shadow-lg";
@@ -54,6 +73,11 @@ export default function WithGuidesView() {
   const [selectedCities, setSelectedCities] = useState<Set<string>>(new Set());
   const [citySearch, setCitySearch] = useState('');
   const [showCityDropdown, setShowCityDropdown] = useState(false);
+
+  // FILTRO POR PRODUCTOS
+  const [selectedProducts, setSelectedProducts] = useState<Set<string>>(new Set());
+  const [productSearch, setProductSearch] = useState('');
+  const [showProductDropdown, setShowProductDropdown] = useState(false);
 
   // FILTRO POR DEPARTAMENTOS
   const [selectedDepartments, setSelectedDepartments] = useState<Set<string>>(new Set());
@@ -131,63 +155,79 @@ export default function WithGuidesView() {
 
   const load = async () => {
     setLoading(true);
-    
-    let query = supabase
-      .from('orders')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .range(0, 9999);
 
-    if (search && search.trim()) {
-      const searchTerm = search.trim();
-      query = query.ilike('order_number', `%${searchTerm}%`);
-    }
+    try {
+      // Sin límite práctico de filas: trae los pedidos en páginas de 1.000
+      // hasta que Supabase ya no devuelva más resultados.
+      const PAGE_SIZE = 1000;
+      let from = 0;
+      let allRows: any[] = [];
 
-    if (status2Filter === 'PENDIENTES') {
-      query = query.or('status2.is.null,status2.eq.--');
-    } else if (status2Filter === 'CON_GUIA') {
-      query = query.eq('status2', 'GUIA GENERADA');
-    }
+      while (true) {
+        let query = supabase
+          .from('orders')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .range(from, from + PAGE_SIZE - 1);
 
-    const { data, error } = await query;
+        if (search && search.trim()) {
+          const searchTerm = search.trim();
+          query = query.ilike('order_number', `%${searchTerm}%`);
+        }
 
-    if (error) {
-      toast.error(error.message);
-      setLoading(false);
-      return;
-    }
+        if (status2Filter === 'PENDIENTES') {
+          query = query.or('status2.is.null,status2.eq.--');
+        } else if (status2Filter === 'CON_GUIA') {
+          query = query.eq('status2', 'GUIA GENERADA');
+        }
 
-    setOrders(data || []);
+        const { data, error } = await query;
 
-    const today = todayISO();
-    const [guidesTodayRes, deliveredTodayRes] = await Promise.all([
-      supabase
-        .from('orders')
-        .select('*')
-        .eq('status2', 'GUIA GENERADA')
-        .gte('updated_at', today + 'T00:00:00')
-        .lte('updated_at', today + 'T23:59:59'),
-      supabase
-        .from('orders')
-        .select('*')
-        .in('status', ['ENTREGADO', 'ENCOMIENDA ENTREGADA'])
-        .gte('delivered_at', today + 'T00:00:00')
-        .lte('delivered_at', today + 'T23:59:59'),
-    ]);
+        if (error) {
+          toast.error(error.message);
+          return;
+        }
 
-    const roleFilter = (o: any) => {
-      if (role === 'PROVEEDOR') {
-        const providerList = o.provider_emails_list || '';
-        return providerList.toLowerCase().includes(myEmail.toLowerCase());
+        const batch = data || [];
+        allRows = allRows.concat(batch);
+
+        if (batch.length < PAGE_SIZE) break;
+        from += PAGE_SIZE;
       }
-      if (role === 'DELIVERY') return (o.assigned_delivery || '').toLowerCase() === myEmail.toLowerCase();
-      if (role === 'VENDEDOR') return (o.created_by || '').toLowerCase() === myEmail.toLowerCase();
-      return true;
-    };
 
-    setGuidesTodayCount((guidesTodayRes.data || []).filter(roleFilter).length);
-    setDeliveredTodayCount((deliveredTodayRes.data || []).filter(roleFilter).length);
-    setLoading(false);
+      setOrders(allRows);
+
+      const today = todayISO();
+      const [guidesTodayRes, deliveredTodayRes] = await Promise.all([
+        supabase
+          .from('orders')
+          .select('*')
+          .eq('status2', 'GUIA GENERADA')
+          .gte('updated_at', today + 'T00:00:00')
+          .lte('updated_at', today + 'T23:59:59'),
+        supabase
+          .from('orders')
+          .select('*')
+          .in('status', ['ENTREGADO', 'ENCOMIENDA ENTREGADA'])
+          .gte('delivered_at', today + 'T00:00:00')
+          .lte('delivered_at', today + 'T23:59:59'),
+      ]);
+
+      const roleFilter = (o: any) => {
+        if (role === 'PROVEEDOR') {
+          const providerList = o.provider_emails_list || '';
+          return providerList.toLowerCase().includes(myEmail.toLowerCase());
+        }
+        if (role === 'DELIVERY') return (o.assigned_delivery || '').toLowerCase() === myEmail.toLowerCase();
+        if (role === 'VENDEDOR') return (o.created_by || '').toLowerCase() === myEmail.toLowerCase();
+        return true;
+      };
+
+      setGuidesTodayCount((guidesTodayRes.data || []).filter(roleFilter).length);
+      setDeliveredTodayCount((deliveredTodayRes.data || []).filter(roleFilter).length);
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => { 
@@ -262,6 +302,14 @@ export default function WithGuidesView() {
     return Array.from(depts).sort();
   }, [orders]);
 
+  const allProducts = useMemo(() => {
+    const products = new Set<string>();
+    orders.forEach(order => {
+      getProductNames(order).forEach(name => products.add(name));
+    });
+    return Array.from(products).sort((a, b) => a.localeCompare(b, 'es'));
+  }, [orders]);
+
   const filteredCities = useMemo(() => {
     if (!citySearch) return allCities;
     return allCities.filter(c => c.toLowerCase().includes(citySearch.toLowerCase()));
@@ -271,6 +319,12 @@ export default function WithGuidesView() {
     if (!deptSearch) return allDepartments;
     return allDepartments.filter(d => d.toLowerCase().includes(deptSearch.toLowerCase()));
   }, [allDepartments, deptSearch]);
+
+  const filteredProducts = useMemo(() => {
+    if (!productSearch.trim()) return allProducts;
+    const q = productSearch.toLowerCase().trim();
+    return allProducts.filter(product => product.toLowerCase().includes(q));
+  }, [allProducts, productSearch]);
 
   const toggleCity = (city: string) => {
     setSelectedCities(prev => {
@@ -290,6 +344,15 @@ export default function WithGuidesView() {
     });
   };
 
+  const toggleProduct = (product: string) => {
+    setSelectedProducts(prev => {
+      const next = new Set(prev);
+      if (next.has(product)) next.delete(product);
+      else next.add(product);
+      return next;
+    });
+  };
+
   const selectAllCities = () => {
     if (selectedCities.size === allCities.length) {
       setSelectedCities(new Set());
@@ -303,6 +366,14 @@ export default function WithGuidesView() {
       setSelectedDepartments(new Set());
     } else {
       setSelectedDepartments(new Set(allDepartments));
+    }
+  };
+
+  const selectAllProducts = () => {
+    if (selectedProducts.size === allProducts.length) {
+      setSelectedProducts(new Set());
+    } else {
+      setSelectedProducts(new Set(allProducts));
     }
   };
 
@@ -337,6 +408,12 @@ export default function WithGuidesView() {
       if (selectedDepartments.size > 0) {
         if (!o.departamento || !selectedDepartments.has(o.departamento)) return false;
       }
+
+      if (selectedProducts.size > 0) {
+        const orderProducts = getProductNames(o);
+        const matchesProduct = orderProducts.some(name => selectedProducts.has(name));
+        if (!matchesProduct) return false;
+      }
       
       if (search && search.trim()) return true;
       
@@ -349,7 +426,7 @@ export default function WithGuidesView() {
         (o.departamento || '').toLowerCase().includes(q) ||
         (o.id || '').toLowerCase().includes(q);
     });
-  }, [orders, search, selectedProviders, role, myEmail, selectedCities, selectedDepartments]);
+  }, [orders, search, selectedProviders, role, myEmail, selectedCities, selectedDepartments, selectedProducts]);
 
   const pendingGuides = filtered.filter(o => !o.status2 || o.status2 === '--');
   const withGuides = filtered.filter(o => o.status2 === 'GUIA GENERADA');
@@ -546,8 +623,8 @@ export default function WithGuidesView() {
   };
 
   // IMPRESIÓN PDF NORMAL - CAMBIO 2: PDF con QR usa order_number
-  const printWithQR = () => {
-    const selected = getSelectedOrders();
+  const printWithQR = (ordersOverride?: any[]) => {
+    const selected = ordersOverride ?? getSelectedOrders();
     if (selected.length === 0) { 
       toast.error('Seleccioná pedidos primero'); 
       return; 
@@ -691,8 +768,8 @@ export default function WithGuidesView() {
   };
 
   // IMPRESIÓN PARA IMPRESORA TÉRMICA - CAMBIO 3: QR con order_number
-  const printThermal = () => {
-    const selected = getSelectedOrders();
+  const printThermal = (ordersOverride?: any[]) => {
+    const selected = ordersOverride ?? getSelectedOrders();
     if (selected.length === 0) {
       toast.error('Seleccioná pedidos primero');
       return;
@@ -706,7 +783,7 @@ export default function WithGuidesView() {
       
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
-        const productName = (it.title || it.sku || 'Item').substring(0, 30);
+        const productName = String(it.title || it.sku || 'Item');
         const qty = it.qty || it.quantity || 1;
         
         itemsHtml += `
@@ -1339,6 +1416,42 @@ export default function WithGuidesView() {
             </div>
           )}
         </div>
+
+        <div className="relative">
+          <button className="nav-btn" type="button" onClick={() => setShowProductDropdown(!showProductDropdown)}
+            style={{ background: selectedProducts.size > 0 ? '#3b82f6' : undefined, color: selectedProducts.size > 0 ? 'white' : undefined }}>
+            📦 Productos {selectedProducts.size > 0 ? `(${selectedProducts.size})` : '(Todos)'}
+          </button>
+          {showProductDropdown && (
+            <div className="absolute top-full mt-1 left-0 z-50 bg-card border border-border rounded-xl shadow-xl w-96 max-h-96 overflow-hidden flex flex-col">
+              <div className="p-2 border-b border-border">
+                <input type="text" className={pillInputCls + " w-full text-sm"} placeholder="🔎 Buscar producto..."
+                  value={productSearch} onChange={e => setProductSearch(e.target.value)} />
+              </div>
+              <div className="p-2 border-b border-border flex gap-2">
+                <button className="text-xs nav-btn !py-1" type="button" onClick={selectAllProducts}>
+                  {selectedProducts.size === allProducts.length && allProducts.length > 0 ? 'Deseleccionar todos' : 'Seleccionar todos'}
+                </button>
+                <button className="text-xs nav-btn !py-1" type="button" onClick={() => setSelectedProducts(new Set())}>Limpiar</button>
+              </div>
+              <div className="overflow-auto max-h-64">
+                {filteredProducts.length === 0 ? (
+                  <div className="px-3 py-4 text-sm text-muted-foreground text-center">No se encontraron productos</div>
+                ) : (
+                  filteredProducts.map(product => (
+                    <label key={product} className="flex items-center gap-2 px-3 py-2 hover:bg-secondary cursor-pointer text-sm">
+                      <input type="checkbox" checked={selectedProducts.has(product)} onChange={() => toggleProduct(product)} />
+                      <span className="truncate" title={product}>{product}</span>
+                      <span className="text-xs text-muted-foreground ml-auto">
+                        {orders.filter(o => getProductNames(o).includes(product)).length}
+                      </span>
+                    </label>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </div>
         
         <button className="nav-btn active" onClick={load} disabled={loading}>
           {loading ? 'Cargando...' : 'Filtrar'}
@@ -1356,10 +1469,10 @@ export default function WithGuidesView() {
           </button>
           <button className="nav-btn" onClick={bulkCopyGuides}>📋 Copiar guías</button>
           <button className="nav-btn active" onClick={downloadTxt}>📥 Descargar TXT</button>
-          <button className="nav-btn active" onClick={printWithQR} style={{ background: '#8b5cf6', color: 'white' }}>
+          <button className="nav-btn active" onClick={() => printWithQR()} style={{ background: '#8b5cf6', color: 'white' }}>
             🖨️ Imprimir PDF con QR
           </button>
-          <button className="nav-btn" onClick={printThermal} style={{ background: '#1a1a1a', color: 'white', border: '1px solid #333' }}>
+          <button className="nav-btn" onClick={() => printThermal()} style={{ background: '#1a1a1a', color: 'white', border: '1px solid #333' }}>
             🧾 Imprimir Ticket Térmico (80mm)
           </button>
           <button className="nav-btn" onClick={clearSelection} style={{ background: '#ef4444', color: 'white' }}>
@@ -1377,18 +1490,43 @@ export default function WithGuidesView() {
             className="nav-btn" 
             onClick={() => {
               setSelectedIds(new Set(pendingGuides.map(o => o.id)));
-              setTimeout(() => printThermal(), 100);
+              printThermal(pendingGuides);
             }} 
             style={{ background: '#1a1a1a', color: 'white' }}
           >
             🧾 Imprimir todos pendientes (Térmica)
           </button>
         )}
+        {visibleOrders.length > 0 && (
+          <>
+            <button
+              className="nav-btn"
+              onClick={() => setSelectedIds(new Set(visibleOrders.map(o => o.id)))}
+              style={{ background: '#0ea5e9', color: 'white' }}
+            >
+              ☑️ Seleccionar todos filtrados ({visibleOrders.length})
+            </button>
+            <button
+              className="nav-btn"
+              onClick={() => printWithQR(visibleOrders)}
+              style={{ background: '#8b5cf6', color: 'white' }}
+            >
+              🖨️ Imprimir todos filtrados PDF ({visibleOrders.length})
+            </button>
+            <button
+              className="nav-btn"
+              onClick={() => printThermal(visibleOrders)}
+              style={{ background: '#1a1a1a', color: 'white' }}
+            >
+              🧾 Imprimir todos filtrados Térmica ({visibleOrders.length})
+            </button>
+          </>
+        )}
       </div>
 
       {/* Tabla */}
       <div className="overflow-auto rounded-2xl border border-slate-700/80 bg-[#101827] shadow-2xl">
-        <table className="w-full min-w-[1320px] text-sm [&_th]:px-4 [&_th]:py-3 [&_td]:px-4 [&_td]:py-3">
+        <table className="w-full min-w-[1550px] text-sm [&_th]:px-4 [&_th]:py-3 [&_td]:px-4 [&_td]:py-3">
           <thead className="bg-[#070b18] sticky top-0 z-10">
             <tr className="text-left text-[11px] uppercase tracking-widest text-slate-400 border-b border-slate-700/80">
               <th className="w-[40px] text-center">
@@ -1400,6 +1538,7 @@ export default function WithGuidesView() {
               <th>Departamento</th>
               <th>Ciudad</th>
               <th>Cliente</th>
+              <th>Productos</th>
               <th>Repetido</th>
               <th>Teléfono</th>
               <th>Vendedor</th>
@@ -1419,6 +1558,15 @@ export default function WithGuidesView() {
                 <td className="text-xs">{o.departamento || '—'}</td>
                 <td className="text-xs">{o.city || '—'}</td>
                 <td className="text-xs font-bold">{o.customer_name}</td>
+                <td className="text-xs min-w-[260px] max-w-[380px]">
+                  <div className="flex flex-wrap gap-1">
+                    {getOrderItems(o).length > 0 ? getOrderItems(o).map((it: any, i: number) => (
+                      <span key={i} className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-900/70 px-2 py-1 text-[11px] text-slate-200">
+                        {it.title || it.sku || 'Item'} x{it.qty || it.quantity || 1}
+                      </span>
+                    )) : <span className="text-slate-500">—</span>}
+                  </div>
+                </td>
                 <td className="text-xs">
                   {repeatedClients.some(c => normalizeClientName(c.name) === normalizeClientName(o.customer_name)) ? (
                     <span className="px-2 py-1 rounded-full bg-amber-500/20 text-amber-300 font-black">Repetido</span>
@@ -1449,7 +1597,7 @@ export default function WithGuidesView() {
             ))}
             {visibleOrders.length === 0 && (
               <tr>
-                <td colSpan={12} className="text-center text-muted-foreground py-8">Sin pedidos para mostrar</td>
+                <td colSpan={13} className="text-center text-muted-foreground py-8">Sin pedidos para mostrar</td>
               </tr>
             )}
           </tbody>
