@@ -39,20 +39,29 @@ const getOrderItems = (order: any): any[] => {
   }
 };
 
-const getProductEntries = (order: any): { name: string; qty: number; key: string; label: string }[] => {
+const normalizeProductKey = (value: any): string => {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+};
+
+const getProductEntries = (order: any): { name: string; qty: number; key: string }[] => {
   return getOrderItems(order)
     .map((item: any) => {
-      const name = String(item?.title || item?.sku || 'Item').trim();
+      const name = String(item?.title || item?.sku || 'Item').replace(/\s+/g, ' ').trim();
       const rawQty = Number(item?.qty ?? item?.quantity ?? 1);
       const qty = Number.isFinite(rawQty) && rawQty > 0 ? rawQty : 1;
       return {
         name,
         qty,
-        key: `${name}|||${qty}`,
-        label: `${name} x${qty}`,
+        // La clave es SOLO el producto. La cantidad no crea otra opción en el filtro.
+        key: normalizeProductKey(name),
       };
     })
-    .filter((item: any) => Boolean(item.name));
+    .filter((item: any) => Boolean(item.name && item.key));
 };
 
 const getProductNames = (order: any): string[] => {
@@ -350,14 +359,27 @@ export default function WithGuidesView() {
   }, [orders, search, selectedProviders, role, myEmail, selectedCities, selectedDepartments]);
 
   const allProducts = useMemo(() => {
-    const products = new Map<string, { key: string; name: string; qty: number; label: string }>();
+    // Un solo registro por producto y suma automática de todas sus unidades
+    // dentro de los pedidos que cumplen los demás filtros activos.
+    const products = new Map<string, { key: string; name: string; qty: number }>();
+
     productFilterBaseOrders.forEach(order => {
       getProductEntries(order).forEach(entry => {
-        if (!products.has(entry.key)) products.set(entry.key, entry);
+        const existing = products.get(entry.key);
+        if (existing) {
+          existing.qty += entry.qty;
+        } else {
+          products.set(entry.key, {
+            key: entry.key,
+            name: entry.name,
+            qty: entry.qty,
+          });
+        }
       });
     });
+
     return Array.from(products.values()).sort((a, b) =>
-      a.name.localeCompare(b.name, 'es') || a.qty - b.qty
+      a.name.localeCompare(b.name, 'es')
     );
   }, [productFilterBaseOrders]);
 
@@ -386,7 +408,6 @@ export default function WithGuidesView() {
     if (!productSearch.trim()) return allProducts;
     const q = productSearch.toLowerCase().trim();
     return allProducts.filter(product =>
-      product.label.toLowerCase().includes(q) ||
       product.name.toLowerCase().includes(q) ||
       String(product.qty).includes(q)
     );
@@ -811,6 +832,7 @@ export default function WithGuidesView() {
         ? window.location.origin + '/#/asignar-pedidos?id=' + encodeURIComponent(orderNumber)
         : '#';
 
+      const timestamp = Date.now();
       const deliveryQrId = `qr-delivery-thermal-${timestamp}-${order.id.slice(0, 8)}`;
 
       allTicketsHtml += `
@@ -1433,9 +1455,9 @@ export default function WithGuidesView() {
                         checked={selectedProducts.has(product.key)}
                         onChange={() => toggleProduct(product.key)}
                       />
-                      <span className="truncate" title={product.label}>{product.label}</span>
-                      <span className="text-xs text-muted-foreground ml-auto">
-                        {productFilterBaseOrders.filter(o => getProductEntries(o).some(entry => entry.key === product.key)).length}
+                      <span className="truncate" title={product.name}>{product.name}</span>
+                      <span className="text-xs font-black text-cyan-300 ml-auto whitespace-nowrap">
+                        Cant. {product.qty}
                       </span>
                     </label>
                   ))
