@@ -107,6 +107,8 @@ export default function StoreOrdersView({ onLoadOrder, checkCoverage, catalogPro
   const [tag, setTag] = useState("all");
   const [chosen, setChosen] = useState<string[]>([]);
   const [tagEdit, setTagEdit] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importReport, setImportReport] = useState<Array<{id:string;status:string;order_id?:string;message?:string}>>([]);
 
   const loadOrders = useCallback(async (showSpinner = false) => {
     if (!email) { setOrders([]); setLoading(false); return; }
@@ -149,13 +151,14 @@ export default function StoreOrdersView({ onLoadOrder, checkCoverage, catalogPro
     return !q || [order.customer_name, order.phone, order.city, order.department, order.product_title, order.page_name, order.id].some(s => normalize(s).includes(q));
   }), [orders, showAllDates, selectedDate, product, coverage, getCoverage, systemStatus, tag, search]);
   const selected = visibleOrders.filter(o => chosen.includes(o.id));
-  const ready = selected.filter(o => !isSaved(o) && classifyProduct(o, catalogProducts) === "matched");
+  const ready = selected.filter(o => !isSaved(o) && getCoverage(o) === "covered" && classifyProduct(o, catalogProducts) === "matched" && Boolean(o.customer_name?.trim()) && Boolean(o.phone?.trim()) && Number(o.quantity)>0 && Number(o.total_gs)>0);
   const selectedDateLabel = showAllDates ? "Todos" : selectedDate === today ? "Hoy" : selectedDate;
   const total = visibleOrders.reduce((sum, o) => sum + Number(o.total_gs || 0), 0);
   const covered = visibleOrders.filter(o => getCoverage(o) === "covered").length;
   const uncovered = visibleOrders.filter(o => getCoverage(o) === "uncovered").length;
   const unknown = visibleOrders.length - covered - uncovered;
-  const busy = savingIds.length > 0;
+  const busy = savingIds.length > 0 || importing;
+  const canImport = (o: StoreOrder) => !isSaved(o) && getCoverage(o) === "covered" && classifyProduct(o, catalogProducts) === "matched" && Boolean(o.customer_name?.trim()) && Boolean(o.phone?.trim()) && Number(o.quantity)>0 && Number(o.total_gs)>0;
 
   async function markOpened(ids: string[]) {
     setSavingIds(ids);
@@ -191,6 +194,44 @@ export default function StoreOrdersView({ onLoadOrder, checkCoverage, catalogPro
     setChosen([]);
   }
 
+  async function importDirect(ids: string[]) {
+    if (busy || !ids.length) return;
+    const eligible = orders.filter(o => ids.includes(o.id) && canImport(o));
+    if (eligible.length !== ids.length) {
+      toast.error("Sólo se importan pedidos con cobertura y producto confirmados, sin datos faltantes y no cargados.");
+      return;
+    }
+    if (!window.confirm(`¿Guardar directamente ${ids.length} pedido(s) en el sistema, sin abrir el formulario?\n\nSe conservarán precio total y cantidad de Mi Tienda. Cada pedido se validará nuevamente en Supabase.`)) return;
+    setImporting(true);
+    setImportReport([]);
+    try {
+      const result: Array<{id:string;status:string;order_id?:string;message?:string}> = [];
+      // Un lote pequeño evita tiempos de espera excesivos y permite resultados parciales.
+      for (let i = 0; i < ids.length; i += 25) {
+        const batch = ids.slice(i, i + 25);
+        const { data, error } = await supabase.rpc("import_store_orders", { p_ids: batch });
+        if (error) {
+          result.push(...batch.map(id => ({id,status:"error",message:error.message})));
+        } else if (Array.isArray(data)) {
+          result.push(...data as typeof result);
+        } else {
+          result.push(...batch.map(id => ({id,status:"error",message:"Respuesta inesperada del servidor"})));
+        }
+      }
+      setImportReport(result);
+      const success = result.filter(x => x.status === "loaded").length;
+      const existing = result.filter(x => x.status === "already_loaded").length;
+      const failed = result.filter(x => x.status === "error").length;
+      if (success) toast.success(`✅ ${success} pedido(s) cargados correctamente`);
+      if (existing) toast.info(`${existing} pedido(s) ya estaban cargados`);
+      if (failed) toast.error(`${failed} pedido(s) requieren revisión. Mirá el detalle debajo.`);
+      setChosen([]);
+      await loadOrders();
+    } finally {
+      setImporting(false);
+    }
+  }
+
   async function saveTags(order: StoreOrder, next: string[]) {
     setTagEdit(order.id);
     const { error } = await supabase.from("landing_page_orders").update({ tags: next }).eq("id", order.id).eq("seller_email", email);
@@ -200,6 +241,7 @@ export default function StoreOrdersView({ onLoadOrder, checkCoverage, catalogPro
   }
 
   async function deleteOrder(order: StoreOrder) {
+    if (isSaved(order)) { toast.error("Un pedido ya importado no se puede eliminar desde Mi Tienda."); return; }
     if (!window.confirm(`¿Eliminar este pedido?\n\nCliente: ${order.customer_name}\nProducto: ${order.product_title}\nTotal: Gs. ${nf(order.total_gs)}\n\nEsta acción no se puede deshacer.`)) return;
     setDeletingId(order.id);
     const { error } = await supabase.from("landing_page_orders").delete().eq("id", order.id).eq("seller_email", email);
@@ -241,9 +283,10 @@ export default function StoreOrdersView({ onLoadOrder, checkCoverage, catalogPro
     <div className="rounded-2xl border border-border p-3 flex flex-wrap items-center gap-3 justify-between">
       <label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" checked={visibleOrders.length > 0 && visibleOrders.every(o => chosen.includes(o.id))} onChange={e => setChosen(e.target.checked ? visibleOrders.map(o => o.id) : [])} /> Seleccionar los {visibleOrders.length} filtrados</label>
       <div className="text-sm">Seleccionados: <b>{selected.length}</b> · Aptos: <b>{ready.length}</b></div>
-      <button className="nav-btn active !px-5 !py-3" onClick={() => void openBulk()} disabled={busy || ready.length === 0}>📦 Cargar seleccionados ↗</button>
+      <div className="flex flex-wrap gap-2"><button className="nav-btn active !px-5 !py-3" onClick={() => void importDirect(ready.map(o => o.id))} disabled={busy || ready.length === 0}>{importing ? "Guardando..." : `⚡ Cargar directo (${ready.length})`}</button><button className="nav-btn !px-5 !py-3" onClick={() => void openBulk()} disabled={busy || ready.length === 0}>📦 Abrir formularios ↗</button></div>
     </div>
 
+    {importReport.length > 0 && <div className="rounded-2xl border border-border p-4 space-y-2"><div className="font-bold">Resultado de carga directa</div>{importReport.map((r,i) => <div key={`${r.id}-${i}`} className="text-sm break-words">{r.status === "loaded" ? "✅" : r.status === "already_loaded" ? "ℹ️" : "❌"} {r.id}: {r.status === "loaded" ? `Cargado (orden ${r.order_id || "creada"})` : r.status === "already_loaded" ? "Ya estaba cargado" : r.message || "Error desconocido"}</div>)}</div>}
     {loading ? <div className="rounded-2xl border border-border p-10 text-center">Cargando pedidos...</div> : !visibleOrders.length ? <div className="rounded-2xl border border-dashed border-border p-12 text-center"><div className="text-4xl">📦</div><div className="font-black mt-3">No hay pedidos en esta vista</div></div> : <div className="space-y-3">{visibleOrders.map(order => {
       const cov = getCoverage(order); const match = classifyProduct(order, catalogProducts); const saved = isSaved(order);
       return <div key={order.id} className="rounded-2xl border border-border bg-background p-4">
@@ -254,7 +297,7 @@ export default function StoreOrdersView({ onLoadOrder, checkCoverage, catalogPro
             {(order.address || order.reference) && <div className="mt-2 text-xs text-muted-foreground">{[order.address, order.reference].filter(Boolean).join(" · ")}</div>}
             <div className="mt-3 flex flex-wrap items-center gap-2"><span className="text-xs text-muted-foreground">Etiquetas:</span>{TAGS.map(t => <label key={t} className="text-xs inline-flex items-center gap-1 rounded-full border border-border px-2 py-1"><input type="checkbox" disabled={tagEdit === order.id} checked={(order.tags || []).includes(t)} onChange={e => void saveTags(order, e.target.checked ? [...(order.tags || []), t] : (order.tags || []).filter(x => x !== t))} />{t}</label>)}</div>
           </div>
-          <div className="shrink-0 flex flex-col gap-2"><button className="nav-btn active !px-5 !py-3" disabled={busy || saved} onClick={() => void openOne(order)}>📦 {saved ? "Ya cargado" : "Cargar pedido ↗"}</button><button className="nav-btn !px-5 !py-3 !border-red-500 !text-red-500" disabled={deletingId === order.id} onClick={() => void deleteOrder(order)}>{deletingId === order.id ? "Eliminando..." : "🗑️ Eliminar pedido"}</button></div>
+          <div className="shrink-0 flex flex-col gap-2"><button className="nav-btn active !px-5 !py-3" disabled={busy || !canImport(order)} onClick={() => void importDirect([order.id])}>⚡ Cargar directo</button><button className="nav-btn !px-5 !py-3" disabled={busy || saved} onClick={() => void openOne(order)}>📦 {saved ? "Ya cargado" : "Abrir formulario ↗"}</button><button className="nav-btn !px-5 !py-3 !border-red-500 !text-red-500" disabled={busy || saved || deletingId === order.id} onClick={() => void deleteOrder(order)}>{deletingId === order.id ? "Eliminando..." : "🗑️ Eliminar pedido"}</button></div>
         </div>
       </div>;
     })}</div>}
