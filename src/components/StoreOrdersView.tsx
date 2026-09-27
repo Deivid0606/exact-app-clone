@@ -77,6 +77,7 @@ export function makeStoreOrderPrefill(order: StoreOrder): StoreOrderPrefill {
 /** Same-page deep link. Parent must mount StoreOrderTabBridge for it to prefill the form. */
 function orderUrl(ids: string[]) {
   const url = new URL(window.location.href);
+  url.searchParams.set("view", "create-order");
   url.searchParams.set("store_order_ids", ids.join(","));
   url.searchParams.delete("store_order_id");
   return url.toString();
@@ -272,7 +273,8 @@ export function StoreOrderTabBridge({ onLoadOrder }: { onLoadOrder: (prefill: St
   const [index, setIndex] = useState(0);
   const [problem, setProblem] = useState("");
   useEffect(() => {
-    const raw = new URL(window.location.href).searchParams.get("store_order_ids");
+    const params = new URL(window.location.href).searchParams;
+    const raw = params.get("store_order_ids") || params.get("store_order_id");
     setIds(raw ? raw.split(",").filter(id => /^[0-9a-f-]{36}$/i.test(id)).slice(0, 500) : []);
     setIndex(0);
   }, []);
