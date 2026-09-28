@@ -90,6 +90,43 @@ function classifyProduct(order: StoreOrder, products?: CatalogProduct[]): Produc
   return exact.length === 1 ? "matched" : exact.length > 1 ? "review" : "missing";
 }
 
+/** Dropi: envía un pedido SOLO a la extensión instalada; no expone datos en la URL. */
+async function prepareDropi(order: StoreOrder, product: CatalogProduct | undefined) {
+  if (!product || !order.city?.trim() || !order.department?.trim()) {
+    toast.error("Verificá producto, ciudad y departamento antes de enviar a Dropi."); return;
+  }
+  const reference = window.prompt(`ID o SKU de Dropi para ${order.product_title}\n(Si ya lo vinculaste, podés dejar vacío):`, "");
+  if (reference === null) return;
+  const productKey = `bot-sky-dropi-product:${product.id}`;
+  const saved = localStorage.getItem(productKey) || "";
+  const dropiReference = reference.trim() || saved;
+  if (!dropiReference) { toast.error("Ingresá un ID o SKU de Dropi para este producto."); return; }
+  if (reference.trim()) localStorage.setItem(productKey, reference.trim());
+  const payload = {
+    sourceOrderId: order.id, productId: product.id, productTitle: order.product_title,
+    dropiReference, customer: order.customer_name, phone: order.phone,
+    city: order.city, department: order.department, address: order.address || "",
+    reference: order.reference || "", quantity: Number(order.quantity || 1),
+    totalGs: Number(order.total_gs || 0), sellerEmail: order.seller_email || ""
+  };
+  // Solo respuesta de la extensión activa; sin ella no se abre Dropi ni se cambia estado.
+  const requestId = crypto.randomUUID();
+  let resolved = false;
+  const onMessage = (event: MessageEvent) => {
+    if (event.source !== window || event.origin !== location.origin) return;
+    if (event.data?.type !== "BOT_SKY_DROPI_ACK" || event.data?.requestId !== requestId) return;
+    resolved = true; window.removeEventListener("message", onMessage);
+    if (event.data.ok) toast.success("🚀 Pedido entregado a la extensión. Revisá Dropi.");
+    else toast.error(event.data.error || "La extensión no pudo preparar Dropi.");
+  };
+  window.addEventListener("message", onMessage);
+  window.postMessage({ type: "BOT_SKY_PREPARE_DROPI", requestId, payload }, location.origin);
+  window.setTimeout(() => {
+    window.removeEventListener("message", onMessage);
+    if (!resolved) toast.error("Instalá y habilitá la extensión BOT SKY → Dropi y volvé a intentar.");
+  }, 2500);
+}
+
 export default function StoreOrdersView({ onLoadOrder, checkCoverage, catalogProducts }: StoreOrdersViewProps) {
   const { user } = useAuth();
   const email = user?.email?.toLowerCase() || "";
@@ -288,7 +325,7 @@ export default function StoreOrdersView({ onLoadOrder, checkCoverage, catalogPro
 
     {importReport.length > 0 && <div className="rounded-2xl border border-border p-4 space-y-2"><div className="font-bold">Resultado de carga directa</div>{importReport.map((r,i) => <div key={`${r.id}-${i}`} className="text-sm break-words">{r.status === "loaded" ? "✅" : r.status === "already_loaded" ? "ℹ️" : "❌"} {r.id}: {r.status === "loaded" ? `Cargado (orden ${r.order_id || "creada"})` : r.status === "already_loaded" ? "Ya estaba cargado" : r.message || "Error desconocido"}</div>)}</div>}
     {loading ? <div className="rounded-2xl border border-border p-10 text-center">Cargando pedidos...</div> : !visibleOrders.length ? <div className="rounded-2xl border border-dashed border-border p-12 text-center"><div className="text-4xl">📦</div><div className="font-black mt-3">No hay pedidos en esta vista</div></div> : <div className="space-y-3">{visibleOrders.map(order => {
-      const cov = getCoverage(order); const match = classifyProduct(order, catalogProducts); const saved = isSaved(order);
+      const cov = getCoverage(order); const match = classifyProduct(order, catalogProducts); const saved = isSaved(order); const matches = (catalogProducts || []).filter(p => normalize(p.title) === normalize(order.product_title) || (p.aliases || []).some(a => normalize(a) === normalize(order.product_title))); const dropiProduct = matches.length === 1 ? matches[0] : undefined;
       return <div key={order.id} className="rounded-2xl border border-border bg-background p-4">
         <div className="flex gap-3 items-start"><input type="checkbox" className="mt-2" checked={chosen.includes(order.id)} onChange={e => setChosen(old => e.target.checked ? [...old, order.id] : old.filter(id => id !== order.id))} />
           <div className="flex-1 min-w-0"><div className="flex flex-wrap items-center gap-2"><span className="font-black text-lg">{order.product_title}</span><span className="chip">{pyDate(order.created_at)} · {pyTime(order.created_at)}</span><span className="chip">{order.status || "nuevo"}</span><span className="chip">{saved ? "✅ Cargado" : sourceStatus(order) === "opened" ? "↗ Formulario abierto" : "⏳ Pendiente"}</span><span className="chip">{cov === "covered" ? "✅ En cobertura" : cov === "uncovered" ? "❌ Sin cobertura" : "⚠️ Cobertura por verificar"}</span><span className="chip">{match === "matched" ? "✅ Producto detectado" : match === "review" ? "⚠️ Revisar producto" : "❌ Producto no encontrado"}</span></div>
@@ -297,7 +334,7 @@ export default function StoreOrdersView({ onLoadOrder, checkCoverage, catalogPro
             {(order.address || order.reference) && <div className="mt-2 text-xs text-muted-foreground">{[order.address, order.reference].filter(Boolean).join(" · ")}</div>}
             <div className="mt-3 flex flex-wrap items-center gap-2"><span className="text-xs text-muted-foreground">Etiquetas:</span>{TAGS.map(t => <label key={t} className="text-xs inline-flex items-center gap-1 rounded-full border border-border px-2 py-1"><input type="checkbox" disabled={tagEdit === order.id} checked={(order.tags || []).includes(t)} onChange={e => void saveTags(order, e.target.checked ? [...(order.tags || []), t] : (order.tags || []).filter(x => x !== t))} />{t}</label>)}</div>
           </div>
-          <div className="shrink-0 flex flex-col gap-2"><button className="nav-btn active !px-5 !py-3" disabled={busy || !canImport(order)} onClick={() => void importDirect([order.id])}>⚡ Cargar directo</button><button className="nav-btn !px-5 !py-3" disabled={busy || saved} onClick={() => void openOne(order)}>📦 {saved ? "Ya cargado" : "Abrir formulario ↗"}</button><button className="nav-btn !px-5 !py-3 !border-red-500 !text-red-500" disabled={busy || saved || deletingId === order.id} onClick={() => void deleteOrder(order)}>{deletingId === order.id ? "Eliminando..." : "🗑️ Eliminar pedido"}</button></div>
+          <div className="shrink-0 flex flex-col gap-2"><button className="nav-btn !px-5 !py-3 !border-orange-500 !text-orange-600" disabled={busy || !dropiProduct || cov !== "covered" || !order.customer_name?.trim() || !order.phone?.trim() || !order.address?.trim() || !(Number(order.quantity)>0) || !(Number(order.total_gs)>0)} onClick={() => void prepareDropi(order, dropiProduct)}>🚀 Cargar a Dropi ↗</button><button className="nav-btn active !px-5 !py-3" disabled={busy || !canImport(order)} onClick={() => void importDirect([order.id])}>⚡ Cargar directo</button><button className="nav-btn !px-5 !py-3" disabled={busy || saved} onClick={() => void openOne(order)}>📦 {saved ? "Ya cargado" : "Abrir formulario ↗"}</button><button className="nav-btn !px-5 !py-3 !border-red-500 !text-red-500" disabled={busy || saved || deletingId === order.id} onClick={() => void deleteOrder(order)}>{deletingId === order.id ? "Eliminando..." : "🗑️ Eliminar pedido"}</button></div>
         </div>
       </div>;
     })}</div>}
