@@ -40,13 +40,12 @@ const channel = "botsky-import-v1";
 const allowedOrigin =
   "https://skybot-ai-sales-130022.vercel.app";
 
-// Normalización general para permisos y SKU.
+// Normalización de valores generales.
 const normalize = (value: unknown): string =>
   String(value ?? "").trim().toLowerCase();
 
 // Normalización de nombres geográficos.
-// Ignora acentos, mayúsculas y espacios repetidos.
-// También permite Ñemby = Nemby.
+// Reconoce acentos, mayúsculas, ñ y espacios diferentes.
 const normalizeLocation = (value: unknown): string =>
   String(value ?? "")
     .normalize("NFD")
@@ -55,8 +54,63 @@ const normalizeLocation = (value: unknown): string =>
     .trim()
     .replace(/\s+/g, " ");
 
-const errorMessage = (error: unknown): string => {
-  if (error instanceof Error) return error.message;
+// Compatibilidad especial para Asunción.
+// En BOT SKY puede figurar Distrito Capital.
+// En E-commerce puede figurar Central.
+const isCapitalDepartment = (
+  value: unknown
+): boolean => {
+  const department = normalizeLocation(value);
+
+  return [
+    "distrito capital",
+    "capital",
+    "asuncion",
+    "central",
+  ].includes(department);
+};
+
+const departmentsMatch = (
+  city: unknown,
+  sourceDepartment: unknown,
+  registeredDepartment: unknown
+): boolean => {
+  const cityName = normalizeLocation(city);
+
+  const source = normalizeLocation(
+    sourceDepartment
+  );
+
+  const registered = normalizeLocation(
+    registeredDepartment
+  );
+
+  if (!source) {
+    return true;
+  }
+
+  if (source === registered) {
+    return true;
+  }
+
+  // Excepción limitada exclusivamente a Asunción.
+  if (
+    cityName === "asuncion" &&
+    isCapitalDepartment(source) &&
+    isCapitalDepartment(registered)
+  ) {
+    return true;
+  }
+
+  return false;
+};
+
+const errorMessage = (
+  error: unknown
+): string => {
+  if (error instanceof Error) {
+    return error.message;
+  }
 
   if (
     typeof error === "object" &&
@@ -77,14 +131,19 @@ export default function BotSkyImportBridge() {
   );
 
   const [working, setWorking] = useState(false);
-  const [details, setDetails] = useState<Detail[]>([]);
+
+  const [details, setDetails] = useState<Detail[]>(
+    []
+  );
 
   useEffect(() => {
     const params = new URLSearchParams(
       window.location.search
     );
 
-    if (params.get("view") !== "import-botsky") {
+    if (
+      params.get("view") !== "import-botsky"
+    ) {
       return;
     }
 
@@ -95,7 +154,7 @@ export default function BotSkyImportBridge() {
     if (!window.opener) {
       setReport(
         "No se detectó la pestaña de BOT SKY. " +
-          "Abrí la importación desde BOT SKY."
+        "Abrí la importación desde BOT SKY."
       );
       return;
     }
@@ -113,12 +172,16 @@ export default function BotSkyImportBridge() {
     };
 
     const timer = window.setInterval(() => {
-      if (!busy) sendReady();
+      if (!busy) {
+        sendReady();
+      }
     }, 1200);
 
     sendReady();
 
-    const onMessage = async (event: MessageEvent) => {
+    const onMessage = async (
+      event: MessageEvent
+    ) => {
       if (
         event.origin !== allowedOrigin ||
         event.source !== window.opener
@@ -160,32 +223,39 @@ export default function BotSkyImportBridge() {
           "proveedor",
         ];
 
-        if (!email || !allowedRoles.includes(role)) {
+        if (
+          !email ||
+          !allowedRoles.includes(role)
+        ) {
           throw new Error(
             "Tu usuario no tiene permisos para importar pedidos."
           );
         }
 
         if (msg.orders.length > 100) {
-          throw new Error("Máximo 100 pedidos por lote.");
+          throw new Error(
+            "Máximo 100 pedidos por lote."
+          );
         }
 
-        // =====================================
-        // CARGAR CATÁLOGO
-        // =====================================
+        // ====================================
+        // CARGAR PRODUCTOS
+        // ====================================
 
         const {
           data: products,
           error: productError,
-        } = await supabase.from("products").select("*");
+        } = await supabase
+          .from("products")
+          .select("*");
 
         if (productError) {
           throw productError;
         }
 
-        // =====================================
+        // ====================================
         // CARGAR FAVORITOS
-        // =====================================
+        // ====================================
 
         const {
           data: favorites,
@@ -205,9 +275,9 @@ export default function BotSkyImportBridge() {
           )
         );
 
-        // =====================================
-        // CARGAR TARIFAS DE CIUDADES
-        // =====================================
+        // ====================================
+        // CARGAR TARIFAS
+        // ====================================
 
         const {
           data: cities,
@@ -222,11 +292,13 @@ export default function BotSkyImportBridge() {
 
         const seen = new Set<string>();
 
-        // =====================================
-        // PROCESAR CADA PEDIDO
-        // =====================================
+        // ====================================
+        // PROCESAR PEDIDOS
+        // ====================================
 
-        for (const raw of msg.orders as SourceOrder[]) {
+        for (
+          const raw of msg.orders as SourceOrder[]
+        ) {
           const id = String(
             raw.source_order_id || ""
           ).trim();
@@ -240,9 +312,9 @@ export default function BotSkyImportBridge() {
 
             seen.add(id);
 
-            // =====================================
-            // VERIFICAR SI YA ESTÁ IMPORTADO
-            // =====================================
+            // ====================================
+            // COMPROBAR SI YA EXISTE
+            // ====================================
 
             const {
               data: existing,
@@ -263,15 +335,15 @@ export default function BotSkyImportBridge() {
                 source_order_id: id,
                 status: "already_exists",
                 message:
-                  "Pedido confirmado como existente en E-commerce.",
+                  "Pedido existente confirmado en E-commerce.",
               });
 
               continue;
             }
 
-            // =====================================
+            // ====================================
             // VALIDAR SKU
-            // =====================================
+            // ====================================
 
             const sku = normalize(raw.sku);
 
@@ -281,7 +353,9 @@ export default function BotSkyImportBridge() {
               );
             }
 
-            const matches = (products || []).filter(
+            const matches = (
+              products || []
+            ).filter(
               (product) =>
                 normalize(product.sku) === sku
             );
@@ -294,15 +368,15 @@ export default function BotSkyImportBridge() {
 
             if (matches.length > 1) {
               throw new Error(
-                `El SKU "${raw.sku}" aparece duplicado en E-commerce.`
+                `El SKU "${raw.sku}" está duplicado en E-commerce.`
               );
             }
 
             const product = matches[0];
 
-            // =====================================
-            // VALIDAR PERMISOS DEL PRODUCTO
-            // =====================================
+            // ====================================
+            // VALIDAR PERMISOS
+            // ====================================
 
             const privateProduct =
               product.is_private === true;
@@ -334,17 +408,21 @@ export default function BotSkyImportBridge() {
 
             if (!authorized || !listed) {
               throw new Error(
-                `El SKU "${raw.sku}" no está disponible ` +
-                  "para este usuario."
+                `El SKU "${raw.sku}" no está disponible para este usuario.`
               );
             }
 
-            // =====================================
+            // ====================================
             // VALIDAR CANTIDAD Y TOTAL
-            // =====================================
+            // ====================================
 
-            const qty = Number(raw.quantity);
-            const total = Number(raw.total);
+            const qty = Number(
+              raw.quantity
+            );
+
+            const total = Number(
+              raw.total
+            );
 
             if (
               !Number.isSafeInteger(qty) ||
@@ -364,9 +442,9 @@ export default function BotSkyImportBridge() {
               );
             }
 
-            // =====================================
+            // ====================================
             // VALIDAR CLIENTE
-            // =====================================
+            // ====================================
 
             if (
               !raw.customer_name?.trim() ||
@@ -378,75 +456,90 @@ export default function BotSkyImportBridge() {
               );
             }
 
-            // =====================================
-            // BUSCAR CIUDAD SIN DIFERENCIAS
-            // DE ACENTOS, MAYÚSCULAS O ESPACIOS
-            // =====================================
+            // ====================================
+            // VALIDAR CIUDAD
+            // ====================================
 
-            const requestedCity = normalizeLocation(
-              raw.city
-            );
+            const requestedCity =
+              normalizeLocation(raw.city);
 
             const requestedDepartment =
-              normalizeLocation(raw.departamento);
+              normalizeLocation(
+                raw.departamento
+              );
 
-            const cityNameMatches = (cities || []).filter(
+            const cityNameMatches = (
+              cities || []
+            ).filter(
               (entry) =>
-                normalizeLocation(entry.city) ===
-                requestedCity
+                normalizeLocation(
+                  entry.city
+                ) === requestedCity
             );
 
-            if (cityNameMatches.length === 0) {
+            if (
+              cityNameMatches.length === 0
+            ) {
               throw new Error(
-                `No se encontró la ciudad "${raw.city}" ` +
-                  "en las tarifas de E-commerce."
+                `La ciudad "${raw.city}" no existe en las tarifas de E-commerce.`
               );
             }
 
-            // Cuando BOT SKY proporciona departamento,
-            // también debe coincidir con el registrado.
-            const cityMatches = requestedDepartment
-              ? cityNameMatches.filter(
-                  (entry) =>
-                    normalizeLocation(
-                      entry.departamento
-                    ) === requestedDepartment
-                )
-              : cityNameMatches;
+            // ====================================
+            // VALIDAR DEPARTAMENTO
+            // INCLUYENDO EXCEPCIÓN ASUNCIÓN
+            // ====================================
 
-            if (cityMatches.length === 0) {
-              const availableDepartments = [
+            const cityMatches =
+              cityNameMatches.filter(
+                (entry) =>
+                  departmentsMatch(
+                    raw.city,
+                    requestedDepartment,
+                    entry.departamento
+                  )
+              );
+
+            if (
+              cityMatches.length === 0
+            ) {
+              const departments = [
                 ...new Set(
-                  cityNameMatches.map((entry) =>
-                    String(
-                      entry.departamento || ""
-                    )
+                  cityNameMatches.map(
+                    (entry) =>
+                      String(
+                        entry.departamento ||
+                        ""
+                      )
                   )
                 ),
               ].join(", ");
 
               throw new Error(
                 `La ciudad "${raw.city}" existe, ` +
-                  `pero no coincide con el departamento ` +
-                  `"${raw.departamento}". ` +
-                  `Departamento registrado: ` +
-                  `${availableDepartments || "sin especificar"}.`
+                `pero el departamento "${raw.departamento}" ` +
+                `no coincide. ` +
+                `Departamentos registrados: ` +
+                `${departments || "sin especificar"}.`
               );
             }
 
-            if (cityMatches.length > 1) {
+            if (
+              cityMatches.length > 1
+            ) {
               throw new Error(
                 `La ciudad "${raw.city}" tiene ` +
-                  `${cityMatches.length} tarifas coincidentes. ` +
-                  "Revisá los registros duplicados."
+                `${cityMatches.length} tarifas coincidentes. ` +
+                "Revisá los registros duplicados."
               );
             }
 
-            const city = cityMatches[0];
+            const city =
+              cityMatches[0];
 
-            // =====================================
+            // ====================================
             // CALCULAR IMPORTES
-            // =====================================
+            // ====================================
 
             const delivery = Number(
               city.price_gs || 0
@@ -475,11 +568,13 @@ export default function BotSkyImportBridge() {
             }
 
             const commission =
-              total - providerPrice * qty - delivery;
+              total -
+              providerPrice * qty -
+              delivery;
 
-            // =====================================
-            // INSERTAR PEDIDO
-            // =====================================
+            // ====================================
+            // GUARDAR PEDIDO
+            // ====================================
 
             const {
               error: insertError,
@@ -488,42 +583,64 @@ export default function BotSkyImportBridge() {
               .insert({
                 order_number:
                   `BS${id
-                    .replace(/[^a-zA-Z0-9]/g, "")
+                    .replace(
+                      /[^a-zA-Z0-9]/g,
+                      ""
+                    )
                     .slice(0, 30)}`,
 
-                source_system: "BOT_SKY",
-                source_order_id: id,
+                source_system:
+                  "BOT_SKY",
 
-                created_by: profile.email,
+                source_order_id:
+                  id,
+
+                created_by:
+                  profile.email,
 
                 customer_name:
                   raw.customer_name.trim(),
 
-                phone: raw.phone.trim(),
+                phone:
+                  raw.phone.trim(),
 
-                city: city.city,
+                city:
+                  city.city,
 
+                // Guardar el departamento original
+                // si es Asunción + Distrito Capital.
                 departamento:
-                  city.departamento ||
-                  raw.departamento ||
-                  "",
+                  requestedCity === "asuncion" &&
+                  isCapitalDepartment(
+                    requestedDepartment
+                  )
+                    ? "Distrito Capital"
+                    : city.departamento ||
+                      raw.departamento ||
+                      "",
 
-                street: raw.street || "",
+                street:
+                  raw.street || "",
 
-                district: raw.district || "",
+                district:
+                  raw.district || "",
 
-                email: raw.email || "",
+                email:
+                  raw.email || "",
 
                 obs: [
                   raw.obs,
+
                   `Pedido BOT SKY: ${
                     raw.order_number || id
                   }`,
+
                   `Pago: ${
                     raw.payment_method || ""
                   } / ${
                     raw.payment_status || ""
                   }`,
+
                   raw.receipt_url
                     ? `Comprobante: ${raw.receipt_url}`
                     : "",
@@ -533,45 +650,76 @@ export default function BotSkyImportBridge() {
 
                 items_json: [
                   {
-                    sku: product.sku,
-                    title: product.title,
-                    sale_gs: total,
+                    sku:
+                      product.sku,
+
+                    title:
+                      product.title,
+
+                    sale_gs:
+                      total,
+
                     qty,
+
                     provider_price_gs:
                       providerPrice,
+
                     provider_email:
-                      product.provider_email || "",
+                      product.provider_email ||
+                      "",
                   },
                 ],
 
-                total_gs: total,
-                delivery_gs: delivery,
-                commission_gs: commission,
+                total_gs:
+                  total,
+
+                delivery_gs:
+                  delivery,
+
+                commission_gs:
+                  commission,
 
                 provider_emails_list:
-                  product.provider_email || "",
+                  product.provider_email ||
+                  "",
               } as any);
 
-            // =====================================
-            // MANEJAR DUPLICADOS DE BASE DE DATOS
-            // =====================================
+            // ====================================
+            // MANEJAR DUPLICADOS
+            // ====================================
 
             if (insertError) {
-              if (insertError.code === "23505") {
+              if (
+                insertError.code ===
+                "23505"
+              ) {
                 const {
                   data: duplicate,
                   error: duplicateError,
                 } = await supabase
                   .from("orders")
                   .select("id")
-                  .eq("source_system", "BOT_SKY")
-                  .eq("source_order_id", id)
+                  .eq(
+                    "source_system",
+                    "BOT_SKY"
+                  )
+                  .eq(
+                    "source_order_id",
+                    id
+                  )
                   .maybeSingle();
 
-                if (!duplicateError && duplicate) {
+                if (
+                  !duplicateError &&
+                  duplicate
+                ) {
                   results.push({
-                    source_order_id: id,
-                    status: "already_exists",
+                    source_order_id:
+                      id,
+
+                    status:
+                      "already_exists",
+
                     message:
                       "Pedido existente confirmado en E-commerce.",
                   });
@@ -590,95 +738,129 @@ export default function BotSkyImportBridge() {
                 "Pedido guardado correctamente en E-commerce.",
             });
 
-          } catch (error: unknown) {
+          } catch (
+            error: unknown
+          ) {
             results.push({
-              source_order_id: id,
-              status: "error",
-              message: errorMessage(error),
+              source_order_id:
+                id,
+
+              status:
+                "error",
+
+              message:
+                errorMessage(error),
             });
           }
         }
 
-      } catch (error: unknown) {
-        const processedIds = new Set(
-          results.map((result) =>
-            result.source_order_id
-          )
-        );
+      } catch (
+        error: unknown
+      ) {
+        const processedIds =
+          new Set(
+            results.map(
+              (result) =>
+                result.source_order_id
+            )
+          );
 
-        for (const raw of msg.orders as SourceOrder[]) {
+        for (
+          const raw of msg.orders as SourceOrder[]
+        ) {
           const id = String(
             raw.source_order_id || ""
           );
 
-          if (processedIds.has(id)) continue;
+          if (
+            processedIds.has(id)
+          ) {
+            continue;
+          }
 
           results.push({
-            source_order_id: id,
-            status: "error",
-            message: errorMessage(error),
+            source_order_id:
+              id,
+
+            status:
+              "error",
+
+            message:
+              errorMessage(error),
           });
         }
       }
 
-      // =====================================
+      // ====================================
       // RESUMEN
-      // =====================================
+      // ====================================
 
-      const created = results.filter(
-        (result) =>
-          result.status === "created"
-      ).length;
+      const created =
+        results.filter(
+          (result) =>
+            result.status ===
+            "created"
+        ).length;
 
-      const existing = results.filter(
-        (result) =>
-          result.status === "already_exists"
-      ).length;
+      const existing =
+        results.filter(
+          (result) =>
+            result.status ===
+            "already_exists"
+        ).length;
 
-      const errors = results.filter(
-        (result) =>
-          result.status === "error"
-      ).length;
+      const errors =
+        results.filter(
+          (result) =>
+            result.status ===
+            "error"
+        ).length;
 
       setReport(
         `Resultado: ${created} creados, ` +
-          `${existing} existentes, ` +
-          `${errors} errores.`
+        `${existing} existentes, ` +
+        `${errors} errores.`
       );
 
-      // =====================================
-      // DETALLES POR PEDIDO
-      // =====================================
+      // ====================================
+      // DETALLES INDIVIDUALES
+      // ====================================
 
       setDetails(
-        results.map((result) => ({
-          id:
-            result.source_order_id ||
-            "(sin identificador)",
+        results.map(
+          (result) => ({
+            id:
+              result.source_order_id ||
+              "(sin identificador)",
 
-          status: result.status,
+            status:
+              result.status,
 
-          reason:
-            result.message ||
-            (
-              result.status === "created"
-                ? "Guardado correctamente"
-                : result.status === "already_exists"
-                ? "Ya estaba importado"
-                : "Error desconocido"
-            ),
-        }))
+            reason:
+              result.message ||
+              (
+                result.status ===
+                "created"
+                  ? "Guardado correctamente"
+                  : result.status ===
+                    "already_exists"
+                  ? "Ya estaba importado"
+                  : "Error desconocido"
+              ),
+          })
+        )
       );
 
-      // =====================================
+      // ====================================
       // RESPONDER A BOT SKY
-      // =====================================
+      // ====================================
 
       window.opener?.postMessage(
         {
           channel,
           type: "RESULT",
-          batchId: msg.batchId,
+          batchId:
+            msg.batchId,
           results,
         },
         allowedOrigin
@@ -705,7 +887,8 @@ export default function BotSkyImportBridge() {
   if (
     new URLSearchParams(
       window.location.search
-    ).get("view") !== "import-botsky"
+    ).get("view") !==
+    "import-botsky"
   ) {
     return null;
   }
@@ -726,7 +909,9 @@ export default function BotSkyImportBridge() {
       </p>
 
       {working && (
-        <p>Guardando pedidos…</p>
+        <p>
+          Guardando pedidos…
+        </p>
       )}
 
       {details.length > 0 && (
@@ -734,27 +919,31 @@ export default function BotSkyImportBridge() {
           className="space-y-2"
           aria-label="Resultado por pedido"
         >
-          {details.map((item, index) => (
-            <div
-              key={`${item.id}-${index}`}
-              className="rounded-lg border p-3 text-sm"
-            >
-              <div className="font-semibold">
-                {item.status === "created"
-                  ? "✅ Cargado"
-                  : item.status === "already_exists"
-                  ? "🟢 Ya existente"
-                  : "❌ Error"}
+          {details.map(
+            (item, index) => (
+              <div
+                key={`${item.id}-${index}`}
+                className="rounded-lg border p-3 text-sm"
+              >
+                <div className="font-semibold">
+                  {item.status ===
+                  "created"
+                    ? "✅ Cargado"
+                    : item.status ===
+                      "already_exists"
+                    ? "🟢 Ya existente"
+                    : "❌ Error"}
 
-                {" · Pedido "}
-                {item.id}
+                  {" · Pedido "}
+                  {item.id}
+                </div>
+
+                <p className="mt-1 break-words">
+                  {item.reason}
+                </p>
               </div>
-
-              <p className="mt-1 break-words">
-                {item.reason}
-              </p>
-            </div>
-          ))}
+            )
+          )}
         </div>
       )}
     </div>
